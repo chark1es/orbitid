@@ -19,5 +19,5 @@ export const ID_PREFIX = {
   user: "user", session: "sess", client: "client", signIn: "sia", signUp: "sua", email: "idn_e", phone: "idn_p", external: "eac", passkey: "pkey",
   org: "org", membership: "orgmem", invitation: "orginv", domain: "orgdmn", request: "orgmreq", role: "role", permission: "perm",
   appInvitation: "inv", waitlist: "wle", allow: "alid", block: "blid", jwtTemplate: "jtmpl", actorToken: "act", signInToken: "sit",
-  webhook: "we", webhookEvent: "evt", delivery: "whd", apiKey: "ak", machine: "mch", m2mToken: "mt", oauthApp: "oa", enterprise: "ent", audit: "aud", verification: "ver",
+  webhook: "we", webhookEvent: "evt", delivery: "whd", apiKey: "ak", machine: "mch", m2mToken: "mt", oauthApp: "oa", oauthGrant: "oag", enterprise: "ent", audit: "aud", verification: "ver",
 } as const;

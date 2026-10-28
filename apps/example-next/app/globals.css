@@ -1,0 +1,17 @@
+@import "tailwindcss";
+@import "@orbitid/ui/styles.css";
+
+@source "../../../packages/react/src";
+@source "../../../packages/ui/src";
+@source "../../../packages/nextjs/src";
+
+body {
+  min-height: 100vh;
+}
+
+.container-page {
+  margin-inline: auto;
+  width: 100%;
+  max-width: 72rem;
+  padding-inline: 1.5rem;
+}
