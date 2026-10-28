@@ -303,6 +303,7 @@ export function environmentJSON(overrides: Partial<EnvironmentJSON> = {}): Envir
     organization_settings: {
       enabled: true,
       max_allowed_memberships: 5,
+      max_created_organizations_per_user: 3,
       creation_enabled: true,
       domains_enabled: true,
       membership_requests_enabled: true,

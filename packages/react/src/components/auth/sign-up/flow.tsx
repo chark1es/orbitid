@@ -10,6 +10,7 @@ import {
   signUpCreate,
   signUpPrepareVerification,
   signUpUpdate,
+  toAuthError,
   verificationStatus,
 } from "../_shared/api";
 import { useAuthRuntime } from "../_shared/w6";
@@ -23,6 +24,7 @@ export const SIGN_UP_STEPS = [
   "verify-email-link",
   "verify-phone-code",
   "continue",
+  "setup-mfa",
   "success",
 ] as const;
 
@@ -64,13 +66,17 @@ export interface SignUpFlow {
   ) => Promise<SignUpResource | null>;
   pollCompletion: () => Promise<void>;
   finish: (signUp: SignUpResource) => Promise<void>;
+  /** The session the sign-up created, while the server keeps it `pending` for MFA enrolment. */
+  pendingSessionId: string | null;
+  completeSetup: () => void;
+  setupCompleted: boolean;
   authenticateWithRedirect: (strategy: string) => Promise<void>;
 }
 
 function readTicket(): string | null {
   if (typeof window === "undefined") return null;
   const params = new URLSearchParams(window.location.search);
-  return params.get("__orbit_ticket") ?? params.get("__clerk_ticket");
+  return params.get("__orbit_ticket");
 }
 
 function readTransferIdentifier(): { transfer: boolean; identifier: string } {
@@ -119,6 +125,15 @@ export function useSignUpFlow(props: SignUpProps, step: SignUpStep, go: (step: S
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [pendingSessionId, setPendingSessionId] = useState<string | null>(() =>
+    runtime.session?.status === "pending" ? runtime.session.id : null,
+  );
+  const [setupCompleted, setSetupCompleted] = useState(false);
+  const pending = (sessionId: string | null) => {
+    if (!sessionId) return false;
+    const sessions = currentClient(orbit)?.sessions ?? [];
+    return sessions.some((session) => session.id === sessionId && session.status === "pending");
+  };
 
   const redirectTarget =
     props.forceRedirectUrl ??
@@ -160,18 +175,31 @@ export function useSignUpFlow(props: SignUpProps, step: SignUpStep, go: (step: S
         setError(t("common.internalError"));
         return;
       }
+      const sessionId = next.created_session_id;
       setBusy(true);
       try {
-        await finishAuth(runtime, next.created_session_id, redirectTarget);
+        if (pending(sessionId)) {
+          setSignUp(next);
+          setPendingSessionId(sessionId);
+          go("setup-mfa");
+          return;
+        }
+        await finishAuth(runtime, sessionId, redirectTarget);
         setSignUp(next);
         if (!redirectTarget) go("success");
       } catch (caught) {
+        if (toAuthError(caught).code === "session_pending") {
+          setSignUp(next);
+          setPendingSessionId(sessionId);
+          go("setup-mfa");
+          return;
+        }
         setError(errorMessage(t, caught));
       } finally {
         setBusy(false);
       }
     },
-    [runtime, redirectTarget, t, go],
+    [orbit, runtime, redirectTarget, t, go],
   );
 
   const prepareVerification = useCallback(
@@ -314,14 +342,31 @@ export function useSignUpFlow(props: SignUpProps, step: SignUpStep, go: (step: S
       }
     }
     if (activeSession) {
+      if (pending(activeSession)) {
+        setPendingSessionId(activeSession);
+        go("setup-mfa");
+        return;
+      }
       try {
         await finishAuth(runtime, activeSession, redirectTarget);
         if (!redirectTarget) go("success");
       } catch (caught) {
+        if (toAuthError(caught).code === "session_pending") {
+          setPendingSessionId(activeSession);
+          go("setup-mfa");
+          return;
+        }
         setError(errorMessage(t, caught));
       }
     }
   }, [orbit, runtime, redirectTarget, finish, go, t]);
+
+  const completeSetup = useCallback(() => {
+    setPendingSessionId(null);
+    setSetupCompleted(true);
+    if (redirectTarget) runtime.navigate(redirectTarget, { replace: true });
+    else go("success");
+  }, [runtime, redirectTarget, go]);
 
   return {
     signUp,
@@ -342,6 +387,9 @@ export function useSignUpFlow(props: SignUpProps, step: SignUpStep, go: (step: S
     attemptVerification,
     pollCompletion,
     finish,
+    pendingSessionId,
+    completeSetup,
+    setupCompleted,
     authenticateWithRedirect,
   };
 }

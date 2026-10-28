@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { SignIn } from "../index";
 import { authEnvironment, authUser, enterOtp, makeSignIn, renderAuth, setupAuth, SESSION_ID } from "./fake-auth";
+import { fakeSession } from "../../../__tests__/helpers";
 
 function renderSignIn(
   harness: ReturnType<typeof setupAuth>,
@@ -48,6 +49,60 @@ describe("SignIn", () => {
     await waitFor(() => expect(harness.instance.setActiveCalls.length).toBe(1));
     expect(harness.instance.setActiveCalls[0]?.session).toBe(SESSION_ID);
     expect(harness.instance.navigations.at(-1)?.to).toBe("/dashboard");
+  });
+
+  it("enrols a second factor for a pending session instead of reporting success", async () => {
+    const harness = setupAuth({ signedIn: false });
+    const user = authUser({
+      createTOTP: vi.fn(async () => ({
+        secret: "JBSWY3DPEHPK3PXP",
+        uri: "otpauth://totp/x",
+        qrCode: "data:image/png;base64,AAAA",
+      })),
+      verifyTOTP: vi.fn(async () => ({
+        verified: true,
+        backupCodes: Array.from({ length: 10 }, (_, index) => `CODE-${index}0`),
+      })),
+    });
+    harness.instance.user = user;
+    makeSignIn(harness.instance, {
+      create: {
+        status: "needs_first_factor",
+        supportedFirstFactors: [{ strategy: "password" }],
+        identifier: "ada@example.com",
+      },
+      attemptFirstFactor: () => {
+        const pending = fakeSession({ id: SESSION_ID, status: "pending" });
+        harness.instance.session = pending;
+        harness.instance.client = {
+          id: "client_1",
+          sessions: [pending],
+          lastActiveSessionId: SESSION_ID,
+        } as typeof harness.instance.client;
+        return { status: "complete", createdSessionId: SESSION_ID };
+      },
+    });
+    renderSignIn(harness, { forceRedirectUrl: "/dashboard" });
+
+    fireEvent.change(screen.getByLabelText(/Email address/), { target: { value: "ada@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    fireEvent.change(await screen.findByLabelText(/^Password/), { target: { value: "correct horse" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(await screen.findByText("Set up two-factor authentication")).toBeTruthy();
+    expect(await screen.findByTestId("setup-two-factor-qr")).toBeTruthy();
+    expect(harness.instance.setActiveCalls).toHaveLength(0);
+    expect(harness.instance.navigations.map((entry) => entry.to)).not.toContain("/dashboard");
+
+    act(() => enterOtp("123456"));
+    await waitFor(() => expect(user.verifyTOTP).toHaveBeenCalledWith({ code: "123456" }));
+    expect(await screen.findAllByTestId("setup-two-factor-code")).toHaveLength(10);
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(harness.instance.setActiveCalls).toHaveLength(1));
+    const activated = harness.instance.setActiveCalls[0]?.session;
+    expect(typeof activated === "string" ? activated : activated?.id).toBe(SESSION_ID);
+    await waitFor(() => expect(harness.instance.navigations.at(-1)?.to).toBe("/dashboard"));
   });
 
   it("keeps the redirect target when routing by path", async () => {

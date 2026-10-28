@@ -4,7 +4,7 @@ import type { OrbitIDInstance } from "../provider/types";
 
 /**
  * The live `@orbitid/js` instance (`orbit.signIn`, `orbit.setActive`, `orbit.navigate`, …).
- * Throws outside `<OrbitIDProvider/>` — the Clerk `useClerk()` equivalent.
+ * Throws outside `<OrbitIDProvider/>`.
  */
 export function useOrbitID(): OrbitIDInstance {
   const instance = useContext(OrbitIDContext);
@@ -14,5 +14,3 @@ export function useOrbitID(): OrbitIDInstance {
   return instance;
 }
 
-/** Clerk-compatible alias for {@link useOrbitID}. */
-export const useClerk = useOrbitID;

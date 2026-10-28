@@ -29,18 +29,20 @@ export function SecretReveal({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="rounded-[6px] sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          {description ? <DialogDescription>{description}</DialogDescription> : null}
+          <DialogTitle className="text-base font-[650] tracking-[-0.01em]">{title}</DialogTitle>
+          {description ? (
+            <DialogDescription className="text-sm leading-6 text-muted-foreground">{description}</DialogDescription>
+          ) : null}
         </DialogHeader>
-        <div className="flex items-start gap-2 rounded-lg border bg-muted/40 p-3">
-          <code className="min-w-0 flex-1 break-all font-mono text-xs">{secret}</code>
+        <div className="flex items-start gap-2 rounded-[4px] border border-border bg-muted/40 p-2.5">
+          <code className="min-w-0 flex-1 break-all font-mono text-xs leading-5">{secret}</code>
           <CopyButton value={secret} label="Copy" size="sm" variant="outline" />
         </div>
         {warning ? (
-          <p className="flex items-start gap-2 text-sm text-amber-700 dark:text-amber-300">
-            <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+          <p className="flex items-start gap-2 text-sm leading-6 text-foreground">
+            <TriangleAlert className="mt-1 size-4 shrink-0 text-caution" strokeWidth={1.5} aria-hidden />
             <span>{warning}</span>
           </p>
         ) : null}

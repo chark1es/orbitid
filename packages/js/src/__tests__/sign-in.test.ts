@@ -70,7 +70,7 @@ describe("SignIn", () => {
     await signIn.attemptFirstFactor({ strategy: "password", password: "correct horse" });
     expect(signIn.status).toBe("complete");
     expect(signIn.createdSessionId).toBe("sess_9");
-    // The session exists but is not active until setActive (Clerk semantics).
+    // The session exists but is not active until setActive.
     expect(orbit.isSignedIn).toBe(false);
 
     await orbit.setActive({ session: "sess_9" });

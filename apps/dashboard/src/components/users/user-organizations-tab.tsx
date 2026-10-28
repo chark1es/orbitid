@@ -1,13 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  Badge,
   Button,
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -33,7 +27,9 @@ import { roleLabel, useOrganizationRoles } from "../../lib/organizations";
 import { OrganizationRoleSelect } from "../organizations/role-select";
 import { asList } from "../../lib/types";
 import { ConfirmDialog } from "../shared/confirm-dialog";
+import { DataTable, type DataTableColumn } from "../shared/data-table";
 import { EmptyState } from "../shared/empty-state";
+import { Section } from "../shared/section";
 import { UserAvatar } from "../shared/user-avatar";
 
 function AddToOrganizationDialog({
@@ -101,7 +97,7 @@ function AddToOrganizationDialog({
               />
             </div>
             {(orgs.data?.data?.length ?? 0) > 0 ? (
-              <ul className="max-h-48 overflow-y-auto rounded-md border">
+              <ul className="max-h-48 overflow-y-auto rounded-[4px] border border-border">
                 {orgs.data?.data?.map((option) => (
                   <li key={option.id}>
                     <button
@@ -112,7 +108,7 @@ function AddToOrganizationDialog({
                       }`}
                     >
                       <span className="truncate">{option.name}</span>
-                      <span className="text-xs text-muted-foreground">{option.slug}</span>
+                      <span className="truncate font-data text-xs text-muted-foreground">{option.slug}</span>
                     </button>
                   </li>
                 ))}
@@ -150,26 +146,22 @@ function AddToOrganizationDialog({
   );
 }
 
-function MembershipRow({
-  membership,
-  user,
-  onChanged,
-}: {
-  membership: OrganizationMembershipJSON;
-  user: UserJSON;
-  onChanged: () => void;
-}) {
-  const [confirmRemove, setConfirmRemove] = useState(false);
+export function UserOrganizationsTab({ user, onUpdated }: { user: UserJSON; onUpdated: () => void }) {
+  const [addOpen, setAddOpen] = useState(false);
+  const [removing, setRemoving] = useState<OrganizationMembershipJSON | null>(null);
   const [pending, setPending] = useState(false);
-  const org = membership.organization;
+  const memberships = useApi<unknown>(["user-memberships", user.id], `/users/${user.id}/organization_memberships?limit=100`);
+  const rows = asList<OrganizationMembershipJSON>(memberships.data).data;
 
   async function remove() {
+    if (!removing) return;
     setPending(true);
     try {
-      await api("DELETE", `/organizations/${org.id}/memberships/${user.id}`);
+      await api("DELETE", `/organizations/${removing.organization.id}/memberships/${user.id}`);
       toast.success("Member removed");
-      setConfirmRemove(false);
-      onChanged();
+      setRemoving(null);
+      await memberships.refetch();
+      onUpdated();
     } catch (error) {
       toast.error(errorMessage(error));
     } finally {
@@ -177,87 +169,104 @@ function MembershipRow({
     }
   }
 
-  return (
-    <li className="flex flex-wrap items-center gap-3 py-3">
-      <UserAvatar name={org.name} imageUrl={org.image_url} size="sm" />
-      <div className="min-w-0 flex-1">
-        <Link to={`/organizations/${org.id}`} className="truncate text-sm font-medium hover:underline">
-          {org.name}
-        </Link>
-        <p className="truncate text-xs text-muted-foreground">
-          {org.slug} · joined {formatDate(membership.created_at)}
-        </p>
-      </div>
-      <Badge variant="outline" className="hidden sm:inline-flex">
-        {org.members_count ?? 0} members
-      </Badge>
-      <OrganizationRoleSelect orgId={org.id} userId={user.id} role={membership.role} onChanged={onChanged} />
-      <Button size="icon" variant="ghost" aria-label={`Remove from ${org.name}`} onClick={() => setConfirmRemove(true)}>
-        <Trash2 aria-hidden />
-      </Button>
-      <ConfirmDialog
-        open={confirmRemove}
-        onOpenChange={setConfirmRemove}
-        title={`Remove from ${org.name}?`}
-        description="The user loses the role and every permission granted by this organization."
-        confirmLabel="Remove member"
-        destructive
-        pending={pending}
-        onConfirm={() => void remove()}
-      />
-    </li>
-  );
-}
+  const columns: DataTableColumn<OrganizationMembershipJSON>[] = [
+    {
+      id: "organization",
+      header: "Organization",
+      cell: (membership) => {
+        const org = membership.organization;
+        return (
+          <div className="flex items-center gap-2.5">
+            <UserAvatar name={org.name} imageUrl={org.image_url} size="sm" />
+            <div className="min-w-0">
+              <Link to={`/organizations/${org.id}`} className="truncate text-sm font-medium hover:underline">
+                {org.name}
+              </Link>
+              <p className="truncate font-data text-xs text-muted-foreground">{org.slug}</p>
+            </div>
+          </div>
+        );
+      },
+    },
+    {
+      id: "role",
+      header: "Role",
+      cell: (membership) => (
+        <OrganizationRoleSelect
+          orgId={membership.organization.id}
+          userId={user.id}
+          role={membership.role}
+          onChanged={() => {
+            void memberships.refetch();
+            onUpdated();
+          }}
+        />
+      ),
+    },
+    {
+      id: "joined",
+      header: "Joined",
+      headerClassName: "hidden sm:table-cell",
+      className: "hidden sm:table-cell",
+      cell: (membership) => (
+        <span className="font-data text-xs text-muted-foreground">{formatDate(membership.created_at)}</span>
+      ),
+    },
+    {
+      id: "members",
+      header: "Members",
+      headerClassName: "hidden md:table-cell",
+      className: "hidden md:table-cell",
+      cell: (membership) => (
+        <span className="font-data text-xs text-muted-foreground">
+          {membership.organization.members_count ?? 0} members
+        </span>
+      ),
+    },
+    {
+      id: "actions",
+      header: <span className="sr-only">Actions</span>,
+      className: "w-24 text-right",
+      cell: (membership) => (
+        <Button
+          size="sm"
+          variant="ghost"
+          aria-label={`Remove from ${membership.organization.name}`}
+          onClick={() => setRemoving(membership)}
+        >
+          <Trash2 aria-hidden /> Remove
+        </Button>
+      ),
+    },
+  ];
 
-export function UserOrganizationsTab({ user, onUpdated }: { user: UserJSON; onUpdated: () => void }) {
-  const [addOpen, setAddOpen] = useState(false);
-  const memberships = useApi<unknown>(["user-memberships", user.id], `/users/${user.id}/organization_memberships?limit=100`);
-  const rows = asList<OrganizationMembershipJSON>(memberships.data).data;
-
   return (
-    <Card>
-      <CardHeader className="flex-row flex-wrap items-start justify-between gap-2">
-        <div className="space-y-1">
-          <CardTitle>Organizations</CardTitle>
-          <CardDescription>Memberships and roles for this user.</CardDescription>
-        </div>
+    <Section
+      title="Organizations"
+      description="Memberships and roles for this user."
+      className="border-t-0 pt-0"
+      actions={
         <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
           <Plus aria-hidden /> Add to organization
         </Button>
-      </CardHeader>
-      <CardContent>
-        {memberships.isLoading ? (
-          <div className="space-y-2">
-            {Array.from({ length: 3 }).map((_, index) => (
-              <div key={index} className="h-12 animate-pulse rounded bg-muted" />
-            ))}
-          </div>
-        ) : memberships.error ? (
-          <p role="alert" className="py-6 text-sm text-destructive">
-            {errorMessage(memberships.error)}
-          </p>
-        ) : rows.length === 0 ? (
+      }
+    >
+      <DataTable
+        columns={columns}
+        rows={rows}
+        rowKey={(membership) => membership.id}
+        isLoading={memberships.isLoading}
+        error={memberships.error}
+        onRetry={() => void memberships.refetch()}
+        loadingRows={4}
+        empty={
           <EmptyState
             icon={Building2}
             title="No organization memberships"
             description="Add this user to an organization to grant roles and permissions."
           />
-        ) : (
-          <ul className="divide-y">
-            {rows.map((membership) => (
-              <MembershipRow
-                key={membership.id}
-                membership={membership}
-                user={user}
-                onChanged={() => {
-                  void memberships.refetch();
-                  onUpdated();
-                }}
-              />
-            ))}
-          </ul>
-        )}
-      </CardContent>
+        }
+      />
       <AddToOrganizationDialog
         open={addOpen}
         onOpenChange={setAddOpen}
@@ -267,6 +276,18 @@ export function UserOrganizationsTab({ user, onUpdated }: { user: UserJSON; onUp
           onUpdated();
         }}
       />
-    </Card>
+      <ConfirmDialog
+        open={!!removing}
+        onOpenChange={(open) => {
+          if (!open) setRemoving(null);
+        }}
+        title={removing ? `Remove from ${removing.organization.name}?` : "Remove member?"}
+        description="The user loses the role and every permission granted by this organization."
+        confirmLabel="Remove member"
+        destructive
+        pending={pending}
+        onConfirm={() => void remove()}
+      />
+    </Section>
   );
 }

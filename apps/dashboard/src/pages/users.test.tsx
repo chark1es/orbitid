@@ -87,4 +87,77 @@ describe("users table", () => {
     });
     expect(await screen.findByText("Showing 21–40 of 45")).toBeTruthy();
   });
+
+  it("keeps both status filters out of the URL when one is chosen", async () => {
+    const requested: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      requested.push(url);
+      const body = url.includes("/v1/users")
+        ? { data: [USER], total_count: 1 }
+        : url.includes("/v1/instance")
+          ? { application: { homeUrl: "http://localhost:3000" } }
+          : { data: [], total_count: 0 };
+      return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/users"]}>
+          <Routes>
+            <Route path="/users" element={<UsersPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("Ada Lovelace")).toBeTruthy();
+
+    const trigger = screen.getByRole("combobox", { name: "Filter users by status" });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("option", { name: "Locked" }));
+
+    await waitFor(() => {
+      expect(requested.some((url) => url.includes("/v1/users") && url.includes("locked=true"))).toBe(true);
+    });
+    expect(requested.some((url) => url.includes("locked=true") && url.includes("banned=true"))).toBe(false);
+  });
+
+  it("confirms a bulk delete against the selected user", async () => {
+    const methods: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      methods.push(`${init?.method ?? "GET"} ${url}`);
+      const body = url.includes("/v1/users")
+        ? { data: [USER], total_count: 1 }
+        : { application: { homeUrl: "http://localhost:3000" } };
+      return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/users"]}>
+          <Routes>
+            <Route path="/users" element={<UsersPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Select Ada Lovelace" }));
+    expect((await screen.findByRole("region", { name: "Bulk actions" })).textContent).toContain("1 selected");
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog.textContent).toContain("Delete 1 user?");
+    expect(dialog.textContent).toContain("removed permanently");
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete users" }));
+    await waitFor(() => {
+      expect(methods).toContain("DELETE http://localhost:4000/v1/users/user_1");
+    });
+  });
 });

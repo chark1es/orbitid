@@ -24,23 +24,27 @@ export function UserMenu() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button type="button" className={buttonVariants({ variant: "ghost", className: "h-9 gap-2 px-1.5 sm:px-2" })}>
+        <button
+          type="button"
+          className={buttonVariants({ variant: "ghost", size: "sm", className: "gap-2 pl-1 pr-1.5" })}
+          aria-label="Instance menu"
+        >
           <UserAvatar name="Instance admin" size="sm" />
-          <span className="hidden text-sm font-medium sm:inline">Admin</span>
+          <span className="hidden text-[0.8125rem] font-medium sm:inline">Admin</span>
           <ChevronsUpDown className="hidden size-3.5 text-muted-foreground sm:inline" aria-hidden />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">
-        <DropdownMenuLabel className="flex items-center gap-2 font-normal">
-          <ShieldCheck className="size-4 text-muted-foreground" aria-hidden />
+        <DropdownMenuLabel className="flex items-start gap-2 font-normal">
+          <ShieldCheck className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
           <span className="flex min-w-0 flex-col">
             <span className="text-sm font-medium">Instance admin</span>
-            <span className="truncate text-xs text-muted-foreground">{keyKind}</span>
+            <span className="text-xs text-muted-foreground">{keyKind}</span>
           </span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-          <span className="block truncate">API: {getApiUrl()}</span>
+        <DropdownMenuLabel className="font-data text-[0.6875rem] font-normal text-muted-foreground">
+          <span className="block truncate">{getApiUrl()}</span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem

@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { keepPreviousData, useQueryClient } from "@tanstack/react-query";
 import {
-  Badge,
   Button,
   Checkbox,
   Input,
@@ -48,6 +47,7 @@ function dateInputToMs(value: string, endOfDay = false): number | null {
 
 export default function UsersPage() {
   const table = useTableState({ limit: 20, orderBy: "-created_at", filterKeys: LIST_KEYS });
+  const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [search, setSearch] = useState(table.query);
@@ -64,14 +64,17 @@ export default function UsersPage() {
   useEffect(() => setSearch(table.query), [table.query]);
   useEffect(() => setSelected(new Set()), [table.searchParams]);
 
+  const status = table.filter("banned") === "true" ? "banned" : table.filter("locked") === "true" ? "locked" : "all";
+  const mfa = table.filter("mfa") === "true" ? "mfa" : "any";
+
   const path = usersListPath({
     page: table.page,
     limit: table.limit,
     query: table.query,
     orderBy: table.orderBy,
-    banned: table.filter("banned") === "true",
-    locked: table.filter("locked") === "true",
-    mfa: table.filter("mfa") === "true",
+    banned: status === "banned",
+    locked: status === "locked",
+    mfa: mfa === "mfa",
     createdAfter: table.filter("created_after") ? Number(table.filter("created_after")) : undefined,
     createdBefore: table.filter("created_before") ? Number(table.filter("created_before")) : undefined,
   });
@@ -84,6 +87,16 @@ export default function UsersPage() {
   const total = users.data?.total_count ?? 0;
   const allSelected = rows.length > 0 && rows.every((user) => selected.has(user.id));
   const someSelected = rows.some((user) => selected.has(user.id));
+
+  function setStatus(value: string) {
+    const next = new URLSearchParams(searchParams);
+    next.delete("banned");
+    next.delete("locked");
+    next.delete("page");
+    if (value === "banned") next.set("banned", "true");
+    if (value === "locked") next.set("locked", "true");
+    setSearchParams(next, { replace: true });
+  }
 
   function toggleAll(checked: boolean) {
     setSelected((current) => {
@@ -125,8 +138,8 @@ export default function UsersPage() {
   const columns: DataTableColumn<UserJSON>[] = [
     {
       id: "select",
-      className: "w-10",
-      headerClassName: "w-10",
+      className: "w-9",
+      headerClassName: "w-9",
       header: (
         <Checkbox
           checked={allSelected ? true : someSelected ? "indeterminate" : false}
@@ -156,8 +169,15 @@ export default function UsersPage() {
         <div className="flex items-center gap-2.5">
           <UserAvatar name={userLabel(user)} imageUrl={user.image_url} size="sm" />
           <div className="min-w-0">
-            <p className="truncate text-sm font-medium">{userLabel(user)}</p>
-            <p className="truncate text-xs text-muted-foreground">{primaryEmail(user) || user.id}</p>
+            <Link
+              to={`/users/${user.id}`}
+              className="block max-w-[32ch] truncate text-sm font-medium underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {userLabel(user)}
+            </Link>
+            <span className="block max-w-[32ch] truncate font-data text-[0.6875rem] text-muted-foreground">
+              {primaryEmail(user) || user.id}
+            </span>
           </div>
         </div>
       ),
@@ -168,7 +188,7 @@ export default function UsersPage() {
       headerClassName: "hidden md:table-cell",
       className: "hidden md:table-cell",
       sortKey: "username",
-      cell: (user) => <span className="text-sm text-muted-foreground">{user.username ?? "—"}</span>,
+      cell: (user) => <span className="font-data text-xs text-muted-foreground">{user.username ?? "—"}</span>,
     },
     {
       id: "status",
@@ -178,7 +198,9 @@ export default function UsersPage() {
           {user.banned ? <StatusBadge status="banned" /> : null}
           {user.locked ? <StatusBadge status="locked" /> : null}
           {user.two_factor_enabled ? <StatusBadge status="enabled" label="MFA" /> : null}
-          {!user.banned && !user.locked && !user.two_factor_enabled ? <Badge variant="outline">No flags</Badge> : null}
+          {!user.banned && !user.locked && !user.two_factor_enabled ? (
+            <StatusBadge status="active" tone="neutral" />
+          ) : null}
         </div>
       ),
     },
@@ -186,7 +208,7 @@ export default function UsersPage() {
       id: "created",
       header: "Created",
       sortKey: "created_at",
-      cell: (user) => <TimeAgo value={user.created_at} className="text-sm" />,
+      cell: (user) => <TimeAgo value={user.created_at} className="font-data text-xs text-muted-foreground" />,
     },
     {
       id: "last_sign_in",
@@ -194,13 +216,15 @@ export default function UsersPage() {
       headerClassName: "hidden lg:table-cell",
       className: "hidden lg:table-cell",
       sortKey: "last_sign_in_at",
-      cell: (user) => <TimeAgo value={user.last_sign_in_at} className="text-sm" />,
+      cell: (user) => (
+        <TimeAgo value={user.last_sign_in_at} className="font-data text-xs text-muted-foreground" fallback="Never" />
+      ),
     },
     {
       id: "actions",
       header: <span className="sr-only">Actions</span>,
-      className: "w-10 text-right",
-      headerClassName: "w-10",
+      className: "w-9 text-right",
+      headerClassName: "w-9",
       cell: (user) => <UserRowActions user={user} />,
     },
   ];
@@ -211,121 +235,108 @@ export default function UsersPage() {
         title="Users"
         description="Search, inspect and administer every account on this instance."
         actions={
-          <Button size="sm" onClick={() => setCreateOpen(true)}>
+          <Button size="default" onClick={() => setCreateOpen(true)}>
             <Plus aria-hidden /> Create user
           </Button>
         }
       />
 
-      <div className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative min-w-56 flex-1">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-            <Input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search email, phone, username or user ID…"
-              aria-label="Search users"
-              className="pl-8"
-            />
-          </div>
-          <Button
-            type="button"
-            variant={table.filter("banned") ? "default" : "outline"}
-            size="sm"
-            aria-pressed={!!table.filter("banned")}
-            onClick={() => table.setFilter("banned", table.filter("banned") ? null : "true")}
-          >
-            <Ban aria-hidden /> Banned
-          </Button>
-          <Button
-            type="button"
-            variant={table.filter("locked") ? "default" : "outline"}
-            size="sm"
-            aria-pressed={!!table.filter("locked")}
-            onClick={() => table.setFilter("locked", table.filter("locked") ? null : "true")}
-          >
-            Locked
-          </Button>
-          <Button
-            type="button"
-            variant={table.filter("mfa") ? "default" : "outline"}
-            size="sm"
-            aria-pressed={!!table.filter("mfa")}
-            onClick={() => table.setFilter("mfa", table.filter("mfa") ? null : "true")}
-          >
-            Has MFA
-          </Button>
-          {table.hasFilters ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setSearch("");
-                table.reset();
-              }}
-            >
-              <X aria-hidden /> Clear
-            </Button>
-          ) : null}
+      <div className="flex flex-wrap items-end gap-x-2 gap-y-3">
+        <div className="relative min-w-56 flex-1">
+          <Search
+            className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+            strokeWidth={1.5}
+            aria-hidden
+          />
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search email, phone, username or user ID"
+            aria-label="Search users"
+            className="h-[34px] pl-8"
+          />
         </div>
-
-        <div className="flex flex-wrap items-end gap-3">
+        <Select value={status} onValueChange={setStatus}>
+          <SelectTrigger className="h-[34px] w-[132px]" aria-label="Filter users by status">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Any status</SelectItem>
+            <SelectItem value="banned">Banned</SelectItem>
+            <SelectItem value="locked">Locked</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={mfa} onValueChange={(value) => table.setFilter("mfa", value === "mfa" ? "true" : null)}>
+          <SelectTrigger className="h-[34px] w-[124px]" aria-label="Filter users by second factor">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="any">Any MFA</SelectItem>
+            <SelectItem value="mfa">Has MFA</SelectItem>
+          </SelectContent>
+        </Select>
+        <div className="flex items-end gap-1">
           <div className="space-y-1">
-            <Label htmlFor="created-after" className="text-xs text-muted-foreground">
+            <Label htmlFor="created-after" className="text-[0.6875rem] uppercase tracking-[0.04em] text-muted-foreground">
               Created after
             </Label>
             <Input
               id="created-after"
               type="date"
-              className="h-8 w-[150px]"
+              className="h-[34px] w-[142px] font-data text-xs"
               value={toDateInput(table.filter("created_after"))}
-              onChange={(event) => table.setFilter("created_after", dateInputToMs(event.target.value)?.toString() ?? null)}
+              onChange={(event) =>
+                table.setFilter("created_after", dateInputToMs(event.target.value)?.toString() ?? null)
+              }
             />
           </div>
           <div className="space-y-1">
-            <Label htmlFor="created-before" className="text-xs text-muted-foreground">
+            <Label htmlFor="created-before" className="text-[0.6875rem] uppercase tracking-[0.04em] text-muted-foreground">
               Created before
             </Label>
             <Input
               id="created-before"
               type="date"
-              className="h-8 w-[150px]"
+              className="h-[34px] w-[142px] font-data text-xs"
               value={toDateInput(table.filter("created_before"))}
-              onChange={(event) => table.setFilter("created_before", dateInputToMs(event.target.value, true)?.toString() ?? null)}
+              onChange={(event) =>
+                table.setFilter("created_before", dateInputToMs(event.target.value, true)?.toString() ?? null)
+              }
             />
           </div>
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">Rows</Label>
-            <Select value={String(table.limit)} onValueChange={(value) => table.setLimit(Number(value))}>
-              <SelectTrigger className="h-8 w-[84px]" aria-label="Rows per page">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {[10, 20, 50, 100].map((size) => (
-                  <SelectItem key={size} value={String(size)}>
-                    {size}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <p className="ml-auto text-xs text-muted-foreground">
-            Sorted by {table.orderBy.replace(/^-/, "").replace(/_/g, " ")}
-            {table.sortDescending ? " (descending)" : " (ascending)"}
-          </p>
         </div>
+        {table.hasFilters ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setSearch("");
+              table.reset();
+            }}
+          >
+            <X aria-hidden /> Clear
+          </Button>
+        ) : null}
       </div>
 
       {selected.size > 0 ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2">
-          <span className="text-sm font-medium">{selected.size} selected</span>
+        <div
+          role="region"
+          aria-label="Bulk actions"
+          className="flex flex-wrap items-center gap-2 rounded-[4px] border border-border bg-muted/40 px-3 py-2"
+        >
+          <span className="text-sm font-medium tabular-nums">{selected.size} selected</span>
           <div className="ml-auto flex flex-wrap gap-2">
             <Button size="sm" variant="outline" disabled={bulkPending !== null} onClick={() => void bulk("ban")}>
               <Ban aria-hidden /> Ban
             </Button>
-            <Button size="sm" variant="destructive" disabled={bulkPending !== null} onClick={() => setConfirmBulkDelete(true)}>
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={bulkPending !== null}
+              onClick={() => setConfirmBulkDelete(true)}
+            >
               <Trash2 aria-hidden /> Delete
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
@@ -351,7 +362,27 @@ export default function UsersPage() {
             icon={Search}
             title={table.hasFilters ? "No users match these filters" : "No users yet"}
             description={
-              table.hasFilters ? "Try a different search term or clear the filters." : "Users appear here after their first sign-up."
+              table.hasFilters
+                ? "Clear a filter or search for another identifier."
+                : "Create the first user, or let someone sign up from your app. Sign-ups land here."
+            }
+            action={
+              table.hasFilters ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setSearch("");
+                    table.reset();
+                  }}
+                >
+                  Clear filters
+                </Button>
+              ) : (
+                <Button size="sm" onClick={() => setCreateOpen(true)}>
+                  <Plus aria-hidden /> Create user
+                </Button>
+              )
             }
           />
         }
@@ -366,16 +397,12 @@ export default function UsersPage() {
         disabled={users.isFetching}
       />
 
-      <p className="text-xs text-muted-foreground">
-        Server-side pagination, search and sorting. Filters map to the Backend API user list query.
-      </p>
-
       <CreateUserDialog open={createOpen} onOpenChange={setCreateOpen} />
       <ConfirmDialog
         open={confirmBulkDelete}
         onOpenChange={setConfirmBulkDelete}
         title={`Delete ${selected.size} user${selected.size === 1 ? "" : "s"}?`}
-        description="Every selected user and their sessions, identifiers and memberships will be permanently removed."
+        description="Every selected user and their sessions, identifiers and memberships are removed permanently. This cannot be undone."
         confirmLabel="Delete users"
         destructive
         pending={bulkPending === "delete"}

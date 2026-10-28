@@ -221,6 +221,8 @@ export interface OrganizationInvitationJSON {
   id: string;
   email_address: string;
   organization_id: string;
+  organization_name?: string;
+  organization_image_url?: string;
   role: string;
   role_name: string;
   status: "pending" | "accepted" | "revoked" | "expired";

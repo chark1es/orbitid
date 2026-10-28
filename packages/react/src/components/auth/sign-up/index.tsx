@@ -1,13 +1,15 @@
+import { useEffect } from "react";
 import { Button } from "@orbitid/ui";
 import { AuthAppearanceScope } from "../_shared/appearance";
 import { AuthCard } from "../_shared/auth-card";
-import { useAuthRuntime } from "../_shared/w6";
+import { useAuthRuntime, type TranslateFn } from "../_shared/w6";
 import { pickSignUp } from "../_shared/api";
 import type { SignUpProps } from "../_shared/types";
 import { useStep } from "../_shared/use-step";
 import { SignUpStartStep, VerifyCodeStep, VerifyEmailLinkStep, ContinueStep, SignUpSuccessStep } from "./steps";
 import { SIGN_UP_STEPS, signUpSlug, useSignUpFlow, type SignUpStep } from "./flow";
 import { Waitlist } from "../waitlist";
+import { TwoFactorSetup } from "../setup-two-factor";
 import { AuthLoadingScreen } from "../_shared/loading";
 
 function SignUpInner(props: SignUpProps) {
@@ -21,6 +23,14 @@ function SignUpInner(props: SignUpProps) {
     slugFor: signUpSlug,
   });
   const flow = useSignUpFlow(props, step, setStep);
+  const pendingSession = runtime.session?.status === "pending";
+
+  // Required MFA leaves the new session pending; it may only enrol a factor until then.
+  useEffect(() => {
+    if (runtime.loaded && pendingSession && !flow.setupCompleted && step !== "setup-mfa") {
+      setStep("setup-mfa");
+    }
+  }, [runtime.loaded, pendingSession, flow.setupCompleted, step, setStep]);
 
   if (!runtime.loaded) return <AuthLoadingScreen />;
 
@@ -53,6 +63,12 @@ function SignUpInner(props: SignUpProps) {
         {step === "verify-email-link" ? <VerifyEmailLinkStep flow={flow} props={props} /> : null}
         {step === "verify-phone-code" ? <VerifyCodeStep flow={flow} props={props} strategy="phone_code" /> : null}
         {step === "continue" ? <ContinueStep flow={flow} props={props} /> : null}
+        {step === "setup-mfa" ? (
+          <TwoFactorSetup
+            sessionId={flow.pendingSessionId ?? runtime.session?.id ?? null}
+            onComplete={flow.completeSetup}
+          />
+        ) : null}
         {step === "success" ? <SignUpSuccessStep /> : null}
       </AuthCard>
     </div>
@@ -73,7 +89,7 @@ function initialSignUpStep(signUp: ReturnType<typeof pickSignUp>): SignUpStep {
 
 function signUpCopy(
   step: SignUpStep,
-  t: (key: string, params?: Record<string, string | number>) => string,
+  t: TranslateFn,
   applicationName: string,
 ): { title: string; subtitle?: string } {
   switch (step) {
@@ -87,6 +103,11 @@ function signUpCopy(
       return { title: t("signUp.verifyPhoneCode.title") };
     case "continue":
       return { title: t("signUp.continue.title"), subtitle: t("signUp.continue.subtitle") };
+    case "setup-mfa":
+      return {
+        title: t("signIn.setupTwoFactor.title"),
+        subtitle: t("signIn.setupTwoFactor.subtitle"),
+      };
     case "success":
       return { title: t("signUp.success.title", { applicationName }) };
   }

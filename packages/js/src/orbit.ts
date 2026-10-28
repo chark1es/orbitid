@@ -87,7 +87,7 @@ export interface HandleRedirectCallbackResult {
 }
 
 /**
- * Framework-agnostic OrbitID client (clerk-js equivalent).
+ * Framework-agnostic OrbitID client.
  * All state updates flow through the `{ response, client }` envelope: every response carrying `client`
  * rebuilds resources and notifies listeners, so React consumers always observe fresh references.
  */
@@ -187,7 +187,7 @@ export class OrbitID {
     };
   }
 
-  /** Clerk-compatible alias for `addListener`. */
+  /** Alias for `addListener`. */
   on = this.addListener;
 
   private emit(): void {
@@ -575,7 +575,7 @@ export class OrbitID {
     this.listeners.clear();
   }
 
-  /** Returns the email-link flow helper for the pending sign-in (Clerk-compatible). */
+  /** Returns the email-link flow helper for the pending sign-in. */
   createSignInEmailLinkFlow(options?: EmailLinkFlowOptions): EmailLinkFlow {
     return this.signIn.createEmailLinkFlow(options);
   }

@@ -15,6 +15,7 @@ import {
 } from "@orbitid/ui";
 import { CopyIcon, DownloadIcon, KeyRoundIcon, PlusIcon, PrinterIcon, Trash2Icon } from "lucide-react";
 import { currentUser, findPhone, invokeMethod, reloadOrbit } from "../_shared/api";
+import { copyText, downloadText, printText } from "../_shared/clipboard";
 import { normalizeSession } from "../_shared/normalize";
 import { ConfirmDialog } from "../_shared/confirm-dialog";
 import { FormError } from "../_shared/form-error";
@@ -552,7 +553,7 @@ function BackupCodesSection({ user, refresh, onError, onNotice }: SectionProps) 
                 <DownloadIcon className="size-4" aria-hidden="true" />
                 {t("common.download")}
               </Button>
-              <Button type="button" variant="outline" size="sm" onClick={() => printCodes((codes ?? []).join("\n"))}>
+              <Button type="button" variant="outline" size="sm" onClick={() => printText((codes ?? []).join("\n"))}>
                 <PrinterIcon className="size-4" aria-hidden="true" />
                 {t("common.print")}
               </Button>
@@ -829,28 +830,4 @@ function formatDate(value: number | null | undefined): string {
   }
 }
 
-async function copyText(text: string): Promise<void> {
-  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-  }
-}
 
-function downloadText(filename: string, text: string): void {
-  if (typeof document === "undefined" || typeof URL.createObjectURL !== "function") return;
-  const blob = new Blob([text], { type: "text/plain" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
-}
-
-function printCodes(text: string): void {
-  if (typeof window === "undefined") return;
-  const win = window.open("", "_blank", "noopener,noreferrer");
-  if (!win) return;
-  win.document.write(`<pre>${text.replace(/</g, "&lt;")}</pre>`);
-  win.document.close();
-  win.print();
-}

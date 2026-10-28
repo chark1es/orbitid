@@ -44,7 +44,7 @@ function AuthSnapshot() {
 }
 
 describe("useAuth", () => {
-  it("projects session claims into the Clerk-compatible shape", async () => {
+  it("projects session claims into the auth state shape", async () => {
     const jwt = makeJwt(
       sessionClaims({
         org_id: "org_7",
@@ -121,15 +121,17 @@ describe("useAuth", () => {
     function Probe() {
       const signedOut = useAuth();
       const signedIn = useAuth({ treatPendingAsSignedOut: false });
+      const { session } = useSession();
       return (
         <p data-testid="pending">
-          {String(signedOut.isSignedIn)}:{String(signedIn.isSignedIn)}:{signedOut.sessionStatus}
+          {String(signedOut.isSignedIn)}:{String(signedIn.isSignedIn)}:{signedOut.sessionStatus}:
+          {session?.status}
         </p>
       );
     }
 
     renderWithProvider(<Probe />, { instance });
-    expect(screen.getByTestId("pending").textContent).toBe("false:true:pending");
+    expect(screen.getByTestId("pending").textContent).toBe("false:true:pending:pending");
   });
 });
 

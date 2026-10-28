@@ -151,6 +151,8 @@ export class UserSettings {
 export class OrganizationSettings {
   enabled: boolean;
   maxAllowedMemberships: number;
+  /** Organizations one user may create, or `null` for no limit. */
+  maxCreatedOrganizationsPerUser: number | null;
   creationEnabled: boolean;
   domainsEnabled: boolean;
   membershipRequestsEnabled: boolean;
@@ -162,6 +164,7 @@ export class OrganizationSettings {
   constructor(json: EnvironmentJSON["organization_settings"]) {
     this.enabled = json.enabled ?? false;
     this.maxAllowedMemberships = json.max_allowed_memberships ?? 5;
+    this.maxCreatedOrganizationsPerUser = json.max_created_organizations_per_user ?? null;
     this.creationEnabled = json.creation_enabled ?? true;
     this.domainsEnabled = json.domains_enabled ?? false;
     this.membershipRequestsEnabled = json.membership_requests_enabled ?? false;

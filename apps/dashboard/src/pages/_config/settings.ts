@@ -470,7 +470,7 @@ export function roleKeyError(key: string): string | null {
   if (!trimmed.startsWith("org:")) return "Role key must start with `org:`.";
   const slug = trimmed.slice(4);
   if (!slug) return "Add a role name after `org:`.";
-  if (slug.includes(":")) return "Role keys cannot contain additional colons (for example `org:billing`).";
+  if (slug.includes(":")) return "Role keys cannot contain additional colons (for example `org:auditor`).";
   if (slug.startsWith("sys_")) return "Keys starting with `org:sys_` are reserved for system roles.";
   if (!ROLE_SLUG.test(slug)) return "Use lowercase letters, numbers, dashes or underscores after `org:`.";
   return null;
@@ -583,9 +583,9 @@ export function normalizeRestrictionIdentifier(
 }
 
 export function formatDate(timestamp: number | null | undefined): string {
-  if (!timestamp) return "—";
+  if (!timestamp) return "Not set";
   const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return "—";
+  if (Number.isNaN(date.getTime())) return "Not set";
   return date.toLocaleString(undefined, {
     year: "numeric",
     month: "short",

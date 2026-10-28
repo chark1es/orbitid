@@ -1,21 +1,13 @@
 import { useState } from "react";
 import type { AuditLogJSON, PaginatedList } from "@orbitid/shared";
 import {
-  Badge,
   Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
   Input,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Table,
   TableBody,
   TableCell,
   TableHead,
@@ -26,7 +18,16 @@ import { ChevronLeft, ChevronRight, Eye, RefreshCw, Search } from "lucide-react"
 import { useApi } from "../lib/api";
 import { unwrapList, unwrapTotal } from "./_config/data";
 import { formatDate, fromDateInput, fromDateInputStart } from "./_config/settings";
-import { CopyButton, EmptyState, ErrorAlert, Field, PageHeader, TableSkeleton } from "./_config/ui";
+import {
+  CopyButton,
+  DetailSheet,
+  EmptyState,
+  ErrorAlert,
+  MetaChip,
+  PageHeader,
+  RuledTable,
+  TableSkeleton,
+} from "./_config/ui";
 
 const PAGE_SIZE = 50;
 
@@ -68,27 +69,29 @@ export default function Page() {
     <div className="space-y-6">
       <PageHeader
         title="Audit logs"
-        description="Administrative and security-relevant actions across the instance. Records are immutable and time-ordered."
-        badge={<Badge variant="outline">{total.toLocaleString()} events</Badge>}
+        description="Administrative and security-relevant actions across the instance. Records are immutable and ordered by time."
+        badge={<MetaChip>{total.toLocaleString()} events</MetaChip>}
         actions={
           <Button variant="outline" size="sm" onClick={() => void query.refetch()} disabled={query.isFetching}>
-            <RefreshCw className={`size-4 ${query.isFetching ? "animate-spin" : ""}`} /> Refresh
+            <RefreshCw className={`size-4 ${query.isFetching ? "animate-spin" : ""}`} aria-hidden />
+            Refresh
           </Button>
         }
       />
 
-      <div className="rounded-xl border bg-card p-3">
-        <div className="grid gap-2 lg:grid-cols-3">
+      <div className="space-y-3 border-y border-border py-3">
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
           <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+            <Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" aria-hidden />
             <Input
               value={action}
               onChange={(event) => {
                 setAction(event.target.value);
                 setOffset(0);
               }}
-              placeholder="Action, e.g. user.created"
-              className="pl-8"
+              placeholder="Action, for example user.created"
+              className="pl-8 font-data text-xs"
+              aria-label="Filter by action"
             />
           </div>
           <Input
@@ -98,6 +101,18 @@ export default function Page() {
               setOffset(0);
             }}
             placeholder="Actor user ID"
+            className="font-data text-xs"
+            aria-label="Filter by actor"
+          />
+          <Input
+            value={targetId}
+            onChange={(event) => {
+              setTargetId(event.target.value);
+              setOffset(0);
+            }}
+            placeholder="Target ID"
+            className="font-data text-xs"
+            aria-label="Filter by target ID"
           />
           <Select
             value={targetType}
@@ -106,7 +121,7 @@ export default function Page() {
               setOffset(0);
             }}
           >
-            <SelectTrigger className="w-full">
+            <SelectTrigger className="w-full" aria-label="Filter by target type">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -121,136 +136,160 @@ export default function Page() {
             </SelectContent>
           </Select>
           <Input
-            value={targetId}
+            id="audit-from"
+            type="date"
+            value={dateFrom}
             onChange={(event) => {
-              setTargetId(event.target.value);
+              setDateFrom(event.target.value);
               setOffset(0);
             }}
-            placeholder="Target ID"
+            className="font-data text-xs"
+            aria-label="From date"
           />
-          <Field label="From" htmlFor="audit-from">
-            <Input
-              id="audit-from"
-              type="date"
-              value={dateFrom}
-              onChange={(event) => {
-                setDateFrom(event.target.value);
-                setOffset(0);
-              }}
-            />
-          </Field>
-          <Field label="To" htmlFor="audit-to">
-            <Input
-              id="audit-to"
-              type="date"
-              value={dateTo}
-              onChange={(event) => {
-                setDateTo(event.target.value);
-                setOffset(0);
-              }}
-            />
-          </Field>
+          <Input
+            id="audit-to"
+            type="date"
+            value={dateTo}
+            onChange={(event) => {
+              setDateTo(event.target.value);
+              setOffset(0);
+            }}
+            className="font-data text-xs"
+            aria-label="To date"
+          />
         </div>
-        {activeFilters > 0 ? (
-          <div className="mt-2 flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">{activeFilters} filter{activeFilters === 1 ? "" : "s"} applied</span>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs text-muted-foreground">
+            {activeFilters > 0
+              ? `${activeFilters} filter${activeFilters === 1 ? "" : "s"} applied`
+              : "No filters. Newest events first."}
+          </span>
+          {activeFilters > 0 ? (
             <Button variant="ghost" size="sm" onClick={resetFilters}>
               Clear filters
             </Button>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </div>
 
       {query.error ? (
         <ErrorAlert error={query.error.message} onRetry={() => void query.refetch()} />
       ) : query.isLoading ? (
-        <TableSkeleton rows={8} />
+        <TableSkeleton rows={10} />
       ) : logs.length === 0 ? (
-        <EmptyState title="No audit events" description={activeFilters > 0 ? "No events match the current filters." : "Actions will appear here as users and administrators use the instance."} />
+        <EmptyState
+          title="No audit events"
+          description={
+            activeFilters > 0
+              ? "No events match the current filters. Clear a filter or widen the date range."
+              : "Actions appear here as users and administrators use the instance."
+          }
+        />
       ) : (
-        <div className="space-y-2">
-          <div className="rounded-lg border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Time</TableHead>
-                  <TableHead>Action</TableHead>
-                  <TableHead>Actor</TableHead>
-                  <TableHead>Target</TableHead>
-                  <TableHead>IP</TableHead>
-                  <TableHead className="w-12" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {logs.map((log) => (
-                  <TableRow key={log.id}>
-                    <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{formatDate(log.created_at)}</TableCell>
-                    <TableCell>
-                      <code className="text-xs font-medium">{log.action}</code>
-                    </TableCell>
-                    <TableCell className="max-w-[14rem] truncate font-mono text-xs">{log.actor ?? "system"}</TableCell>
-                    <TableCell>
+        <div className="space-y-3">
+          <RuledTable>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[146px]">Time</TableHead>
+                <TableHead>Action</TableHead>
+                <TableHead className="w-[180px]">Actor</TableHead>
+                <TableHead className="w-[230px]">Target</TableHead>
+                <TableHead className="w-[110px]">IP</TableHead>
+                <TableHead className="w-12 text-right">Detail</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {logs.map((log) => (
+                <TableRow key={log.id}>
+                  <TableCell className="font-data text-xs text-muted-foreground">{formatDate(log.created_at)}</TableCell>
+                  <TableCell>
+                    <code className="font-data text-xs font-medium">{log.action}</code>
+                  </TableCell>
+                  <TableCell>
+                    <span className="block truncate font-data text-xs">{log.actor ?? "system"}</span>
+                  </TableCell>
+                  <TableCell>
+                    <span className="block truncate text-xs">
                       {log.target_type ? (
-                        <div className="space-y-0.5">
-                          <Badge variant="outline">{log.target_type}</Badge>
-                          <p className="max-w-[14rem] truncate font-mono text-xs text-muted-foreground">{log.target_id ?? "—"}</p>
-                        </div>
+                        <>
+                          <span className="text-muted-foreground">{log.target_type} </span>
+                          <span className="font-data">{log.target_id ?? ""}</span>
+                        </>
                       ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
+                        <span className="text-muted-foreground">None</span>
                       )}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">{log.ip ?? "—"}</TableCell>
-                    <TableCell>
-                      <Button variant="ghost" size="icon-sm" onClick={() => setMetadata(log)} title="Metadata">
-                        <Eye className="size-4" />
-                        <span className="sr-only">Metadata</span>
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>
-              Showing {offset + 1}–{offset + logs.length} of {total.toLocaleString()}
+                    </span>
+                  </TableCell>
+                  <TableCell className="font-data text-xs text-muted-foreground">{log.ip ?? "None"}</TableCell>
+                  <TableCell className="text-right">
+                    <Button variant="ghost" size="icon-sm" onClick={() => setMetadata(log)} title="Metadata">
+                      <Eye className="size-4" aria-hidden />
+                      <span className="sr-only">Metadata for {log.action}</span>
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </RuledTable>
+          <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+            <span className="font-data">
+              {offset + 1} to {offset + logs.length} of {total.toLocaleString()}
             </span>
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>
-                <ChevronLeft className="size-4" /> Previous
+                <ChevronLeft className="size-4" aria-hidden /> Previous
               </Button>
-              <Button variant="outline" size="sm" disabled={offset + logs.length >= total} onClick={() => setOffset(offset + PAGE_SIZE)}>
-                Next <ChevronRight className="size-4" />
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={offset + logs.length >= total}
+                onClick={() => setOffset(offset + PAGE_SIZE)}
+              >
+                Next <ChevronRight className="size-4" aria-hidden />
               </Button>
             </div>
           </div>
         </div>
       )}
 
-      <Dialog open={metadata !== null} onOpenChange={(open) => !open && setMetadata(null)}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{metadata?.action}</DialogTitle>
-            <DialogDescription>
-              {metadata ? `${formatDate(metadata.created_at)} · ${metadata.actor ?? "system"}` : null}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-medium">Metadata</p>
-              {metadata ? <CopyButton value={JSON.stringify(metadata.metadata, null, 2)} size="sm" variant="outline" label="Copy JSON" /> : null}
-            </div>
-            <pre className="max-h-96 overflow-auto rounded-md border bg-muted/40 p-3 text-xs">
-              {metadata ? JSON.stringify(metadata.metadata, null, 2) : ""}
-            </pre>
+      <DetailSheet
+        open={metadata !== null}
+        onOpenChange={(open) => !open && setMetadata(null)}
+        size="lg"
+        title={metadata?.action ?? "Audit event"}
+        description={metadata ? `${formatDate(metadata.created_at)}, ${metadata.actor ?? "system"}` : undefined}
+        footer={<Button variant="outline" onClick={() => setMetadata(null)}>Close</Button>}
+      >
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-medium">Metadata</p>
+            {metadata ? (
+              <CopyButton value={JSON.stringify(metadata.metadata, null, 2)} size="sm" variant="outline" label="Copy JSON" />
+            ) : null}
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setMetadata(null)}>
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          <pre className="max-h-96 overflow-auto border border-border bg-muted/40 p-3 font-data text-xs leading-relaxed">
+            {metadata ? JSON.stringify(metadata.metadata, null, 2) : ""}
+          </pre>
+          {metadata ? (
+            <dl className="divide-y divide-border border-y border-border text-xs">
+              <div className="flex justify-between gap-4 py-1.5">
+                <dt className="text-muted-foreground">Actor</dt>
+                <dd className="font-data">{metadata.actor ?? "system"}</dd>
+              </div>
+              <div className="flex justify-between gap-4 py-1.5">
+                <dt className="text-muted-foreground">Target</dt>
+                <dd className="font-data">
+                  {metadata.target_type ? `${metadata.target_type} ${metadata.target_id ?? ""}` : "None"}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-4 py-1.5">
+                <dt className="text-muted-foreground">IP address</dt>
+                <dd className="font-data">{metadata.ip ?? "None"}</dd>
+              </div>
+            </dl>
+          ) : null}
+        </div>
+      </DetailSheet>
     </div>
   );
 }

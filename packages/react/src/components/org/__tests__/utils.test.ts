@@ -45,7 +45,7 @@ describe("org component utilities", () => {
     ]);
   });
 
-  test("permission checks follow Clerk's role/permission contract", () => {
+  test("permission checks follow the role and permission contract", () => {
     const admin = { role: "org:admin", permissions: [ORG_PERMISSIONS.profileManage] };
     const member = { role: "org:member", permissions: [] };
     expect(hasPermission(admin, ORG_PERMISSIONS.profileManage)).toBe(true);

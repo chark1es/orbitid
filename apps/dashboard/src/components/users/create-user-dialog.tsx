@@ -9,7 +9,6 @@ import {
   DialogTitle,
   Input,
   Label,
-  Separator,
   Switch,
 } from "@orbitid/ui";
 import { Loader2 } from "lucide-react";
@@ -130,7 +129,7 @@ export function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpen
             </div>
           </div>
 
-          <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
+          <div className="flex items-center justify-between gap-3 rounded-[4px] border border-border p-3">
             <div className="space-y-0.5">
               <Label htmlFor="create-skip-checks">Skip password checks</Label>
               <p className="text-xs text-muted-foreground">Bypass length, complexity and pwned-password validation.</p>
@@ -138,7 +137,7 @@ export function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpen
             <Switch id="create-skip-checks" checked={form.skipPasswordChecks} onCheckedChange={set("skipPasswordChecks")} />
           </div>
 
-          <Separator />
+          <div className="border-t border-border" />
 
           <div className="space-y-4">
             <JsonEditor
@@ -168,7 +167,7 @@ export function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpen
           </div>
 
           {error ? (
-            <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <p role="alert" className="rounded-[4px] border border-signal/40 bg-signal/5 px-3 py-2 text-sm text-signal">
               {error}
             </p>
           ) : null}

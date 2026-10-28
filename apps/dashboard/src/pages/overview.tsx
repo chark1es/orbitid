@@ -1,37 +1,19 @@
 import { Link } from "react-router-dom";
-import {
-  Badge,
-  Button,
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-  Progress,
-  Skeleton,
-} from "@orbitid/ui";
-import {
-  Activity,
-  Ban,
-  Building2,
-  Clock,
-  Lock,
-  MonitorSmartphone,
-  RefreshCw,
-  ShieldCheck,
-  Users,
-} from "lucide-react";
-import type { UserJSON } from "@orbitid/shared";
+import { ActivityBoard, Button, Skeleton } from "@orbitid/ui";
+import { RefreshCw, Users } from "lucide-react";
+import type { SessionJSON, UserJSON } from "@orbitid/shared";
 import { useApi } from "../lib/api";
 import { useHealth, useInstance } from "../lib/instance";
 import type { InstanceStatsJSON } from "../lib/types";
 import { errorMessage } from "../lib/errors";
-import { formatNumber, percent, primaryEmail, userLabel } from "../lib/format";
+import { formatNumber, primaryEmail, userLabel } from "../lib/format";
+import { sessionActivityRows } from "../lib/activity";
 import { PageHeader } from "../components/shared/page-header";
+import { Section } from "../components/shared/section";
 import { UserAvatar } from "../components/shared/user-avatar";
 import { EmptyState } from "../components/shared/empty-state";
 import { TimeAgo } from "../components/shared/time-ago";
-import { StatCard } from "../components/overview/stat-card";
+import { InstanceSheet } from "../components/overview/instance-sheet";
 import { TrendChart } from "../components/overview/trend-chart";
 import { InstanceKeys } from "../components/overview/instance-keys";
 
@@ -42,18 +24,23 @@ export default function OverviewPage() {
   const health = useHealth();
   const instance = useInstance();
   const recentUsers = useApi<{ data: UserJSON[] }>(["users", "recent"], "/users?limit=5&order_by=-created_at&paginated=true");
+  const recentSessions = useApi<{ data: SessionJSON[] }>(
+    ["sessions", "recent"],
+    "/sessions?limit=20&order_by=-created_at",
+    { refetchInterval: 15_000 },
+  );
 
   const data = stats.data;
-  const mfaAdoption = data ? percent(data.mfa_enabled_users, data.users_total) : "—";
   const providers = data?.top_social_providers ?? [];
-  const maxProviderCount = Math.max(1, ...providers.map((provider) => provider.count));
   const users = recentUsers.data?.data ?? [];
+  const activity = sessionActivityRows(recentSessions.data?.data);
+  const signIns30d = sumCounts(data?.signins_by_day);
 
   return (
     <>
       <PageHeader
         title="Overview"
-        description="Instance health, sign-up trends and the most recent accounts."
+        description="What this instance holds right now, and the sign-ins that just happened."
         actions={
           <Button
             variant="outline"
@@ -62,6 +49,7 @@ export default function OverviewPage() {
               void stats.refetch();
               void health.refetch();
               void recentUsers.refetch();
+              void recentSessions.refetch();
             }}
             disabled={stats.isFetching}
           >
@@ -71,119 +59,128 @@ export default function OverviewPage() {
       />
 
       {stats.error ? (
-        <div role="alert" className="rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm">
-          <p className="font-medium text-destructive">Could not load instance statistics</p>
-          <p className="text-muted-foreground">{errorMessage(stats.error)}</p>
+        <div role="alert" className="flex flex-col gap-1 border border-signal/40 bg-signal/5 px-3 py-2.5 text-sm">
+          <p className="font-medium">Could not load instance statistics</p>
+          <p className="text-muted-foreground">
+            {errorMessage(stats.error)} Check that the server answers at the frontend API URL, then refresh.
+          </p>
         </div>
       ) : null}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          title="Users"
-          value={formatNumber(data?.users_total)}
-          hint={`${formatNumber(data?.users_active_7d)} active in the last 7 days`}
-          icon={Users}
-          loading={stats.isLoading}
-        />
-        <StatCard
-          title="Active sessions"
-          value={formatNumber(data?.sessions_active)}
-          hint="Unexpired, status active"
-          icon={MonitorSmartphone}
-          loading={stats.isLoading}
-        />
-        <StatCard
-          title="Organizations"
-          value={formatNumber(data?.organizations_total)}
-          hint="Across the whole instance"
-          icon={Building2}
-          loading={stats.isLoading}
-        />
-        <StatCard
-          title="MFA adoption"
-          value={mfaAdoption}
-          hint={`${formatNumber(data?.mfa_enabled_users)} users with a second factor`}
-          icon={ShieldCheck}
-          loading={stats.isLoading}
-        />
-      </div>
+      <InstanceSheet stats={data} loading={stats.isLoading} />
 
-      <div className="flex flex-wrap items-center gap-x-8 gap-y-3 rounded-lg border bg-card px-4 py-3 text-sm">
-        <span className="flex items-center gap-2">
-          <Ban className="size-4 text-muted-foreground" aria-hidden />
-          <span className="text-muted-foreground">Banned</span>
-          <span className="font-medium tabular-nums">{formatNumber(data?.banned_users)}</span>
-        </span>
-        <span className="flex items-center gap-2">
-          <Lock className="size-4 text-muted-foreground" aria-hidden />
-          <span className="text-muted-foreground">Locked</span>
-          <span className="font-medium tabular-nums">{formatNumber(data?.locked_users)}</span>
-        </span>
-        <span className="flex items-center gap-2">
-          <Activity className="size-4 text-muted-foreground" aria-hidden />
-          <span className="text-muted-foreground">Sign-ups (30d)</span>
-          <span className="font-medium tabular-nums">{formatNumber(sumCounts(data?.signups_by_day))}</span>
-        </span>
-        <span className="flex items-center gap-2">
-          <Clock className="size-4 text-muted-foreground" aria-hidden />
-          <span className="text-muted-foreground">Sign-ins (30d)</span>
-          <span className="font-medium tabular-nums">{formatNumber(sumCounts(data?.signins_by_day))}</span>
-        </span>
-      </div>
+      <Section
+        title="Recent sign-ins"
+        description="Newest sessions on this instance, refreshed every 15 seconds."
+        actions={
+          <Button variant="ghost" size="sm" asChild>
+            <Link to="/sessions">All sessions</Link>
+          </Button>
+        }
+        className="border-t-0 pt-0"
+      >
+        {recentSessions.isLoading || activity.length > 0 ? (
+          <div className="overflow-hidden rounded-[4px] border border-border bg-card">
+            <ActivityBoard
+              rows={activity}
+              loading={recentSessions.isLoading}
+              maxRows={20}
+              emptyTitle="No sign-ins yet"
+              emptyHint="Create a user or open the test site. Every new session lands here."
+            />
+          </div>
+        ) : (
+          <ActivityBoard
+            rows={activity}
+            emptyTitle="No sign-ins yet"
+            emptyHint="Create a user or open the test site. Every new session lands here."
+          />
+        )}
+        {recentSessions.error ? (
+          <p role="alert" className="mt-2 text-sm leading-6 text-muted-foreground">
+            Could not read sessions: {errorMessage(recentSessions.error)} Reload the page once the server is reachable.
+          </p>
+        ) : null}
+        <p className="mt-2 max-w-[90ch] text-xs leading-5 text-muted-foreground">
+          A session does not record which method created it, so the line code is <span className="font-data">?</span> for
+          every session row. Sessions started by impersonation carry <span className="font-data">I</span>.
+        </p>
+      </Section>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Sign-ups</CardTitle>
-            <CardDescription>New users per day over the last 30 days</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <TrendChart data={data?.signups_by_day ?? []} kind="area" color="var(--chart-1)" label="Sign-ups" />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Sign-ins</CardTitle>
-            <CardDescription>New sessions per day over the last 30 days</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <TrendChart data={data?.signins_by_day ?? []} kind="bar" color="var(--chart-2)" label="Sign-ins" />
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader className="flex-row items-center justify-between gap-2">
-            <div className="space-y-1">
-              <CardTitle>Recent users</CardTitle>
-              <CardDescription>The five newest accounts</CardDescription>
+      <div className="grid gap-8 lg:grid-cols-3">
+        <Section
+          title="Last 30 days"
+          description="New accounts and new sessions per day, from the instance statistics."
+          className="lg:col-span-2"
+        >
+          <div className="space-y-5">
+            <div>
+              <div className="flex items-baseline gap-2">
+                <h3 className="text-[0.8125rem] font-semibold text-foreground">Sign-ups per day</h3>
+                <span className="font-data text-xs text-muted-foreground">
+                  {formatNumber(sumCounts(data?.signups_by_day))} in 30 days
+                </span>
+              </div>
+              {stats.isLoading ? (
+                <Skeleton className="mt-2 h-[180px] w-full" />
+              ) : (
+                <TrendChart data={data?.signups_by_day ?? []} tone="ink" label="Sign-ups" />
+              )}
             </div>
-            <Button variant="ghost" size="sm" asChild>
-              <Link to="/users">View all</Link>
-            </Button>
-          </CardHeader>
-          <CardContent>
+            <div>
+              <div className="flex items-baseline gap-2">
+                <h3 className="text-[0.8125rem] font-semibold text-foreground">Sign-ins per day</h3>
+                <span className="font-data text-xs text-muted-foreground">{formatNumber(signIns30d)} in 30 days</span>
+              </div>
+              {stats.isLoading ? (
+                <Skeleton className="mt-2 h-[180px] w-full" />
+              ) : (
+                <TrendChart data={data?.signins_by_day ?? []} tone="signal" label="Sign-ins" />
+              )}
+            </div>
+          </div>
+        </Section>
+
+        <div className="space-y-8">
+          <Section
+            title="Newest accounts"
+            actions={
+              <Button variant="ghost" size="sm" asChild>
+                <Link to="/users">All users</Link>
+              </Button>
+            }
+          >
             {recentUsers.isLoading ? (
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {Array.from({ length: 5 }).map((_, index) => (
-                  <Skeleton key={index} className="h-10 w-full" />
+                  <Skeleton key={index} className="h-9 w-full" />
                 ))}
               </div>
             ) : users.length === 0 ? (
-              <EmptyState icon={Users} title="No users yet" description="Sign-ups will appear here as soon as your app is live." />
+              <EmptyState
+                icon={Users}
+                title="No users yet"
+                description="Create the first user, or let someone sign up from your app."
+                action={
+                  <Button size="sm" asChild>
+                    <Link to="/users?create=1">Create user</Link>
+                  </Button>
+                }
+              />
             ) : (
-              <ul className="divide-y">
+              <ul className="-mx-2 divide-y divide-border">
                 {users.map((user) => (
                   <li key={user.id}>
                     <Link
                       to={`/users/${user.id}`}
-                      className="-mx-2 flex items-center gap-3 rounded-md px-2 py-2.5 hover:bg-accent/60"
+                      className="-mx-2 flex items-center gap-2.5 rounded-[3px] px-2 py-2 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       <UserAvatar name={userLabel(user)} imageUrl={user.image_url} size="sm" />
                       <span className="flex min-w-0 flex-1 flex-col">
                         <span className="truncate text-sm font-medium">{userLabel(user)}</span>
-                        <span className="truncate text-xs text-muted-foreground">{primaryEmail(user) || user.id}</span>
+                        <span className="truncate font-mono text-[0.6875rem] text-muted-foreground">
+                          {primaryEmail(user) || user.id}
+                        </span>
                       </span>
                       <TimeAgo value={user.created_at} className="text-xs text-muted-foreground" />
                     </Link>
@@ -191,42 +188,30 @@ export default function OverviewPage() {
                 ))}
               </ul>
             )}
-          </CardContent>
-        </Card>
+          </Section>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Top social providers</CardTitle>
-            <CardDescription>Connected external accounts</CardDescription>
-          </CardHeader>
-          <CardContent>
+          <Section title="Social providers" description="Connected external accounts.">
             {providers.length === 0 ? (
-              <EmptyState icon={Building2} title="No social accounts" description="OAuth connections will be counted here." />
+              <p className="text-sm leading-6 text-muted-foreground">
+                No external accounts yet. Enable a provider under Settings, Social.
+              </p>
             ) : (
-              <ul className="space-y-3">
+              <ul className="divide-y divide-border">
                 {providers.map((provider) => (
-                  <li key={provider.provider} className="space-y-1.5">
-                    <div className="flex items-center justify-between gap-2 text-sm">
-                      <span className="capitalize">{provider.provider.replace(/_/g, " ")}</span>
-                      <Badge variant="secondary" className="tabular-nums">
-                        {formatNumber(provider.count)}
-                      </Badge>
-                    </div>
-                    <Progress value={(provider.count / maxProviderCount) * 100} className="h-1.5" />
+                  <li key={provider.provider} className="flex items-center justify-between gap-3 py-2 text-sm">
+                    <span className="capitalize">{provider.provider.replace(/_/g, " ")}</span>
+                    <span className="font-mono text-xs tabular-nums text-muted-foreground">
+                      {formatNumber(provider.count)}
+                    </span>
                   </li>
                 ))}
               </ul>
             )}
-          </CardContent>
-        </Card>
+          </Section>
+        </div>
       </div>
 
-      <InstanceKeys
-        health={health.data}
-        healthError={health.error}
-        instance={instance.data}
-        loading={health.isLoading}
-      />
+      <InstanceKeys health={health.data} healthError={health.error} instance={instance.data} loading={health.isLoading} />
     </>
   );
 }

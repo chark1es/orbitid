@@ -527,6 +527,9 @@ export interface UserOrganizationInvitationWireJSON {
   status: "pending" | "accepted" | "revoked" | "expired";
   public_metadata: Metadata;
   organization?: OrganizationJSON;
+  /** Denormalized organization label; absent on servers that only send `organization`. */
+  organization_name?: string;
+  organization_image_url?: string;
   created_at: number;
   updated_at: number;
 }
@@ -541,6 +544,8 @@ export class UserOrganizationInvitation {
   status: "pending" | "accepted" | "revoked" | "expired";
   publicMetadata: Metadata;
   organization: Organization | null;
+  organizationName: string | null;
+  organizationImageUrl: string | null;
   createdAt: number;
   updatedAt: number;
 
@@ -556,6 +561,8 @@ export class UserOrganizationInvitation {
     this.status = json.status;
     this.publicMetadata = json.public_metadata ?? {};
     this.organization = json.organization ? Organization.fromJSON(fapi, json.organization) : null;
+    this.organizationName = json.organization_name ?? json.organization?.name ?? null;
+    this.organizationImageUrl = json.organization_image_url ?? json.organization?.image_url ?? null;
     this.createdAt = json.created_at;
     this.updatedAt = json.updated_at;
   }

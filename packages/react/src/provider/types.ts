@@ -77,7 +77,11 @@ export interface TOTPResource {
   secret?: string;
   uri?: string;
   qrCodeUrl?: string;
+  qrCode?: string;
+  qr_code?: string;
   verified?: boolean;
+  /** Ten single-use codes; the server returns them once, when verification completes. */
+  backupCodes?: string[];
   [key: string]: unknown;
 }
 
@@ -105,7 +109,7 @@ export interface SessionPublicUserData {
   image_url?: string;
   has_image?: boolean;
   identifier?: string;
-  /** camelCase aliases added by `@orbitid/react` (Clerk-compatible component code). */
+  /** camelCase aliases added by `@orbitid/react`. */
   userId?: string;
   firstName?: string | null;
   lastName?: string | null;
@@ -326,6 +330,9 @@ export interface OrganizationInvitationResource {
 
 export interface UserOrganizationInvitationResource extends OrganizationInvitationResource {
   organization?: OrganizationResource | null;
+  /** Denormalized organization label on `GET /me/organization_invitations`; absent on older servers. */
+  organizationName?: string | null;
+  organizationImageUrl?: string | null;
   accept(): Promise<UserOrganizationInvitationResource>;
 }
 
@@ -484,6 +491,8 @@ export interface EnvironmentResource {
   organizationSettings: {
     enabled: boolean;
     maxAllowedMemberships: number;
+    /** Organizations one user may create, or `null`/absent for no limit. */
+    maxCreatedOrganizationsPerUser?: number | null;
     creationEnabled: boolean;
     domainsEnabled: boolean;
     membershipRequestsEnabled: boolean;

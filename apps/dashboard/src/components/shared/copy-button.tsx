@@ -14,7 +14,7 @@ export function CopyButton({
 }: {
   value: string;
   label?: string;
-  size?: "icon" | "sm" | "xs" | "default";
+  size?: "icon" | "icon-sm" | "icon-xs" | "sm" | "xs" | "default";
   variant?: "ghost" | "outline" | "secondary" | "default";
   className?: string;
   disabled?: boolean;
@@ -43,7 +43,7 @@ export function CopyButton({
       }}
     >
       {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
-      {size !== "icon" ? <span>{copied ? "Copied" : label ?? "Copy"}</span> : null}
+      {size.startsWith("icon") ? null : <span>{copied ? "Copied" : label ?? "Copy"}</span>}
     </Button>
   );
 }

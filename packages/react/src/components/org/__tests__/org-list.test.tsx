@@ -48,6 +48,23 @@ describe("<OrganizationList />", () => {
     expect(await screen.findByText("Choose an organization")).toBeTruthy();
   });
 
+  test("names the inviting organization when the server sends its label", async () => {
+    const fake = createFakeInstance();
+    addOrg(fake, "org_beta", "Beta Corp");
+    fake.backend.userInvitations.push({
+      id: "inv_1",
+      emailAddress: "ada@example.com",
+      organizationId: "org_beta",
+      role: "org:member",
+      organizationName: "Beta Corp",
+      organizationImageUrl: "https://img.test/beta.png",
+    });
+    renderWithOrbit(<OrganizationList />, fake);
+
+    expect(await screen.findByText("Beta Corp")).toBeTruthy();
+    expect(screen.getByText("ada@example.com")).toBeTruthy();
+  });
+
   test("skips the invitation screen", async () => {
     const fake = createFakeInstance();
     addOrg(fake, "org_beta");

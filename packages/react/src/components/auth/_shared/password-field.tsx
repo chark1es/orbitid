@@ -3,7 +3,7 @@ import { CheckIcon, EyeIcon, EyeOffIcon, XIcon } from "lucide-react";
 import { Button, Input, Label, Progress, cn } from "@orbitid/ui";
 import type { PasswordSettingsView } from "./environment";
 import { useElementClasses } from "./appearance";
-import { useAuthRuntime } from "./w6";
+import { useAuthRuntime, type TranslateFn } from "./w6";
 
 export const DEFAULT_PASSWORD_SETTINGS: PasswordSettingsView = {
   minLength: 8,
@@ -216,7 +216,7 @@ export function PasswordField({
 }
 
 function requirementLabel(
-  t: (key: string, params?: Record<string, string | number>) => string,
+  t: TranslateFn,
   id: PasswordRequirementId,
   settings: PasswordSettingsView,
 ): string {

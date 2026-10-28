@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { SignUp } from "../index";
-import { authEnvironment, enterOtp, makeSignUp, renderAuth, setupAuth, SESSION_ID } from "./fake-auth";
+import { authEnvironment, authUser, enterOtp, makeSignUp, renderAuth, setupAuth, SESSION_ID } from "./fake-auth";
+import { fakeSession } from "../../../__tests__/helpers";
 
 describe("SignUp", () => {
   it("submits the required fields and verifies the email", async () => {
@@ -48,6 +49,59 @@ describe("SignUp", () => {
     await waitFor(() => expect(signUp.attemptEmailAddressVerification).toHaveBeenCalledWith(expect.objectContaining({ code: "424242", strategy: "email_code" })));
     await waitFor(() => expect(harness.instance.setActiveCalls.length).toBe(1));
     expect(harness.instance.navigations.at(-1)?.to).toBe("/welcome");
+  });
+
+  it("enrols a second factor when required MFA leaves the session pending", async () => {
+    const harness = setupAuth({ signedIn: false });
+    const user = authUser({
+      verifyTOTP: vi.fn(async () => ({ verified: true, backupCodes: ["A1B2-C3D4"] })),
+    });
+    harness.instance.user = user;
+    const signUp = makeSignUp(harness.instance, {
+      create: {
+        status: "missing_requirements",
+        emailAddress: "new@example.com",
+        unverifiedFields: ["email_address"],
+        missingFields: [],
+        verifications: {
+          emailAddress: { status: "unverified", strategy: "email_code", attempts: 0, expireAt: null },
+        },
+      },
+      prepareEmailAddressVerification: {
+        status: "missing_requirements",
+        unverifiedFields: ["email_address"],
+      },
+      attemptEmailAddressVerification: () => {
+        const pending = fakeSession({ id: SESSION_ID, status: "pending" });
+        harness.instance.session = pending;
+        harness.instance.client = {
+          id: "client_1",
+          sessions: [pending],
+          lastActiveSessionId: SESSION_ID,
+        } as typeof harness.instance.client;
+        return { status: "complete", createdSessionId: SESSION_ID };
+      },
+    });
+    renderAuth(<SignUp routing="virtual" forceRedirectUrl="/welcome" />, harness);
+
+    fireEvent.change(await screen.findByLabelText(/First name/), { target: { value: "Grace" } });
+    fireEvent.change(screen.getByLabelText(/Email address/), { target: { value: "new@example.com" } });
+    fireEvent.change(screen.getByLabelText(/^Password/), { target: { value: "Sup3r-Secret!" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
+
+    await waitFor(() => expect(document.querySelector("input[data-input-otp]")).toBeTruthy());
+    act(() => enterOtp("424242"));
+
+    expect(await screen.findByText("Set up two-factor authentication")).toBeTruthy();
+    expect(signUp.create).toHaveBeenCalled();
+    expect(harness.instance.setActiveCalls).toHaveLength(0);
+    expect(harness.instance.navigations.map((entry) => entry.to)).not.toContain("/welcome");
+
+    act(() => enterOtp("123456"));
+    await waitFor(() => expect(user.verifyTOTP).toHaveBeenCalledWith({ code: "123456" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(harness.instance.setActiveCalls).toHaveLength(1));
+    await waitFor(() => expect(harness.instance.navigations.at(-1)?.to).toBe("/welcome"));
   });
 
   it("shows a legal consent checkbox when required", async () => {

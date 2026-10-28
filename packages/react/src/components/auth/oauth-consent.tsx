@@ -14,8 +14,9 @@ import { AuthAppearanceScope, useElementClasses } from "./_shared/appearance";
 import { AuthCard } from "./_shared/auth-card";
 import { FormError } from "./_shared/form-error";
 import { isRecord } from "./_shared/guards";
-import { useAuthRuntime } from "./_shared/w6";
+import { useAuthRuntime, type TranslateFn } from "./_shared/w6";
 import type { OAuthConsentProps } from "./_shared/types";
+import type { TranslationKey } from "../../localization";
 
 interface ConsentScope {
   scope: string;
@@ -27,7 +28,7 @@ interface ConsentInfo {
   scopes: ConsentScope[];
 }
 
-const STANDARD_SCOPE_KEYS: Record<string, string> = {
+const STANDARD_SCOPE_KEYS: Record<string, TranslationKey> = {
   openid: "oauthConsent.scope.openid",
   profile: "oauthConsent.scope.profile",
   email: "oauthConsent.scope.email",
@@ -252,7 +253,7 @@ function OAuthConsentInner(props: OAuthConsentProps) {
   );
 }
 
-function scopeLabel(t: (key: string, params?: Record<string, string | number>) => string, scope: string): string {
+function scopeLabel(t: TranslateFn, scope: string): string {
   const key = STANDARD_SCOPE_KEYS[scope];
   return key ? t(key) : t("oauthConsent.scope.default", { scope });
 }

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@orbitid/ui";
+import { Button } from "@orbitid/ui";
 import { Loader2, Save } from "lucide-react";
 import { parseJsonObject, stringifyMetadata } from "../../lib/format";
 import { JsonEditor } from "./json-editor";
+import { Section } from "./section";
 
 export interface MetadataField {
   key: string;
@@ -49,12 +50,8 @@ export function MetadataEditors({
   });
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-        <CardDescription>{description}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-5">
+    <Section title={title} description={description} className="border-t-0 pt-0">
+      <div className="space-y-5">
         {fields.map((field, index) => (
           <JsonEditor
             key={field.key}
@@ -66,7 +63,7 @@ export function MetadataEditors({
             rows={index === 0 ? 8 : 6}
           />
         ))}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
           <p className="text-xs text-muted-foreground">
             {invalid.length
               ? "Fix invalid JSON before saving."
@@ -92,7 +89,7 @@ export function MetadataEditors({
             </Button>
           </div>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </Section>
   );
 }

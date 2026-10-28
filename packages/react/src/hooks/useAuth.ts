@@ -3,7 +3,7 @@ import { AuthContext } from "../provider/contexts";
 import type { AuthState } from "../provider/types";
 
 export interface UseAuthOptions {
-  /** Default `true`, matching Clerk: a `pending` session is treated as signed out. */
+  /** Default `true`: a `pending` session is treated as signed out. */
   treatPendingAsSignedOut?: boolean;
 }
 

@@ -1,4 +1,6 @@
 export { SignIn } from "./sign-in";
+export { SetupTwoFactor } from "./setup-two-factor";
+export type { SetupTwoFactorProps, TwoFactorSetupProps } from "./setup-two-factor";
 export { SignUp } from "./sign-up";
 export { UserButton } from "./user-button";
 export type { UserButtonActionProps, UserButtonLinkProps } from "./user-button";

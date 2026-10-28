@@ -1,92 +1,66 @@
-import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@orbitid/ui";
-import { ScrollText } from "lucide-react";
-import type { AuditLogJSON, UserJSON } from "@orbitid/shared";
+import { Link } from "react-router-dom";
+import { ActivityBoard, Button } from "@orbitid/ui";
+import type { AuditLogJSON, SessionJSON, UserJSON } from "@orbitid/shared";
 import { useApi } from "../../lib/api";
-import { formatDateTime } from "../../lib/format";
-import { useTableState } from "../../lib/use-table-state";
-import { buildListPath } from "../../lib/query";
-import { DataTable, type DataTableColumn } from "../shared/data-table";
-import { TablePagination } from "../shared/table-pagination";
-import { EmptyState } from "../shared/empty-state";
+import { errorMessage } from "../../lib/errors";
+import { auditActivityRow, sessionActivityRows, type ActivityRow } from "../../lib/activity";
+import { Section } from "../shared/section";
 
+/**
+ * A user's activity, newest first: the sessions they signed in with and every recorded change that
+ * targets them. Rows come from `/sessions?user_id=` and `/audit_logs?target_id=`.
+ */
 export function UserActivityTab({ user }: { user: UserJSON }) {
-  const table = useTableState({ limit: 10, orderBy: "-created_at" });
-  const path = buildListPath("/audit_logs", {
-    limit: table.limit,
-    page: table.page,
-    orderBy: table.orderBy,
-    extra: { target_id: user.id },
-  });
-  const logs = useApi<{ data: AuditLogJSON[]; total_count: number }>(["user-activity", path], path);
+  const sessions = useApi<{ data: SessionJSON[] }>(
+    ["user-activity", "sessions", user.id],
+    `/sessions?user_id=${encodeURIComponent(user.id)}&limit=25&order_by=-created_at`,
+  );
+  const logs = useApi<{ data: AuditLogJSON[] }>(
+    ["user-activity", "audit", user.id],
+    `/audit_logs?target_id=${encodeURIComponent(user.id)}&limit=25&order_by=-created_at`,
+  );
 
-  const columns: DataTableColumn<AuditLogJSON>[] = [
-    {
-      id: "action",
-      header: "Action",
-      cell: (log) => <code className="text-xs font-medium">{log.action}</code>,
-    },
-    {
-      id: "target",
-      header: "Target",
-      cell: (log) => (
-        <span className="text-xs text-muted-foreground">
-          {log.target_type ?? "—"}
-          {log.target_id ? ` · ${log.target_id.slice(0, 20)}` : ""}
-        </span>
-      ),
-    },
-    {
-      id: "actor",
-      header: "Actor",
-      cell: (log) => <span className="text-xs text-muted-foreground">{log.actor ?? "system"}</span>,
-    },
-    {
-      id: "metadata",
-      header: "Metadata",
-      headerClassName: "hidden lg:table-cell",
-      className: "hidden lg:table-cell",
-      cell: (log) => (
-        <code className="line-clamp-1 max-w-64 text-xs text-muted-foreground">
-          {Object.keys(log.metadata).length ? JSON.stringify(log.metadata) : "—"}
-        </code>
-      ),
-    },
-    {
-      id: "created",
-      header: "When",
-      cell: (log) => <span className="whitespace-nowrap text-xs">{formatDateTime(log.created_at)}</span>,
-    },
+  const rows: ActivityRow[] = [
+    ...sessionActivityRows(sessions.data?.data),
+    ...(logs.data?.data ?? []).map(auditActivityRow),
   ];
+  const error = sessions.error ?? logs.error;
 
   return (
-    <Card>
-      <CardHeader className="flex-row flex-wrap items-start justify-between gap-2">
-        <div className="space-y-1">
-          <CardTitle>Activity</CardTitle>
-          <CardDescription>Audit log entries targeting this user.</CardDescription>
+    <Section
+      title="Activity"
+      description="Sessions for this user and recorded changes that target them."
+      actions={
+        <Button variant="ghost" size="sm" asChild>
+          <Link to="/audit-logs">Full audit log</Link>
+        </Button>
+      }
+      className="border-t-0 pt-0"
+    >
+      {error ? (
+        <p role="alert" className="mb-3 border border-signal/40 bg-signal/5 px-3 py-2 text-sm leading-6">
+          Some activity could not be read. {errorMessage(error)} Reload once the server is reachable.
+        </p>
+      ) : null}
+      {sessions.isLoading || logs.isLoading ? (
+        <div className="rounded-[4px] border border-border bg-card">
+          <ActivityBoard rows={[]} loading />
         </div>
-        <Badge variant="outline">target_id: {user.id}</Badge>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <DataTable
-          columns={columns}
-          rows={logs.data?.data ?? []}
-          rowKey={(log) => log.id}
-          isLoading={logs.isLoading}
-          error={logs.error}
-          onRetry={() => void logs.refetch()}
-          loadingRows={4}
-          empty={<EmptyState icon={ScrollText} title="No activity" description="Backend mutations targeting this user appear here." />}
+      ) : rows.length === 0 ? (
+        <ActivityBoard
+          rows={[]}
+          emptyTitle="No activity recorded"
+          emptyHint="Sessions and changes to this user appear here. Impersonation and admin actions are recorded too."
         />
-        <TablePagination
-          page={table.page}
-          limit={table.limit}
-          total={logs.data?.total_count ?? 0}
-          onPageChange={table.setPage}
-          onLimitChange={table.setLimit}
-          disabled={logs.isFetching}
-        />
-      </CardContent>
-    </Card>
+      ) : (
+        <div className="overflow-hidden rounded-[4px] border border-border bg-card">
+          <ActivityBoard rows={rows} maxRows={25} />
+        </div>
+      )}
+      <p className="mt-2 max-w-[90ch] text-xs leading-5 text-muted-foreground">
+        Sign-in method is not stored on a session, so the line code is <span className="font-data">?</span> for session
+        rows. Change rows name the action under the outcome.
+      </p>
+    </Section>
   );
 }

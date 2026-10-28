@@ -1,11 +1,14 @@
+import { useEffect } from "react";
 import { AuthAppearanceScope } from "../_shared/appearance";
 import { AuthCard } from "../_shared/auth-card";
 import { useAuthRuntime } from "../_shared/w6";
+import type { TranslateFn } from "../_shared/w6";
 import { pickSignIn } from "../_shared/api";
 import type { SignInProps } from "../_shared/types";
 import { useStep } from "../_shared/use-step";
 import { AuthLoadingScreen } from "../_shared/loading";
 import { SIGN_IN_STEPS, signInSlug, signInStepFromStatus, useSignInFlow, type SignInStep } from "./flow";
+import { TwoFactorSetup } from "../setup-two-factor";
 import {
   ChooseStrategyStep,
   EmailCodeStep,
@@ -35,6 +38,14 @@ function SignInInner(props: SignInProps) {
     slugFor: signInSlug,
   });
   const flow = useSignInFlow(props, step, setStep);
+  const pendingSession = runtime.session?.status === "pending";
+
+  // A pending session can only enrol a second factor, whether sign-in just created it or the page reloaded.
+  useEffect(() => {
+    if (runtime.loaded && pendingSession && !flow.setupCompleted && step !== "setup-mfa") {
+      setStep("setup-mfa");
+    }
+  }, [runtime.loaded, pendingSession, flow.setupCompleted, step, setStep]);
 
   if (!runtime.loaded) return <AuthLoadingScreen />;
 
@@ -56,6 +67,12 @@ function SignInInner(props: SignInProps) {
         {step === "enterprise-sso" ? <EnterpriseSsoStep flow={flow} props={props} /> : null}
         {step === "transfer" ? <TransferStep flow={flow} props={props} /> : null}
         {step === "sso-callback" ? <SsoCallbackStep flow={flow} props={props} /> : null}
+        {step === "setup-mfa" ? (
+          <TwoFactorSetup
+            sessionId={flow.pendingSessionId ?? runtime.session?.id ?? null}
+            onComplete={flow.completeSetup}
+          />
+        ) : null}
         {step === "success" ? <SuccessStep flow={flow} props={props} /> : null}
       </AuthCard>
     </div>
@@ -64,7 +81,7 @@ function SignInInner(props: SignInProps) {
 
 function stepCopy(
   step: SignInStep,
-  t: (key: string, params?: Record<string, string | number>) => string,
+  t: TranslateFn,
   applicationName: string,
 ): { title: string; subtitle?: string } {
   switch (step) {
@@ -112,6 +129,11 @@ function stepCopy(
       return { title: t("signIn.transfer.title") };
     case "sso-callback":
       return { title: t("signIn.ssoCallback.processing") };
+    case "setup-mfa":
+      return {
+        title: t("signIn.setupTwoFactor.title"),
+        subtitle: t("signIn.setupTwoFactor.subtitle"),
+      };
     case "success":
       return { title: t("signIn.success.title") };
   }

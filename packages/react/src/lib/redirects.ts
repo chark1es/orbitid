@@ -46,7 +46,7 @@ export function isValidRedirectUrl(url: string | null | undefined, options: Redi
 }
 
 /**
- * Clerk-compatible precedence: `forceRedirectUrl` → validated `redirectUrl` →
+ * Redirect precedence: `forceRedirectUrl` → validated `redirectUrl` →
  * `fallbackRedirectUrl` → `defaultRedirectUrl`.
  */
 export function resolveRedirectUrl(options: RedirectResolutionOptions): string | undefined {

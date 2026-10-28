@@ -22,6 +22,7 @@ export interface SettingsEditor {
   revision: number;
   isLoading: boolean;
   error: string | null;
+  saveError: string | null;
   saving: boolean;
   patch: (partial: DeepPatch) => void;
   update: (updater: (current: InstanceSettings) => InstanceSettings) => void;
@@ -46,6 +47,7 @@ export function useSettingsEditor(): SettingsEditor {
   const [baseline, setBaseline] = useState<InstanceSettings | null>(null);
   const [revision, setRevision] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const initialized = useRef(false);
 
   useEffect(() => {
@@ -63,10 +65,12 @@ export function useSettingsEditor(): SettingsEditor {
   }, [draft, baseline]);
 
   const patch = useCallback((partial: DeepPatch) => {
+    setSaveError(null);
     setDraft((current) => (current ? deepMerge(current, partial) : current));
   }, []);
 
   const update = useCallback((updater: (current: InstanceSettings) => InstanceSettings) => {
+    setSaveError(null);
     setDraft((current) => (current ? updater(current) : current));
   }, []);
 
@@ -75,6 +79,7 @@ export function useSettingsEditor(): SettingsEditor {
       if (baseline) return cloneJson(baseline);
       return current;
     });
+    setSaveError(null);
     setRevision((value) => value + 1);
   }, [baseline]);
 
@@ -86,6 +91,7 @@ export function useSettingsEditor(): SettingsEditor {
       return true;
     }
     setSaving(true);
+    setSaveError(null);
     try {
       const response = await api<unknown>("PATCH", "/instance", body);
       const fallback = deepMerge(cloneJson(baseline), body);
@@ -97,7 +103,7 @@ export function useSettingsEditor(): SettingsEditor {
       toast.success("Settings saved");
       return true;
     } catch (error) {
-      toast.error("Could not save settings", { description: errorMessage(error) });
+      setSaveError(errorMessage(error));
       return false;
     } finally {
       setSaving(false);
@@ -112,6 +118,7 @@ export function useSettingsEditor(): SettingsEditor {
     revision,
     isLoading: query.isLoading,
     error: query.error ? errorMessage(query.error) : null,
+    saveError,
     saving,
     patch,
     update,

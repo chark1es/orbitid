@@ -8,10 +8,15 @@ export interface AsyncValue<T> {
   revalidate(): Promise<void>;
 }
 
+export interface AsyncFetchOptions {
+  /** `revalidate()` bypasses the shared request cache. */
+  force?: boolean;
+}
+
 export interface UseAsyncValueOptions<T> {
   /** Cache identity; changing it reloads. */
   key: string;
-  fetcher: (() => Promise<T | null>) | null;
+  fetcher: ((options: AsyncFetchOptions) => Promise<T | null>) | null;
   enabled?: boolean;
 }
 
@@ -36,14 +41,14 @@ export function useAsyncValue<T>(options: UseAsyncValueOptions<T>): AsyncValue<T
   }));
   const requestIdRef = useRef(0);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     const current = fetcherRef.current;
     if (!enabled || !current) return;
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     setState((previous) => ({ ...previous, isFetching: true, error: null }));
     try {
-      const result = await current();
+      const result = await current({ force });
       if (requestIdRef.current !== requestId) return;
       cache.set(key, { data: result, at: Date.now() });
       setState({ data: result, isFetching: false, error: null });
@@ -73,6 +78,6 @@ export function useAsyncValue<T>(options: UseAsyncValueOptions<T>): AsyncValue<T
     isLoading: state.isFetching && state.data === null,
     isFetching: state.isFetching,
     error: state.error,
-    revalidate: load,
+    revalidate: () => load(true),
   };
 }

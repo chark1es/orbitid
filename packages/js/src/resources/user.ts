@@ -297,6 +297,8 @@ export interface TOTPJSON {
   uri?: string;
   qr_code?: string;
   verified?: boolean;
+  /** Plaintext single-use codes returned once by `attempt_verification`. */
+  backup_codes?: ({ code: string } | string)[];
 }
 
 export class TOTP {
@@ -306,6 +308,8 @@ export class TOTP {
   uri?: string;
   qrCode?: string;
   verified: boolean;
+  /** The ten backup codes the server issues when TOTP verification completes. */
+  backupCodes?: string[];
 
   constructor(json: TOTPJSON) {
     this.id = json.id;
@@ -313,11 +317,20 @@ export class TOTP {
     this.uri = json.uri;
     this.qrCode = json.qr_code ?? (json as { qrCode?: string }).qrCode;
     this.verified = json.verified ?? false;
+    this.backupCodes = parseBackupCodes(json.backup_codes);
   }
 
   static fromJSON(json: TOTPJSON): TOTP {
     return new TOTP(json);
   }
+}
+
+function parseBackupCodes(value: TOTPJSON["backup_codes"]): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.flatMap((item) => {
+    if (typeof item === "string") return [item];
+    return item && typeof item.code === "string" ? [item.code] : [];
+  });
 }
 
 export class BackupCodeResource {

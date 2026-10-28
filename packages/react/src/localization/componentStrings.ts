@@ -5,7 +5,7 @@ import type { LocalizationResource } from "./types";
  * those components call `t()` with). `enUS` merges this over its base strings, so consumer
  * localization overrides and these defaults resolve through a single dictionary.
  */
-export const componentStrings: LocalizationResource = {
+export const componentStrings = {
   common: {
     continue: "Continue",
     cancel: "Cancel",
@@ -157,6 +157,27 @@ export const componentStrings: LocalizationResource = {
     },
     passkey: {
       button: "Sign in with a passkey",
+    },
+    setupTwoFactor: {
+      title: "Set up two-factor authentication",
+      subtitle: "This account needs a second factor. Add one now to finish signing in.",
+      scanQr: "Scan this QR code with your authenticator app, or enter the secret key.",
+      secret: "Secret key",
+      copySecret: "Copy secret key",
+      codeLabel: "Enter the 6-digit code from your authenticator app",
+      verify: "Verify and continue",
+      usePhone: "Use a phone number instead",
+      useAuthenticator: "Use an authenticator app instead",
+      phoneLabel: "Phone number",
+      sendCode: "Send code",
+      phoneCodeLabel: "Enter the code we sent to your phone",
+      phoneVerify: "Verify phone number",
+      backupTitle: "Save your backup codes",
+      backupDescription: "Each code signs you in once. Store them somewhere safe. They will not be shown again.",
+      backupCopy: "Copy codes",
+      backupDownload: "Download codes",
+      backupFilename: "orbitid-backup-codes.txt",
+      continue: "Continue",
     },
     lastUsed: "Last used",
     oauth: {
@@ -439,6 +460,9 @@ export const componentStrings: LocalizationResource = {
   errors: {
     unexpected: "Something went wrong. Please try again.",
     network: "Network error. Check your connection and try again.",
+    not_supported: "This action is not supported by the current OrbitID SDK.",
+    session_missing: "Sign in did not create a session. Try again.",
+    verification_cancelled: "Verification was cancelled.",
     form_identifier_not_found: "Couldn't find your account.",
     form_identifier_exists: "That identifier is already in use.",
     form_password_incorrect: "Password is incorrect. Try again or use another method.",
@@ -498,4 +522,4 @@ export const componentStrings: LocalizationResource = {
     last_admin_cannot_leave: "The last administrator cannot leave.",
     org_permission_required: "You do not have the required permission.",
   },
-};
+} satisfies LocalizationResource;

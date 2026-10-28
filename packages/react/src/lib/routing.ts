@@ -98,7 +98,7 @@ export function resetVirtualRouter(): void {
 }
 
 /**
- * Component-local router, mirroring Clerk's `routing="path" | "hash" | "virtual"` prop.
+ * Component-local router for the `routing="path" | "hash" | "virtual"` prop.
  * Navigation goes through the provider's `routerPush`/`routerReplace` when supplied.
  */
 export function useRouter(options: RouterOptions = {}): Router {

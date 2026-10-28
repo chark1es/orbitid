@@ -30,7 +30,7 @@ export interface UserButtonActionProps {
   label: string;
   labelIcon?: ReactNode;
   onClick?: () => void;
-  /** Kept for Clerk parity: opens the manage-account screen. */
+  /** Opens the manage-account screen. */
   open?: string;
   children?: ReactNode;
 }

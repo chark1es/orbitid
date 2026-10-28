@@ -71,7 +71,7 @@ export function appendQuery(url: string, params: Record<string, string | undefin
   return hash ? `${base}#${hash}` : base;
 }
 
-/** Appends `redirect_url` (Clerk-compatible) to a sign-in/sign-up/profile URL. */
+/** Appends `redirect_url` to a sign-in/sign-up/profile URL. */
 export function buildRedirectUrl(baseUrl: string, redirectUrl?: string | null): string {
   return appendQuery(baseUrl, { redirect_url: redirectUrl ?? undefined });
 }

@@ -2,7 +2,7 @@ import type { ApiErrorBody, ApiErrorItem } from "@orbitid/shared";
 
 /**
  * Error thrown for every non-2xx Frontend API response (and for exhausted network retries).
- * Mirrors clerk-js: `.errors` holds the wire items, `.status` the HTTP status, `.traceId` the server trace id.
+ * `.errors` holds the wire items, `.status` the HTTP status, `.traceId` the server trace id.
  */
 export class OrbitAPIResponseError extends Error {
   readonly errors: ApiErrorItem[];

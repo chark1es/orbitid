@@ -36,6 +36,7 @@ describe("Environment", () => {
     expect(environment.userSettings.signUp.progressive).toBe(true);
     expect(environment.organizationSettings.enabled).toBe(true);
     expect(environment.organizationSettings.defaultRole).toBe("org:member");
+    expect(environment.organizationSettings.maxCreatedOrganizationsPerUser).toBe(3);
     expect(environment.displayConfig.applicationName).toBe("Acme App");
     expect(environment.displayConfig.captchaEnabled).toBe(false);
   });
@@ -73,7 +74,7 @@ describe("redirect URL helpers", () => {
 });
 
 describe("pagination helpers", () => {
-  it("serialises array query params Clerk-style and normalises lists", () => {
+  it("serialises array query params and normalises lists", () => {
     expect(toQueryString({ limit: 10, "email_address[]": ["a@x.com", "b@x.com"], skip: undefined })).toBe(
       "?limit=10&email_address%5B%5D=a%40x.com&email_address%5B%5D=b%40x.com",
     );

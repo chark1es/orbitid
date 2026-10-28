@@ -5,26 +5,9 @@ import {
   AccordionContent,
   AccordionItem,
   AccordionTrigger,
-  Alert,
-  AlertDescription,
-  AlertTitle,
-  Badge,
   Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
   Input,
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
   Switch,
-  Table,
   TableBody,
   TableCell,
   TableHead,
@@ -47,15 +30,18 @@ import {
   CheckboxRow,
   ConfirmDialog,
   CopyButton,
+  DetailSheet,
   EmptyState,
   ErrorAlert,
   Field,
+  MetaChip,
   PageHeader,
-  SectionCard,
+  RuledTable,
   SecretReveal,
   StatusBadge,
   SwitchRow,
   TableSkeleton,
+  ValidationSummary,
 } from "./_config/ui";
 
 interface EndpointForm {
@@ -71,7 +57,7 @@ const EMPTY_FORM: EndpointForm = { url: "", description: "", eventTypes: [], all
 export default function Page() {
   const query = useApi<PaginatedList<WebhookEndpointJSON>>(["webhooks"], "/webhooks/endpoints?limit=100");
   const endpoints = unwrapList<WebhookEndpointJSON>(query.data);
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [form, setForm] = useState<EndpointForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState<WebhookEndpointJSON | null>(null);
@@ -96,7 +82,7 @@ export default function Page() {
 
   const openCreate = () => {
     setForm(EMPTY_FORM);
-    setDialogOpen(true);
+    setSheetOpen(true);
   };
 
   const openEdit = (endpoint: WebhookEndpointJSON) => {
@@ -107,7 +93,7 @@ export default function Page() {
       eventTypes: endpoint.event_types ?? [],
       allEvents: (endpoint.event_types ?? []).length === 0,
     });
-    setDialogOpen(true);
+    setSheetOpen(true);
   };
 
   const formErrors: string[] = [];
@@ -142,7 +128,7 @@ export default function Page() {
       const response = await api<WebhookEndpointJSON>(form.id ? "PATCH" : "POST", form.id ? `/webhooks/endpoints/${form.id}` : "/webhooks/endpoints", body);
       await query.refetch();
       toast.success(form.id ? "Webhook endpoint updated" : "Webhook endpoint created");
-      setDialogOpen(false);
+      setSheetOpen(false);
       if (!form.id) {
         setSecretEndpoint(response);
         setSecretValue(oneTimeSecret(response));
@@ -240,16 +226,21 @@ export default function Page() {
       <PageHeader
         title="Webhooks"
         description="Send signed events to your application and inspect delivery attempts. Failed deliveries retry with exponential backoff."
+        badge={<MetaChip>{endpoints.length} {endpoints.length === 1 ? "endpoint" : "endpoints"}</MetaChip>}
         actions={
           <Button size="sm" onClick={openCreate}>
-            <Plus className="size-4" /> Add endpoint
+            <Plus className="size-4" aria-hidden /> Add endpoint
           </Button>
         }
       />
 
       {query.error ? <ErrorAlert error={errorMessage(query.error)} onRetry={() => void query.refetch()} /> : null}
 
-      <SectionCard title="Endpoints" description="Empty event selection means all events. Secrets are shown once and can be rotated.">
+      <section className="space-y-3">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 className="text-sm font-semibold">Endpoints</h2>
+          <p className="text-xs text-muted-foreground">An empty event selection means every event. Secrets are shown once.</p>
+        </div>
         {query.isLoading ? (
           <TableSkeleton />
         ) : endpoints.length === 0 ? (
@@ -258,327 +249,334 @@ export default function Page() {
             description="Create an endpoint to receive user, session, organization, and API key events."
             action={
               <Button size="sm" onClick={openCreate}>
-                <Plus className="size-4" /> Add endpoint
+                <Plus className="size-4" aria-hidden /> Add endpoint
               </Button>
             }
           />
         ) : (
-          <div className="rounded-lg border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>URL</TableHead>
-                  <TableHead>Events</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead className="w-40" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {endpoints.map((endpoint) => (
-                  <TableRow key={endpoint.id}>
-                    <TableCell>
-                      <button type="button" className="block max-w-xs truncate text-left font-mono text-xs hover:underline" onClick={() => setDetailId(endpoint.id)}>
+          <RuledTable>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Endpoint</TableHead>
+                <TableHead>Events</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Created</TableHead>
+                <TableHead className="w-44 text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {endpoints.map((endpoint) => (
+                <TableRow key={endpoint.id}>
+                  <TableCell className="max-w-[26rem]">
+                    <div className="flex min-w-0 items-baseline gap-2">
+                      <button
+                        type="button"
+                        className="truncate text-left font-data text-xs font-medium underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        onClick={() => setDetailId(endpoint.id)}
+                      >
                         {endpoint.url}
                       </button>
-                      {endpoint.description ? <p className="max-w-xs truncate text-xs text-muted-foreground">{endpoint.description}</p> : null}
-                    </TableCell>
-                    <TableCell>
-                      {(endpoint.event_types ?? []).length === 0 ? (
-                        <Badge variant="outline">All events</Badge>
-                      ) : (
-                        <div className="flex flex-wrap gap-1">
-                          {endpoint.event_types.slice(0, 2).map((event) => (
-                            <Badge key={event} variant="secondary" className="font-mono text-[10px]">
-                              {event}
-                            </Badge>
-                          ))}
-                          {endpoint.event_types.length > 2 ? <Badge variant="secondary">+{endpoint.event_types.length - 2}</Badge> : null}
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Switch checked={!endpoint.disabled} onCheckedChange={() => void toggleEndpoint(endpoint)} aria-label="Endpoint enabled" />
-                        <StatusBadge status={endpoint.disabled ? "disabled" : "active"} />
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{formatDate(endpoint.created_at)}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1">
-                        <Button variant="ghost" size="icon-sm" onClick={() => setDetailId(endpoint.id)} title="Deliveries">
-                          <Eye className="size-4" />
-                          <span className="sr-only">Deliveries</span>
-                        </Button>
-                        <Button variant="ghost" size="icon-sm" onClick={() => void openSecret(endpoint)} title="Signing secret">
-                          <ShieldCheck className="size-4" />
-                          <span className="sr-only">Signing secret</span>
-                        </Button>
-                        <Button variant="ghost" size="icon-sm" onClick={() => openEdit(endpoint)} title="Edit">
-                          <Pencil className="size-4" />
-                          <span className="sr-only">Edit</span>
-                        </Button>
-                        <Button variant="ghost" size="icon-sm" className="text-destructive" onClick={() => setSelected(endpoint)} title="Delete">
-                          <Trash2 className="size-4" />
-                          <span className="sr-only">Delete</span>
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+                      {endpoint.description ? (
+                        <span className="truncate text-xs text-muted-foreground">{endpoint.description}</span>
+                      ) : null}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    {(endpoint.event_types ?? []).length === 0 ? (
+                      <span className="text-xs text-muted-foreground">All events</span>
+                    ) : (
+                      <span className="font-data text-xs text-muted-foreground">
+                        {endpoint.event_types.length} selected
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2.5">
+                      <Switch checked={!endpoint.disabled} onCheckedChange={() => void toggleEndpoint(endpoint)} aria-label="Endpoint enabled" />
+                      <StatusBadge status={endpoint.disabled ? "disabled" : "active"} />
+                    </div>
+                  </TableCell>
+                  <TableCell className="font-data text-xs text-muted-foreground">{formatDate(endpoint.created_at)}</TableCell>
+                  <TableCell>
+                    <div className="flex items-center justify-end gap-1">
+                      <Button variant="ghost" size="icon-sm" onClick={() => setDetailId(endpoint.id)} title="Deliveries">
+                        <Eye className="size-4" aria-hidden />
+                        <span className="sr-only">Deliveries for {endpoint.url}</span>
+                      </Button>
+                      <Button variant="ghost" size="icon-sm" onClick={() => void openSecret(endpoint)} title="Signing secret">
+                        <ShieldCheck className="size-4" aria-hidden />
+                        <span className="sr-only">Signing secret for {endpoint.url}</span>
+                      </Button>
+                      <Button variant="ghost" size="icon-sm" onClick={() => openEdit(endpoint)} title="Edit">
+                        <Pencil className="size-4" aria-hidden />
+                        <span className="sr-only">Edit {endpoint.url}</span>
+                      </Button>
+                      <Button variant="ghost" size="icon-sm" className="text-destructive" onClick={() => setSelected(endpoint)} title="Delete">
+                        <Trash2 className="size-4" aria-hidden />
+                        <span className="sr-only">Delete {endpoint.url}</span>
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </RuledTable>
         )}
-      </SectionCard>
+      </section>
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{form.id ? "Edit webhook endpoint" : "Add webhook endpoint"}</DialogTitle>
-            <DialogDescription>Events are signed with the endpoint secret using Svix-compatible headers.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <Field label="Endpoint URL" htmlFor="webhook-url" required error={form.url && !isHttpUrl(form.url) ? "Enter an http(s) URL." : null}>
-              <Input
-                id="webhook-url"
-                value={form.url}
-                onChange={(event) => setForm((current) => ({ ...current, url: event.target.value }))}
-                placeholder="https://example.com/webhooks/orbitid"
-              />
-            </Field>
-            <Field label="Description" htmlFor="webhook-description">
-              <Input
-                id="webhook-description"
-                value={form.description}
-                onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
-                placeholder="Production event receiver"
-              />
-            </Field>
-            <SwitchRow
-              label="All events"
-              description="Receive every event type. Individual event subscriptions are ignored while this is on."
-              checked={form.allEvents}
-              onCheckedChange={(allEvents) => setForm((current) => ({ ...current, allEvents }))}
-            />
-            {!form.allEvents ? (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium">Event types</p>
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setForm((current) => ({ ...current, eventTypes: [...WEBHOOK_EVENT_TYPES] }))}
-                    >
-                      Select all
-                    </Button>
-                    <Button type="button" variant="ghost" size="sm" onClick={() => setForm((current) => ({ ...current, eventTypes: [] }))}>
-                      Clear
-                    </Button>
-                  </div>
-                </div>
-                <Accordion type="multiple" defaultValue={eventGroups.map((group) => group.resource)}>
-                  {eventGroups.map((group) => {
-                    const selectedCount = group.events.filter((event) => form.eventTypes.includes(event)).length;
-                    return (
-                      <AccordionItem key={group.resource} value={group.resource}>
-                        <AccordionTrigger className="text-sm">
-                          <span className="flex items-center gap-2">
-                            {group.label}
-                            <Badge variant="secondary">{selectedCount}</Badge>
-                          </span>
-                        </AccordionTrigger>
-                        <AccordionContent>
-                          <div className="space-y-1">
-                            <CheckboxRow
-                              label={`All ${group.label.toLowerCase()}`}
-                              checked={selectedCount === group.events.length}
-                              onCheckedChange={(checked) => toggleGroup(group.events, checked)}
-                            />
-                            {group.events.map((event) => (
-                              <CheckboxRow
-                                key={event}
-                                label={<code className="text-xs">{event}</code>}
-                                description={describeWebhookEvent(event)}
-                                checked={form.eventTypes.includes(event)}
-                                onCheckedChange={() => toggleEvent(event)}
-                              />
-                            ))}
-                          </div>
-                        </AccordionContent>
-                      </AccordionItem>
-                    );
-                  })}
-                </Accordion>
-              </div>
-            ) : null}
-            {formErrors.length > 0 ? (
-              <ul className="list-disc space-y-0.5 pl-5 text-xs text-destructive">
-                {formErrors.map((error) => (
-                  <li key={error}>{error}</li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={saving}>
+      <DetailSheet
+        open={sheetOpen}
+        onOpenChange={setSheetOpen}
+        size="lg"
+        title={form.id ? "Edit webhook endpoint" : "Add webhook endpoint"}
+        description="Events are signed with the endpoint secret in Svix-compatible headers."
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setSheetOpen(false)} disabled={saving}>
               Cancel
             </Button>
             <Button onClick={() => void saveEndpoint()} disabled={saving || formErrors.length > 0}>
               {saving ? "Saving…" : form.id ? "Save changes" : "Add endpoint"}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={secretEndpoint !== null} onOpenChange={(open) => !open && setSecretEndpoint(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Signing secret</DialogTitle>
-            <DialogDescription>Use this secret to verify the `svix-signature` header. Rotate it if it leaks.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            {secretLoading ? (
-              <p className="py-4 text-center text-sm text-muted-foreground">Loading signing secret…</p>
-            ) : secretValue ? (
-              <SecretReveal value={secretValue} />
-            ) : (
-              <Alert>
-                <AlertTitle>Secret unavailable</AlertTitle>
-                <AlertDescription>Rotate the secret to generate and reveal a new one.</AlertDescription>
-              </Alert>
-            )}
-            <div className="flex items-center justify-between rounded-lg border px-3 py-2 text-xs">
-              <span className="truncate text-muted-foreground">{secretEndpoint?.url}</span>
-              {secretValue ? <CopyButton value={secretValue} size="sm" variant="outline" label="Copy" /> : null}
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <Field label="Endpoint URL" htmlFor="webhook-url" required error={form.url && !isHttpUrl(form.url) ? "Enter an http(s) URL." : null}>
+            <Input
+              id="webhook-url"
+              value={form.url}
+              onChange={(event) => setForm((current) => ({ ...current, url: event.target.value }))}
+              placeholder="https://example.com/webhooks/orbitid"
+              className="font-data text-xs"
+            />
+          </Field>
+          <Field label="Description" htmlFor="webhook-description">
+            <Input
+              id="webhook-description"
+              value={form.description}
+              onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
+              placeholder="Production event receiver"
+            />
+          </Field>
+          <SwitchRow
+            label="All events"
+            description="Receive every event type. Individual subscriptions are ignored while this is on."
+            checked={form.allEvents}
+            onCheckedChange={(allEvents) => setForm((current) => ({ ...current, allEvents }))}
+          />
+          {!form.allEvents ? (
+            <div className="space-y-2 border-t border-border pt-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-medium">Event types</p>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setForm((current) => ({ ...current, eventTypes: [...WEBHOOK_EVENT_TYPES] }))}
+                  >
+                    Select all
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setForm((current) => ({ ...current, eventTypes: [] }))}>
+                    Clear
+                  </Button>
+                </div>
+              </div>
+              <Accordion type="multiple" defaultValue={eventGroups.map((group) => group.resource)}>
+                {eventGroups.map((group) => {
+                  const selectedCount = group.events.filter((event) => form.eventTypes.includes(event)).length;
+                  return (
+                    <AccordionItem key={group.resource} value={group.resource}>
+                      <AccordionTrigger className="text-sm">
+                        <span className="flex items-center gap-2">
+                          {group.label}
+                          <span className="font-data text-xs text-muted-foreground">{selectedCount}</span>
+                        </span>
+                      </AccordionTrigger>
+                      <AccordionContent>
+                        <div className="space-y-1">
+                          <CheckboxRow
+                            label={`All ${group.label.toLowerCase()}`}
+                            checked={selectedCount === group.events.length}
+                            onCheckedChange={(checked) => toggleGroup(group.events, checked)}
+                          />
+                          {group.events.map((event) => (
+                            <CheckboxRow
+                              key={event}
+                              label={<code className="font-data text-xs">{event}</code>}
+                              description={describeWebhookEvent(event)}
+                              checked={form.eventTypes.includes(event)}
+                              onCheckedChange={() => toggleEvent(event)}
+                            />
+                          ))}
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  );
+                })}
+              </Accordion>
             </div>
-          </div>
-          <DialogFooter>
+          ) : null}
+          <ValidationSummary errors={formErrors} title="Fix this before saving" />
+        </div>
+      </DetailSheet>
+
+      <DetailSheet
+        open={secretEndpoint !== null}
+        onOpenChange={(open) => !open && setSecretEndpoint(null)}
+        title="Signing secret"
+        description="Verify the svix-signature header with this secret. Rotate it if it leaks."
+        footer={
+          <>
             <Button variant="outline" onClick={() => setSecretEndpoint(null)}>
               Close
             </Button>
             <Button variant="destructive" onClick={() => void rotateSecret()} disabled={rotating}>
-              <RotateCw className="size-4" /> {rotating ? "Rotating…" : "Rotate secret"}
+              <RotateCw className="size-4" aria-hidden /> {rotating ? "Rotating…" : "Rotate secret"}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Sheet open={detail !== null} onOpenChange={(open) => !open && setDetailId(null)}>
-        <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-3xl">
-          <SheetHeader>
-            <SheetTitle className="flex items-center gap-2">
-              Delivery log
-              {detail ? <StatusBadge status={detail.disabled ? "disabled" : "active"} /> : null}
-            </SheetTitle>
-            <SheetDescription className="break-all font-mono">{detail?.url}</SheetDescription>
-          </SheetHeader>
-          {detail ? (
-            <div className="space-y-4 px-4 pb-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3">
-                <p className="text-xs text-muted-foreground">Test deliveries send a `user.created` event.</p>
-                <div className="flex items-center gap-2">
-                  <Button variant="outline" onClick={() => void sendTest()} disabled={testing}>
-                    <Send className="size-4" /> {testing ? "Sending…" : "Send test event"}
-                  </Button>
-                  <Button variant="ghost" size="icon-sm" onClick={() => void deliveriesQuery.refetch()} title="Refresh">
-                    <RefreshCw className="size-4" />
-                    <span className="sr-only">Refresh</span>
-                  </Button>
-                </div>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <p className="break-all font-data text-xs text-muted-foreground">{secretEndpoint?.url}</p>
+          {secretLoading ? (
+            <p className="text-sm text-muted-foreground">Loading signing secret…</p>
+          ) : secretValue ? (
+            <>
+              <SecretReveal
+                value={secretValue}
+                warning="Rotating this secret invalidates the old one immediately. Update your receiver before you rotate."
+              />
+              <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
+                <p className="text-xs text-muted-foreground">Copy the secret into your receiver's signature check.</p>
+                <CopyButton value={secretValue} size="sm" variant="outline" label="Copy secret" />
               </div>
-              {deliveriesQuery.isLoading ? (
-                <TableSkeleton rows={4} />
-              ) : deliveriesQuery.error ? (
-                <ErrorAlert error={errorMessage(deliveriesQuery.error)} onRetry={() => void deliveriesQuery.refetch()} />
-              ) : deliveries.length === 0 ? (
-                <EmptyState title="No deliveries yet" description="Events sent to this endpoint will appear here." />
-              ) : (
-                <div className="rounded-lg border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Event</TableHead>
-                        <TableHead>Attempt</TableHead>
-                        <TableHead>Response</TableHead>
-                        <TableHead>Created</TableHead>
-                        <TableHead className="w-20" />
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {deliveries.map((delivery) => (
-                        <TableRow key={delivery.id} className={delivery.status === "failed" ? "bg-destructive/5" : undefined}>
-                          <TableCell>
-                            <StatusBadge status={delivery.status} />
-                          </TableCell>
-                          <TableCell className="font-mono text-xs">{delivery.event_type}</TableCell>
-                          <TableCell>{delivery.attempt}</TableCell>
-                          <TableCell>
-                            <button
-                              type="button"
-                              className="text-left font-mono text-xs hover:underline disabled:no-underline"
-                              disabled={!delivery.response_body}
-                              onClick={() => setBodyView(delivery)}
-                            >
-                              {delivery.response_code ?? "—"}
-                              {delivery.response_body ? <span className="ml-1 text-muted-foreground">({truncate(delivery.response_body, 24)})</span> : null}
-                            </button>
-                          </TableCell>
-                          <TableCell className="text-xs text-muted-foreground">{formatDate(delivery.created_at)}</TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-1">
-                              <Button variant="ghost" size="icon-sm" onClick={() => void retryDelivery(delivery)} title="Retry">
-                                <RefreshCw className="size-4" />
-                                <span className="sr-only">Retry</span>
-                              </Button>
-                              <Button variant="ghost" size="icon-sm" onClick={() => setBodyView(delivery)} title="View response">
-                                <Eye className="size-4" />
-                                <span className="sr-only">View response</span>
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
+            </>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">The server did not return the stored secret. Rotate the secret to generate a new one.</p>
             </div>
-          ) : null}
-          <SheetFooter>
-            <Button variant="outline" onClick={() => setDetailId(null)}>
-              Close
-            </Button>
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
+          )}
+        </div>
+      </DetailSheet>
 
-      <Dialog open={bodyView !== null} onOpenChange={(open) => !open && setBodyView(null)}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Delivery response</DialogTitle>
-            <DialogDescription>
-              {bodyView?.event_type} · attempt {bodyView?.attempt} · status {bodyView?.status}
-            </DialogDescription>
-          </DialogHeader>
-          <pre className="max-h-80 overflow-auto rounded-md border bg-muted/40 p-3 text-xs">
-            {bodyView?.response_body ?? "(empty response body)"}
-          </pre>
-          <DialogFooter>
+      <DetailSheet
+        open={detail !== null}
+        onOpenChange={(open) => !open && setDetailId(null)}
+        size="lg"
+        title="Delivery log"
+        description={detail ? <span className="break-all font-data text-xs">{detail.url}</span> : undefined}
+        footer={
+          <Button variant="outline" onClick={() => setDetailId(null)}>
+            Close
+          </Button>
+        }
+      >
+        {detail ? (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground">A test delivery sends a user.created event.</p>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => void sendTest()} disabled={testing}>
+                  <Send className="size-4" aria-hidden /> {testing ? "Sending…" : "Send test event"}
+                </Button>
+                <Button variant="ghost" size="icon-sm" onClick={() => void deliveriesQuery.refetch()} title="Refresh">
+                  <RefreshCw className="size-4" aria-hidden />
+                  <span className="sr-only">Refresh deliveries</span>
+                </Button>
+              </div>
+            </div>
+            {deliveriesQuery.isLoading ? (
+              <TableSkeleton rows={4} />
+            ) : deliveriesQuery.error ? (
+              <ErrorAlert error={errorMessage(deliveriesQuery.error)} onRetry={() => void deliveriesQuery.refetch()} />
+            ) : deliveries.length === 0 ? (
+              <EmptyState title="No deliveries yet" description="Events sent to this endpoint appear here, newest first." />
+            ) : (
+              <RuledTable>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Time</TableHead>
+                    <TableHead>Event</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Attempt</TableHead>
+                    <TableHead className="text-right">Response</TableHead>
+                    <TableHead className="w-20 text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {deliveries.map((delivery) => (
+                    <TableRow key={delivery.id}>
+                      <TableCell
+                        className="font-data text-xs text-muted-foreground"
+                        title={formatDate(delivery.created_at)}
+                      >
+                        {new Date(delivery.created_at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+                      </TableCell>
+                      <TableCell>
+                        <code className="font-data text-xs">{delivery.event_type}</code>
+                      </TableCell>
+                      <TableCell>
+                        <StatusBadge status={delivery.status} />
+                      </TableCell>
+                      <TableCell className="text-right font-data text-xs">{delivery.attempt}</TableCell>
+                      <TableCell className="text-right">
+                        <button
+                          type="button"
+                          className="font-data text-xs underline-offset-4 hover:underline disabled:no-underline disabled:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                          disabled={!delivery.response_body}
+                          onClick={() => setBodyView(delivery)}
+                        >
+                          {delivery.response_code ?? "none"}
+                          {delivery.response_body ? <span className="ml-1 text-muted-foreground">({truncate(delivery.response_body, 18)})</span> : null}
+                        </button>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center justify-end gap-1">
+                          <Button variant="ghost" size="icon-sm" onClick={() => void retryDelivery(delivery)} title="Retry">
+                            <RefreshCw className="size-4" aria-hidden />
+                            <span className="sr-only">Retry delivery</span>
+                          </Button>
+                          <Button variant="ghost" size="icon-sm" onClick={() => setBodyView(delivery)} title="View response">
+                            <Eye className="size-4" aria-hidden />
+                            <span className="sr-only">View response body</span>
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </RuledTable>
+            )}
+          </div>
+        ) : null}
+      </DetailSheet>
+
+      <DetailSheet
+        open={bodyView !== null}
+        onOpenChange={(open) => !open && setBodyView(null)}
+        title="Delivery response"
+        description={
+          bodyView ? `${bodyView.event_type}, attempt ${bodyView.attempt}, status ${bodyView.status}` : undefined
+        }
+        footer={
+          <>
             <Button variant="outline" onClick={() => setBodyView(null)}>
               Close
             </Button>
             {bodyView ? (
               <Button onClick={() => void retryDelivery(bodyView)}>
-                <RefreshCw className="size-4" /> Retry delivery
+                <RefreshCw className="size-4" aria-hidden /> Retry delivery
               </Button>
             ) : null}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </>
+        }
+      >
+        <pre className="max-h-96 overflow-auto border border-border bg-muted/40 p-3 font-data text-xs leading-relaxed">
+          {bodyView?.response_body ?? "(empty response body)"}
+        </pre>
+      </DetailSheet>
 
       <ConfirmDialog
         open={selected !== null}
@@ -588,7 +586,7 @@ export default function Page() {
         title="Delete webhook endpoint?"
         description={
           <span>
-            Deliveries and the signing secret for <code>{selected?.url}</code> will be removed.
+            Deliveries and the signing secret for <code className="font-data">{selected?.url}</code> are removed.
           </span>
         }
         confirmLabel="Delete endpoint"

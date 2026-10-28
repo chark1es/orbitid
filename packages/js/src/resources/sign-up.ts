@@ -104,7 +104,7 @@ export class SignUp {
     return new SignUp(fapi, json);
   }
 
-  /** All verification resources keyed like Clerk (`verifications.emailAddress`, …). */
+  /** All verification resources keyed by identifier (`verifications.emailAddress`, …). */
   get verifications(): Record<"emailAddress" | "phoneNumber" | "externalAccount" | "web3Wallet", Verification | null> {
     return {
       emailAddress: this.emailAddressVerification,

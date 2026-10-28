@@ -24,10 +24,10 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
-function mockApi() {
+function mockApi(health: Record<string, unknown> = { status: "ok", publishable_key: "pk_test_demo" }) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input);
-    if (url.endsWith("/health")) return json({ status: "ok", publishable_key: "pk_test_demo" });
+    if (url.endsWith("/health")) return json(health);
     if (url.includes("/v1/stats")) return json(STATS);
     if (url.includes("/v1/instance")) return json(INSTANCE);
     if (url.includes("/v1/users")) return json({ data: [], total_count: 0 });
@@ -49,27 +49,48 @@ function renderApp(initialEntry: string) {
 }
 
 describe("login guard", () => {
-  it("redirects unauthenticated visitors to the login screen", async () => {
+  it("redirects unauthenticated visitors to the sign-in screen", async () => {
     mockApi();
     renderApp("/");
-    expect(await screen.findByText("Sign in to your instance")).toBeTruthy();
-    expect(screen.getByLabelText("Instance URL")).toBeTruthy();
+    expect(await screen.findByText("Sign in with your secret key")).toBeTruthy();
+    expect(document.title).toBe("Sign in \u00b7 OrbitID");
+    expect(screen.getByLabelText("API URL")).toBeTruthy();
     expect(screen.getByLabelText("Secret key")).toBeTruthy();
   });
 
   it("guards nested routes as well", async () => {
     mockApi();
     renderApp("/users");
-    expect(await screen.findByText("Sign in to your instance")).toBeTruthy();
+    expect(await screen.findByText("Sign in with your secret key")).toBeTruthy();
+  });
+
+  it("shows the database and publishable key from the health check before sign-in", async () => {
+    mockApi({ status: "ok", database: "postgres", publishable_key: "pk_test_demo" });
+    renderApp("/login");
+
+    expect(await screen.findByText("Postgres")).toBeTruthy();
+    expect(screen.getByText("pk_test_demo")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Show secret key" })).toBeTruthy();
+  });
+
+  it("names the problem when the instance does not answer", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      if (String(input).endsWith("/health")) throw new TypeError("Failed to fetch");
+      return json({ data: [], total_count: 0 });
+    });
+    renderApp("/login");
+
+    expect(await screen.findByText(/No answer from/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Check again" })).toBeTruthy();
   });
 
   it("renders the shell when a secret key is already stored", { timeout: 20_000 }, async () => {
     sessionStorage.setItem("orbitid.secretKey", "sk_test_existing");
-    mockApi();
+    mockApi({ status: "ok", database: "sqlite", publishable_key: "pk_test_demo" });
     renderApp("/");
     expect(await screen.findAllByText("Overview")).not.toHaveLength(0);
-    expect(screen.queryByText("Sign in to your instance")).toBeNull();
-    // The overview chunk is lazy and pulls in recharts; give it room when the machine is busy.
-    expect(await screen.findByText("Instance keys", {}, { timeout: 10_000 })).toBeTruthy();
+    expect(screen.queryByText("Sign in with your secret key")).toBeNull();
+    expect(await screen.findByText("SQLite", {}, { timeout: 10_000 })).toBeTruthy();
+    expect(document.title).toBe("Overview \u00b7 OrbitID");
   });
 });

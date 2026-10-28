@@ -1,4 +1,4 @@
-// Organization components (shadcn/ui, Clerk-compatible props).
+// Organization components built from the shadcn/ui primitives.
 export {
   OrganizationSwitcher,
   type OrganizationSwitcherProps,

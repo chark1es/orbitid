@@ -1,4 +1,4 @@
-export { useOrbitID, useClerk } from "./useOrbitID";
+export { useOrbitID } from "./useOrbitID";
 export { useAuth, type UseAuthOptions } from "./useAuth";
 export { useUser, type UseUserReturn } from "./useUser";
 export { useSession, type UseSessionReturn } from "./useSession";

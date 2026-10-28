@@ -1,15 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
-import {
-  Button,
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-  Input,
-  Label,
-  Separator,
-} from "@orbitid/ui";
+import { Button, Input, Label } from "@orbitid/ui";
 import { ImagePlus, Loader2, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { UserJSON } from "@orbitid/shared";
@@ -18,6 +8,7 @@ import { errorMessage } from "../../lib/errors";
 import { uploadProfileImage } from "../../lib/uploads";
 import { CopyButton } from "../shared/copy-button";
 import { ConfirmDialog } from "../shared/confirm-dialog";
+import { Panel, Section } from "../shared/section";
 import { UserAvatar } from "../shared/user-avatar";
 import { userLabel } from "../../lib/format";
 
@@ -73,13 +64,13 @@ export function UserProfileTab({ user, onUpdated }: { user: UserJSON; onUpdated:
   }
 
   return (
-    <div className="grid gap-4 lg:grid-cols-3">
-      <Card className="lg:col-span-2">
-        <CardHeader>
-          <CardTitle>Profile</CardTitle>
-          <CardDescription>Names and the external ID are visible wherever the user is rendered.</CardDescription>
-        </CardHeader>
-        <CardContent>
+    <Section
+      title="Profile"
+      description="Names and the external ID are visible wherever the user is rendered."
+      className="border-t-0 pt-0"
+    >
+      <div className="grid gap-5 lg:grid-cols-3">
+        <Panel className="p-4 lg:col-span-2">
           <form
             className="space-y-5"
             onSubmit={(event) => {
@@ -111,58 +102,69 @@ export function UserProfileTab({ user, onUpdated }: { user: UserJSON; onUpdated:
                 <Input id="profile-external-id" value={externalId} onChange={(event) => setExternalId(event.target.value)} />
               </div>
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               <Label>User ID</Label>
               <div className="flex items-center gap-1">
-                <code className="rounded bg-muted px-2 py-1 font-mono text-xs">{user.id}</code>
+                <code className="rounded-[3px] border border-border bg-muted px-2 py-1 font-data text-xs">{user.id}</code>
                 <CopyButton value={user.id} label="Copy user ID" />
               </div>
             </div>
-            <div className="flex justify-end">
+            <div className="flex justify-end border-t border-border pt-4">
               <Button type="submit" disabled={!dirty || save.isPending}>
                 {save.isPending ? <Loader2 className="animate-spin" aria-hidden /> : <Save aria-hidden />}
                 Save profile
               </Button>
             </div>
           </form>
-        </CardContent>
-      </Card>
+        </Panel>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Avatar</CardTitle>
-          <CardDescription>PNG, JPEG, GIF or WebP. Uploaded to the instance.</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col items-center gap-4">
-          <UserAvatar name={userLabel(user)} imageUrl={user.image_url} size="lg" className="size-20" />
-          <input ref={fileInput} type="file" accept="image/*" className="hidden" onChange={onFileChange} />
-          <div className="flex w-full flex-col gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={uploading}
-              onClick={() => fileInput.current?.click()}
-              className="w-full"
-            >
-              {uploading ? <Loader2 className="animate-spin" aria-hidden /> : <ImagePlus aria-hidden />}
-              {uploading ? "Uploading…" : "Upload image"}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              className="w-full text-destructive hover:text-destructive"
-              disabled={!user.has_image || removeImage.isPending}
-              onClick={() => setConfirmRemoveImage(true)}
-            >
-              <Trash2 aria-hidden /> Remove image
-            </Button>
+        <Panel className="flex flex-col gap-4 p-4">
+          <div className="space-y-1">
+            <h3 className="text-sm font-medium">Avatar</h3>
+            <p className="text-xs leading-5 text-muted-foreground">PNG, JPEG, GIF or WebP. Stored on this instance.</p>
           </div>
-        </CardContent>
-        <Separator />
-        <CardContent className="pt-4 text-xs text-muted-foreground">
-          Created {new Date(user.created_at).toLocaleString()} · Updated {new Date(user.updated_at).toLocaleString()}
-        </CardContent>
-      </Card>
+          <div className="flex flex-col items-center gap-4 py-2">
+            <UserAvatar name={userLabel(user)} imageUrl={user.image_url} size="lg" className="size-20" />
+            <input ref={fileInput} type="file" accept="image/*" className="hidden" onChange={onFileChange} />
+            <div className="flex w-full flex-col gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={uploading}
+                onClick={() => fileInput.current?.click()}
+                className="w-full"
+              >
+                {uploading ? <Loader2 className="animate-spin" aria-hidden /> : <ImagePlus aria-hidden />}
+                {uploading ? "Uploading…" : "Upload image"}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="w-full text-signal hover:text-signal"
+                disabled={!user.has_image || removeImage.isPending}
+                onClick={() => setConfirmRemoveImage(true)}
+              >
+                <Trash2 aria-hidden /> Remove image
+              </Button>
+            </div>
+            <p className="text-xs leading-5 text-muted-foreground">
+              Removing the image falls back to a generated avatar.
+            </p>
+          </div>
+          <dl className="space-y-1 border-t border-border pt-3 font-data text-xs leading-5 text-muted-foreground">
+            <div>
+              <dt className="inline">Created </dt>
+              <dd className="inline">{new Date(user.created_at).toLocaleString()}</dd>
+            </div>
+            <div>
+              <dt className="inline">Updated </dt>
+              <dd className="inline">{new Date(user.updated_at).toLocaleString()}</dd>
+            </div>
+          </dl>
+        </Panel>
+      </div>
 
       <ConfirmDialog
         open={confirmRemoveImage}
@@ -176,6 +178,6 @@ export function UserProfileTab({ user, onUpdated }: { user: UserJSON; onUpdated:
           removeImage.mutate(undefined, { onError: (error) => toast.error(errorMessage(error)) })
         }
       />
-    </div>
+    </Section>
   );
 }

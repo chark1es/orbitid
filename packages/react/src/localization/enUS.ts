@@ -1,12 +1,12 @@
 import { componentStrings } from "./componentStrings";
 import { mergeLocalization } from "./merge";
-import type { LocalizationResource } from "./types";
+import type { DeepMerge, DotPaths, LocalizationResource } from "./types";
 
 /**
  * Default (en-US) strings for every OrbitID component. Component-specific copy lives in
  * `componentStrings.ts`; locales inherit anything they do not override.
  */
-const baseStrings: LocalizationResource = {
+const baseStrings = {
   locale: "en-US",
 
   backButton: "Back",
@@ -596,6 +596,7 @@ const baseStrings: LocalizationResource = {
     inviteSubtitle: "Add teammates to {{organization}}. You can invite more later.",
     inviteButton: "Send invitations",
     skipButton: "Skip for now",
+    limitReached: "You have created the maximum number of organizations your account allows, {{max}}. Delete one you created or ask an administrator to raise the limit.",
   },
 
   organizationProfile: {
@@ -902,7 +903,12 @@ const baseStrings: LocalizationResource = {
     invalid_client: "Invalid client.",
     invalid_scope: "Invalid scope.",
   },
-};
+} satisfies LocalizationResource;
 
-/** Base strings win over the component defaults; both resolve through one lookup table. */
+type Dictionary = DeepMerge<typeof componentStrings, typeof baseStrings>;
+
+/** Dot path of every key in the dictionary, e.g. `signIn.start.title`. */
+export type TranslationKey = DotPaths<Dictionary>;
+
+/** The single English source: component strings with the base strings merged over them. */
 export const enUS: LocalizationResource = mergeLocalization(componentStrings, baseStrings);

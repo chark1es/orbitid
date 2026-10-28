@@ -177,6 +177,8 @@ export interface EnvironmentJSON {
   organization_settings: {
     enabled: boolean; max_allowed_memberships: number; creation_enabled: boolean; domains_enabled: boolean; membership_requests_enabled: boolean;
     slug_enabled: boolean; force_organization_selection: boolean; creator_role: string; default_role: string;
+    /** Organizations one user may create, or null for no limit. */
+    max_created_organizations_per_user: number | null;
   };
   display_config: { application_name: string; logo_image_url: string | null; home_url: string; support_email: string | null; terms_url: string | null; privacy_url: string | null; primary_color: string; theme: string; branded: boolean; captcha_enabled: boolean; captcha_provider: string; captcha_site_key: string };
 }

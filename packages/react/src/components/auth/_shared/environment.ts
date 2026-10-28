@@ -237,6 +237,7 @@ export function createDefaultEnvironment(): EnvironmentJSON {
     organization_settings: {
       enabled: false,
       max_allowed_memberships: 5,
+      max_created_organizations_per_user: null,
       creation_enabled: true,
       domains_enabled: false,
       membership_requests_enabled: false,
@@ -282,6 +283,11 @@ function booleanValue(record: Record<string, unknown>, snake: string, camel?: st
 function numberValue(record: Record<string, unknown>, snake: string, camel: string | undefined, fallback: number): number {
   const value = pick(record, snake, camel);
   return typeof value === "number" ? value : fallback;
+}
+
+function nullableNumberValue(record: Record<string, unknown>, snake: string, camel: string): number | null {
+  const value = pick(record, snake, camel);
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 /**
@@ -391,6 +397,11 @@ export function environmentFromResource(raw: unknown): EnvironmentJSON | null {
     organization_settings: {
       enabled: booleanValue(organizationRaw, "enabled"),
       max_allowed_memberships: numberValue(organizationRaw, "max_allowed_memberships", "maxAllowedMemberships", 5),
+      max_created_organizations_per_user: nullableNumberValue(
+        organizationRaw,
+        "max_created_organizations_per_user",
+        "maxCreatedOrganizationsPerUser",
+      ),
       creation_enabled: booleanValue(organizationRaw, "creation_enabled", "creationEnabled", true),
       domains_enabled: booleanValue(organizationRaw, "domains_enabled", "domainsEnabled"),
       membership_requests_enabled: booleanValue(organizationRaw, "membership_requests_enabled", "membershipRequestsEnabled"),

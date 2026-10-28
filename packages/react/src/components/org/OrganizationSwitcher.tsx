@@ -260,31 +260,47 @@ function OrganizationSwitcherView({
                   <p className="px-2 text-xs font-medium text-muted-foreground">
                     {t("organizationSwitcher.invitations")}
                   </p>
-                  {list.invitations.data.map((invitation) => (
-                    <div
-                      key={invitation.id}
-                      className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5"
-                    >
-                      <span className="flex min-w-0 flex-col">
-                        <span className="truncate text-sm">{invitation.emailAddress}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {roleLabel(invitation.role, invitation.roleName, t)}
-                        </span>
-                      </span>
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        disabled={acceptAction.isPending}
-                        onClick={() => {
-                          void acceptAction
-                            .run(invitation.id, invitation.organizationId)
-                            .then(redirectAfterAccept);
-                        }}
+                  {list.invitations.data.map((invitation) => {
+                    const organizationName =
+                      invitation.organizationName ?? invitation.organization?.name ?? null;
+                    const organizationImage =
+                      invitation.organizationImageUrl ?? invitation.organization?.imageUrl ?? null;
+                    return (
+                      <div
+                        key={invitation.id}
+                        className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5"
                       >
-                        {t("organizationSwitcher.action__invitationAccept")}
-                      </Button>
-                    </div>
-                  ))}
+                        {organizationName ? (
+                          <OrgAvatar name={organizationName} imageUrl={organizationImage} size="xs" />
+                        ) : null}
+                        <span className="flex min-w-0 flex-1 flex-col">
+                          <span className="truncate text-sm">
+                            {organizationName ?? invitation.emailAddress}
+                          </span>
+                          <span className="truncate text-xs text-muted-foreground">
+                            {roleLabel(invitation.role, invitation.roleName, t)}
+                          </span>
+                          {organizationName ? (
+                            <span className="truncate text-xs text-muted-foreground">
+                              {invitation.emailAddress}
+                            </span>
+                          ) : null}
+                        </span>
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          disabled={acceptAction.isPending}
+                          onClick={() => {
+                            void acceptAction
+                              .run(invitation.id, invitation.organizationId)
+                              .then(redirectAfterAccept);
+                          }}
+                        >
+                          {t("organizationSwitcher.action__invitationAccept")}
+                        </Button>
+                      </div>
+                    );
+                  })}
                 </section>
               </>
             ) : null}

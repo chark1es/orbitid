@@ -133,7 +133,20 @@ describe("user resources", () => {
       if (key === "POST /v1/client/me/totp") {
         return { body: { response: { secret: "JBSWY3DPEHPK3PXP", uri: "otpauth://totp/Acme:ada@example.com?secret=JBSWY3DPEHPK3PXP", qr_code: "data:image/png;base64,abc", verified: false } } };
       }
-      if (key === "POST /v1/client/me/totp/attempt_verification") return { body: { response: { secret: "JBSWY3DPEHPK3PXP", verified: true } } };
+      if (key === "POST /v1/client/me/totp/attempt_verification") {
+        return {
+          body: {
+            response: {
+              secret: "JBSWY3DPEHPK3PXP",
+              verified: true,
+              backup_codes: [
+                { object: "backup_code", code: "aaaa-1111", used: false },
+                { object: "backup_code", code: "bbbb-2222", used: false },
+              ],
+            },
+          },
+        };
+      }
       if (key === "DELETE /v1/client/me/totp") return { body: { response: { object: "totp", deleted: true } } };
       if (key === "POST /v1/client/me/backup_codes") {
         return {
@@ -253,8 +266,9 @@ describe("user resources", () => {
     expect(user.totpEnabled).toBe(false);
     expect(totp.qrCode).toContain("data:image/png");
     expect(totp.uri).toContain("otpauth://");
-    await user.verifyTOTP({ code: "123456" });
+    const verified = await user.verifyTOTP({ code: "123456" });
     expect(api.lastCall("POST", "/v1/client/me/totp/attempt_verification")?.body).toEqual({ code: "123456" });
+    expect(verified.backupCodes).toEqual(["aaaa-1111", "bbbb-2222"]);
     expect(user.totpEnabled).toBe(true);
     await user.disableTOTP();
     expect(api.lastCall("DELETE", "/v1/client/me/totp")).toBeDefined();

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { JsonEditor, SaveBar, SecretReveal } from "../ui";
+import { ConfirmDialog, DetailSheet, JsonEditor, SaveBar, SecretReveal, StatusBadge } from "../ui";
 
 describe("SaveBar", () => {
   it("is hidden when there is nothing to save", () => {
@@ -22,6 +22,45 @@ describe("SaveBar", () => {
   it("disables saving while a validation error is present", () => {
     render(<SaveBar dirty saving={false} disabled onSave={vi.fn()} onDiscard={vi.fn()} />);
     expect(screen.getByRole("button", { name: /save changes/i }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("lists validation problems with the fix and stays visible when clean", () => {
+    render(
+      <SaveBar
+        dirty={false}
+        saving={false}
+        errors={["Password minimum length must be at least 1."]}
+        onSave={vi.fn()}
+        onDiscard={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("alert")).toBeTruthy();
+    expect(screen.getByText("One setting needs attention")).toBeTruthy();
+    expect(screen.getByText("Password minimum length must be at least 1.")).toBeTruthy();
+    expect(screen.getByText("Fix the listed fields to enable saving.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /discard/i }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("reports a failed save with the next step", () => {
+    render(
+      <SaveBar dirty saving={false} error="connect ECONNREFUSED" onSave={vi.fn()} onDiscard={vi.fn()} />,
+    );
+    expect(screen.getByText(/Save failed: connect ECONNREFUSED/)).toBeTruthy();
+    expect(screen.getByText(/Check the server log, then save again/)).toBeTruthy();
+  });
+});
+
+describe("StatusBadge", () => {
+  it("always carries the status word next to the dot", () => {
+    const { rerender, container } = render(<StatusBadge status="active" />);
+    expect(screen.getByText("active")).toBeTruthy();
+    expect(container.querySelector(".bg-go")).toBeTruthy();
+    rerender(<StatusBadge status="failed" />);
+    expect(screen.getByText("failed")).toBeTruthy();
+    expect(container.querySelector(".bg-signal")).toBeTruthy();
+    rerender(<StatusBadge status="revoked" />);
+    expect(screen.getByText("revoked")).toBeTruthy();
+    expect(container.querySelector(".bg-signal")).toBeTruthy();
   });
 });
 
@@ -45,5 +84,49 @@ describe("SecretReveal", () => {
     expect(screen.getByText("super-secret-value")).toBeTruthy();
     rerender(<SecretReveal value="" emptyLabel="No secret yet" />);
     expect(screen.getByText("No secret yet")).toBeTruthy();
+  });
+
+  it("shows a plain warning under a revealed secret", () => {
+    render(<SecretReveal value="one-time" warning="Copy it now. It is not shown again." />);
+    expect(screen.getByText("Copy it now. It is not shown again.")).toBeTruthy();
+  });
+});
+
+describe("DetailSheet", () => {
+  it("renders form content with its title and closes from the footer", () => {
+    const onOpenChange = vi.fn();
+    render(
+      <DetailSheet open onOpenChange={onOpenChange} title="Add endpoint" description="Events are signed." footer={<button type="button">Done</button>}>
+        <label htmlFor="sheet-field">URL</label>
+        <input id="sheet-field" />
+      </DetailSheet>,
+    );
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.getByText("Add endpoint")).toBeTruthy();
+    expect(screen.getByLabelText("URL")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+});
+
+describe("ConfirmDialog", () => {
+  it("names the destructive action and runs it only on confirm", () => {
+    const onConfirm = vi.fn();
+    const onOpenChange = vi.fn();
+    render(
+      <ConfirmDialog
+        open
+        onOpenChange={onOpenChange}
+        title="Delete endpoint?"
+        description="Deliveries stop immediately."
+        confirmLabel="Delete endpoint"
+        destructive
+        onConfirm={onConfirm}
+      />,
+    );
+    expect(screen.getByText("Delete endpoint?")).toBeTruthy();
+    expect(screen.getByText("Deliveries stop immediately.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Delete endpoint" }));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 });

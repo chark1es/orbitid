@@ -2,11 +2,6 @@ import { useState, type FormEvent } from "react";
 import {
   Badge,
   Button,
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -15,7 +10,6 @@ import {
   DialogTitle,
   Input,
   Label,
-  Separator,
   Switch,
 } from "@orbitid/ui";
 import { Ban, KeyRound, Lock, LogOut, RotateCcw, ShieldCheck, ShieldOff, Unlock } from "lucide-react";
@@ -26,6 +20,7 @@ import { errorMessage } from "../../lib/errors";
 import { useUserAdmin } from "../../lib/user-admin";
 import { formatDateTime } from "../../lib/format";
 import { ConfirmDialog } from "../shared/confirm-dialog";
+import { Panel, Section } from "../shared/section";
 import { StatusBadge } from "../shared/status-badge";
 
 export function UserSecurityTab({ user, onUpdated }: { user: UserJSON; onUpdated: () => void }) {
@@ -71,22 +66,35 @@ export function UserSecurityTab({ user, onUpdated }: { user: UserJSON; onUpdated
   }
 
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+    <Section
+      title="Security"
+      description="Passwords, sign-in factors, account locks and failed verification attempts."
+      className="border-t-0 pt-0"
+    >
+      <div className="grid gap-5 lg:grid-cols-2">
+        <Panel className="p-4">
+          <h3 className="flex items-center gap-2 text-sm font-medium">
             <KeyRound className="size-4 text-muted-foreground" aria-hidden />
             Password
-          </CardTitle>
-          <CardDescription>Password sign-in for this account.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-sm text-muted-foreground">Status</span>
-            <StatusBadge status={user.password_enabled ? "enabled" : "unverified"} label={user.password_enabled ? "Password set" : "No password"} />
+          </h3>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">Password sign-in for this account.</p>
+          <div className="mt-3">
+            <div className="flex items-center justify-between gap-3 border-b border-border py-2">
+              <span className="text-sm">Status</span>
+              <StatusBadge
+                status={user.password_enabled ? "enabled" : "unverified"}
+                label={user.password_enabled ? "Password set" : "No password"}
+              />
+            </div>
+            <div className="flex items-center justify-between gap-3 border-b border-border py-2">
+              <span className="text-sm">Last sign-in</span>
+              <span className="font-data text-xs text-muted-foreground">
+                {user.last_sign_in_at ? formatDateTime(user.last_sign_in_at) : "Never"}
+              </span>
+            </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" onClick={() => setPasswordOpen(true)}>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button onClick={() => setPasswordOpen(true)}>
               {user.password_enabled ? "Change password" : "Set password"}
             </Button>
             <Button
@@ -98,35 +106,36 @@ export function UserSecurityTab({ user, onUpdated }: { user: UserJSON; onUpdated
               Remove password
             </Button>
           </div>
-          {user.last_sign_in_at ? (
-            <p className="text-xs text-muted-foreground">Last sign-in {formatDateTime(user.last_sign_in_at)}</p>
-          ) : (
-            <p className="text-xs text-muted-foreground">This user has never signed in.</p>
-          )}
-        </CardContent>
-      </Card>
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">
+            Removing the password leaves the user with the remaining sign-in factors.
+          </p>
+        </Panel>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+        <Panel className="p-4">
+          <h3 className="flex items-center gap-2 text-sm font-medium">
             <ShieldCheck className="size-4 text-muted-foreground" aria-hidden />
             Multi-factor authentication
-          </CardTitle>
-          <CardDescription>TOTP authenticator and single-use backup codes.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-sm text-muted-foreground">Authenticator app</span>
-            <StatusBadge status={user.totp_enabled ? "enabled" : "unverified"} label={user.totp_enabled ? "TOTP enabled" : "Not enabled"} />
+          </h3>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            TOTP authenticator and single-use backup codes.
+          </p>
+          <div className="mt-3">
+            <div className="flex items-center justify-between gap-3 border-b border-border py-2">
+              <span className="text-sm">Authenticator app</span>
+              <StatusBadge
+                status={user.totp_enabled ? "enabled" : "unverified"}
+                label={user.totp_enabled ? "TOTP enabled" : "Not enabled"}
+              />
+            </div>
+            <div className="flex items-center justify-between gap-3 border-b border-border py-2">
+              <span className="text-sm">Backup codes</span>
+              <StatusBadge
+                status={user.backup_code_enabled ? "enabled" : "unverified"}
+                label={user.backup_code_enabled ? "Codes available" : "No codes"}
+              />
+            </div>
           </div>
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-sm text-muted-foreground">Backup codes</span>
-            <StatusBadge
-              status={user.backup_code_enabled ? "enabled" : "unverified"}
-              label={user.backup_code_enabled ? "Codes available" : "No codes"}
-            />
-          </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="mt-4 flex flex-wrap items-center gap-2">
             <Button
               size="sm"
               variant="outline"
@@ -135,33 +144,35 @@ export function UserSecurityTab({ user, onUpdated }: { user: UserJSON; onUpdated
             >
               <RotateCcw aria-hidden /> Reset MFA
             </Button>
-            {user.passkeys.length ? <Badge variant="outline">{user.passkeys.length} passkey(s)</Badge> : null}
+            {user.passkeys.length ? (
+              <Badge variant="outline">
+                {user.passkeys.length} {user.passkeys.length === 1 ? "passkey" : "passkeys"}
+              </Badge>
+            ) : null}
           </div>
-          <p className="text-xs text-muted-foreground">
-            Reset removes the encrypted TOTP secret and invalidates every backup code. The user must enroll again.
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">
+            Resetting removes the authenticator secret and every backup code. The user must enroll again.
           </p>
-        </CardContent>
-      </Card>
+        </Panel>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+        <Panel className="p-4">
+          <h3 className="flex items-center gap-2 text-sm font-medium">
             <Lock className="size-4 text-muted-foreground" aria-hidden />
             Account state
-          </CardTitle>
-          <CardDescription>Banned users cannot start sessions. Locked users fail verification.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2">
+          </h3>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            Banned users cannot start sessions. Locked users fail verification.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             <StatusBadge status={user.banned ? "banned" : "active"} label={user.banned ? "Banned" : "Not banned"} />
             <StatusBadge status={user.locked ? "locked" : "active"} label={user.locked ? "Locked" : "Not locked"} />
             {user.lockout_expires_in_seconds ? (
-              <span className="text-xs text-muted-foreground">
+              <span className="font-data text-xs text-muted-foreground">
                 Lock expires in {Math.ceil(user.lockout_expires_in_seconds / 60)} min
               </span>
             ) : null}
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="mt-4 flex flex-wrap gap-2">
             {user.banned ? (
               <Button size="sm" variant="outline" onClick={() => void admin.unban()} disabled={admin.pending === "unban"}>
                 <Unlock aria-hidden /> Unban
@@ -181,39 +192,40 @@ export function UserSecurityTab({ user, onUpdated }: { user: UserJSON; onUpdated
               </Button>
             )}
           </div>
-          <Separator />
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-xs text-muted-foreground">Revoke every active session for this user.</p>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+            <p className="max-w-[36ch] text-xs leading-5 text-muted-foreground">
+              Signing out everywhere revokes every active session for this user.
+            </p>
             <Button size="sm" variant="outline" onClick={() => setConfirmRevoke(true)}>
               <LogOut aria-hidden /> Sign out everywhere
             </Button>
           </div>
-        </CardContent>
-      </Card>
+        </Panel>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+        <Panel className="p-4">
+          <h3 className="flex items-center gap-2 text-sm font-medium">
             <ShieldOff className="size-4 text-muted-foreground" aria-hidden />
             Verification attempts
-          </CardTitle>
-          <CardDescription>Failed factor attempts before the account locks.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2 text-sm">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-muted-foreground">Remaining attempts</span>
-            <span className="font-medium tabular-nums">{user.verification_attempts_remaining ?? "—"}</span>
+          </h3>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            Failed factor attempts before the account locks.
+          </p>
+          <div className="mt-3">
+            <div className="flex items-center justify-between gap-3 border-b border-border py-2">
+              <span className="text-sm text-muted-foreground">Remaining attempts</span>
+              <span className="font-data text-xs">{user.verification_attempts_remaining ?? "None"}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3 border-b border-border py-2">
+              <span className="text-sm text-muted-foreground">Two-factor enabled</span>
+              <StatusBadge status={user.two_factor_enabled ? "enabled" : "unverified"} />
+            </div>
+            <div className="flex items-center justify-between gap-3 border-b border-border py-2 last:border-b-0">
+              <span className="text-sm text-muted-foreground">External ID</span>
+              <code className="max-w-[60%] truncate font-data text-xs">{user.external_id ?? "Not set"}</code>
+            </div>
           </div>
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-muted-foreground">Two-factor enabled</span>
-            <StatusBadge status={user.two_factor_enabled ? "enabled" : "unverified"} />
-          </div>
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-muted-foreground">External ID</span>
-            <code className="max-w-[60%] truncate text-xs">{user.external_id ?? "—"}</code>
-          </div>
-        </CardContent>
-      </Card>
+        </Panel>
+      </div>
 
       <Dialog open={passwordOpen} onOpenChange={setPasswordOpen}>
         <DialogContent className="sm:max-w-md">
@@ -236,7 +248,7 @@ export function UserSecurityTab({ user, onUpdated }: { user: UserJSON; onUpdated
             <div className="flex items-center justify-between gap-3">
               <div className="space-y-0.5">
                 <Label htmlFor="skip-password-checks">Skip policy checks</Label>
-                <p className="text-xs text-muted-foreground">Bypass length/complexity/pwned validation.</p>
+                <p className="text-xs text-muted-foreground">Bypass length, complexity and pwned-password validation.</p>
               </div>
               <Switch id="skip-password-checks" checked={skipChecks} onCheckedChange={setSkipChecks} />
             </div>
@@ -291,6 +303,6 @@ export function UserSecurityTab({ user, onUpdated }: { user: UserJSON; onUpdated
           })
         }
       />
-    </div>
+    </Section>
   );
 }

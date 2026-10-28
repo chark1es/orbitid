@@ -30,7 +30,7 @@ import {
 import { factorsOf } from "../_shared/api";
 import { AuthenticateWithRedirectCallback } from "../../../control";
 import { signUpUrlFor } from "./flow";
-import { useAuthRuntime } from "../_shared/w6";
+import { useAuthRuntime, type TranslateFn } from "../_shared/w6";
 import { useElementClasses } from "../_shared/appearance";
 import { FormError } from "../_shared/form-error";
 import { Field } from "../_shared/field";
@@ -120,7 +120,7 @@ function IdentifierPreview({ value, onEdit }: { value: string; onEdit: () => voi
 }
 
 function identifierLabel(
-  t: (key: string) => string,
+  t: TranslateFn,
   identifiers: readonly string[],
 ): string {
   if (identifiers.length === 1) {
@@ -687,7 +687,7 @@ interface StrategyOption {
 function buildStrategyOptions(
   factors: ReturnType<typeof factorsOf>,
   environment: EnvironmentView,
-  t: (key: string, params?: Record<string, string | number>) => string,
+  t: TranslateFn,
 ): StrategyOption[] {
   const options: StrategyOption[] = [];
   const seen = new Set<string>();
@@ -854,7 +854,7 @@ export function SecondFactorStep({ flow }: StepProps) {
   );
 }
 
-function labelForSecondFactor(t: (key: string) => string, strategy: string): string {
+function labelForSecondFactor(t: TranslateFn, strategy: string): string {
   if (strategy === "phone_code") return t("signIn.secondFactor.methodPhoneCode");
   if (strategy === "backup_code") return t("signIn.secondFactor.methodBackupCode");
   return t("signIn.secondFactor.methodTotp");

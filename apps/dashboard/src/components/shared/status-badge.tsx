@@ -1,11 +1,15 @@
-import { Badge, cn } from "@orbitid/ui";
+import { cn } from "@orbitid/ui";
 
+/**
+ * Status is a word plus a 6px dot. The word carries the meaning, the dot carries the tone, so the
+ * chip stays readable without colour and the palette stays restrained.
+ */
 const TONES = {
-  positive: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-  warning: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
-  negative: "border-destructive/40 bg-destructive/10 text-destructive dark:text-red-300",
-  neutral: "border-border bg-muted/60 text-muted-foreground",
-  info: "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300",
+  positive: { chip: "border-go/35 bg-go/10", dot: "bg-go" },
+  warning: { chip: "border-caution/45 bg-caution/12", dot: "bg-caution" },
+  negative: { chip: "border-signal/40 bg-signal/10", dot: "bg-signal" },
+  info: { chip: "border-info/35 bg-info/10", dot: "bg-info" },
+  neutral: { chip: "border-border bg-muted/40", dot: "bg-muted-foreground" },
 } as const;
 
 const STATUS_TONES: Record<string, keyof typeof TONES> = {
@@ -57,10 +61,18 @@ export function StatusBadge({
   className?: string;
 }) {
   const resolvedTone = tone ?? STATUS_TONES[status] ?? "neutral";
+  const palette = TONES[resolvedTone];
+  const text = label ?? LABELS[status] ?? status.replace(/_/g, " ");
   return (
-    <Badge variant="outline" className={cn("gap-1.5 font-normal", TONES[resolvedTone], className)}>
-      <span className="size-1.5 rounded-full bg-current" aria-hidden />
-      {label ?? LABELS[status] ?? status}
-    </Badge>
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 whitespace-nowrap rounded-[3px] border px-1.5 py-px text-xs font-medium text-foreground",
+        palette.chip,
+        className,
+      )}
+    >
+      <span className={cn("size-1.5 shrink-0 rounded-full", palette.dot)} aria-hidden />
+      {text.charAt(0).toUpperCase() + text.slice(1)}
+    </span>
   );
 }

@@ -13,6 +13,7 @@ import {
 } from "@orbitid/ui";
 import { ArrowLeftIcon, CheckCircle2Icon, Loader2Icon, MailIcon } from "lucide-react";
 import { useAuthRuntime } from "../_shared/w6";
+import type { TranslationKey } from "../../../localization";
 import { useElementClasses } from "../_shared/appearance";
 import { CaptchaWidget } from "../_shared/captcha";
 import { Field } from "../_shared/field";
@@ -447,7 +448,7 @@ export function VerifyEmailLinkStep({ flow }: SignUpStepProps) {
   );
 }
 
-const FIELD_LABELS: Record<string, string> = {
+const FIELD_LABELS: Record<string, TranslationKey> = {
   email_address: "formFieldLabel__emailAddress",
   phone_number: "formFieldLabel__phoneNumber",
   username: "formFieldLabel__username",

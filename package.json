@@ -22,9 +22,10 @@
   },
   "packageManager": "bun@1.4.4",
   "trustedDependencies": [
+    "@embedded-postgres/linux-x64",
+    "@node-rs/argon2",
     "better-sqlite3",
-    "esbuild",
-    "@node-rs/argon2"
+    "esbuild"
   ],
   "devDependencies": {
     "embedded-postgres": "^18.4.0-beta.17",

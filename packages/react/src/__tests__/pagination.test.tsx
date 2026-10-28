@@ -142,7 +142,7 @@ describe("usePagedResource", () => {
     fetcher.mockResolvedValueOnce(rows(["9", "8"], 2));
     fireEvent.click(screen.getByText("revalidate"));
     await waitFor(() => expect(read().ids).toEqual(["9", "8"]));
-    expect(fetcher).toHaveBeenLastCalledWith({ limit: 2, offset: 0, page: 1 });
+    expect(fetcher).toHaveBeenLastCalledWith({ limit: 2, offset: 0, page: 1, force: true });
 
     fireEvent.click(screen.getByText("set"));
     await waitFor(() => expect(read().ids).toEqual(["local"]));

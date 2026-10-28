@@ -14,7 +14,7 @@ import type {
 import { normalizeClient, normalizeSession, normalizeSignIn, normalizeSignUp, normalizeUser, type NormalizedClient, type NormalizedSession } from "./normalize";
 import type { SignInResource, SignUpResource, VerificationLike } from "./types";
 import { isRecord } from "./guards";
-import { isStringKey, type StringKey, type TranslateParams } from "./strings";
+import { isTranslationKey, type TranslateParams, type TranslationKey } from "../../../localization";
 
 export class AuthUIError extends Error {
   code: string;
@@ -74,17 +74,17 @@ export function toAuthError(error: unknown): AuthUIError {
 }
 
 /** Localized message for an API/UI error, falling back to the server's long message. */
-export function errorMessage(t: (key: string, params?: TranslateParams) => string, error: unknown): string {
+export function errorMessage(t: (key: TranslationKey, params?: TranslateParams) => string, error: unknown): string {
   const authError = toAuthError(error);
   const meta = authError.meta;
   const params: TranslateParams | undefined = meta
     ? { min: String(meta.min_length ?? ""), max: String(meta.max_length ?? "") }
     : undefined;
-  const unstableKey = `unstable__errors.${authError.code}`;
+  const unstableKey = `unstable__errors.${authError.code}` as TranslationKey;
   const unstable = t(unstableKey, params);
   if (unstable !== unstableKey) return unstable;
   const key = `errors.${authError.code}`;
-  if (isStringKey(key)) return t(key as StringKey, params);
+  if (isTranslationKey(key)) return t(key, params);
   if (authError.longMessage) return authError.longMessage;
   if (authError.message && authError.message !== authError.code) return authError.message;
   return t("errors.unexpected");
@@ -403,6 +403,12 @@ export async function preparePhoneVerification(
 
 export async function attemptPhoneVerification(phone: PhoneNumberResource, code: string): Promise<unknown> {
   return invokeMethod(phone, ["attemptVerification", "attempt_verification"], { code });
+}
+
+/** Re-fetch the client from the Frontend API (session status, user flags) when the SDK offers it. */
+export async function refreshClient(orbit: OrbitInstance): Promise<void> {
+  const method: unknown = Reflect.get(orbit, "refreshClient");
+  if (typeof method === "function") await (method as () => Promise<unknown>).call(orbit);
 }
 
 export async function reloadOrbit(orbit: OrbitInstance): Promise<void> {

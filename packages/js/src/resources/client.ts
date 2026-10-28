@@ -39,7 +39,7 @@ export class Client {
     return this.sessions.filter((session) => session.status === "active");
   }
 
-  /** The session the user last activated (Clerk `client.session`); null until `setActive`. */
+  /** The session the user last activated (`client.session`); null until `setActive`. */
   get session(): Session | null {
     return this.sessions.find((session) => session.id === this.lastActiveSessionId) ?? null;
   }

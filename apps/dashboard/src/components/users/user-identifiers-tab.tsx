@@ -2,11 +2,6 @@ import { useState } from "react";
 import {
   Badge,
   Button,
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -25,6 +20,7 @@ import { errorMessage } from "../../lib/errors";
 import { formatDate } from "../../lib/format";
 import { ConfirmDialog } from "../shared/confirm-dialog";
 import { EmptyState } from "../shared/empty-state";
+import { Section } from "../shared/section";
 import { StatusBadge } from "../shared/status-badge";
 import { CopyButton } from "../shared/copy-button";
 
@@ -123,7 +119,7 @@ function AddIdentifierDialog({
   );
 }
 
-function IdentifierSection({
+function IdentifierGroup({
   title,
   description,
   rows,
@@ -148,57 +144,61 @@ function IdentifierSection({
   const [deleting, setDeleting] = useState<IdentifierRow | null>(null);
 
   return (
-    <Card>
-      <CardHeader className="flex-row items-start justify-between gap-2">
-        <div className="space-y-1">
-          <CardTitle>{title}</CardTitle>
-          <CardDescription>{description}</CardDescription>
+    <div className="min-w-0">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-2">
+        <div className="min-w-0 space-y-1">
+          <h3 className="text-sm font-medium">{title}</h3>
+          <p className="text-xs leading-5 text-muted-foreground">{description}</p>
         </div>
         <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
           <Plus aria-hidden /> Add
         </Button>
-      </CardHeader>
-      <CardContent>
-        {rows.length === 0 ? (
-          <EmptyState
-            title={`No ${addKind === "email" ? "email addresses" : "phone numbers"}`}
-            description="Identifiers let the user sign in and receive verification codes."
-          />
-        ) : (
-          <ul className="divide-y">
-            {rows.map((row) => (
-              <li key={row.id} className="flex flex-wrap items-center gap-2 py-2.5">
-                <span className="min-w-0 flex-1 truncate font-mono text-sm">{row.value}</span>
-                {row.primary ? <Badge variant="secondary">Primary</Badge> : null}
-                <StatusBadge status={row.verified ? "verified" : "unverified"} />
-                <span className="hidden text-xs text-muted-foreground sm:inline">{formatDate(row.createdAt)}</span>
-                <div className="flex items-center gap-1">
-                  {!row.verified ? (
-                    <Button size="xs" variant="ghost" onClick={() => onVerify(row)} disabled={pending}>
-                      <CheckCircle2 aria-hidden /> Verify
-                    </Button>
-                  ) : null}
-                  {row.verified && !row.primary ? (
-                    <Button size="xs" variant="ghost" onClick={() => onSetPrimary(row)} disabled={pending}>
-                      <Star aria-hidden /> Primary
-                    </Button>
-                  ) : null}
-                  <CopyButton value={row.value} label="Copy identifier" />
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    aria-label={`Delete ${row.value}`}
-                    onClick={() => setDeleting(row)}
-                    disabled={pending}
-                  >
-                    <Trash2 aria-hidden />
+      </div>
+      {rows.length === 0 ? (
+        <EmptyState
+          className="py-8"
+          title={`No ${addKind === "email" ? "email addresses" : "phone numbers"}`}
+          description="Identifiers let the user sign in and receive verification codes."
+        />
+      ) : (
+        <ul>
+          {rows.map((row) => (
+            <li
+              key={row.id}
+              className="flex flex-wrap items-center gap-2 border-b border-border py-2.5 last:border-b-0"
+            >
+              <span className="min-w-0 flex-1 truncate font-data text-sm">{row.value}</span>
+              {row.primary ? <Badge variant="secondary">Primary</Badge> : null}
+              <StatusBadge status={row.verified ? "verified" : "unverified"} />
+              <span className="hidden font-data text-xs text-muted-foreground sm:inline">
+                {formatDate(row.createdAt)}
+              </span>
+              <div className="flex items-center gap-1">
+                {!row.verified ? (
+                  <Button size="xs" variant="ghost" onClick={() => onVerify(row)} disabled={pending}>
+                    <CheckCircle2 aria-hidden /> Verify
                   </Button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </CardContent>
+                ) : null}
+                {row.verified && !row.primary ? (
+                  <Button size="xs" variant="ghost" onClick={() => onSetPrimary(row)} disabled={pending}>
+                    <Star aria-hidden /> Primary
+                  </Button>
+                ) : null}
+                <CopyButton value={row.value} label="Copy identifier" />
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  aria-label={`Delete ${row.value}`}
+                  onClick={() => setDeleting(row)}
+                  disabled={pending}
+                >
+                  <Trash2 aria-hidden />
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
 
       <AddIdentifierDialog
         open={addOpen}
@@ -216,7 +216,14 @@ function IdentifierSection({
           if (!open) setDeleting(null);
         }}
         title={`Delete ${addKind === "email" ? "email address" : "phone number"}?`}
-        description={deleting?.value}
+        description={
+          deleting ? (
+            <>
+              <span className="font-data text-xs">{deleting.value}</span> is removed as a sign-in identifier. This cannot be
+              undone.
+            </>
+          ) : undefined
+        }
         destructive
         confirmLabel="Delete"
         pending={pending}
@@ -225,7 +232,7 @@ function IdentifierSection({
           setDeleting(null);
         }}
       />
-    </Card>
+    </div>
   );
 }
 
@@ -261,82 +268,96 @@ export function UserIdentifiersTab({ user, onUpdated }: { user: UserJSON; onUpda
   }));
 
   return (
-    <div className="space-y-4">
-      <IdentifierSection
-        title="Email addresses"
-        description="Sign-in identifiers and email-code destinations."
-        rows={emails}
-        addKind="email"
-        pending={pending}
-        onAdd={(value) =>
-          void run(
-            () =>
-              api("POST", "/email_addresses", {
-                user_id: user.id,
-                email_address: value.value,
-                verified: value.verified,
-                primary: value.primary,
-              }),
-            "Email address added",
-          )
-        }
-        onVerify={(row) => void run(() => api("PATCH", `/email_addresses/${row.id}`, { verified: true }), "Email verified")}
-        onSetPrimary={(row) =>
-          void run(() => api("PATCH", `/users/${user.id}`, { primary_email_address_id: row.id }), "Primary email updated")
-        }
-        onDelete={(row) => void run(() => api("DELETE", `/email_addresses/${row.id}`), "Email address deleted")}
-      />
+    <Section
+      title="Identifiers"
+      description="Addresses the user signs in with and accounts linked through a provider."
+      className="border-t-0 pt-0"
+    >
+      <div className="grid gap-5 lg:grid-cols-2">
+        <IdentifierGroup
+          title="Email addresses"
+          description="Sign-in identifiers and email-code destinations."
+          rows={emails}
+          addKind="email"
+          pending={pending}
+          onAdd={(value) =>
+            void run(
+              () =>
+                api("POST", "/email_addresses", {
+                  user_id: user.id,
+                  email_address: value.value,
+                  verified: value.verified,
+                  primary: value.primary,
+                }),
+              "Email address added",
+            )
+          }
+          onVerify={(row) => void run(() => api("PATCH", `/email_addresses/${row.id}`, { verified: true }), "Email verified")}
+          onSetPrimary={(row) =>
+            void run(() => api("PATCH", `/users/${user.id}`, { primary_email_address_id: row.id }), "Primary email updated")
+          }
+          onDelete={(row) => void run(() => api("DELETE", `/email_addresses/${row.id}`), "Email address deleted")}
+        />
 
-      <IdentifierSection
-        title="Phone numbers"
-        description="Usable for SMS codes and as a second factor."
-        rows={phones}
-        addKind="phone"
-        pending={pending}
-        onAdd={(value) =>
-          void run(
-            () =>
-              api("POST", "/phone_numbers", {
-                user_id: user.id,
-                phone_number: value.value,
-                verified: value.verified,
-                primary: value.primary,
-              }),
-            "Phone number added",
-          )
-        }
-        onVerify={(row) => void run(() => api("PATCH", `/phone_numbers/${row.id}`, { verified: true }), "Phone verified")}
-        onSetPrimary={(row) =>
-          void run(() => api("PATCH", `/users/${user.id}`, { primary_phone_number_id: row.id }), "Primary phone updated")
-        }
-        onDelete={(row) => void run(() => api("DELETE", `/phone_numbers/${row.id}`), "Phone number deleted")}
-      />
+        <IdentifierGroup
+          title="Phone numbers"
+          description="Usable for SMS codes and as a second factor."
+          rows={phones}
+          addKind="phone"
+          pending={pending}
+          onAdd={(value) =>
+            void run(
+              () =>
+                api("POST", "/phone_numbers", {
+                  user_id: user.id,
+                  phone_number: value.value,
+                  verified: value.verified,
+                  primary: value.primary,
+                }),
+              "Phone number added",
+            )
+          }
+          onVerify={(row) => void run(() => api("PATCH", `/phone_numbers/${row.id}`, { verified: true }), "Phone verified")}
+          onSetPrimary={(row) =>
+            void run(() => api("PATCH", `/users/${user.id}`, { primary_phone_number_id: row.id }), "Primary phone updated")
+          }
+          onDelete={(row) => void run(() => api("DELETE", `/phone_numbers/${row.id}`), "Phone number deleted")}
+        />
+      </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Social accounts</CardTitle>
-          <CardDescription>External accounts linked through OAuth. Users connect these themselves.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {user.external_accounts.length === 0 ? (
-            <EmptyState icon={Globe} title="No social accounts" description="OAuth connections appear here after the user links one." />
-          ) : (
-            <ul className="divide-y">
-              {user.external_accounts.map((account) => (
-                <li key={account.id} className="flex flex-wrap items-center gap-2 py-2.5">
-                  <Badge variant="outline" className="capitalize">
-                    {account.provider.replace(/_/g, " ")}
-                  </Badge>
-                  <span className="min-w-0 flex-1 truncate text-sm">
-                    {account.email_address || account.username || account.provider_user_id}
-                  </span>
-                  <span className="text-xs text-muted-foreground">{formatDate(account.created_at)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+      <div className="mt-6 min-w-0">
+        <div className="space-y-1 border-b border-border pb-2">
+          <h3 className="text-sm font-medium">Social accounts</h3>
+          <p className="text-xs leading-5 text-muted-foreground">
+            External accounts linked through OAuth. Users connect these themselves.
+          </p>
+        </div>
+        {user.external_accounts.length === 0 ? (
+          <EmptyState
+            className="py-8"
+            icon={Globe}
+            title="No social accounts"
+            description="OAuth connections appear here after the user links one."
+          />
+        ) : (
+          <ul>
+            {user.external_accounts.map((account) => (
+              <li
+                key={account.id}
+                className="flex flex-wrap items-center gap-2 border-b border-border py-2.5 last:border-b-0"
+              >
+                <Badge variant="outline" className="capitalize">
+                  {account.provider.replace(/_/g, " ")}
+                </Badge>
+                <span className="min-w-0 flex-1 truncate text-sm">
+                  {account.email_address || account.username || account.provider_user_id}
+                </span>
+                <span className="font-data text-xs text-muted-foreground">{formatDate(account.created_at)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Section>
   );
 }

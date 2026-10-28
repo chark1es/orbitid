@@ -52,7 +52,7 @@ Contexts: `OrbitIDContext`, `ClientContext`, `SessionContext`, `UserContext`,
 
 | Hook | Returns |
 |---|---|
-| `useOrbitID()` / `useClerk()` | the SDK instance |
+| `useOrbitID()` | the SDK instance |
 | `useAuth()` | `{ isLoaded, isSignedIn, userId, sessionId, actor, orgId, orgRole, orgSlug, orgPermissions, sessionClaims, sessionStatus, has, getToken, signOut }` |
 | `useUser()` | `{ isLoaded, isSignedIn, user }` |
 | `useSession()` | `{ isLoaded, isSignedIn, session }` |
@@ -68,7 +68,7 @@ Contexts: `OrbitIDContext`, `ClientContext`, `SessionContext`, `UserContext`,
 `has()` accepts exactly one of `role`, `permission`, `feature`, `condition`, `reverification`
 (`"strict_mfa" | "strict" | "moderate" | "lax"` or `{ level, afterMinutes }`).
 
-Paginated resources return the Clerk shape:
+Paginated resources return this shape:
 
 ```ts
 {
@@ -84,6 +84,12 @@ Paginated resources return the Clerk shape:
 const { memberships } = useOrganization({ memberships: { pageSize: 20, infinite: true } });
 await memberships.fetchNext();
 ```
+
+Membership, invitation and suggestion requests are keyed by resource and user. Components that
+mount together share one in-flight request, and a response is reused for a few seconds, so
+`<UserButton/>`, `<OrganizationSwitcher/>`, `<OrganizationList/>` and `<UserProfile/>` on the same
+page issue each GET once. `revalidate()` bypasses the cache and replaces the current page;
+creating, accepting, leaving or updating an organization invalidates the affected entries.
 
 ## Control components
 
@@ -128,10 +134,17 @@ import { enUS, de, type LocalizationResource } from "@orbitid/react";
 
 `t(path, vars)` interpolates `{{placeholders}}` (unknown placeholders stay visible), resolves
 active locale → `enUS` → the dot-path, and `useLocalizations()` exposes `locale`/`resource`.
-`enUS` covers the base dictionary (`enUS.ts`) plus the component key inventory
-(`componentStrings.ts`); partial locales fall back per key. API error codes are localized under
-`unstable__errors.<code>` — `getErrorMessage(error, t)` / `handleOrbitError(error, setFieldErrors, { t })`
-use them.
+`enUS` is the only English dictionary: `enUS.ts` holds the base strings and the component copy in
+`componentStrings.ts`, both merged into one lookup table. Partial locales fall back per key.
+`TranslationKey` is the union of dot paths in that dictionary; the prebuilt components type their
+translate function with it, so a missing key is a compile error.
+
+```ts
+import { isTranslationKey, type TranslationKey, type TranslateParams } from "@orbitid/react";
+```
+
+API error codes are localized under `unstable__errors.<code>`; `getErrorMessage(error, t)` and
+`handleOrbitError(error, setFieldErrors, { t })` use them.
 
 ## Routing
 
@@ -176,22 +189,41 @@ Pass `initialState` from the server so `useAuth()` is correct before hydration:
 hydration (only the server can read the session cookie). Instance methods throw a descriptive error
 if called before hydration.
 
-## Migrating from Clerk
+## Required MFA and pending sessions
 
-| Clerk | OrbitID |
-|---|---|
-| `<ClerkProvider publishableKey>` | `<OrbitIDProvider publishableKey>` |
-| `useClerk()` | `useOrbitID()` (alias `useClerk` available) |
-| `useAuth()`, `useUser()`, `useSession()`, `useSessionList()` | identical names/shapes |
-| `useSignIn()`, `useSignUp()` | identical names/shapes |
-| `useOrganization`, `useOrganizationList` | identical; paginated resources are `{ data, count, isFetching, fetchNext, … }` |
-| `useReverification` | identical; modal handler via `useRegisterReverificationUI()` |
-| `SignedIn`, `SignedOut`, `Protect`, `RedirectTo*`, `AuthenticateWithRedirectCallback` | identical names |
-| `MultisessionAppSupport` | identical |
-| `appearance={{ baseTheme, variables, layout, elements }}` | identical (`theme` → `baseTheme`) |
-| `@clerk/localizations` | `localization={{ … }}` / `enUS`, `de`, `fr`, `es` |
-| `useLocalizations()` | `useLocalizations()` → `{ t, locale }` |
-| `useAppearance()` | `useAppearance()` + `useElementClasses(name)` |
+With `settings.mfa.required`, a sign-in or sign-up for a user without a second factor creates a
+session with `status: "pending"`. The Frontend API rejects every call except `GET /me`, the
+`/me/totp` routes and the `/me/phone_numbers` routes while that session is pending.
+
+The package reports pending sessions plainly:
+
+* `useAuth().isSignedIn` is `false` and `useAuth().sessionStatus` is `"pending"`.
+* `useAuth({ treatPendingAsSignedOut: false }).isSignedIn` is `true`.
+* `useSession().session?.status === "pending"`.
+
+```tsx
+const { session } = useSession();
+if (session?.status === "pending") {
+  // Show your own enrolment screen instead of protected content.
+}
+```
+
+`<SignIn/>` and `<SignUp/>` do not report success for a pending session. They show a "Set up
+two-factor authentication" step: the authenticator QR code and secret, a code input, and the ten
+backup codes the server returns when verification succeeds. Phone enrolment appears when the
+environment enables phone numbers as a second factor. After the server activates the session,
+the component calls `setActive` and continues to the redirect target.
+
+The same step is available on its own:
+
+```tsx
+import { SetupTwoFactor } from "@orbitid/react";
+
+<SetupTwoFactor redirectUrl="/dashboard" />
+```
+
+Pass `sessionId` to activate a specific session, or leave it out to activate the pending session
+on the SDK instance. `onComplete` replaces the redirect when the host app handles navigation.
 
 ## Tests
 

@@ -1,24 +1,13 @@
 import { useState } from "react";
 import type { AllowlistIdentifierJSON, BlocklistIdentifierJSON, PaginatedList } from "@orbitid/shared";
 import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-  Badge,
   Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
   Input,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Table,
   TableBody,
   TableCell,
   TableHead,
@@ -33,21 +22,20 @@ import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, useApi, useApiMutation } from "../lib/api";
 import { unwrapList } from "./_config/data";
-import {
-  errorMessage,
-  formatDate,
-  normalizeRestrictionIdentifier,
-} from "./_config/settings";
+import { errorMessage, formatDate, normalizeRestrictionIdentifier } from "./_config/settings";
 import {
   CheckboxRow,
   ConfirmDialog,
+  DetailSheet,
   EmptyState,
   ErrorAlert,
   Field,
   LoadingPage,
+  MetaChip,
   PageHeader,
+  RuledTable,
   SaveBar,
-  SectionCard,
+  SettingsSection,
   SwitchRow,
   TableSkeleton,
 } from "./_config/ui";
@@ -71,7 +59,7 @@ export default function Page() {
   const editor = useSettingsEditor();
   const settings = editor.settings;
   const [tab, setTab] = useState<ListKind>("allow");
-  const [dialogKind, setDialogKind] = useState<ListKind | null>(null);
+  const [sheetKind, setSheetKind] = useState<ListKind | null>(null);
   const [identifierKind, setIdentifierKind] = useState<IdentifierKind>("email");
   const [identifier, setIdentifier] = useState("");
   const [notify, setNotify] = useState(false);
@@ -84,11 +72,11 @@ export default function Page() {
   const allowRows = unwrapList<RestrictionRow>(allowQuery.data);
   const blockRows = unwrapList<RestrictionRow>(blockQuery.data);
 
-  const addMutation = useApiMutation<Record<string, unknown>>("POST", dialogKind === "block" ? "/blocklist_identifiers" : "/allowlist_identifiers", {
-    invalidate: dialogKind === "block" ? [[...fetchers.block.key]] : [[...fetchers.allow.key]],
+  const addMutation = useApiMutation<Record<string, unknown>>("POST", sheetKind === "block" ? "/blocklist_identifiers" : "/allowlist_identifiers", {
+    invalidate: sheetKind === "block" ? [[...fetchers.block.key]] : [[...fetchers.allow.key]],
     onSuccess: () => {
-      toast.success(dialogKind === "block" ? "Identifier blocked" : "Identifier allowed");
-      setDialogKind(null);
+      toast.success(sheetKind === "block" ? "Identifier blocked" : "Identifier allowed");
+      setSheetKind(null);
       setIdentifier("");
       setNotify(false);
     },
@@ -98,8 +86,8 @@ export default function Page() {
   if (!settings) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Allowlist & Blocklist" description="Control who can sign up." />
-        <ErrorAlert error={editor.error ?? "Could not load instance settings."} onRetry={editor.refetch} />
+        <PageHeader title="Allowlist & blocklist" description="Control who can sign up." />
+        <ErrorAlert error={editor.error ?? "Instance settings did not load."} onRetry={editor.refetch} />
       </div>
     );
   }
@@ -108,8 +96,8 @@ export default function Page() {
   const parsed = normalizeRestrictionIdentifier(identifierKind, identifier);
   const identifierError = identifier.trim() && !parsed ? `Enter a valid ${identifierKind === "domain" ? "domain" : identifierKind}.` : null;
 
-  const openDialog = (kind: ListKind) => {
-    setDialogKind(kind);
+  const openSheet = (kind: ListKind) => {
+    setSheetKind(kind);
     setIdentifierKind("email");
     setIdentifier("");
     setNotify(false);
@@ -123,7 +111,7 @@ export default function Page() {
         identifier: parsed.identifier,
         identifier_type: parsed.identifier_type,
       };
-      if (dialogKind === "allow") body.notify = notify;
+      if (sheetKind === "allow") body.notify = notify;
       await addMutation.mutateAsync(body);
     } catch (error) {
       toast.error("Could not add identifier", { description: errorMessage(error) });
@@ -139,7 +127,7 @@ export default function Page() {
       const base = tab === "allow" ? "/allowlist_identifiers" : "/blocklist_identifiers";
       await api("DELETE", `${base}/${selected.id}`);
       await (tab === "allow" ? allowQuery.refetch() : blockQuery.refetch());
-      toast.success(tab === "allow" ? "Identifier removed from allowlist" : "Identifier removed from blocklist");
+      toast.success(tab === "allow" ? "Identifier removed from the allowlist" : "Identifier removed from the blocklist");
       setSelected(null);
     } catch (error) {
       toast.error("Could not remove identifier", { description: errorMessage(error) });
@@ -159,83 +147,79 @@ export default function Page() {
     if (rows.length === 0) {
       return (
         <EmptyState
-          title={kind === "allow" ? "No allowlisted identifiers" : "No blocked identifiers"}
+          title={kind === "allow" ? "No allowed identifiers" : "No blocked identifiers"}
           description={
             kind === "allow"
-              ? "When the allowlist is enabled, only these emails, domains, and phone numbers can sign up."
-              : "Blocked identifiers are rejected during sign-up even when the allowlist is off."
+              ? "With the allowlist on, only these emails, domains, and phone numbers can sign up. Add one, or send an invitation instead."
+              : "Blocked identifiers are rejected at sign-up even when the allowlist is off."
           }
           action={
-            <Button size="sm" onClick={() => openDialog(kind)}>
-              <Plus className="size-4" /> Add identifier
+            <Button size="sm" onClick={() => openSheet(kind)}>
+              <Plus className="size-4" aria-hidden /> Add identifier
             </Button>
           }
         />
       );
     }
     return (
-      <div className="rounded-lg border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Identifier</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>Added</TableHead>
-              <TableHead className="w-16" />
+      <RuledTable>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Identifier</TableHead>
+            <TableHead>Type</TableHead>
+            <TableHead>Added</TableHead>
+            <TableHead className="w-16 text-right">Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((row) => (
+            <TableRow key={row.id}>
+              <TableCell className="font-data text-xs">{row.identifier}</TableCell>
+              <TableCell className="text-xs text-muted-foreground">{row.identifier_type.replace(/_/g, " ")}</TableCell>
+              <TableCell className="font-data text-xs text-muted-foreground">{formatDate(row.created_at)}</TableCell>
+              <TableCell className="text-right">
+                <Button variant="ghost" size="icon-sm" className="text-destructive" onClick={() => setSelected(row)} title="Remove">
+                  <Trash2 className="size-4" aria-hidden />
+                  <span className="sr-only">Remove {row.identifier}</span>
+                </Button>
+              </TableCell>
             </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((row) => (
-              <TableRow key={row.id}>
-                <TableCell className="font-mono text-xs">{row.identifier}</TableCell>
-                <TableCell>
-                  <Badge variant="outline">{row.identifier_type.replace(/_/g, " ")}</Badge>
-                </TableCell>
-                <TableCell className="text-xs text-muted-foreground">{formatDate(row.created_at)}</TableCell>
-                <TableCell>
-                  <Button variant="ghost" size="icon-sm" className="text-destructive" onClick={() => setSelected(row)} title="Remove">
-                    <Trash2 className="size-4" />
-                    <span className="sr-only">Remove</span>
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+          ))}
+        </TableBody>
+      </RuledTable>
     );
   };
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Allowlist & Blocklist"
-        description="Gate sign-ups by exact email address, entire email domains, or phone number."
+        title="Allowlist & blocklist"
+        description="Gate sign-ups by exact email address, an entire email domain, or a phone number."
         badge={
-          <Badge variant={restrictions.allowlistEnabled || restrictions.blocklistEnabled ? "default" : "secondary"}>
+          <MetaChip>
             {restrictions.allowlistEnabled && restrictions.blocklistEnabled
-              ? "Both enabled"
+              ? "Both lists on"
               : restrictions.allowlistEnabled
-                ? "Allowlist enabled"
+                ? "Allowlist on"
                 : restrictions.blocklistEnabled
-                  ? "Blocklist enabled"
-                  : "Disabled"}
-          </Badge>
+                  ? "Blocklist on"
+                  : "Both lists off"}
+          </MetaChip>
         }
       />
 
       {editor.error ? <ErrorAlert error={editor.error} onRetry={editor.refetch} /> : null}
 
-      <SectionCard title="Enforcement" description="These switches take effect after saving instance settings.">
+      <SettingsSection title="Enforcement" description="These switches apply to sign-up after you save them.">
         <SwitchRow
-          label="Enable allowlist"
-          description="When enabled, only allowlisted identifiers (or users with a valid invitation) may sign up."
+          label="Enable the allowlist"
+          description="Only allowlisted identifiers and users with a valid invitation may sign up."
           checked={restrictions.allowlistEnabled}
           onCheckedChange={(allowlistEnabled) => editor.patch({ restrictions: { allowlistEnabled } })}
         />
         <SwitchRow
-          label="Enable blocklist"
-          description="Blocked identifiers are always rejected, regardless of the allowlist."
+          label="Enable the blocklist"
+          description="Blocked identifiers are rejected whether or not the allowlist is on."
           checked={restrictions.blocklistEnabled}
           onCheckedChange={(blocklistEnabled) => editor.patch({ restrictions: { blocklistEnabled } })}
         />
@@ -247,27 +231,32 @@ export default function Page() {
         />
         <SwitchRow
           label="Block email subaddresses"
-          description="Reject addresses like `user+tag@example.com` to prevent duplicate accounts."
+          description="Reject addresses like user+tag@example.com to prevent duplicate accounts."
           checked={restrictions.blockEmailSubaddresses}
           onCheckedChange={(blockEmailSubaddresses) => editor.patch({ restrictions: { blockEmailSubaddresses } })}
         />
         {restrictions.allowlistEnabled && allowRows.length === 0 ? (
-          <Alert>
-            <AlertTitle>Allowlist is enabled but empty</AlertTitle>
-            <AlertDescription>Only invited users will be able to sign up. Add at least one identifier or invitation.</AlertDescription>
-          </Alert>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            The allowlist is on but empty, so only invited users can sign up. Add an identifier or send invitations.
+          </p>
         ) : null}
-        <SaveBar dirty={editor.dirty} saving={editor.saving} onSave={editor.save} onDiscard={editor.reset} />
-      </SectionCard>
+        <SaveBar
+          dirty={editor.dirty}
+          saving={editor.saving}
+          error={editor.saveError}
+          onSave={editor.save}
+          onDiscard={editor.reset}
+        />
+      </SettingsSection>
 
       <Tabs value={tab} onValueChange={(value) => setTab(value as ListKind)}>
-        <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-5">
           <TabsList>
             <TabsTrigger value="allow">Allowlist ({allowRows.length})</TabsTrigger>
             <TabsTrigger value="block">Blocklist ({blockRows.length})</TabsTrigger>
           </TabsList>
-          <Button size="sm" onClick={() => openDialog(tab)}>
-            <Plus className="size-4" /> Add {tab === "allow" ? "allowed" : "blocked"} identifier
+          <Button size="sm" onClick={() => openSheet(tab)}>
+            <Plus className="size-4" aria-hidden /> Add {tab === "allow" ? "allowed" : "blocked"} identifier
           </Button>
         </div>
         <TabsContent value="allow" className="mt-4">
@@ -278,82 +267,81 @@ export default function Page() {
         </TabsContent>
       </Tabs>
 
-      <Dialog
-        open={dialogKind !== null}
+      <DetailSheet
+        open={sheetKind !== null}
         onOpenChange={(open) => {
-          if (!open) setDialogKind(null);
+          if (!open) setSheetKind(null);
         }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{dialogKind === "block" ? "Block identifier" : "Allow identifier"}</DialogTitle>
-            <DialogDescription>
-              {dialogKind === "block"
-                ? "Sign-ups matching this identifier will be rejected."
-                : "Sign-ups matching this identifier will be permitted when the allowlist is enabled."}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <Field label="Identifier type" htmlFor="restriction-type">
-              <Select value={identifierKind} onValueChange={(value) => setIdentifierKind(value as IdentifierKind)}>
-                <SelectTrigger id="restriction-type" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="email">Email address</SelectItem>
-                  <SelectItem value="domain">Email domain</SelectItem>
-                  <SelectItem value="phone">Phone number</SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field
-              label={identifierKind === "domain" ? "Domain" : identifierKind === "phone" ? "Phone number" : "Email address"}
-              htmlFor="restriction-identifier"
-              required
-              error={identifierError}
-              description={
-                identifierKind === "domain"
-                  ? "Every user with an email at this domain will match."
-                  : identifierKind === "phone"
-                    ? "E.164 format, for example +15551234567."
-                    : undefined
-              }
-            >
-              <Input
-                id="restriction-identifier"
-                value={identifier}
-                onChange={(event) => setIdentifier(event.target.value)}
-                placeholder={identifierKind === "domain" ? "example.com" : identifierKind === "phone" ? "+15551234567" : "user@example.com"}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") void submitIdentifier();
-                }}
-              />
-            </Field>
-            {parsed && parsed.identifier !== identifier.trim() ? (
-              <p className="text-xs text-muted-foreground">
-                Will be stored as <code>{parsed.identifier}</code>.
-              </p>
-            ) : null}
-            {dialogKind === "allow" ? (
-              <CheckboxRow
-                label="Notify this identifier"
-                description="Send an email or SMS with a sign-up link when the identifier is allowed. Only possible for exact addresses."
-                checked={notify}
-                disabled={identifierKind !== "email"}
-                onCheckedChange={setNotify}
-              />
-            ) : null}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogKind(null)}>
+        title={sheetKind === "block" ? "Block identifier" : "Allow identifier"}
+        description={
+          sheetKind === "block"
+            ? "Sign-ups that match this identifier are rejected."
+            : "Sign-ups that match this identifier are permitted while the allowlist is on."
+        }
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setSheetKind(null)}>
               Cancel
             </Button>
             <Button onClick={() => void submitIdentifier()} disabled={!parsed || adding}>
-              {adding ? "Adding…" : dialogKind === "block" ? "Block identifier" : "Allow identifier"}
+              {adding ? "Adding…" : sheetKind === "block" ? "Block identifier" : "Allow identifier"}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <Field label="Identifier type" htmlFor="restriction-type">
+            <Select value={identifierKind} onValueChange={(value) => setIdentifierKind(value as IdentifierKind)}>
+              <SelectTrigger id="restriction-type" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="email">Email address</SelectItem>
+                <SelectItem value="domain">Email domain</SelectItem>
+                <SelectItem value="phone">Phone number</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field
+            label={identifierKind === "domain" ? "Domain" : identifierKind === "phone" ? "Phone number" : "Email address"}
+            htmlFor="restriction-identifier"
+            required
+            error={identifierError}
+            description={
+              identifierKind === "domain"
+                ? "Every user with an email at this domain matches."
+                : identifierKind === "phone"
+                  ? "E.164 format, for example +15551234567."
+                  : undefined
+            }
+          >
+            <Input
+              id="restriction-identifier"
+              value={identifier}
+              onChange={(event) => setIdentifier(event.target.value)}
+              placeholder={identifierKind === "domain" ? "example.com" : identifierKind === "phone" ? "+15551234567" : "user@example.com"}
+              className="font-data text-xs"
+              onKeyDown={(event) => {
+                if (event.key === "Enter") void submitIdentifier();
+              }}
+            />
+          </Field>
+          {parsed && parsed.identifier !== identifier.trim() ? (
+            <p className="text-xs text-muted-foreground">
+              Stored as <code className="font-data">{parsed.identifier}</code>.
+            </p>
+          ) : null}
+          {sheetKind === "allow" ? (
+            <CheckboxRow
+              label="Notify this identifier"
+              description="Send a sign-up link when the identifier is allowed. Works for exact email addresses only."
+              checked={notify}
+              disabled={identifierKind !== "email"}
+              onCheckedChange={setNotify}
+            />
+          ) : null}
+        </div>
+      </DetailSheet>
 
       <ConfirmDialog
         open={selected !== null}
@@ -363,7 +351,7 @@ export default function Page() {
         title={tab === "allow" ? "Remove allowed identifier?" : "Remove blocked identifier?"}
         description={
           <span>
-            <code>{selected?.identifier}</code> will no longer be {tab === "allow" ? "allowed" : "blocked"}.
+            <code className="font-data">{selected?.identifier}</code> will no longer be {tab === "allow" ? "allowed" : "blocked"}.
           </span>
         }
         confirmLabel="Remove"
