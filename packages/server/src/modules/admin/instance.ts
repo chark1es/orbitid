@@ -3,11 +3,12 @@ import { Hono, type Context } from "hono";
 import { z, ZodError } from "zod";
 import { eq } from "drizzle-orm";
 import { ErrorCodes, ID_PREFIX, OrbitError, type InstanceSettings } from "@orbitid/shared";
-import { parseBody, zodToOrbit } from "../../lib/http";
+import { parseBody, zodToOrbit, clientIp } from "../../lib/http";
 import { randomToken, sha256 } from "../../lib/crypto";
 import { newId } from "../../lib/ids";
 import * as s from "../../db/schema";
-import { sendEmail } from "../../services/mail";
+import { parseEmailFrom, parseSmtpUrl, sendEmail, sendTestEmail } from "../../services/mail";
+import { hit } from "../../lib/rate-limit";
 import { audit, listAuditLogs } from "../../services/audit";
 import { instanceStats } from "../../services/stats";
 import { rotateSigningKey } from "../../services/tokens";
@@ -79,6 +80,34 @@ function assertInstanceUrls(patch: SettingsTree): void {
   }
 }
 
+/** Rejects SMTP URLs and From headers that would fail at delivery time, before they are persisted. */
+function assertEmailSettings(patch: SettingsTree): void {
+  const email = patch.email as SettingsTree | undefined;
+  if (!email) return;
+  if (email.from !== undefined) {
+    if (typeof email.from !== "string") {
+      throw new OrbitError(422, ErrorCodes.form_param_format_invalid, "email.from must be a string", { param_name: "email.from" });
+    }
+    parseEmailFrom(email.from);
+  }
+  if (email.smtpUrl !== undefined) {
+    if (typeof email.smtpUrl !== "string") {
+      throw new OrbitError(422, ErrorCodes.form_param_format_invalid, "email.smtpUrl must be a string", { param_name: "email.smtpUrl" });
+    }
+    // An empty URL is the way to clear it; anything else must be a valid smtp(s):// URL.
+    if (email.smtpUrl.trim()) parseSmtpUrl(email.smtpUrl);
+  }
+  for (const field of ["resendApiKey"] as const) {
+    const value = email[field];
+    if (value !== undefined && typeof value !== "string") {
+      throw new OrbitError(422, ErrorCodes.form_param_format_invalid, `email.${field} must be a string`, { param_name: `email.${field}` });
+    }
+    if (typeof value === "string" && /\r|\n/.test(value)) {
+      throw new OrbitError(422, ErrorCodes.form_param_format_invalid, `email.${field} must not contain line breaks`, { param_name: `email.${field}` });
+    }
+  }
+}
+
 /** Accepts a partial settings tree (`settings.update` deep-merges it and validates against the schema). */
 function instanceJson(ctx: AppContext) {
   const settings = ctx.settings.get();
@@ -101,6 +130,7 @@ export default function routes(ctx: AppContext) {
     const body = (await parseBody(c, z.record(z.string(), z.unknown()))) as SettingsTree;
     const patch = stripMasked(body) as SettingsTree;
     assertInstanceUrls(patch);
+    assertEmailSettings(patch);
     try {
       // `settings.update` deep-merges and re-validates the whole tree through the zod schema.
       await ctx.settings.update(patch as DeepPartial<InstanceSettings>);
@@ -118,6 +148,17 @@ export default function routes(ctx: AppContext) {
     const to = body.to ?? settings.application.supportEmail ?? settings.email.from;
     await sendEmail(ctx, { to, template: "verification_code", vars: { code: "123456", app_name: settings.application.name } });
     return c.json({ status: "ok", to });
+  });
+
+  /** Sends a real test message through the resolved transport and reports which provider it used. */
+  app.post("/instance/email_test", async (c) => {
+    const body = await parseBody(c, z.object({ to: z.string() }));
+    await hit(ctx, `instance:email_test:${clientIp(c)}`, 10, 60_000);
+    await hit(ctx, "instance:email_test", 60, 60_000);
+    // Delivery failures surface as a 502 `email_delivery_failed` from the mail service, with the API key redacted.
+    const { provider } = await sendTestEmail(ctx, body.to);
+    await audit(ctx, { actor: "secret_key", action: "instance.email_test", targetType: "instance", targetId: "default", metadata: { provider } });
+    return c.json({ provider, ok: true as const });
   });
 
   app.post("/instance/signing_keys/rotate", async (c) => {

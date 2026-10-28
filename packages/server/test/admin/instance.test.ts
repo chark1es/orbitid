@@ -8,7 +8,11 @@ import { createSessionFixture, createUser, json, testApp } from "./helpers";
 
 type SendEmail = (ctx: unknown, input: { to: string; template: string; vars: Record<string, unknown> }) => Promise<void>;
 const { sendEmail } = vi.hoisted(() => ({ sendEmail: vi.fn<SendEmail>(async () => undefined) }));
-vi.mock("../../src/services/mail", () => ({ sendEmail, sendSms: vi.fn(async () => undefined) }));
+vi.mock("../../src/services/mail", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/services/mail")>()),
+  sendEmail,
+  sendSms: vi.fn(async () => undefined),
+}));
 
 beforeEach(() => sendEmail.mockClear());
 
