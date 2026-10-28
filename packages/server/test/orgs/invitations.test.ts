@@ -212,4 +212,16 @@ describe("organization invitations", () => {
     expect(await acceptInvitation(ctx, stale, invitee.id)).toBeNull();
     expect((await ctx.db.select().from(schema.organizationMemberships).where(eq(schema.organizationMemberships.userId, invitee.id))).length).toBe(0);
   });
+
+  it("treats an idle session as signed out on organization routes", async () => {
+    const { ctx, app } = await setup();
+    const owner = await seedUser(ctx, { email: "idle@acme.test" });
+    const auth = await seedAuth(ctx, owner.id);
+    const org = await createOrg(app, auth.cookie, "Idle Co");
+    await ctx.settings.update({ session: { inactivityTimeoutSeconds: 60 } });
+    await ctx.db.update(schema.sessions).set({ lastActiveAt: Date.now() - 120_000 }).where(eq(schema.sessions.id, auth.sessionId));
+
+    const res = await api(app, "PATCH", `/v1/client/organizations/${org.id}`, { cookie: auth.cookie, body: { name: "Renamed" } });
+    expect(res.status).toBe(401);
+  });
 });
