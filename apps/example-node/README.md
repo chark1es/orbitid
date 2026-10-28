@@ -15,8 +15,9 @@ cp .env.example .env          # fill in ORBITID_SECRET_KEY (and the webhook secr
 bun run dev
 ```
 
-`bun run start` runs it once without `--watch`. Both load `.env` through `tsx`; to skip the file,
-export the two variables in your shell instead.
+`bun run start` runs it once without `--watch`. The scripts load `.env` with Node's `--env-file`, so
+Node 20.6 or newer is required; on an older runtime export the two variables in your shell and run
+`node --import tsx src/server.ts`.
 
 | Method | Path | Demonstrates |
 |---|---|---|
@@ -31,7 +32,7 @@ export the two variables in your shell instead.
 # 401 without a session token
 curl -i http://localhost:3001/me
 
-# with a session JWT copied from the browser (`document.cookie` is httpOnly; read it in devtools)
+# with a session JWT copied from the browser (document.cookie is httpOnly; read it in devtools)
 curl -s http://localhost:3001/me -H "authorization: Bearer $SESSION_JWT"
 
 # or from the browser cookie the SDK sets
@@ -62,3 +63,4 @@ bun run typecheck
 - The webhook route reads the body itself (`readBody`) and passes the raw bytes to `verify()`. If you
   use a framework with a JSON body parser, mount the webhook route with `express.raw({ type:
   "application/json" })` before the parser instead.
+- The body is capped at 256 KiB; a larger request is rejected instead of being buffered.

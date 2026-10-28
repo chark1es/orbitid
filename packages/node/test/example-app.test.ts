@@ -71,7 +71,9 @@ beforeAll(async () => {
   // Start the example on a free port.
   const port = await freePort();
   exampleUrl = `http://127.0.0.1:${port}`;
-  appProcess = spawn(process.execPath, [`${REPO_ROOT}node_modules/tsx/dist/cli.mjs`, "apps/example-node/src/server.ts"], {
+  // Same shape as the package script (`node --import tsx <file>`), without `--env-file`: the test
+  // passes the variables directly.
+  appProcess = spawn(process.execPath, ["--import", "tsx", "apps/example-node/src/server.ts"], {
     cwd: REPO_ROOT,
     env: {
       ...process.env,
@@ -178,7 +180,7 @@ async function freePort(): Promise<number> {
 /** Runs one of the example's scripts in a child process, as `bun run <script>` would. */
 async function runScript(args: string[], env: Record<string, string>): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [`${REPO_ROOT}node_modules/tsx/dist/cli.mjs`, ...args], {
+    const child = spawn(process.execPath, ["--import", "tsx", ...args], {
       cwd: REPO_ROOT,
       env: { ...process.env, ...env },
     });

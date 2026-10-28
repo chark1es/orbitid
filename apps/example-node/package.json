@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
-    "start": "tsx src/server.ts",
-    "list-users": "tsx src/list-users.ts",
+    "dev": "node --env-file=.env --watch --import tsx src/server.ts",
+    "start": "node --env-file=.env --import tsx src/server.ts",
+    "list-users": "node --env-file=.env --import tsx src/list-users.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
