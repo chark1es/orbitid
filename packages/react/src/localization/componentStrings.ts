@@ -467,6 +467,7 @@ export const componentStrings: LocalizationResource = {
     ticket_invalid: "That invitation code is invalid.",
     ticket_expired: "That invitation code has expired.",
     user_locked: "Your account is locked. Try again later.",
+    session_pending: "Set up two-factor authentication to continue.",
     user_banned: "Your account has been banned.",
     session_reverification_required: "Please verify your identity to continue.",
     needs_second_factor: "A second factor is required.",

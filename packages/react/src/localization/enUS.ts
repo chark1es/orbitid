@@ -865,6 +865,7 @@ const baseStrings: LocalizationResource = {
 
     // account
     user_locked: "Your account has been locked due to too many failed attempts.",
+    session_pending: "Finish setting up two-factor authentication before continuing.",
     user_banned: "Your account has been banned.",
     session_reverification_required: "Please verify your identity to continue.",
     needs_second_factor: "Two-step verification is required for this account.",
