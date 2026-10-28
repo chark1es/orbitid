@@ -1,6 +1,6 @@
 // Backend API JWT templates (`/v1/jwt_templates`).
 import { Hono } from "hono";
-import { eq, sql } from "drizzle-orm";
+import { count, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { generateKeyPair, exportJWK } from "jose";
 import { ErrorCodes, ID_PREFIX, OrbitError, type JwtTemplateJSON } from "@orbitid/shared";
@@ -74,7 +74,7 @@ export default function routes(ctx: AppContext) {
   app.get("/jwt_templates", async (c) => {
     const { limit, offset } = listParams(c);
     const rows = (await ctx.db.select().from(s.jwtTemplates).orderBy(s.jwtTemplates.createdAt).limit(limit).offset(offset));
-    const total = Number(first(await ctx.db.select({ n: sql<number>`count(*)` }).from(s.jwtTemplates))?.n ?? 0);
+    const total = Number(first(await ctx.db.select({ n: count() }).from(s.jwtTemplates))?.n ?? 0);
     return c.json(page(rows.map((row) => serializeTemplate(ctx, row)), total));
   });
 

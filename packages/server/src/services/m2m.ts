@@ -1,5 +1,5 @@
 // machine-to-machine identities: machine secrets, opaque/JWT tokens, revocation.
-import { asc, desc, eq, sql } from "drizzle-orm";
+import { asc, count, desc, eq, sql } from "drizzle-orm";
 import { jwtVerify, importJWK, type JWK } from "jose";
 import { ErrorCodes, ID_PREFIX, OrbitError, type M2MMachineJSON, type M2MTokenJSON } from "@orbitid/shared";
 import type { AppContext } from "../context";
@@ -55,7 +55,7 @@ export async function getMachine(ctx: AppContext, id: string): Promise<MachineRo
 
 export async function listMachines(ctx: AppContext, opts: { limit?: number; offset?: number } = {}): Promise<{ data: MachineRow[]; totalCount: number }> {
   const data = (await ctx.db.select().from(s.machines).orderBy(desc(s.machines.createdAt)).limit(opts.limit ?? 10).offset(opts.offset ?? 0));
-  const totalCount = first(await ctx.db.select({ n: sql<number>`count(*)` }).from(s.machines))?.n ?? 0;
+  const totalCount = first(await ctx.db.select({ n: count() }).from(s.machines))?.n ?? 0;
   return { data, totalCount };
 }
 
@@ -215,7 +215,7 @@ export async function listMachineTokens(ctx: AppContext, opts: { machineId?: str
   const col = raw.replace(/^-/, "") === "expires_at" ? s.m2mTokens.expiresAt : s.m2mTokens.createdAt;
   const data = (await ctx.db.select().from(s.m2mTokens).where(where).orderBy(desc_ ? desc(col) : asc(col))
       .limit(opts.limit ?? 10).offset(opts.offset ?? 0));
-  const totalCount = first(await ctx.db.select({ n: sql<number>`count(*)` }).from(s.m2mTokens).where(where))?.n ?? 0;
+  const totalCount = first(await ctx.db.select({ n: count() }).from(s.m2mTokens).where(where))?.n ?? 0;
   return { data, totalCount };
 }
 

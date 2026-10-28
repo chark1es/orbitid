@@ -1,5 +1,5 @@
 // Aggregate instance statistics for the dashboard overview (`GET /v1/stats`).
-import { and, asc, desc, eq, exists, gt, gte, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, exists, gt, gte, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
 import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
 import type { AppContext } from "../context";
 import * as s from "../db/schema";
@@ -41,11 +41,11 @@ async function byDay(ctx: AppContext, createdAt: { column: PgColumn }, from: PgT
 export async function instanceStats(ctx: AppContext): Promise<InstanceStatsJSON> {
   const now = Date.now();
   const total = async (table: PgTable, where?: SQL) => {
-    const [row] = await ctx.db.select({ n: sql<number>`count(*)`.mapWith(Number) }).from(table).where(where);
+    const [row] = await ctx.db.select({ n: count() }).from(table).where(where);
     return row?.n ?? 0;
   };
   const providers = await ctx.db
-    .select({ provider: s.externalAccounts.provider, count: sql<number>`count(*)`.mapWith(Number) })
+    .select({ provider: s.externalAccounts.provider, count: count() })
     .from(s.externalAccounts)
     .groupBy(s.externalAccounts.provider)
     .orderBy(desc(sql`count(*)`), asc(s.externalAccounts.provider))

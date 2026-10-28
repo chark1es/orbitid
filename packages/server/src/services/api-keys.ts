@@ -1,5 +1,5 @@
 // API keys (`ak_live_...`), one-time secret display, hash-at-rest, scopes/claims/expiry/revocation.
-import { and, asc, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { ErrorCodes, ID_PREFIX, OrbitError, type ApiKeyJSON } from "@orbitid/shared";
 import type { AppContext } from "../context";
 import * as s from "../db/schema";
@@ -145,7 +145,7 @@ export async function listApiKeys(ctx: AppContext, opts: ListApiKeysOptions = {}
       .orderBy(orderFor(opts.orderBy))
       .limit(opts.limit ?? 10)
       .offset(opts.offset ?? 0));
-  const totalCount = first(await ctx.db.select({ n: sql<number>`count(*)` }).from(s.apiKeys).where(where))?.n ?? 0;
+  const totalCount = first(await ctx.db.select({ n: count() }).from(s.apiKeys).where(where))?.n ?? 0;
   return { data, totalCount };
 }
 

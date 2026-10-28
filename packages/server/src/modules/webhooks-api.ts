@@ -1,6 +1,6 @@
 // Backend API: /v1/webhooks/*
 import { Hono } from "hono";
-import { and, eq, sql, type SQL } from "drizzle-orm";
+import { and, count, eq, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import {
   ErrorCodes, ID_PREFIX, OrbitError, WEBHOOK_EVENT_TYPES,
@@ -41,7 +41,7 @@ export default function routes(ctx: AppContext) {
   app.get("/endpoints", async (c) => {
     const { limit, offset } = listParams(c);
     const rows = (await ctx.db.select().from(s.webhookEndpoints).orderBy(parseOrderBy(c.req.query("order_by"), ENDPOINT_ORDER_COLUMNS, "-created_at")).limit(limit).offset(offset));
-    const total = Number(first(await ctx.db.select({ n: sql<number>`count(*)` }).from(s.webhookEndpoints))?.n ?? 0);
+    const total = Number(first(await ctx.db.select({ n: count() }).from(s.webhookEndpoints))?.n ?? 0);
     return c.json(page(rows.map((row) => serializeWebhookEndpoint(row)), total));
   });
 
@@ -124,7 +124,7 @@ export default function routes(ctx: AppContext) {
           .orderBy(parseOrderBy(order_by, DELIVERY_ORDER_COLUMNS, "-created_at"))
           .limit(limit)
           .offset(offset));
-    const total = Number(first(await ctx.db.select({ n: sql<number>`count(*)` }).from(s.webhookDeliveries).where(where))?.n ?? 0);
+    const total = Number(first(await ctx.db.select({ n: count() }).from(s.webhookDeliveries).where(where))?.n ?? 0);
     return c.json(page((await Promise.all(rows.map((row) => deliveryJson(ctx, row)))), total));
   });
 

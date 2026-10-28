@@ -2,7 +2,7 @@
 // `/v1/client/enterprise/*` (start + OIDC callback) and the SAML service provider at `/v1/saml/:id/*`.
 import { Hono, type Context } from "hono";
 import { getCookie } from "hono/cookie";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, count, desc, eq, sql } from "drizzle-orm";
 import { COOKIES, ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../context";
 import * as s from "../db/schema";
@@ -80,7 +80,7 @@ function backendRoutes(ctx: AppContext): Hono {
     const where = filters.length ? and(...filters) : undefined;
     const data = (await ctx.db.select().from(s.enterpriseConnections).where(where)
           .orderBy(desc(s.enterpriseConnections.createdAt)).limit(page.limit).offset(page.offset));
-    const totalCount = first(await ctx.db.select({ n: sql<number>`count(*)` }).from(s.enterpriseConnections).where(where))?.n ?? 0;
+    const totalCount = first(await ctx.db.select({ n: count() }).from(s.enterpriseConnections).where(where))?.n ?? 0;
     return c.json({ data: data.map((row) => serializeConnection(ctx, row)), total_count: totalCount });
   });
 

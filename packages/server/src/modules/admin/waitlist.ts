@@ -1,6 +1,6 @@
 // Backend API waitlist management (`/v1/waitlist_entries`).
 import { Hono } from "hono";
-import { and, eq, like, sql, type SQL } from "drizzle-orm";
+import { and, count, eq, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { ErrorCodes, ID_PREFIX, OrbitError, type WaitlistEntryJSON } from "@orbitid/shared";
 import { parseBody } from "../../lib/http";
@@ -12,7 +12,7 @@ import { audit } from "../../services/audit";
 import type { AppContext } from "../../context";
 import { deleted, listParams, normalizeEmail, page, parseOrderBy } from "./shared";
 import { createInvitation } from "./invitations";
-import { first } from "../../lib/db";
+import { first, containsText } from "../../lib/db";
 
 type WaitlistRow = typeof s.waitlistEntries.$inferSelect;
 
@@ -46,7 +46,7 @@ export default function routes(ctx: AppContext) {
     const status = c.req.query("status");
     if (status) conds.push(eq(s.waitlistEntries.status, status));
     const query = c.req.query("query")?.trim();
-    if (query) conds.push(like(s.waitlistEntries.email, `%${query}%`));
+    if (query) conds.push(containsText(s.waitlistEntries.email, query));
     const where = conds.length ? and(...conds) : undefined;
     const rows = (await ctx.db
           .select()
@@ -55,7 +55,7 @@ export default function routes(ctx: AppContext) {
           .orderBy(parseOrderBy(order_by, WAITLIST_ORDER_COLUMNS, "-created_at"))
           .limit(limit)
           .offset(offset));
-    const total = Number(first(await ctx.db.select({ n: sql<number>`count(*)` }).from(s.waitlistEntries).where(where))?.n ?? 0);
+    const total = Number(first(await ctx.db.select({ n: count() }).from(s.waitlistEntries).where(where))?.n ?? 0);
     return c.json(page((await Promise.all(rows.map((row) => serializeWaitlistEntry(ctx, row)))), total));
   });
 

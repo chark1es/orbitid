@@ -1,6 +1,6 @@
 // Backend API sessions & clients.
 import { Hono, type Context } from "hono";
-import { and, eq, sql, type SQL } from "drizzle-orm";
+import { and, count, eq, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { ErrorCodes, OrbitError, type ClientJSON } from "@orbitid/shared";
 import { parseBody } from "../../lib/http";
@@ -67,7 +67,7 @@ export default function routes(ctx: AppContext) {
           .orderBy(parseOrderBy(order_by, SESSION_ORDER_COLUMNS, "-created_at"))
           .limit(limit)
           .offset(offset));
-    const total = Number(first(await ctx.db.select({ n: sql<number>`count(*)` }).from(s.sessions).where(where))?.n ?? 0);
+    const total = Number(first(await ctx.db.select({ n: count() }).from(s.sessions).where(where))?.n ?? 0);
     return c.json(page((await Promise.all(rows.map((row) => serializeSession(ctx, row, { withUser: true })))), total));
   });
 

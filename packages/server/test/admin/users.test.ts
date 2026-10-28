@@ -270,3 +270,18 @@ describe("users", () => {
     expect((await api("GET", `/v1/users/${user.id}/oauth_access_tokens/github`)).status).toBe(404);
   });
 });
+
+describe("user search", () => {
+  it("matches names, emails and ids case-insensitively and treats % and _ literally", async () => {
+    const { api } = await testApp();
+    const ada = await createUser(api, { email_address: ["Ada.Lovelace@Example.com"], first_name: "Ada", last_name: "Lovelace" });
+    await createUser(api, { email_address: ["grace@example.com"], first_name: "Grace", last_name: "Hopper" });
+
+    const ids = async (q: string) => (await json<UserJSON[]>(await api("GET", `/v1/users?query=${encodeURIComponent(q)}`))).map((u) => u.id);
+    expect(await ids("ADA")).toEqual([ada.id]);
+    expect(await ids("lovelace@EXAMPLE")).toEqual([ada.id]);
+    expect(await ids("ada lovelace")).toEqual([ada.id]);
+    expect(await ids("%")).toEqual([]);
+    expect(await ids("_da")).toEqual([]);
+  });
+});

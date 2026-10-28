@@ -1,6 +1,6 @@
 // Backend API instance invitations (`/v1/invitations`).
 import { Hono } from "hono";
-import { and, eq, like, sql, type SQL } from "drizzle-orm";
+import { and, count, eq, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { ErrorCodes, ID_PREFIX, OrbitError } from "@orbitid/shared";
 import { parseBody } from "../../lib/http";
@@ -13,7 +13,7 @@ import { audit } from "../../services/audit";
 import { sendEmail, type EmailTemplate } from "../../services/mail";
 import type { AppContext } from "../../context";
 import { bool, listParams, metadataSchema, normalizeEmail, page, parseOrderBy, ticketUrl } from "./shared";
-import { first } from "../../lib/db";
+import { first, containsText } from "../../lib/db";
 
 const INVITATION_TTL_DAYS = 30;
 
@@ -101,7 +101,7 @@ export default function routes(ctx: AppContext) {
     const status = c.req.query("status") ?? c.req.query("status[]");
     if (status) conds.push(eq(s.invitations.status, status));
     const query = c.req.query("query")?.trim();
-    if (query) conds.push(like(s.invitations.email, `%${query}%`));
+    if (query) conds.push(containsText(s.invitations.email, query));
     const where = conds.length ? and(...conds) : undefined;
     const rows = (await ctx.db
           .select()
@@ -110,7 +110,7 @@ export default function routes(ctx: AppContext) {
           .orderBy(parseOrderBy(order_by, INVITATION_ORDER_COLUMNS, "-created_at"))
           .limit(limit)
           .offset(offset));
-    const total = Number(first(await ctx.db.select({ n: sql<number>`count(*)` }).from(s.invitations).where(where))?.n ?? 0);
+    const total = Number(first(await ctx.db.select({ n: count() }).from(s.invitations).where(where))?.n ?? 0);
     return c.json(page(rows.map((row) => serializeInvitation(row)), total));
   });
 

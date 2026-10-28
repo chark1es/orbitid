@@ -17,7 +17,8 @@
     "test": "vitest run --passWithNoTests",
     "db:generate": "bun run db:generate:postgres && bun run db:generate:sqlite",
     "db:generate:postgres": "ORBITID_DB_DIALECT=postgres drizzle-kit generate",
-    "db:generate:sqlite": "ORBITID_DB_DIALECT=sqlite drizzle-kit generate"
+    "db:generate:sqlite": "ORBITID_DB_DIALECT=sqlite drizzle-kit generate",
+    "test:postgres": "ORBITID_DB_DIALECT=postgres vitest run --passWithNoTests"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.12",

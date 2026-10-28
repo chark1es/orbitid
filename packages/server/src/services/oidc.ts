@@ -5,7 +5,7 @@
 //  - for access/refresh rows the unused `nonce` column stores the *family id* of the token chain, which is what
 //    makes refresh-token rotation and reuse detection possible. Code rows keep the OIDC `nonce` there.
 import { createHash } from "node:crypto";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, count, desc, eq, inArray, sql } from "drizzle-orm";
 import { ErrorCodes, ID_PREFIX, OrbitError, type OAuthApplicationJSON } from "@orbitid/shared";
 import type { AppContext } from "../context";
 import * as s from "../db/schema";
@@ -128,7 +128,7 @@ export async function rotateClientSecret(ctx: AppContext, row: ApplicationRow): 
 
 export async function listApplications(ctx: AppContext, opts: { limit?: number; offset?: number } = {}): Promise<{ data: ApplicationRow[]; totalCount: number }> {
   const data = (await ctx.db.select().from(s.oauthApplications).orderBy(desc(s.oauthApplications.createdAt)).limit(opts.limit ?? 10).offset(opts.offset ?? 0));
-  const totalCount = first(await ctx.db.select({ n: sql<number>`count(*)` }).from(s.oauthApplications))?.n ?? 0;
+  const totalCount = first(await ctx.db.select({ n: count() }).from(s.oauthApplications))?.n ?? 0;
   return { data, totalCount };
 }
 

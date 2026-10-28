@@ -1,6 +1,6 @@
 // Backend API identifiers: email addresses, phone numbers, allowlist & blocklist.
 import { Hono } from "hono";
-import { and, eq, sql, type SQL } from "drizzle-orm";
+import { and, count, eq, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { ErrorCodes, ID_PREFIX, OrbitError } from "@orbitid/shared";
 import { parseBody } from "../../lib/http";
@@ -41,7 +41,7 @@ export default function routes(ctx: AppContext) {
     if (email) conds.push(eq(s.emailAddresses.email, normalizeEmail(email)));
     const where = conds.length ? and(...conds) : undefined;
     const rows = (await ctx.db.select().from(s.emailAddresses).where(where).limit(limit).offset(offset));
-    const total = Number(first(await ctx.db.select({ n: sql<number>`count(*)` }).from(s.emailAddresses).where(where))?.n ?? 0);
+    const total = Number(first(await ctx.db.select({ n: count() }).from(s.emailAddresses).where(where))?.n ?? 0);
     return c.json(page(rows.map(serializeEmail), total));
   });
 
@@ -142,7 +142,7 @@ export default function routes(ctx: AppContext) {
     if (phone) conds.push(eq(s.phoneNumbers.phone, phone.trim()));
     const where = conds.length ? and(...conds) : undefined;
     const rows = (await ctx.db.select().from(s.phoneNumbers).where(where).limit(limit).offset(offset));
-    const total = Number(first(await ctx.db.select({ n: sql<number>`count(*)` }).from(s.phoneNumbers).where(where))?.n ?? 0);
+    const total = Number(first(await ctx.db.select({ n: count() }).from(s.phoneNumbers).where(where))?.n ?? 0);
     return c.json(page(rows.map(serializePhone), total));
   });
 
@@ -246,7 +246,7 @@ export default function routes(ctx: AppContext) {
   app.get("/allowlist_identifiers", async (c) => {
     const { limit, offset } = listParams(c);
     const rows = (await ctx.db.select().from(s.allowlistIdentifiers).limit(limit).offset(offset));
-    const total = Number(first(await ctx.db.select({ n: sql<number>`count(*)` }).from(s.allowlistIdentifiers))?.n ?? 0);
+    const total = Number(first(await ctx.db.select({ n: count() }).from(s.allowlistIdentifiers))?.n ?? 0);
     return c.json(page(rows.map(serializeAllowlist), total));
   });
 
@@ -288,7 +288,7 @@ export default function routes(ctx: AppContext) {
   app.get("/blocklist_identifiers", async (c) => {
     const { limit, offset } = listParams(c);
     const rows = (await ctx.db.select().from(s.blocklistIdentifiers).limit(limit).offset(offset));
-    const total = Number(first(await ctx.db.select({ n: sql<number>`count(*)` }).from(s.blocklistIdentifiers))?.n ?? 0);
+    const total = Number(first(await ctx.db.select({ n: count() }).from(s.blocklistIdentifiers))?.n ?? 0);
     return c.json(page(rows.map(serializeBlocklist), total));
   });
 

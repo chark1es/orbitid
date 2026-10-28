@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, count, eq, inArray, sql } from "drizzle-orm";
 import type {
   EmailAddressJSON, ExternalAccountJSON, OrganizationJSON, OrganizationMembershipJSON, PasskeyJSON, PhoneNumberJSON, SessionJSON, UserJSON, VerificationJSON,
 } from "@orbitid/shared";
@@ -89,8 +89,8 @@ export async function serializeOrganization(ctx: AppContext, o: typeof s.organiz
     created_at: o.createdAt, updated_at: o.updatedAt,
   };
   if (opts.counts !== false) {
-    json.members_count = first(await ctx.db.select({ n: sql<number>`count(*)` }).from(s.organizationMemberships).where(eq(s.organizationMemberships.organizationId, o.id)))?.n ?? 0;
-    json.pending_invitations_count = first(await ctx.db.select({ n: sql<number>`count(*)` }).from(s.organizationInvitations).where(and(eq(s.organizationInvitations.organizationId, o.id), eq(s.organizationInvitations.status, "pending"))))?.n ?? 0;
+    json.members_count = first(await ctx.db.select({ n: count() }).from(s.organizationMemberships).where(eq(s.organizationMemberships.organizationId, o.id)))?.n ?? 0;
+    json.pending_invitations_count = first(await ctx.db.select({ n: count() }).from(s.organizationInvitations).where(and(eq(s.organizationInvitations.organizationId, o.id), eq(s.organizationInvitations.status, "pending"))))?.n ?? 0;
   }
   if (opts.backend) json.private_metadata = o.privateMetadata;
   return json;

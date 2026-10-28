@@ -1,6 +1,6 @@
 // Backend API users: CRUD, filters, metadata, ban/lock, MFA, identifiers, impersonation.
 import { Hono, type Context } from "hono";
-import { and, eq, gte, inArray, like, lt, or, sql, type SQL } from "drizzle-orm";
+import { and, count, eq, exists, gte, inArray, lt, or, sql, type SQL } from "drizzle-orm";
 import { authenticator } from "otplib";
 import { z } from "zod";
 import { ErrorCodes, ID_PREFIX, OrbitError } from "@orbitid/shared";
@@ -17,7 +17,7 @@ import { assertPasswordHasher, assertPasswordPolicy, hashPassword, verifyPasswor
 import {
   bool, deleted, getUserOrThrow, listParams, mergeMetadata, metadataSchema, normalizeEmail, page, parseOrderBy, queryValues,
 } from "./shared";
-import { first } from "../../lib/db";
+import { first, containsText } from "../../lib/db";
 
 const AUDIT_ACTOR = "secret_key";
 const MAX_PROFILE_IMAGE_BYTES = 512 * 1024;
@@ -81,16 +81,15 @@ async function userWhere(ctx: AppContext, c: Context): Promise<SQL | undefined> 
   const conds: SQL[] = [];
   const search = c.req.query("query")?.trim();
   if (search) {
-    const pattern = `%${search}%`;
     conds.push(
       or(
-        like(s.users.id, pattern),
-        like(s.users.username, pattern),
-        like(s.users.firstName, pattern),
-        like(s.users.lastName, pattern),
-        sql`(${s.users.firstName} || ' ' || ${s.users.lastName}) LIKE ${pattern}`,
-        sql`EXISTS (SELECT 1 FROM email_addresses e WHERE e.user_id = ${s.users.id} AND e.email LIKE ${pattern})`,
-        sql`EXISTS (SELECT 1 FROM phone_numbers p WHERE p.user_id = ${s.users.id} AND p.phone LIKE ${pattern})`,
+        containsText(s.users.id, search),
+        containsText(s.users.username, search),
+        containsText(s.users.firstName, search),
+        containsText(s.users.lastName, search),
+        containsText(sql`(coalesce(${s.users.firstName}, '') || ' ' || coalesce(${s.users.lastName}, ''))`, search),
+        exists(ctx.db.select({ one: sql`1` }).from(s.emailAddresses).where(and(eq(s.emailAddresses.userId, s.users.id), containsText(s.emailAddresses.email, search)))),
+        exists(ctx.db.select({ one: sql`1` }).from(s.phoneNumbers).where(and(eq(s.phoneNumbers.userId, s.users.id), containsText(s.phoneNumbers.phone, search)))),
       )!,
     );
   }
@@ -158,7 +157,7 @@ export default function routes(ctx: AppContext) {
   const app = new Hono();
 
   app.get("/users/count", async (c) => {
-    const total = first(await ctx.db.select({ n: sql<number>`count(*)` }).from(s.users).where(await userWhere(ctx, c)))?.n ?? 0;
+    const total = first(await ctx.db.select({ n: count() }).from(s.users).where(await userWhere(ctx, c)))?.n ?? 0;
     return c.json({ object: "total_count", total_count: Number(total) });
   });
 
@@ -167,7 +166,7 @@ export default function routes(ctx: AppContext) {
     const { limit, offset, order_by } = listParams(c);
     const order = parseOrderBy(order_by, USER_ORDER_COLUMNS, "-created_at");
     const rows = (await ctx.db.select().from(s.users).where(where).orderBy(order).limit(limit).offset(offset));
-    const total = Number(first(await ctx.db.select({ n: sql<number>`count(*)` }).from(s.users).where(where))?.n ?? 0);
+    const total = Number(first(await ctx.db.select({ n: count() }).from(s.users).where(where))?.n ?? 0);
     const data = (await Promise.all(rows.map((row) => serializeUser(ctx, row, { backend: true }))));
     if (c.req.query("paginated") === "true") return c.json(page(data, total));
     c.header("x-total-count", String(total));
@@ -507,7 +506,7 @@ export default function routes(ctx: AppContext) {
     const { limit, offset } = listParams(c);
     const where = eq(s.organizationMemberships.userId, existing.id);
     const rows = (await ctx.db.select().from(s.organizationMemberships).where(where).limit(limit).offset(offset));
-    const total = Number(first(await ctx.db.select({ n: sql<number>`count(*)` }).from(s.organizationMemberships).where(where))?.n ?? 0);
+    const total = Number(first(await ctx.db.select({ n: count() }).from(s.organizationMemberships).where(where))?.n ?? 0);
     return c.json(page((await Promise.all(rows.map((row) => serializeMembership(ctx, row, { backend: true })))), total));
   });
 
