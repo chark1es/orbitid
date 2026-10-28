@@ -25,11 +25,14 @@ export function effectiveInvitationStatus(row: InvitationRow): OrganizationInvit
 
 export async function serializeOrganizationInvitation(ctx: AppContext, row: InvitationRow, opts: { backend?: boolean; url?: string | null } = {}): Promise<OrganizationInvitationJSON> {
   const role = first(await ctx.db.select().from(s.roles).where(eq(s.roles.key, row.roleKey)));
+  const org = first(await ctx.db.select({ name: s.organizations.name, imageUrl: s.organizations.imageUrl }).from(s.organizations).where(eq(s.organizations.id, row.organizationId)));
   const json: OrganizationInvitationJSON = {
     object: "organization_invitation",
     id: row.id,
     email_address: row.email,
     organization_id: row.organizationId,
+    organization_name: org?.name,
+    organization_image_url: org?.imageUrl ?? undefined,
     role: row.roleKey,
     role_name: role?.name ?? row.roleKey,
     status: effectiveInvitationStatus(row),

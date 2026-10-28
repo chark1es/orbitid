@@ -1,5 +1,5 @@
 // RelayState / `state` storage for enterprise SSO flows (SAML and enterprise OIDC).
-import { eq } from "drizzle-orm";
+import { and, eq, gt } from "drizzle-orm";
 import { ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../../context";
 import { oauthStates } from "../../db/schema";
@@ -46,10 +46,10 @@ export interface EnterpriseState {
 /** Reads and deletes a state row (single use). Returns null for unknown, expired or provider-mismatched states. */
 export async function takeEnterpriseState(ctx: AppContext, state: string, provider: string): Promise<EnterpriseState | null> {
   if (!state) return null;
-  const row = first(await ctx.db.select().from(oauthStates).where(eq(oauthStates.state, state)));
-  if (!row || row.provider !== provider) return null;
-  await ctx.db.delete(oauthStates).where(eq(oauthStates.state, state));
-  if (row.expiresAt <= Date.now()) return null;
+  const row = first(await ctx.db.delete(oauthStates)
+    .where(and(eq(oauthStates.state, state), eq(oauthStates.provider, provider), gt(oauthStates.expiresAt, Date.now())))
+    .returning());
+  if (!row) return null;
   return { flow: row.flow as unknown as EnterpriseFlow, codeVerifier: row.codeVerifier, nonce: row.nonce };
 }
 

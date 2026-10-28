@@ -315,6 +315,21 @@ describe("sign-in", () => {
     expect(errorsOf(old)[0]?.code).toBe("form_password_incorrect");
   });
 
+  it("applies a password reset once even when the request is sent in parallel", async () => {
+    const { app } = await setup();
+    const user = await signUpUser(app);
+    const client = testClient(app);
+    const created = await client.json<{ response: { id: string } }>("/v1/client/sign_ins", { body: { identifier: user.email, strategy: "reset_password_email_code" } });
+    await client.json(`/v1/client/sign_ins/${created.response.id}/prepare_first_factor`, { body: { strategy: "reset_password_email_code" } });
+    const code = latestCodeFor(user.email, "reset_password_code")!;
+    await client.json(`/v1/client/sign_ins/${created.response.id}/attempt_first_factor`, { body: { strategy: "reset_password_email_code", code } });
+
+    const results = await Promise.all(Array.from({ length: 6 }, (_, i) =>
+      client.request(`/v1/client/sign_ins/${created.response.id}/reset_password`, { body: { password: `Br4ndNewPass-${i}!` } })));
+    expect(results.filter((r) => r.status === 200)).toHaveLength(1);
+    expect(results.filter((r) => r.status === 400)).toHaveLength(5);
+  });
+
   it("locks an account after too many failed password attempts", async () => {
     const { app, ctx } = await setup();
     const user = await signUpUser(app);

@@ -5,7 +5,7 @@
 //  - for access/refresh rows the unused `nonce` column stores the *family id* of the token chain, which is what
 //    makes refresh-token rotation and reuse detection possible. Code rows keep the OIDC `nonce` there.
 import { createHash } from "node:crypto";
-import { and, count, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, inArray } from "drizzle-orm";
 import { ErrorCodes, ID_PREFIX, OrbitError, type OAuthApplicationJSON } from "@orbitid/shared";
 import type { AppContext } from "../context";
 import * as s from "../db/schema";
@@ -386,7 +386,11 @@ export async function exchangeAuthorizationCode(ctx: AppContext, input: CodeExch
 
   const user = first(await ctx.db.select().from(s.users).where(eq(s.users.id, row.userId)));
   if (!user || user.banned) throw new OAuthError(400, "invalid_grant", "User is not allowed to sign in");
-  await ctx.db.update(s.oauthGrants).set({ revoked: true }).where(eq(s.oauthGrants.id, row.id));
+  // Revoking the code is the gate: exactly one exchange of a code succeeds, even under parallel requests.
+  const claimed = first(await ctx.db.update(s.oauthGrants).set({ revoked: true })
+    .where(and(eq(s.oauthGrants.id, row.id), eq(s.oauthGrants.revoked, false), gt(s.oauthGrants.expiresAt, Date.now())))
+    .returning({ id: s.oauthGrants.id }));
+  if (!claimed) throw new OAuthError(400, "invalid_grant", "Authorization code is invalid or expired");
 
   return issueTokenSet(ctx, {
     application: input.application,
@@ -417,7 +421,14 @@ export async function exchangeRefreshToken(ctx: AppContext, application: Applica
     throw new OAuthError(400, "invalid_grant", "User is not allowed to sign in");
   }
 
-  await ctx.db.update(s.oauthGrants).set({ revoked: true }).where(eq(s.oauthGrants.id, row.id));
+  // Revoking the presented token is the gate. A loser presents an already rotated token, which is reuse.
+  const claimed = first(await ctx.db.update(s.oauthGrants).set({ revoked: true })
+    .where(and(eq(s.oauthGrants.id, row.id), eq(s.oauthGrants.revoked, false), gt(s.oauthGrants.expiresAt, Date.now())))
+    .returning({ id: s.oauthGrants.id }));
+  if (!claimed) {
+    await revokeGrantFamily(ctx, family);
+    throw new OAuthError(400, "invalid_grant", "Refresh token has already been used");
+  }
   return issueTokenSet(ctx, { application, user, scopes: parseScopes(row.scopes), family, nonce: null });
 }
 

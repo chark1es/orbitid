@@ -1,5 +1,5 @@
 // Sign-up gating (mode/allowlist/blocklist/waitlist/invitations) + one-time tickets.
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, or } from "drizzle-orm";
 import { ErrorCodes, OrbitError, type InvitationJSON } from "@orbitid/shared";
 import { sha256 } from "../lib/crypto";
 import * as s from "../db/schema";
@@ -185,27 +185,42 @@ export async function redeemTicket(
   ctx: AppContext,
   _ticket: string,
 ): Promise<{ kind: "sign_in_token" | "actor_token"; userId: string; actor?: Record<string, unknown>; sessionMaxDurationSeconds?: number } | { kind: "invitation"; invitationId: string; email: string; publicMetadata: Record<string, unknown> }> {
+  const tokenHash = sha256(_ticket);
+  const now = Date.now();
+  // Redeeming is the single statement that decides the winner; a loser gets the same errors as a reused ticket.
+  const signInToken = first(await ctx.db.update(s.signInTokens).set({ status: "accepted" })
+    .where(and(eq(s.signInTokens.tokenHash, tokenHash), eq(s.signInTokens.status, "pending"), gt(s.signInTokens.expiresAt, now)))
+    .returning());
+  if (signInToken) return { kind: "sign_in_token", userId: signInToken.userId };
+  const actorToken = first(await ctx.db.update(s.actorTokens).set({ status: "accepted" })
+    .where(and(eq(s.actorTokens.tokenHash, tokenHash), eq(s.actorTokens.status, "pending"), gt(s.actorTokens.expiresAt, now)))
+    .returning());
+  if (actorToken) {
+    return {
+      kind: "actor_token",
+      userId: actorToken.userId,
+      actor: (actorToken.actor ?? {}) as Record<string, unknown>,
+      sessionMaxDurationSeconds: actorToken.sessionMaxDurationSeconds,
+    };
+  }
+  // Only an invitation can still be live here; validateTicket raises the exact error otherwise.
   const grant = await validateTicket(ctx, _ticket);
-  if (grant.kind === "sign_in_token") {
-    await ctx.db.update(s.signInTokens).set({ status: "accepted" }).where(eq(s.signInTokens.tokenHash, sha256(_ticket)));
-    return { kind: "sign_in_token", userId: grant.userId };
-  }
-  if (grant.kind === "actor_token") {
-    await ctx.db.update(s.actorTokens).set({ status: "accepted" }).where(eq(s.actorTokens.tokenHash, sha256(_ticket)));
-    return { kind: "actor_token", userId: grant.userId, actor: grant.actor, sessionMaxDurationSeconds: grant.sessionMaxDurationSeconds };
-  }
+  if (grant.kind !== "invitation") throw new OrbitError(422, ErrorCodes.ticket_invalid, "This ticket has already been used or revoked.");
   // Invitations stay `pending` until the sign-up completes (markInvitationAccepted), like Clerk.
   return { kind: "invitation", invitationId: grant.invitationId, email: grant.email, publicMetadata: grant.publicMetadata };
 }
 
 /** Mark an invitation accepted & waitlist entry completed after a successful sign-up. */
 export async function markInvitationAccepted(ctx: AppContext, _invitationId: string, _userId: string): Promise<void> {
-  const invitation = first(await ctx.db.select().from(s.invitations).where(eq(s.invitations.id, _invitationId)));
-  if (!invitation) return;
   const now = Date.now();
-  if (invitation.status === "pending") {
-    await ctx.db.update(s.invitations).set({ status: "accepted", updatedAt: now }).where(eq(s.invitations.id, invitation.id));
-  }
-  await ctx.db.update(s.waitlistEntries).set({ status: "completed", updatedAt: now }).where(eq(s.waitlistEntries.invitationId, invitation.id));
-  await emitEvent(ctx, "invitation.accepted", { ...serializeInvitation(invitation), status: "accepted", user_id: _userId, updated_at: now });
+  const accepted = first(await ctx.db.update(s.invitations).set({ status: "accepted", updatedAt: now })
+    .where(and(
+      eq(s.invitations.id, _invitationId),
+      eq(s.invitations.status, "pending"),
+      or(isNull(s.invitations.expiresAt), gt(s.invitations.expiresAt, now)),
+    ))
+    .returning());
+  if (!accepted) return;
+  await ctx.db.update(s.waitlistEntries).set({ status: "completed", updatedAt: now }).where(eq(s.waitlistEntries.invitationId, accepted.id));
+  await emitEvent(ctx, "invitation.accepted", { ...serializeInvitation(accepted), status: "accepted", user_id: _userId, updated_at: now });
 }

@@ -7,7 +7,7 @@ import {
   verifyRegistrationResponse,
 } from "@simplewebauthn/server";
 import type { AuthenticationResponseJSON, AuthenticatorTransportFuture, RegistrationResponseJSON } from "@simplewebauthn/types";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../context";
 import * as s from "../db/schema";
@@ -195,9 +195,17 @@ export async function finishPasskeyAuthentication(ctx: AppContext, input: {
   if (!verified) {
     throw new OrbitError(400, ErrorCodes.passkey_authentication_failure, "Passkey could not be verified");
   }
-  await ctx.db.update(s.passkeys).set({ counter: newCounter, lastUsedAt: Date.now(), updatedAt: Date.now() }).where(eq(s.passkeys.id, passkey.id));
+  const now = Date.now();
+  const updated = first(await ctx.db.update(s.passkeys)
+    .set({
+      counter: sql`case when ${s.passkeys.counter} < ${newCounter} then ${newCounter} else ${s.passkeys.counter} end`,
+      lastUsedAt: now,
+      updatedAt: now,
+    })
+    .where(eq(s.passkeys.id, passkey.id))
+    .returning());
   const user = first(await ctx.db.select().from(s.users).where(eq(s.users.id, passkey.userId)))!;
-  return { user, passkey: first(await ctx.db.select().from(s.passkeys).where(eq(s.passkeys.id, passkey.id)))! };
+  return { user, passkey: updated! };
 }
 
 export const listPasskeys = async (ctx: AppContext, userId: string) =>

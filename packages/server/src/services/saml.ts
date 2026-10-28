@@ -6,7 +6,7 @@
 import { X509Certificate } from "node:crypto";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { SAML, ValidateInResponseTo, type CacheProvider, type Profile } from "@node-saml/node-saml";
-import { and, eq } from "drizzle-orm";
+import { and, eq, gt, sql } from "drizzle-orm";
 import { ErrorCodes, OrbitError, type EnterpriseConnectionJSON } from "@orbitid/shared";
 import type { AppContext } from "../context";
 import * as s from "../db/schema";
@@ -101,47 +101,44 @@ const SAML_ASSERTION_MAX_AGE_MS = 24 * 60 * 60_000;
 
 /**
  * Remembers AuthnRequest IDs (so a response must answer a request we issued, once) and assertion IDs
- * (so a captured response cannot be replayed). Rows live in `oauth_states`; better-sqlite3 is synchronous,
- * so each check-then-write below is atomic.
+ * (so a captured response cannot be replayed). Rows live in `oauth_states`; every check-and-write is a
+ * single statement so parallel requests cannot both claim the same key.
  */
-function samlCache(ctx: AppContext): CacheProvider {
+export function samlCache(ctx: AppContext): CacheProvider {
   const rowKey = (key: string) => `saml:${key}`;
-  const live = async (key: string) => {
-    const row = first(await ctx.db.select().from(s.oauthStates).where(eq(s.oauthStates.state, rowKey(key))));
-    if (row && row.expiresAt <= Date.now()) {
-      await ctx.db.delete(s.oauthStates).where(eq(s.oauthStates.state, rowKey(key)));
-      return undefined;
-    }
-    return row;
-  };
-  const write = async (key: string, value: string, expiresAt: number) =>
-    (await ctx.db.insert(s.oauthStates).values({ state: rowKey(key), provider: "saml_cache", flow: { value }, expiresAt }));
   const valueOf = (row: { flow: Record<string, unknown> } | undefined) => (row ? String(row.flow.value) : null);
   return {
     async saveAsync(key, value) {
-      await ctx.db.delete(s.oauthStates).where(eq(s.oauthStates.state, rowKey(key)));
-      await write(key, value, Date.now() + SAML_CACHE_TTL_MS);
+      const expiresAt = Date.now() + SAML_CACHE_TTL_MS;
+      await ctx.db.insert(s.oauthStates).values({ state: rowKey(key), provider: "saml_cache", flow: { value }, expiresAt })
+        .onConflictDoUpdate({ target: s.oauthStates.state, set: { flow: { value }, expiresAt } });
       return { value, createdAt: Date.now() };
     },
     async getAsync(key) {
-      return valueOf(await live(key));
+      return valueOf(first(await ctx.db.select().from(s.oauthStates)
+        .where(and(eq(s.oauthStates.state, rowKey(key)), gt(s.oauthStates.expiresAt, Date.now())))));
     },
     async removeAsync(key) {
       if (!key) return null;
-      const value = valueOf(await live(key));
-      await ctx.db.delete(s.oauthStates).where(eq(s.oauthStates.state, rowKey(key)));
-      return value;
+      const row = first(await ctx.db.delete(s.oauthStates).where(eq(s.oauthStates.state, rowKey(key))).returning());
+      return row && row.expiresAt > Date.now() ? valueOf(row) : null;
     },
     async consumeAsync(key) {
-      const value = valueOf(await live(key));
-      await ctx.db.delete(s.oauthStates).where(eq(s.oauthStates.state, rowKey(key)));
-      return value;
+      return valueOf(first(await ctx.db.delete(s.oauthStates)
+        .where(and(eq(s.oauthStates.state, rowKey(key)), gt(s.oauthStates.expiresAt, Date.now())))
+        .returning()));
     },
     async saveIfAbsentAsync(key, value, expiresAtMs) {
-      if (await live(key)) return false;
       // node-saml passes the instant until which it would still accept this assertion.
-      await write(key, value, expiresAtMs);
-      return true;
+      const now = Date.now();
+      const written = first(await ctx.db.insert(s.oauthStates).values({ state: rowKey(key), provider: "saml_cache", flow: { value }, expiresAt: expiresAtMs })
+        .onConflictDoUpdate({
+          target: s.oauthStates.state,
+          set: { flow: { value }, expiresAt: expiresAtMs },
+          setWhere: sql`${s.oauthStates.expiresAt} <= ${now}`,
+        })
+        .returning());
+      return !!written;
     },
   };
 }

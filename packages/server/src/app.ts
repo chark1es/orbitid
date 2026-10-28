@@ -4,6 +4,7 @@ import { OrbitError, ErrorCodes, type ApiErrorBody } from "@orbitid/shared";
 import { nanoid } from "nanoid";
 import type { AppContext } from "./context";
 import { requireSecretKey } from "./middleware";
+import { dashboardHandler } from "./modules/dashboard";
 
 import jwks from "./modules/jwks";
 import environment from "./modules/environment";
@@ -22,6 +23,13 @@ import apiKeys from "./modules/api-keys";
 import m2m from "./modules/m2m";
 import oidc from "./modules/oidc";
 import enterprise from "./modules/enterprise";
+
+/** A race between a check and an insert surfaces as a unique-constraint error from either database. */
+function isUniqueViolation(err: unknown): boolean {
+  const e = err as { code?: string; cause?: { code?: string } } | undefined;
+  const code = e?.code ?? e?.cause?.code ?? "";
+  return code === "23505" || code === "SQLITE_CONSTRAINT_UNIQUE" || code === "SQLITE_CONSTRAINT_PRIMARYKEY";
+}
 
 export function createApp(ctx: AppContext) {
   const app = new Hono();
@@ -45,13 +53,14 @@ export function createApp(ctx: AppContext) {
       if (err.status === 429 && err.meta?.retry_after) c.header("Retry-After", String(err.meta.retry_after));
       return c.json({ errors: items, trace_id } satisfies ApiErrorBody, err.status as any);
     }
+    if (isUniqueViolation(err)) return c.json({ errors: [{ code: ErrorCodes.duplicate_record, message: "That record already exists" }], trace_id } satisfies ApiErrorBody, 409);
     if ((err as any)?.name === "SyntaxError") return c.json({ errors: [{ code: ErrorCodes.request_body_invalid, message: "Invalid JSON" }], trace_id }, 400);
     console.error(`[${trace_id}]`, err);
     return c.json({ errors: [{ code: "internal_server_error", message: "Internal server error" }], trace_id } satisfies ApiErrorBody, 500);
   });
   app.notFound((c) => c.json({ errors: [{ code: ErrorCodes.resource_not_found, message: "Route not found" }] } satisfies ApiErrorBody, 404));
 
-  app.get("/health", (c) => c.json({ status: "ok", publishable_key: ctx.publishableKey }));
+  app.get("/health", (c) => c.json({ status: "ok", publishable_key: ctx.publishableKey, database: ctx.database.dialect, database_driver: ctx.database.driver }));
 
   // Public / well-known
   app.route("/", jwks(ctx));
@@ -83,6 +92,9 @@ export function createApp(ctx: AppContext) {
   backend.route("/m2m", m2m(ctx));
   if (ssoApp.backend) backend.route("/", ssoApp.backend);
   app.route("/v1", backend);
+
+  const dashboard = dashboardHandler(ctx);
+  if (dashboard) app.get("*", dashboard);
 
   return app;
 }

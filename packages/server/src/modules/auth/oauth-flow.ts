@@ -1,7 +1,7 @@
 // Starts an OAuth authorization and persists its state.
 import { generateCodeVerifier, generateState } from "arctic";
 import type { Context } from "hono";
-import { eq } from "drizzle-orm";
+import { and, eq, gt } from "drizzle-orm";
 import { ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../../context";
 import * as s from "../../db/schema";
@@ -47,15 +47,19 @@ export async function createOAuthAuthorization(ctx: AppContext, c: Context, prov
 export interface StoredOAuthFlow extends OAuthFlow { provider: string; codeVerifier: string; browserHash: string }
 
 export async function takeOAuthState(ctx: AppContext, state: string, provider: string): Promise<StoredOAuthFlow> {
+  const now = Date.now();
   const row = first(await ctx.db.select().from(s.oauthStates).where(eq(s.oauthStates.state, state)));
   // `oauth_states` also holds SAML cache and enterprise rows; only a real OAuth flow may be consumed here.
   const isOAuthFlow = typeof (row?.flow as { kind?: unknown } | undefined)?.kind === "string" && !!row?.codeVerifier && !row.provider.startsWith("enterprise_");
-  if (!row || !isOAuthFlow || row.provider !== provider || row.expiresAt <= Date.now()) {
-    if (row && isOAuthFlow && row.expiresAt <= Date.now()) await ctx.db.delete(s.oauthStates).where(eq(s.oauthStates.state, state));
+  if (!row || !isOAuthFlow || row.provider !== provider || row.expiresAt <= now) {
+    if (row && isOAuthFlow && row.expiresAt <= now) await ctx.db.delete(s.oauthStates).where(eq(s.oauthStates.state, state));
     throw new OrbitError(400, ErrorCodes.oauth_callback_error, "The OAuth state is invalid or has expired");
   }
-  await ctx.db.delete(s.oauthStates).where(eq(s.oauthStates.state, state));
+  const consumed = first(await ctx.db.delete(s.oauthStates)
+    .where(and(eq(s.oauthStates.state, state), eq(s.oauthStates.provider, provider), gt(s.oauthStates.expiresAt, now)))
+    .returning());
+  if (!consumed) throw new OrbitError(400, ErrorCodes.oauth_callback_error, "The OAuth state is invalid or has expired");
   // Persisted JSON: the row is written only by createOAuthAuthorization above.
-  const flow = row.flow as unknown as OAuthFlow & { browserHash?: string };
-  return { ...flow, browserHash: flow.browserHash ?? "", provider: row.provider, codeVerifier: row.codeVerifier ?? "" };
+  const flow = consumed.flow as unknown as OAuthFlow & { browserHash?: string };
+  return { ...flow, browserHash: flow.browserHash ?? "", provider: consumed.provider, codeVerifier: consumed.codeVerifier ?? "" };
 }

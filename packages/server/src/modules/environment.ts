@@ -95,6 +95,7 @@ export function buildEnvironment(ctx: AppContext): EnvironmentJSON {
       force_organization_selection: st.organizations.forceOrganizationSelection,
       creator_role: st.organizations.creatorRole,
       default_role: st.organizations.defaultRole,
+      max_created_organizations_per_user: st.organizations.maxCreatedOrganizationsPerUser,
     },
     display_config: {
       application_name: st.application.name,

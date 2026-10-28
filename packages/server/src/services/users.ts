@@ -1,5 +1,5 @@
 // Reusable user/identifier helpers (also used by the Backend API).
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../context";
 import * as s from "../db/schema";
@@ -269,15 +269,18 @@ export async function deletePhoneNumber(ctx: AppContext, userId: string, phoneId
 /** Locks the account after too many failed attempts (per settings.mfa.maxAttempts / lockoutDurationSeconds). */
 export async function recordFailedAttempt(ctx: AppContext, userId: string) {
   const st = ctx.settings.get();
-  const user = await getUserById(ctx, userId);
-  if (!user) return;
-  const attempts = user.failedAttempts + 1;
-  const shouldLock = attempts >= st.mfa.maxAttempts;
+  const now = Date.now();
+  // One statement so parallel wrong passwords cannot lose increments and slip under the lockout threshold.
+  const updated = first(await ctx.db.update(s.users)
+    .set({ failedAttempts: sql`${s.users.failedAttempts} + 1`, updatedAt: now })
+    .where(eq(s.users.id, userId))
+    .returning());
+  if (!updated || updated.failedAttempts < st.mfa.maxAttempts) return;
   await ctx.db.update(s.users).set({
-            failedAttempts: shouldLock ? 0 : attempts,
-            locked: shouldLock ? true : user.locked,
-            lockoutExpiresAt: shouldLock ? Date.now() + st.mfa.lockoutDurationSeconds * 1000 : user.lockoutExpiresAt,
-            updatedAt: Date.now(),
+            failedAttempts: 0,
+            locked: true,
+            lockoutExpiresAt: now + st.mfa.lockoutDurationSeconds * 1000,
+            updatedAt: now,
           }).where(eq(s.users.id, userId));
 }
 

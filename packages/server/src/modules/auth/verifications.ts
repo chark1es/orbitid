@@ -1,5 +1,5 @@
 // One-time codes, magic links and their delivery.
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import { ErrorCodes, OrbitError, type VerificationJSON } from "@orbitid/shared";
 import type { AppContext } from "../../context";
 import * as s from "../../db/schema";
@@ -104,26 +104,46 @@ export function verificationJSON(row: VerificationRow | null | undefined, fallba
 /** Verifies a numeric code, counting attempts and enforcing expiry/attempt limits. */
 export async function checkCode(ctx: AppContext, row: VerificationRow | undefined, code: string | undefined): Promise<VerificationRow> {
   if (!row) throw new OrbitError(422, ErrorCodes.form_code_incorrect, "There is no pending verification to check");
+  const now = Date.now();
   if (isExpired(row)) throw new OrbitError(422, ErrorCodes.verification_expired, "That verification code has expired. Request a new one.");
   if (row.attempts >= row.maxAttempts) throw new OrbitError(422, ErrorCodes.too_many_attempts, "Too many incorrect attempts. Request a new code.");
+  // The attempt is claimed before the code is compared: parallel guesses can never exceed max_attempts.
+  const claimed = first(await ctx.db.update(s.verifications)
+    .set({ attempts: sql`${s.verifications.attempts} + 1` })
+    .where(and(
+      eq(s.verifications.id, row.id),
+      sql`${s.verifications.attempts} < ${s.verifications.maxAttempts}`,
+      gt(s.verifications.expiresAt, now),
+    ))
+    .returning());
+  if (!claimed) {
+    const current = await getVerificationById(ctx, row.id);
+    if (!current || isExpired(current)) throw new OrbitError(422, ErrorCodes.verification_expired, "That verification code has expired. Request a new one.");
+    throw new OrbitError(422, ErrorCodes.too_many_attempts, "Too many incorrect attempts. Request a new code.");
+  }
   const trimmed = (code ?? "").trim();
-  const ok = !!row.codeHash && !!trimmed && safeEqual(sha256(trimmed), row.codeHash);
+  const ok = !!claimed.codeHash && !!trimmed && safeEqual(sha256(trimmed), claimed.codeHash);
   if (!ok) {
-    const attempts = row.attempts + 1;
-    await ctx.db.update(s.verifications).set({ attempts }).where(eq(s.verifications.id, row.id));
-    if (attempts >= row.maxAttempts) throw new OrbitError(422, ErrorCodes.too_many_attempts, "Too many incorrect attempts. Request a new code.");
+    if (claimed.attempts >= claimed.maxAttempts) throw new OrbitError(422, ErrorCodes.too_many_attempts, "Too many incorrect attempts. Request a new code.");
     throw new OrbitError(422, ErrorCodes.form_code_incorrect, "That verification code is incorrect", { param_name: "code" });
   }
-  await ctx.db.update(s.verifications).set({ verifiedAt: Date.now(), attempts: row.attempts }).where(eq(s.verifications.id, row.id));
-  return (await getVerificationById(ctx, row.id))!;
+  await ctx.db.update(s.verifications).set({ verifiedAt: now }).where(eq(s.verifications.id, claimed.id));
+  return (await getVerificationById(ctx, claimed.id))!;
 }
 
 /** Marks a magic link as clicked. Cross-device: the sign-in attempt poll then sees it. */
 export async function consumeLink(ctx: AppContext, row: VerificationRow) {
   if (row.verifiedAt) return row;
-  if (isExpired(row)) throw new OrbitError(422, ErrorCodes.verification_expired, "That link has expired");
-  await ctx.db.update(s.verifications).set({ consumedAt: Date.now(), verifiedAt: Date.now() }).where(eq(s.verifications.id, row.id));
-  return (await getVerificationById(ctx, row.id))!;
+  const now = Date.now();
+  const claimed = first(await ctx.db.update(s.verifications)
+    .set({ consumedAt: now, verifiedAt: now })
+    .where(and(eq(s.verifications.id, row.id), isNull(s.verifications.consumedAt), gt(s.verifications.expiresAt, now)))
+    .returning());
+  if (claimed) return claimed;
+  // A parallel click won: the link is already consumed, which is what the caller wants.
+  const current = await getVerificationById(ctx, row.id);
+  if (current?.verifiedAt) return current;
+  throw new OrbitError(422, ErrorCodes.verification_expired, "That link has expired");
 }
 
 export function magicLinkUrl(ctx: AppContext, token: string, params: Record<string, string | undefined> = {}): string {

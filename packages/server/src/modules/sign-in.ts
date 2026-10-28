@@ -496,6 +496,10 @@ export default function routes(ctx: AppContext) {
     await assertPasswordValid(ctx, body.password);
     const passwordHash = await hashPassword(body.password);
     const now = Date.now();
+    // One request wins the authorization; a parallel duplicate finds the attempt already claimed.
+    const claimed = await ctx.db.update(s.signIns).set({ status: "resetting_password", updatedAt: now })
+      .where(and(eq(s.signIns.id, row.id), eq(s.signIns.status, "needs_new_password"))).returning({ id: s.signIns.id });
+    if (!claimed.length) throw new OrbitError(400, ErrorCodes.client_state_invalid, "Password reset has not been verified");
     await ctx.db.update(s.users).set({ passwordHash, passwordUpdatedAt: now, failedAttempts: 0, locked: false, lockoutExpiresAt: null, updatedAt: now }).where(eq(s.users.id, user.id));
     const email = await primaryEmail(ctx, user);
     if (email) {

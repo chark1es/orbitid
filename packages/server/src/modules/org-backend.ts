@@ -348,10 +348,12 @@ export default function routes(ctx: AppContext) {
     if (effectiveInvitationStatus(invitation) !== "pending") {
       throw new OrbitError(409, ErrorCodes.duplicate_record, `Invitation is ${effectiveInvitationStatus(invitation)}`);
     }
-    await ctx.db.update(s.organizationInvitations).set({ status: "revoked", updatedAt: Date.now() }).where(eq(s.organizationInvitations.id, invitation.id));
-    const updated = first(await ctx.db.select().from(s.organizationInvitations).where(eq(s.organizationInvitations.id, invitation.id)))!;
-    await emitEvent(ctx, "organizationInvitation.revoked", await serializeOrganizationInvitation(ctx, updated, { backend: true }));
-    return c.json(await serializeOrganizationInvitation(ctx, updated, { backend: true }));
+    const revoked = first(await ctx.db.update(s.organizationInvitations).set({ status: "revoked", updatedAt: Date.now() })
+      .where(and(eq(s.organizationInvitations.id, invitation.id), eq(s.organizationInvitations.status, "pending")))
+      .returning());
+    if (!revoked) throw new OrbitError(409, ErrorCodes.duplicate_record, `Invitation is ${invitation.status}`);
+    await emitEvent(ctx, "organizationInvitation.revoked", await serializeOrganizationInvitation(ctx, revoked, { backend: true }));
+    return c.json(await serializeOrganizationInvitation(ctx, revoked, { backend: true }));
   });
 
   // ─────────── domains ───────────

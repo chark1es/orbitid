@@ -1,5 +1,5 @@
 // machine-to-machine identities: machine secrets, opaque/JWT tokens, revocation.
-import { asc, count, desc, eq, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, sql } from "drizzle-orm";
 import { jwtVerify, importJWK, type JWK } from "jose";
 import { ErrorCodes, ID_PREFIX, OrbitError, type M2MMachineJSON, type M2MTokenJSON } from "@orbitid/shared";
 import type { AppContext } from "../context";
@@ -204,8 +204,10 @@ export async function verifyMachineToken(ctx: AppContext, token: string): Promis
 }
 
 export async function revokeMachineToken(ctx: AppContext, row: TokenRow): Promise<TokenRow> {
-  if (!row.revoked) await ctx.db.update(s.m2mTokens).set({ revoked: true }).where(eq(s.m2mTokens.id, row.id));
-  return { ...row, revoked: true };
+  const revoked = first(await ctx.db.update(s.m2mTokens).set({ revoked: true })
+    .where(and(eq(s.m2mTokens.id, row.id), eq(s.m2mTokens.revoked, false)))
+    .returning());
+  return revoked ?? { ...row, revoked: true };
 }
 
 export async function listMachineTokens(ctx: AppContext, opts: { machineId?: string; limit?: number; offset?: number; orderBy?: string } = {}): Promise<{ data: TokenRow[]; totalCount: number }> {

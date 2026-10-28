@@ -1,5 +1,5 @@
 import { someAsync } from "../lib/async";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, or } from "drizzle-orm";
 import { ErrorCodes, OrbitError, ID_PREFIX } from "@orbitid/shared";
 import type { AppContext } from "../context";
 import * as s from "../db/schema";
@@ -188,12 +188,19 @@ export async function addMembership(ctx: AppContext, input: {
   if (existing) return existing;
   await assertOrganizationCapacity(ctx, org);
   const now = Date.now();
-  const id = newId(ID_PREFIX.membership);
-  await ctx.db.insert(s.organizationMemberships).values({
-            id, organizationId: input.organizationId, userId: input.userId, roleKey: input.roleKey,
+  // The unique index is the arbiter: parallel callers cannot create the membership twice.
+  const row = first(await ctx.db.insert(s.organizationMemberships).values({
+            id: newId(ID_PREFIX.membership), organizationId: input.organizationId, userId: input.userId, roleKey: input.roleKey,
             publicMetadata: input.publicMetadata ?? {}, privateMetadata: input.privateMetadata ?? {}, createdAt: now, updatedAt: now,
-          });
-  const row = first(await ctx.db.select().from(s.organizationMemberships).where(eq(s.organizationMemberships.id, id)))!;
+          })
+    .onConflictDoNothing({ target: [s.organizationMemberships.organizationId, s.organizationMemberships.userId] })
+    .returning());
+  if (!row) {
+    return first(await ctx.db
+      .select()
+      .from(s.organizationMemberships)
+      .where(and(eq(s.organizationMemberships.organizationId, input.organizationId), eq(s.organizationMemberships.userId, input.userId))))!;
+  }
   await emitEvent(ctx, "organizationMembership.created", await serializeMembership(ctx, row, { backend: true }));
   return row;
 }
@@ -203,9 +210,17 @@ export async function acceptInvitation(ctx: AppContext, invitation: InvitationRo
   const org = first(await ctx.db.select().from(s.organizations).where(eq(s.organizations.id, invitation.organizationId)));
   if (!org) return null;
   const membership = await addMembership(ctx, { organizationId: invitation.organizationId, userId, roleKey: invitation.roleKey, publicMetadata: invitation.publicMetadata });
-  await ctx.db.update(s.organizationInvitations).set({ status: "accepted", updatedAt: Date.now() }).where(eq(s.organizationInvitations.id, invitation.id));
-  const updated = first(await ctx.db.select().from(s.organizationInvitations).where(eq(s.organizationInvitations.id, invitation.id)))!;
-  await emitEvent(ctx, "organizationInvitation.accepted", await serializeOrganizationInvitation(ctx, updated, { backend: true }));
+  const now = Date.now();
+  // Flipping the status is the gate: only one of several parallel accepts emits the accepted event.
+  const accepted = first(await ctx.db.update(s.organizationInvitations).set({ status: "accepted", updatedAt: now })
+    .where(and(
+      eq(s.organizationInvitations.id, invitation.id),
+      eq(s.organizationInvitations.status, "pending"),
+      or(isNull(s.organizationInvitations.expiresAt), gt(s.organizationInvitations.expiresAt, now)),
+    ))
+    .returning());
+  if (!accepted) return membership;
+  await emitEvent(ctx, "organizationInvitation.accepted", await serializeOrganizationInvitation(ctx, accepted, { backend: true }));
   return membership;
 }
 

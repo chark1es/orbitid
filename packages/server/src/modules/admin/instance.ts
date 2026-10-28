@@ -87,6 +87,7 @@ function instanceJson(ctx: AppContext) {
     id: "default",
     environment_type: ctx.env.nodeEnv === "production" ? "production" : "development",
     publishable_key: ctx.publishableKey,
+    database: { dialect: ctx.database.dialect, driver: ctx.database.driver, label: ctx.database.label },
     ...maskSettings(settings),
   };
 }

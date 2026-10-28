@@ -394,11 +394,13 @@ export default function routes(ctx: AppContext) {
           .from(s.organizationInvitations)
           .where(and(eq(s.organizationInvitations.organizationId, org.id), eq(s.organizationInvitations.id, c.req.param("invId")))));
     if (!invitation) throw new OrbitError(404, ErrorCodes.resource_not_found, "Organization invitation not found");
-    if (invitation.status !== "pending") throw new OrbitError(409, ErrorCodes.duplicate_record, `Invitation is ${invitation.status}`);
-    await ctx.db.update(s.organizationInvitations).set({ status: "revoked", updatedAt: Date.now() }).where(eq(s.organizationInvitations.id, invitation.id));
-    const updated = first(await ctx.db.select().from(s.organizationInvitations).where(eq(s.organizationInvitations.id, invitation.id)))!;
-    await emitEvent(ctx, "organizationInvitation.revoked", await serializeOrganizationInvitation(ctx, updated, { backend: true }));
-    return c.json({ response: await serializeOrganizationInvitation(ctx, updated) });
+    const now = Date.now();
+    const revoked = first(await ctx.db.update(s.organizationInvitations).set({ status: "revoked", updatedAt: now })
+      .where(and(eq(s.organizationInvitations.id, invitation.id), eq(s.organizationInvitations.status, "pending")))
+      .returning());
+    if (!revoked) throw new OrbitError(409, ErrorCodes.duplicate_record, `Invitation is ${invitation.status}`);
+    await emitEvent(ctx, "organizationInvitation.revoked", await serializeOrganizationInvitation(ctx, revoked, { backend: true }));
+    return c.json({ response: await serializeOrganizationInvitation(ctx, revoked) });
   });
 
   // ─────────── domains ───────────

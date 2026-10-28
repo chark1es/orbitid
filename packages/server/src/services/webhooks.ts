@@ -172,8 +172,15 @@ export async function deliverDue(ctx: AppContext, opts: { limit?: number } = {})
     const event = first(await ctx.db.select().from(s.webhookEvents).where(eq(s.webhookEvents.id, delivery.eventId)));
     if (!endpoint || !event) continue;
     // Claim the row before the network call so overlapping ticks cannot deliver it twice.
-    await ctx.db.update(s.webhookDeliveries).set({ nextAttemptAt: Date.now() + CLAIM_WINDOW_MS }).where(eq(s.webhookDeliveries.id, delivery.id));
-    await attemptDelivery(ctx, delivery, endpoint, event);
+    const claimed = first(await ctx.db.update(s.webhookDeliveries).set({ nextAttemptAt: Date.now() + CLAIM_WINDOW_MS })
+      .where(and(
+        eq(s.webhookDeliveries.id, delivery.id),
+        eq(s.webhookDeliveries.status, "pending"),
+        lte(s.webhookDeliveries.nextAttemptAt, now),
+      ))
+      .returning());
+    if (!claimed) continue;
+    await attemptDelivery(ctx, claimed, endpoint, event);
     attempted += 1;
   }
   return attempted;

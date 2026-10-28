@@ -2,7 +2,7 @@
 import { randomInt } from "node:crypto";
 import { authenticator } from "otplib";
 import { toDataURL } from "qrcode";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { SignInFactor } from "@orbitid/shared";
 import type { AppContext } from "../context";
 import * as s from "../db/schema";
@@ -61,8 +61,12 @@ export async function consumeBackupCode(ctx: AppContext, user: UserRow, code: st
   const hashes = user.backupCodes ?? [];
   const hash = normalizeBackupCodeHash(code);
   if (!hashes.includes(hash)) return false;
-  await ctx.db.update(s.users).set({ backupCodes: hashes.filter((h) => h !== hash), updatedAt: Date.now() }).where(eq(s.users.id, user.id));
-  return true;
+  // Compare-and-set on the serialized array: only one of several parallel requests can spend this code.
+  const spent = first(await ctx.db.update(s.users)
+    .set({ backupCodes: hashes.filter((h) => h !== hash), updatedAt: Date.now() })
+    .where(and(eq(s.users.id, user.id), sql`${s.users.backupCodes} = ${JSON.stringify(hashes)}`))
+    .returning({ id: s.users.id }));
+  return !!spent;
 }
 
 export async function verifiedSecondFactorPhones(ctx: AppContext, user: UserRow) {

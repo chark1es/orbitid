@@ -167,13 +167,12 @@ export async function updateApiKey(ctx: AppContext, row: ApiKeyRow, patch: Updat
 }
 
 export async function revokeApiKey(ctx: AppContext, row: ApiKeyRow, reason?: string | null): Promise<ApiKeyRow> {
-  if (!row.revoked) {
-    await ctx.db.update(s.apiKeys).set({ revoked: true, revocationReason: reason ?? null, updatedAt: Date.now() }).where(eq(s.apiKeys.id, row.id));
-    const updated = (await getApiKey(ctx, row.id))!;
-    void emitEvent(ctx, "apiKey.revoked", serializeApiKey(updated));
-    return updated;
-  }
-  return row;
+  const revoked = first(await ctx.db.update(s.apiKeys).set({ revoked: true, revocationReason: reason ?? null, updatedAt: Date.now() })
+    .where(and(eq(s.apiKeys.id, row.id), eq(s.apiKeys.revoked, false)))
+    .returning());
+  if (!revoked) return row;
+  void emitEvent(ctx, "apiKey.revoked", serializeApiKey(revoked));
+  return revoked;
 }
 
 /** Deletes the key (returns the deleted object's id). Emits `apiKey.revoked` — deletion revokes the credential. */
