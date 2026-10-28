@@ -1,0 +1,486 @@
+import { sqliteTable, text, integer, index, uniqueIndex, primaryKey } from "drizzle-orm/sqlite-core";
+
+/** All timestamps: integer unix epoch milliseconds. JSON columns: text with `{ mode: "json" }`. */
+const ts = (name: string) => integer(name).notNull().$defaultFn(() => Date.now());
+const json = <T>(name: string) => text(name, { mode: "json" }).$type<T>();
+type Meta = Record<string, unknown>;
+const created = () => ({ createdAt: ts("created_at"), updatedAt: ts("updated_at") });
+
+// ───────────── instance ─────────────
+/** Single row (id = "default"). `settings` is `InstanceSettings` from @orbitid/shared (secrets included). */
+export const instance = sqliteTable("instance", {
+  id: text("id").primaryKey(),
+  settings: json<Record<string, unknown>>("settings").notNull(),
+  secretKeyHash: text("secret_key_hash"),
+  ...created(),
+});
+
+/** JWT signing keys; private JWK encrypted at rest with ORBITID_ENCRYPTION_KEY (AES-256-GCM). */
+export const signingKeys = sqliteTable("signing_keys", {
+  kid: text("kid").primaryKey(),
+  alg: text("alg").notNull(),
+  publicJwk: json<Record<string, unknown>>("public_jwk").notNull(),
+  privateJwkEnc: text("private_jwk_enc").notNull(),
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
+  createdAt: ts("created_at"),
+  rotatedAt: integer("rotated_at"),
+});
+
+// ───────────── users & identifications ─────────────
+export const users = sqliteTable("users", {
+  id: text("id").primaryKey(),
+  externalId: text("external_id").unique(),
+  username: text("username"),
+  usernameLower: text("username_lower").unique(),
+  firstName: text("first_name"),
+  lastName: text("last_name"),
+  imageUrl: text("image_url"),
+  hasImage: integer("has_image", { mode: "boolean" }).notNull().default(false),
+  passwordHash: text("password_hash"),
+  passwordUpdatedAt: integer("password_updated_at"),
+  primaryEmailAddressId: text("primary_email_address_id"),
+  primaryPhoneNumberId: text("primary_phone_number_id"),
+  publicMetadata: json<Meta>("public_metadata").notNull().$defaultFn(() => ({})),
+  privateMetadata: json<Meta>("private_metadata").notNull().$defaultFn(() => ({})),
+  unsafeMetadata: json<Meta>("unsafe_metadata").notNull().$defaultFn(() => ({})),
+  banned: integer("banned", { mode: "boolean" }).notNull().default(false),
+  locked: integer("locked", { mode: "boolean" }).notNull().default(false),
+  lockoutExpiresAt: integer("lockout_expires_at"),
+  failedAttempts: integer("failed_attempts").notNull().default(0),
+  // MFA
+  totpSecretEnc: text("totp_secret_enc"),
+  totpVerified: integer("totp_verified", { mode: "boolean" }).notNull().default(false),
+  /** sha256 hashes of unused backup codes */
+  backupCodes: json<string[]>("backup_codes"),
+  deleteSelfEnabled: integer("delete_self_enabled", { mode: "boolean" }).notNull().default(true),
+  createOrganizationEnabled: integer("create_organization_enabled", { mode: "boolean" }).notNull().default(true),
+  createOrganizationsLimit: integer("create_organizations_limit"),
+  legalAcceptedAt: integer("legal_accepted_at"),
+  lastSignInAt: integer("last_sign_in_at"),
+  lastActiveAt: integer("last_active_at"),
+  ...created(),
+});
+
+export const emailAddresses = sqliteTable("email_addresses", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
+  email: text("email").notNull(), // stored lowercased
+  verified: integer("verified", { mode: "boolean" }).notNull().default(false),
+  verifiedAt: integer("verified_at"),
+  verifiedStrategy: text("verified_strategy"),
+  reserved: integer("reserved", { mode: "boolean" }).notNull().default(false),
+  ...created(),
+}, (t) => [uniqueIndex("email_unique_verified").on(t.email).where(sql`verified = 1`), index("email_user_idx").on(t.userId), index("email_addr_idx").on(t.email)]);
+
+export const phoneNumbers = sqliteTable("phone_numbers", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
+  phone: text("phone").notNull(), // E.164
+  verified: integer("verified", { mode: "boolean" }).notNull().default(false),
+  verifiedAt: integer("verified_at"),
+  reservedForSecondFactor: integer("reserved_for_second_factor", { mode: "boolean" }).notNull().default(false),
+  defaultSecondFactor: integer("default_second_factor", { mode: "boolean" }).notNull().default(false),
+  ...created(),
+}, (t) => [uniqueIndex("phone_unique_verified").on(t.phone).where(sql`verified = 1`), index("phone_user_idx").on(t.userId)]);
+
+export const externalAccounts = sqliteTable("external_accounts", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
+  provider: text("provider").notNull(),
+  providerUserId: text("provider_user_id").notNull(),
+  emailAddress: text("email_address").notNull().default(""),
+  firstName: text("first_name").notNull().default(""),
+  lastName: text("last_name").notNull().default(""),
+  username: text("username"),
+  imageUrl: text("image_url"),
+  approvedScopes: text("approved_scopes").notNull().default(""),
+  accessTokenEnc: text("access_token_enc"),
+  refreshTokenEnc: text("refresh_token_enc"),
+  tokenExpiresAt: integer("token_expires_at"),
+  publicMetadata: json<Meta>("public_metadata").notNull().$defaultFn(() => ({})),
+  ...created(),
+}, (t) => [uniqueIndex("ext_provider_uid").on(t.provider, t.providerUserId), index("ext_user_idx").on(t.userId)]);
+
+export const passkeys = sqliteTable("passkeys", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  credentialId: text("credential_id").notNull().unique(), // base64url
+  publicKey: text("public_key").notNull(), // base64url COSE key
+  counter: integer("counter").notNull().default(0),
+  transports: json<string[]>("transports"),
+  deviceType: text("device_type"),
+  backedUp: integer("backed_up", { mode: "boolean" }).notNull().default(false),
+  lastUsedAt: integer("last_used_at"),
+  ...created(),
+});
+
+// ───────────── clients, sessions, sign-in/up attempts ─────────────
+export const clients = sqliteTable("clients", {
+  id: text("id").primaryKey(),
+  /** sha256 of the opaque `__client` cookie value */
+  tokenHash: text("token_hash").notNull().unique(),
+  lastActiveSessionId: text("last_active_session_id"),
+  ip: text("ip"),
+  userAgent: text("user_agent"),
+  ...created(),
+});
+
+export const sessions = sqliteTable("sessions", {
+  id: text("id").primaryKey(),
+  clientId: text("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  status: text("status").notNull().default("active"),
+  lastActiveAt: ts("last_active_at"),
+  lastActiveOrganizationId: text("last_active_organization_id"),
+  expireAt: integer("expire_at").notNull(),
+  abandonAt: integer("abandon_at").notNull(),
+  actor: json<Record<string, unknown>>("actor"),
+  /** epoch ms of last successful first/second factor verification (reverification) */
+  firstFactorVerifiedAt: integer("first_factor_verified_at"),
+  secondFactorVerifiedAt: integer("second_factor_verified_at"),
+  ip: text("ip"),
+  userAgent: text("user_agent"),
+  city: text("city"),
+  country: text("country"),
+  ...created(),
+}, (t) => [index("sess_user_idx").on(t.userId), index("sess_client_idx").on(t.clientId)]);
+
+export const signIns = sqliteTable("sign_ins", {
+  id: text("id").primaryKey(),
+  clientId: text("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+  status: text("status").notNull(),
+  identifier: text("identifier"),
+  userId: text("user_id"),
+  /** serialized verification state: { first: VerificationJSON-ish + internal, second: ... , passwordResetPending: bool } */
+  state: json<Record<string, unknown>>("state").notNull().$defaultFn(() => ({})),
+  createdSessionId: text("created_session_id"),
+  abandonAt: integer("abandon_at").notNull(),
+  ...created(),
+});
+
+export const signUps = sqliteTable("sign_ups", {
+  id: text("id").primaryKey(),
+  clientId: text("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+  status: text("status").notNull(),
+  /** collected fields: emailAddress, phoneNumber, username, firstName, lastName, passwordHash, externalId, legalAcceptedAt, externalAccount{...} */
+  fields: json<Record<string, unknown>>("fields").notNull().$defaultFn(() => ({})),
+  unsafeMetadata: json<Meta>("unsafe_metadata").notNull().$defaultFn(() => ({})),
+  /** per-field verification state: { email_address: {...}, phone_number: {...}, external_account: {...} } */
+  verifications: json<Record<string, unknown>>("verifications").notNull().$defaultFn(() => ({})),
+  invitationId: text("invitation_id"),
+  orgInvitationId: text("org_invitation_id"),
+  createdSessionId: text("created_session_id"),
+  createdUserId: text("created_user_id"),
+  abandonAt: integer("abandon_at").notNull(),
+  ...created(),
+});
+
+/** One-time codes / magic-link tokens / tickets, hashed. */
+export const verifications = sqliteTable("verifications", {
+  id: text("id").primaryKey(),
+  /** e.g. sign_in_first_factor | sign_in_second_factor | sign_up_email | add_email | add_phone | reverify | reset_password | org_domain */
+  purpose: text("purpose").notNull(),
+  strategy: text("strategy").notNull(), // email_code | email_link | phone_code | ...
+  identifier: text("identifier").notNull(), // email / phone the code was sent to
+  /** resource that owns the attempt (sign_in id, sign_up id, email_address id, ...) */
+  ownerId: text("owner_id").notNull(),
+  codeHash: text("code_hash"),
+  tokenHash: text("token_hash"),
+  attempts: integer("attempts").notNull().default(0),
+  maxAttempts: integer("max_attempts").notNull().default(5),
+  redirectUrl: text("redirect_url"),
+  /** magic-link: set when link was clicked in any browser */
+  consumedAt: integer("consumed_at"),
+  verifiedAt: integer("verified_at"),
+  expiresAt: integer("expires_at").notNull(),
+  createdAt: ts("created_at"),
+}, (t) => [index("ver_owner_idx").on(t.ownerId, t.purpose), index("ver_token_idx").on(t.tokenHash)]);
+
+/** In-flight OAuth authorizations (state → flow). */
+export const oauthStates = sqliteTable("oauth_states", {
+  state: text("state").primaryKey(),
+  provider: text("provider").notNull(),
+  codeVerifier: text("code_verifier"),
+  nonce: text("nonce"),
+  /** { kind: "sign_in"|"sign_up"|"connect", ownerId, userId?, redirectUrl, actionCompleteRedirectUrl, additionalScopes? } */
+  flow: json<Record<string, unknown>>("flow").notNull(),
+  expiresAt: integer("expires_at").notNull(),
+});
+
+/** Sliding-window rate limit counters (also used for lockout of IPs). */
+export const rateLimits = sqliteTable("rate_limits", {
+  key: text("key").primaryKey(),
+  count: integer("count").notNull(),
+  resetAt: integer("reset_at").notNull(),
+});
+
+// ───────────── organizations & RBAC ─────────────
+export const organizations = sqliteTable("organizations", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  slug: text("slug").unique(),
+  imageUrl: text("image_url"),
+  hasImage: integer("has_image", { mode: "boolean" }).notNull().default(false),
+  maxAllowedMemberships: integer("max_allowed_memberships").notNull().default(5),
+  adminDeleteEnabled: integer("admin_delete_enabled", { mode: "boolean" }).notNull().default(true),
+  publicMetadata: json<Meta>("public_metadata").notNull().$defaultFn(() => ({})),
+  privateMetadata: json<Meta>("private_metadata").notNull().$defaultFn(() => ({})),
+  createdBy: text("created_by"),
+  ...created(),
+});
+/** Instance-wide custom roles. System roles `org:admin` and `org:member` are seeded. */
+export const roles = sqliteTable("roles", {
+  id: text("id").primaryKey(),
+  key: text("key").notNull().unique(), // "org:admin"
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  isCreatorEligible: integer("is_creator_eligible", { mode: "boolean" }).notNull().default(false),
+  isSystem: integer("is_system", { mode: "boolean" }).notNull().default(false),
+  ...created(),
+});
+export const permissions = sqliteTable("permissions", {
+  id: text("id").primaryKey(),
+  key: text("key").notNull().unique(), // "org:billing:manage"
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  type: text("type").notNull().default("user"), // system | user
+  ...created(),
+});
+export const rolePermissions = sqliteTable("role_permissions", {
+  roleId: text("role_id").notNull().references(() => roles.id, { onDelete: "cascade" }),
+  permissionId: text("permission_id").notNull().references(() => permissions.id, { onDelete: "cascade" }),
+}, (t) => [primaryKey({ columns: [t.roleId, t.permissionId] })]);
+
+export const organizationMemberships = sqliteTable("organization_memberships", {
+  id: text("id").primaryKey(),
+  organizationId: text("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  roleKey: text("role_key").notNull(),
+  publicMetadata: json<Meta>("public_metadata").notNull().$defaultFn(() => ({})),
+  privateMetadata: json<Meta>("private_metadata").notNull().$defaultFn(() => ({})),
+  ...created(),
+}, (t) => [uniqueIndex("om_org_user").on(t.organizationId, t.userId), index("om_user_idx").on(t.userId)]);
+
+export const organizationInvitations = sqliteTable("organization_invitations", {
+  id: text("id").primaryKey(),
+  organizationId: text("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  email: text("email").notNull(),
+  roleKey: text("role_key").notNull(),
+  status: text("status").notNull().default("pending"),
+  tokenHash: text("token_hash").notNull().unique(),
+  inviterUserId: text("inviter_user_id"),
+  redirectUrl: text("redirect_url"),
+  publicMetadata: json<Meta>("public_metadata").notNull().$defaultFn(() => ({})),
+  privateMetadata: json<Meta>("private_metadata").notNull().$defaultFn(() => ({})),
+  expiresAt: integer("expires_at"),
+  ...created(),
+}, (t) => [index("oi_org_idx").on(t.organizationId), index("oi_email_idx").on(t.email)]);
+
+export const organizationDomains = sqliteTable("organization_domains", {
+  id: text("id").primaryKey(),
+  organizationId: text("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  enrollmentMode: text("enrollment_mode").notNull().default("manual_invitation"),
+  verified: integer("verified", { mode: "boolean" }).notNull().default(false),
+  affiliationEmailAddress: text("affiliation_email_address"),
+  ...created(),
+}, (t) => [uniqueIndex("od_org_name").on(t.organizationId, t.name)]);
+
+export const organizationMembershipRequests = sqliteTable("organization_membership_requests", {
+  id: text("id").primaryKey(),
+  organizationId: text("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  status: text("status").notNull().default("pending"),
+  ...created(),
+});
+
+// ───────────── instance-level access control ─────────────
+export const invitations = sqliteTable("invitations", {
+  id: text("id").primaryKey(),
+  email: text("email").notNull(),
+  status: text("status").notNull().default("pending"),
+  tokenHash: text("token_hash").notNull().unique(),
+  redirectUrl: text("redirect_url"),
+  publicMetadata: json<Meta>("public_metadata").notNull().$defaultFn(() => ({})),
+  expiresAt: integer("expires_at"),
+  ...created(),
+});
+export const waitlistEntries = sqliteTable("waitlist_entries", {
+  id: text("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  status: text("status").notNull().default("pending"),
+  invitationId: text("invitation_id"),
+  ...created(),
+});
+export const allowlistIdentifiers = sqliteTable("allowlist_identifiers", {
+  id: text("id").primaryKey(),
+  identifier: text("identifier").notNull().unique(), // email, phone, or "@domain.com" / "*@domain.com"
+  identifierType: text("identifier_type").notNull(),
+  invitationId: text("invitation_id"),
+  ...created(),
+});
+export const blocklistIdentifiers = sqliteTable("blocklist_identifiers", {
+  id: text("id").primaryKey(),
+  identifier: text("identifier").notNull().unique(),
+  identifierType: text("identifier_type").notNull(),
+  ...created(),
+});
+
+// ───────────── tokens & templates ─────────────
+export const jwtTemplates = sqliteTable("jwt_templates", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  /** claims with shortcodes e.g. { "email": "{{user.primary_email_address}}", "org": "{{org.slug}}" } */
+  claims: json<Record<string, unknown>>("claims").notNull(),
+  lifetime: integer("lifetime").notNull().default(60),
+  allowedClockSkew: integer("allowed_clock_skew").notNull().default(5),
+  customSigningKey: integer("custom_signing_key", { mode: "boolean" }).notNull().default(false),
+  signingAlgorithm: text("signing_algorithm").notNull().default("RS256"),
+  signingKeyEnc: text("signing_key_enc"),
+  ...created(),
+});
+export const actorTokens = sqliteTable("actor_tokens", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  actor: json<Record<string, unknown>>("actor").notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  status: text("status").notNull().default("pending"),
+  expiresAt: integer("expires_at").notNull(),
+  sessionMaxDurationSeconds: integer("session_max_duration_seconds").notNull().default(1800),
+  ...created(),
+});
+export const signInTokens = sqliteTable("sign_in_tokens", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull().unique(),
+  status: text("status").notNull().default("pending"),
+  expiresAt: integer("expires_at").notNull(),
+  ...created(),
+});
+
+// ───────────── webhooks ─────────────
+export const webhookEndpoints = sqliteTable("webhook_endpoints", {
+  id: text("id").primaryKey(),
+  url: text("url").notNull(),
+  description: text("description").notNull().default(""),
+  eventTypes: json<string[]>("event_types").notNull().$defaultFn(() => []), // [] = all
+  secret: text("secret").notNull(), // whsec_<base64>
+  disabled: integer("disabled", { mode: "boolean" }).notNull().default(false),
+  ...created(),
+});
+export const webhookEvents = sqliteTable("webhook_events", {
+  id: text("id").primaryKey(),
+  type: text("type").notNull(),
+  payload: json<Record<string, unknown>>("payload").notNull(),
+  createdAt: ts("created_at"),
+});
+export const webhookDeliveries = sqliteTable("webhook_deliveries", {
+  id: text("id").primaryKey(),
+  endpointId: text("endpoint_id").notNull().references(() => webhookEndpoints.id, { onDelete: "cascade" }),
+  eventId: text("event_id").notNull().references(() => webhookEvents.id, { onDelete: "cascade" }),
+  status: text("status").notNull().default("pending"), // pending | success | failed
+  attempt: integer("attempt").notNull().default(0),
+  responseCode: integer("response_code"),
+  responseBody: text("response_body"),
+  nextAttemptAt: integer("next_attempt_at"),
+  createdAt: ts("created_at"),
+}, (t) => [index("wd_due_idx").on(t.status, t.nextAttemptAt)]);
+
+// ───────────── API keys, M2M, OAuth provider, enterprise SSO ─────────────
+export const apiKeys = sqliteTable("api_keys", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  /** user_xxx or org_xxx */
+  subject: text("subject").notNull(),
+  prefix: text("prefix").notNull(), // first chars shown in UI, e.g. "ak_live_AbCd"
+  secretHash: text("secret_hash").notNull().unique(),
+  scopes: json<string[]>("scopes").notNull().$defaultFn(() => []),
+  claims: json<Record<string, unknown>>("claims"),
+  revoked: integer("revoked", { mode: "boolean" }).notNull().default(false),
+  revocationReason: text("revocation_reason"),
+  expiresAt: integer("expires_at"),
+  lastUsedAt: integer("last_used_at"),
+  createdBy: text("created_by"),
+  ...created(),
+}, (t) => [index("ak_subject_idx").on(t.subject)]);
+export const machines = sqliteTable("machines", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  secretHash: text("secret_hash").notNull().unique(),
+  scopedMachines: json<string[]>("scoped_machines").notNull().$defaultFn(() => []),
+  defaultTokenTtl: integer("default_token_ttl").notNull().default(3600),
+  ...created(),
+});
+export const m2mTokens = sqliteTable("m2m_tokens", {
+  id: text("id").primaryKey(),
+  machineId: text("machine_id").notNull().references(() => machines.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull().unique(),
+  claims: json<Record<string, unknown>>("claims"),
+  revoked: integer("revoked", { mode: "boolean" }).notNull().default(false),
+  expiresAt: integer("expires_at"),
+  createdAt: ts("created_at"),
+});
+export const oauthApplications = sqliteTable("oauth_applications", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  clientId: text("client_id").notNull().unique(),
+  clientSecretHash: text("client_secret_hash"),
+  isPublic: integer("is_public", { mode: "boolean" }).notNull().default(false),
+  redirectUris: json<string[]>("redirect_uris").notNull().$defaultFn(() => []),
+  scopes: text("scopes").notNull().default("openid profile email"),
+  consentScreenEnabled: integer("consent_screen_enabled", { mode: "boolean" }).notNull().default(true),
+  pkceRequired: integer("pkce_required", { mode: "boolean" }).notNull().default(true),
+  ...created(),
+});
+/** Authorization codes + access/refresh tokens issued by the OIDC provider. `kind`: code | access | refresh */
+export const oauthGrants = sqliteTable("oauth_grants", {
+  id: text("id").primaryKey(),
+  kind: text("kind").notNull(),
+  applicationId: text("application_id").notNull().references(() => oauthApplications.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull().unique(),
+  scopes: text("scopes").notNull(),
+  redirectUri: text("redirect_uri"),
+  codeChallenge: text("code_challenge"),
+  codeChallengeMethod: text("code_challenge_method"),
+  nonce: text("nonce"),
+  revoked: integer("revoked", { mode: "boolean" }).notNull().default(false),
+  expiresAt: integer("expires_at").notNull(),
+  createdAt: ts("created_at"),
+});
+export const oauthConsents = sqliteTable("oauth_consents", {
+  applicationId: text("application_id").notNull().references(() => oauthApplications.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  scopes: text("scopes").notNull(),
+  createdAt: ts("created_at"),
+}, (t) => [primaryKey({ columns: [t.applicationId, t.userId] })]);
+export const enterpriseConnections = sqliteTable("enterprise_connections", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  protocol: text("protocol").notNull(), // saml | oidc
+  provider: text("provider").notNull().default("custom"),
+  domains: json<string[]>("domains").notNull().$defaultFn(() => []),
+  active: integer("active", { mode: "boolean" }).notNull().default(false),
+  allowSubdomains: integer("allow_subdomains", { mode: "boolean" }).notNull().default(false),
+  allowIdpInitiated: integer("allow_idp_initiated", { mode: "boolean" }).notNull().default(false),
+  syncUserAttributes: integer("sync_user_attributes", { mode: "boolean" }).notNull().default(true),
+  disableAdditionalIdentifications: integer("disable_additional_identifications", { mode: "boolean" }).notNull().default(false),
+  /** SAML: { idpEntityId, idpSsoUrl, idpCertificate, attributeMapping }; OIDC: { clientId, clientSecretEnc, discoveryUrl, ... } */
+  config: json<Record<string, unknown>>("config").notNull().$defaultFn(() => ({})),
+  ...created(),
+});
+
+export const auditLogs = sqliteTable("audit_logs", {
+  id: text("id").primaryKey(),
+  actor: text("actor"),
+  action: text("action").notNull(),
+  targetType: text("target_type"),
+  targetId: text("target_id"),
+  metadata: json<Record<string, unknown>>("metadata").notNull().$defaultFn(() => ({})),
+  ip: text("ip"),
+  createdAt: ts("created_at"),
+}, (t) => [index("audit_created_idx").on(t.createdAt)]);
+
+import { sql } from "drizzle-orm";

@@ -1,0 +1,17 @@
+{
+  "name": "orbitid",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Open source authentication & user management platform — a Clerk alternative.",
+  "license": "MIT",
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "dev:server": "npm run dev -w @orbitid/server",
+    "dev:dashboard": "npm run dev -w @orbitid/dashboard",
+    "dev:example": "npm run dev -w example-next",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "db:generate": "npm run db:generate -w @orbitid/server"
+  },
+  "engines": { "node": ">=20" }
+}
