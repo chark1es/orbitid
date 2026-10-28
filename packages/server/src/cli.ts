@@ -1,6 +1,7 @@
 #!/usr/bin/env -S npx tsx
 import { createContext } from "./bootstrap";
 import { startServer } from "./index";
+import { emailStartupWarnings } from "./services/mail";
 
 const USAGE = `Usage: orbitid [command]
 
@@ -51,6 +52,7 @@ async function main() {
   console.log(`  Secret key      : ${ctx.env.nodeEnv === "production" ? `${ctx.env.secretKey.slice(0, 8)}…${ctx.env.secretKey.slice(-4)} (print it with: keys)` : ctx.env.secretKey}`);
   console.log(`  JWKS            : ${ctx.env.baseUrl}/.well-known/jwks.json`);
   for (const line of describeDatabase(ctx.database.label, ctx.database.driver)) console.log(line);
+  for (const line of emailStartupWarnings(ctx)) console.log(line);
   console.log("");
 
   const stop = async () => {

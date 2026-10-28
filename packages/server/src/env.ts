@@ -19,6 +19,10 @@ export interface Env {
   /** Built dashboard (apps/dashboard/dist). The server serves it at `/` when the folder exists. */
   dashboardDir: string;
   nodeEnv: string;
+  /** Email fallbacks; the dashboard settings win when they are set. */
+  resendApiKey: string;
+  smtpUrl: string;
+  emailFrom: string;
 }
 
 export function loadEnv(overrides: Partial<Env> = {}): Env {
@@ -49,5 +53,8 @@ export function loadEnv(overrides: Partial<Env> = {}): Env {
     dataDir,
     dashboardDir: resolve(overrides.dashboardDir ?? e.ORBITID_DASHBOARD_DIR ?? new URL("../../../apps/dashboard/dist", import.meta.url).pathname),
     nodeEnv,
+    resendApiKey: overrides.resendApiKey ?? e.ORBITID_RESEND_API_KEY ?? "",
+    smtpUrl: overrides.smtpUrl ?? e.ORBITID_SMTP_URL ?? "",
+    emailFrom: overrides.emailFrom ?? e.ORBITID_EMAIL_FROM ?? "",
   };
 }

@@ -14,6 +14,8 @@ export const ErrorCodes = {
   secret_key_invalid: "secret_key_invalid",
   rate_limit_exceeded: "rate_limit_exceeded",
   bot_detected: "bot_detected",
+  // delivery
+  email_delivery_failed: "email_delivery_failed",
   // identifiers / credentials
   form_identifier_not_found: "form_identifier_not_found",
   form_identifier_exists: "form_identifier_exists",
