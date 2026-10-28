@@ -190,6 +190,8 @@ export const verifications = sqliteTable("verifications", {
   attempts: integer("attempts").notNull().default(0),
   maxAttempts: integer("max_attempts").notNull().default(5),
   redirectUrl: text("redirect_url"),
+  /** extra state for the verification (passkey challenge/rpID/origin, email being verified, ...) */
+  data: json<Record<string, unknown>>("data"),
   /** magic-link: set when link was clicked in any browser */
   consumedAt: integer("consumed_at"),
   verifiedAt: integer("verified_at"),

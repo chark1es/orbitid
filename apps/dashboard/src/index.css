@@ -1,0 +1,29 @@
+@import "@orbitid/ui/styles.css";
+
+/* Tailwind does not scan node_modules by default; the workspace symlink must be declared explicitly. */
+@source "../../../packages/ui/src";
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Recharts renders SVG text; give it the theme's muted colour. */
+.recharts-cartesian-axis-tick text {
+  fill: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.recharts-default-tooltip {
+  border-radius: var(--radius-md) !important;
+  border: 1px solid var(--border) !important;
+  background: var(--popover) !important;
+  color: var(--popover-foreground) !important;
+  font-size: 12px;
+}

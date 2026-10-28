@@ -1,0 +1,338 @@
+import { useEffect, useState } from "react";
+import { keepPreviousData, useQueryClient } from "@tanstack/react-query";
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Input,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Switch,
+  Textarea,
+} from "@orbitid/ui";
+import { Ban, MailPlus, Search } from "lucide-react";
+import { toast } from "sonner";
+import type { InvitationJSON } from "@orbitid/shared";
+import { api, useApi } from "../lib/api";
+import { errorMessage } from "../lib/errors";
+import { formatDate } from "../lib/format";
+import { buildListPath } from "../lib/query";
+import { useTableState } from "../lib/use-table-state";
+import { useDebounced } from "../lib/hooks";
+import { PageHeader } from "../components/shared/page-header";
+import { DataTable, type DataTableColumn } from "../components/shared/data-table";
+import { TablePagination } from "../components/shared/table-pagination";
+import { EmptyState } from "../components/shared/empty-state";
+import { StatusBadge } from "../components/shared/status-badge";
+import { CopyButton } from "../components/shared/copy-button";
+import { ConfirmDialog } from "../components/shared/confirm-dialog";
+import { SecretReveal } from "../components/shared/secret-reveal";
+
+const STATUSES = ["all", "pending", "accepted", "revoked", "expired"];
+
+function parseEmails(text: string): string[] {
+  return [...new Set(text.split(/[\s,;]+/).map((value) => value.trim()).filter(Boolean))];
+}
+
+function CreateInvitationsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  const queryClient = useQueryClient();
+  const [mode, setMode] = useState<"single" | "bulk">("single");
+  const [email, setEmail] = useState("");
+  const [emails, setEmails] = useState("");
+  const [expiresInDays, setExpiresInDays] = useState("30");
+  const [notify, setNotify] = useState(true);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+
+  async function submit() {
+    setPending(true);
+    setError(null);
+    const days = Number(expiresInDays) || undefined;
+    try {
+      if (mode === "single") {
+        const invitation = await api<InvitationJSON>("POST", "/invitations", {
+          email_address: email.trim(),
+          notify,
+          ...(days ? { expires_in_days: days } : {}),
+        });
+        if (invitation.url) setInviteUrl(invitation.url);
+        toast.success("Invitation created");
+      } else {
+        const list = parseEmails(emails);
+        await api<unknown>("POST", "/invitations/bulk", {
+          email_addresses: list,
+          notify,
+          ...(days ? { expires_in_days: days } : {}),
+        });
+        toast.success(`${list.length} invitations created`);
+      }
+      await queryClient.invalidateQueries({ queryKey: ["invitations"] });
+      onOpenChange(false);
+      setEmail("");
+      setEmails("");
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  const valid = mode === "single" ? !!email.trim() : parseEmails(emails).length > 0;
+
+  return (
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Create invitation</DialogTitle>
+            <DialogDescription>
+              Invitations are required when sign-up mode is `restricted` or when the allowlist is enabled.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Mode</Label>
+              <Select value={mode} onValueChange={(value) => setMode(value as "single" | "bulk")}>
+                <SelectTrigger aria-label="Invitation mode">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="single">Single invitation</SelectItem>
+                  <SelectItem value="bulk">Bulk invitations</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {mode === "single" ? (
+              <div className="space-y-2">
+                <Label htmlFor="invitation-email">Email address</Label>
+                <Input
+                  id="invitation-email"
+                  type="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="new-user@example.com"
+                />
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label htmlFor="invitation-emails">Email addresses</Label>
+                <Textarea
+                  id="invitation-emails"
+                  value={emails}
+                  onChange={(event) => setEmails(event.target.value)}
+                  rows={5}
+                  placeholder={"one@example.com\ntwo@example.com"}
+                  className="font-mono text-xs"
+                />
+                <p className="text-xs text-muted-foreground">Separate with commas, spaces or new lines. Duplicates are dropped.</p>
+              </div>
+            )}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="invitation-expiry">Expires in (days)</Label>
+                <Input
+                  id="invitation-expiry"
+                  type="number"
+                  min={1}
+                  value={expiresInDays}
+                  onChange={(event) => setExpiresInDays(event.target.value)}
+                />
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <Label htmlFor="invitation-notify">Send email</Label>
+                <Switch id="invitation-notify" checked={notify} onCheckedChange={setNotify} />
+              </div>
+            </div>
+            {error ? (
+              <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {error}
+              </p>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => void submit()} disabled={!valid || pending}>
+              <MailPlus aria-hidden /> Create {mode === "bulk" ? "invitations" : "invitation"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <SecretReveal
+        open={!!inviteUrl}
+        onOpenChange={(next) => {
+          if (!next) setInviteUrl(null);
+        }}
+        title="Invitation link"
+        description="Share this link if the recipient did not receive the email."
+        secret={inviteUrl ?? ""}
+      />
+    </>
+  );
+}
+
+export default function InvitationsPage() {
+  const table = useTableState({ limit: 20, orderBy: "-created_at", filterKeys: ["status"] });
+  const [search, setSearch] = useState(table.query);
+  const debounced = useDebounced(search, 300);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [revoking, setRevoking] = useState<InvitationJSON | null>(null);
+  const [pending, setPending] = useState(false);
+
+  useEffect(() => {
+    if (debounced !== table.query) table.setQuery(debounced);
+  }, [debounced]);
+  useEffect(() => setSearch(table.query), [table.query]);
+
+  const status = table.filter("status") || "all";
+  const path = buildListPath("/invitations", {
+    limit: table.limit,
+    page: table.page,
+    query: table.query,
+    orderBy: table.orderBy,
+    extra: { status: status === "all" ? undefined : status },
+  });
+  const invitations = useApi<{ data: InvitationJSON[]; total_count: number }>(["invitations", path], path, {
+    placeholderData: keepPreviousData,
+  });
+  const rows = invitations.data?.data ?? [];
+
+  async function revoke() {
+    if (!revoking) return;
+    setPending(true);
+    try {
+      await api("POST", `/invitations/${revoking.id}/revoke`);
+      toast.success("Invitation revoked");
+      setRevoking(null);
+      await invitations.refetch();
+    } catch (error) {
+      toast.error(errorMessage(error));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  const columns: DataTableColumn<InvitationJSON>[] = [
+    {
+      id: "email",
+      header: "Email",
+      cell: (invitation) => <span className="font-mono text-sm">{invitation.email_address}</span>,
+    },
+    {
+      id: "status",
+      header: "Status",
+      cell: (invitation) => <StatusBadge status={invitation.status} />,
+    },
+    {
+      id: "created",
+      header: "Created",
+      sortKey: "created_at",
+      cell: (invitation) => <span className="text-sm text-muted-foreground">{formatDate(invitation.created_at)}</span>,
+    },
+    {
+      id: "expires",
+      header: "Expires",
+      headerClassName: "hidden sm:table-cell",
+      className: "hidden sm:table-cell",
+      cell: (invitation) => <span className="text-sm text-muted-foreground">{formatDate(invitation.expires_at)}</span>,
+    },
+    {
+      id: "actions",
+      header: <span className="sr-only">Actions</span>,
+      className: "w-24 text-right",
+      cell: (invitation) => (
+        <div className="flex justify-end gap-1">
+          {invitation.url ? <CopyButton value={invitation.url} label="Copy invitation URL" /> : null}
+          <Button size="xs" variant="outline" disabled={invitation.status !== "pending"} onClick={() => setRevoking(invitation)}>
+            <Ban aria-hidden /> Revoke
+          </Button>
+        </div>
+      ),
+    },
+  ];
+
+  return (
+    <>
+      <PageHeader
+        title="Invitations"
+        description="Instance-level invitations used to gate sign-ups."
+        actions={
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
+            <MailPlus aria-hidden /> Create invitation
+          </Button>
+        }
+      />
+
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-56 flex-1">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search invitations…"
+            aria-label="Search invitations"
+            className="pl-8"
+          />
+        </div>
+        <Select value={status} onValueChange={(value) => table.setFilter("status", value === "all" ? null : value)}>
+          <SelectTrigger className="h-9 w-[140px]" aria-label="Filter invitations by status">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {STATUSES.map((value) => (
+              <SelectItem key={value} value={value}>
+                <span className="capitalize">{value}</span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <DataTable
+        columns={columns}
+        rows={rows}
+        rowKey={(invitation) => invitation.id}
+        isLoading={invitations.isLoading}
+        error={invitations.error}
+        onRetry={() => void invitations.refetch()}
+        sortKey={table.sortKey}
+        sortDescending={table.sortDescending}
+        onSort={table.toggleSort}
+        empty={<EmptyState icon={MailPlus} title="No invitations" description="Create one to let a specific person sign up." />}
+      />
+
+      <TablePagination
+        page={table.page}
+        limit={table.limit}
+        total={invitations.data?.total_count ?? 0}
+        onPageChange={table.setPage}
+        onLimitChange={table.setLimit}
+        disabled={invitations.isFetching}
+      />
+
+      <CreateInvitationsDialog open={createOpen} onOpenChange={setCreateOpen} />
+      <ConfirmDialog
+        open={!!revoking}
+        onOpenChange={(open) => {
+          if (!open) setRevoking(null);
+        }}
+        title="Revoke invitation?"
+        description={revoking ? `${revoking.email_address} will no longer be able to use this invitation.` : undefined}
+        confirmLabel="Revoke"
+        destructive
+        pending={pending}
+        onConfirm={() => void revoke()}
+      />
+    </>
+  );
+}
