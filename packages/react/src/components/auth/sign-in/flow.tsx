@@ -21,7 +21,7 @@ import { useAuthRuntime } from "../_shared/w6";
 import { OrbitIDOptionsContext } from "../../../provider";
 import type { SignInProps, SignInResource } from "../_shared/types";
 import { currentClient } from "../_shared/api";
-import { redirectUrlFromQuery } from "../_shared/guards";
+import { safeRedirectUrlFromLocation } from "../../../lib/redirects";
 
 export const SIGN_IN_STEPS = [
   "start",
@@ -128,7 +128,7 @@ export function useSignInFlow(props: SignInProps, step: SignInStep, go: (step: S
     () =>
       props.forceRedirectUrl ??
       options.signInForceRedirectUrl ??
-      redirectUrlFromQuery() ??
+      safeRedirectUrlFromLocation({ allowedRedirectOrigins: options.allowedRedirectOrigins }) ??
       props.fallbackRedirectUrl ??
       options.signInFallbackRedirectUrl ??
       undefined,
@@ -467,7 +467,14 @@ export function useSignInFlow(props: SignInProps, step: SignInStep, go: (step: S
     if (!runtime.loaded || ticketStarted.current || typeof window === "undefined") return;
     const ticket = new URLSearchParams(window.location.search).get("__orbit_ticket");
     if (!ticket) {
-      if (runtime.session?.status === "active" && redirectTarget) {
+      const leavesThisPage = (target: string) => {
+        try {
+          return new URL(target, window.location.href).pathname !== window.location.pathname;
+        } catch {
+          return false;
+        }
+      };
+      if (runtime.session?.status === "active" && redirectTarget && leavesThisPage(redirectTarget)) {
         ticketStarted.current = true;
         runtime.navigate(redirectTarget, { replace: true });
       }

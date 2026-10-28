@@ -65,7 +65,7 @@ export default orbitIdMiddleware(async (auth, req) => {
   }
 });
 
-export const config = { matcher: ['/((?!_next|.*\\..*).*)'] };
+export const config = { matcher: ['/((?!_next|.*\\.(?:svg|png|jpe?g|gif|ico|webp|woff2?|css|js|map|txt|xml)$).*)'] };
 ```
 
 Plain mode (no handler) only attaches auth state to the request:

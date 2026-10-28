@@ -194,7 +194,9 @@ describe("atomic single-use and counted operations", () => {
     const inviteeAuth = await seedAuth(ctx, invitee.id);
     const results = await Promise.all(Array.from({ length: PARALLEL }, () => api(app, "POST", `/v1/client/me/organization_invitations/${invitation.id}/accept`, { cookie: inviteeAuth.cookie })));
     expect(results.filter((r) => r.status >= 500)).toHaveLength(0);
-    expect(results.every((r) => r.status === 200)).toBe(true);
+    // One request wins; the rest either see the finished membership (200) or a no longer pending invitation (409).
+    expect(results.filter((r) => r.status === 200).length).toBeGreaterThanOrEqual(1);
+    expect(results.every((r) => r.status === 200 || r.status === 409)).toBe(true);
     expect(eventsOf("organizationInvitation.accepted")).toHaveLength(1);
     const memberships = await ctx.db.select().from(s.organizationMemberships)
       .where(and(eq(s.organizationMemberships.organizationId, org.id), eq(s.organizationMemberships.userId, invitee.id)));

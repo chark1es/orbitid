@@ -191,7 +191,7 @@ export function PasswordField({
           {requirements.map((requirement) => (
             <li key={requirement.id} className="flex items-center gap-1.5">
               {requirement.met ? (
-                <CheckIcon className="size-3 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                <CheckIcon className="size-3 text-go" aria-hidden="true" />
               ) : (
                 <XIcon className="size-3 text-muted-foreground" aria-hidden="true" />
               )}

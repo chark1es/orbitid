@@ -20,5 +20,5 @@ export default orbitIdMiddleware(
 );
 
 export const config = {
-  matcher: ["/((?!_next|.*\\..*).*)"],
+  matcher: ["/((?!_next|.*\\.(?:svg|png|jpe?g|gif|ico|webp|avif|woff2?|css|js|map|txt|xml)$).*)"],
 };

@@ -170,7 +170,7 @@ export default function routes(ctx: AppContext) {
     if (invitation.status !== "pending") throw new OrbitError(409, ErrorCodes.duplicate_record, `Invitation is ${invitation.status}`);
     if (invitation.expiresAt && invitation.expiresAt <= Date.now()) throw new OrbitError(422, ErrorCodes.ticket_expired, "Organization invitation has expired");
     const membership = await acceptInvitation(ctx, invitation, caller.userId);
-    if (!membership) throw new OrbitError(404, ErrorCodes.organization_not_found, "Organization not found");
+    if (!membership) throw new OrbitError(409, ErrorCodes.duplicate_record, "Invitation is no longer pending");
     return c.json({ response: await serializeMembership(ctx, membership) });
   });
 

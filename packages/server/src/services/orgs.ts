@@ -205,13 +205,13 @@ export async function addMembership(ctx: AppContext, input: {
   return row;
 }
 
-/** Accepts a pending invitation: creates the membership, flips the status and emits webhooks. */
+/** Accepts a pending invitation: flips the status, then creates the membership and emits webhooks. */
 export async function acceptInvitation(ctx: AppContext, invitation: InvitationRow, userId: string): Promise<MembershipRow | null> {
   const org = first(await ctx.db.select().from(s.organizations).where(eq(s.organizations.id, invitation.organizationId)));
   if (!org) return null;
-  const membership = await addMembership(ctx, { organizationId: invitation.organizationId, userId, roleKey: invitation.roleKey, publicMetadata: invitation.publicMetadata });
   const now = Date.now();
-  // Flipping the status is the gate: only one of several parallel accepts emits the accepted event.
+  // Flipping the status is the gate: a revoked, expired or already accepted invitation never creates a membership,
+  // and only one of several parallel accepts goes on to add it and emit the accepted event.
   const accepted = first(await ctx.db.update(s.organizationInvitations).set({ status: "accepted", updatedAt: now })
     .where(and(
       eq(s.organizationInvitations.id, invitation.id),
@@ -219,7 +219,11 @@ export async function acceptInvitation(ctx: AppContext, invitation: InvitationRo
       or(isNull(s.organizationInvitations.expiresAt), gt(s.organizationInvitations.expiresAt, now)),
     ))
     .returning());
-  if (!accepted) return membership;
+  if (!accepted) {
+    return first(await ctx.db.select().from(s.organizationMemberships)
+      .where(and(eq(s.organizationMemberships.organizationId, invitation.organizationId), eq(s.organizationMemberships.userId, userId)))) ?? null;
+  }
+  const membership = await addMembership(ctx, { organizationId: invitation.organizationId, userId, roleKey: invitation.roleKey, publicMetadata: invitation.publicMetadata });
   await emitEvent(ctx, "organizationInvitation.accepted", await serializeOrganizationInvitation(ctx, accepted, { backend: true }));
   return membership;
 }

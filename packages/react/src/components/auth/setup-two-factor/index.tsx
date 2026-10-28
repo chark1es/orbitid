@@ -342,7 +342,7 @@ export function TwoFactorSetup({ sessionId, onComplete, redirectUrl, className }
       {phase === "backup" ? (
         <>
           <div className="flex items-center gap-2">
-            <ShieldCheckIcon className="size-5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+            <ShieldCheckIcon className="size-5 text-go" aria-hidden="true" />
             <p className="text-sm font-medium">{t("signIn.setupTwoFactor.backupTitle")}</p>
           </div>
           {codes.length > 0 ? (

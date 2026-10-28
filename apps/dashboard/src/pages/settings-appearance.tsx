@@ -22,6 +22,15 @@ import { useSettingsEditor } from "./_config/use-settings";
 
 const COLOR_PATTERN = /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
 
+/** Black or white, whichever reads better on the chosen brand color (hex, 3 or 6 digits). */
+function readableInk(hex: string): string {
+  const digits = hex.replace("#", "");
+  const full = digits.length === 3 ? digits.split("").map((d) => d + d).join("") : digits;
+  const [r = 0, g = 0, b = 0] = [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16) / 255);
+  const lin = (c: number) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b) > 0.45 ? "#111111" : "#ffffff";
+}
+
 export default function Page() {
   const editor = useSettingsEditor();
   const settings = editor.settings;
@@ -45,6 +54,7 @@ export default function Page() {
   if (app.allowedRedirectOrigins.some((origin) => !isHttpOrigin(origin))) errors.push("Every redirect origin must be an http(s) origin without a path.");
 
   const previewColor = COLOR_PATTERN.test(branding.primaryColor) ? branding.primaryColor : "#2b2522";
+  const previewInk = readableInk(previewColor);
 
   return (
     <div className="space-y-6">
@@ -109,8 +119,8 @@ export default function Page() {
             <div className="mx-auto w-full max-w-sm border border-border bg-card px-6 py-7">
               <div className="space-y-1 text-center">
                 <div
-                  className="mx-auto grid size-9 place-items-center text-sm font-semibold text-white"
-                  style={{ backgroundColor: previewColor }}
+                  className="mx-auto grid size-9 place-items-center text-sm font-semibold"
+                  style={{ backgroundColor: previewColor, color: previewInk }}
                   aria-hidden
                 >
                   {(app.name || "O").trim().charAt(0).toUpperCase()}
@@ -124,8 +134,8 @@ export default function Page() {
                   <div className="h-[34px] border border-input bg-background px-3 py-2 text-xs text-muted-foreground">you@example.com</div>
                 </div>
                 <div
-                  className="grid h-[34px] place-items-center text-xs font-medium text-white"
-                  style={{ backgroundColor: previewColor }}
+                  className="grid h-[34px] place-items-center text-xs font-medium"
+                  style={{ backgroundColor: previewColor, color: previewInk }}
                 >
                   Continue
                 </div>

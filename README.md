@@ -105,7 +105,7 @@ export default orbitIdMiddleware(async (auth, req) => {
   if (isProtected(req)) await auth.protect();
 });
 
-export const config = { matcher: ["/((?!_next|.*\\..*).*)"] };
+export const config = { matcher: ["/((?!_next|.*\\.(?:svg|png|jpe?g|gif|ico|webp|woff2?|css|js|map|txt|xml)$).*)"] };
 ```
 
 ```ts

@@ -47,7 +47,8 @@ async function main() {
   console.log(`\n  OrbitID is running at ${ctx.env.baseUrl}`);
   console.log(`  Dashboard       : ${(await import("node:fs")).existsSync(dashboard) ? ctx.env.baseUrl : "not built (run: bun run --filter @orbitid/dashboard build)"}`);
   console.log(`  Publishable key : ${ctx.publishableKey}`);
-  console.log(`  Secret key      : ${ctx.env.secretKey}`);
+  // Logs are widely readable, so a production instance shows only the end of the secret key.
+  console.log(`  Secret key      : ${ctx.env.nodeEnv === "production" ? `${ctx.env.secretKey.slice(0, 8)}…${ctx.env.secretKey.slice(-4)} (print it with: keys)` : ctx.env.secretKey}`);
   console.log(`  JWKS            : ${ctx.env.baseUrl}/.well-known/jwks.json`);
   for (const line of describeDatabase(ctx.database.label, ctx.database.driver)) console.log(line);
   console.log("");

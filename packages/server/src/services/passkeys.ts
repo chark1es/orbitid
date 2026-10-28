@@ -7,7 +7,7 @@ import {
   verifyRegistrationResponse,
 } from "@simplewebauthn/server";
 import type { AuthenticationResponseJSON, AuthenticatorTransportFuture, RegistrationResponseJSON } from "@simplewebauthn/types";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, lt, sql } from "drizzle-orm";
 import { ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../context";
 import * as s from "../db/schema";
@@ -110,7 +110,7 @@ export async function finishPasskeyRegistration(ctx: AppContext, input: {
   } catch {
     verified = false;
   }
-  await ctx.db.update(s.verifications).set({ attempts: stored.attempts + 1, verifiedAt: verified ? Date.now() : null }).where(eq(s.verifications.id, stored.id));
+  if (verified) await ctx.db.update(s.verifications).set({ verifiedAt: Date.now() }).where(eq(s.verifications.id, stored.id));
   if (!verified || !info) {
     throw new OrbitError(400, ErrorCodes.passkey_registration_failure, "Passkey registration could not be verified");
   }
@@ -165,9 +165,13 @@ export async function finishPasskeyAuthentication(ctx: AppContext, input: {
 }): Promise<{ user: UserRow; passkey: PasskeyRow }> {
   const stored = await loadChallenge(ctx, "passkey_authentication", input.ownerId);
   if (!stored) throw new OrbitError(400, ErrorCodes.verification_expired, "Passkey sign-in expired. Please try again.");
+  // Spend an attempt before any signature work, so a challenge cannot be tried an unlimited number of times.
+  const claimed = first(await ctx.db.update(s.verifications).set({ attempts: sql`${s.verifications.attempts} + 1` })
+    .where(and(eq(s.verifications.id, stored.id), lt(s.verifications.attempts, s.verifications.maxAttempts)))
+    .returning());
+  if (!claimed) throw new OrbitError(400, ErrorCodes.verification_expired, "Too many passkey attempts. Please try again.");
   const passkey = first(await ctx.db.select().from(s.passkeys).where(eq(s.passkeys.credentialId, input.credential.id)));
   if (!passkey) {
-    await ctx.db.update(s.verifications).set({ attempts: stored.attempts + 1 }).where(eq(s.verifications.id, stored.id));
     throw new OrbitError(400, ErrorCodes.passkey_authentication_failure, "Unknown passkey");
   }
   let verified = false;

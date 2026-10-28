@@ -94,7 +94,7 @@ export function AuthCard({
             className={cn("h-10 w-auto max-w-[10rem] object-contain", el("logoImage"))}
           />
         ) : (
-          <OrbitMark color={primaryColor} />
+          <OrbitMark color="var(--primary)" />
         )}
       </a>
     </div>

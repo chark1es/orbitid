@@ -1004,7 +1004,7 @@ export function SuccessStep({ flow }: StepProps) {
   const { t, environment, navigate } = runtime;
   return (
     <div className="flex flex-col items-center gap-3 py-2 text-center">
-      <CheckCircle2Icon className="size-10 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+      <CheckCircle2Icon className="size-10 text-go" aria-hidden="true" />
       <p className="text-sm font-medium">{t("signIn.success.title")}</p>
       <p className="text-sm text-muted-foreground">
         {t("signIn.success.message", { applicationName: environment.app.name })}

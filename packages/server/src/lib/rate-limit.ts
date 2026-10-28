@@ -1,5 +1,5 @@
 import type { MiddlewareHandler } from "hono";
-import { sql } from "drizzle-orm";
+import { lte, sql } from "drizzle-orm";
 import { OrbitError, ErrorCodes } from "@orbitid/shared";
 import type { AppContext } from "../context";
 import { rateLimits } from "../db/schema";
@@ -21,6 +21,8 @@ export async function hit(ctx: AppContext, key: string, max: number, windowMs: n
       },
     })
     .returning());
+  // Expired windows are dead weight; sweep them now and then so spoofed or rotating keys cannot grow the table forever.
+  if (Math.random() < 0.01) void ctx.db.delete(rateLimits).where(lte(rateLimits.resetAt, now)).catch(() => undefined);
   if (row && row.count > max) {
     throw new OrbitError(429, ErrorCodes.rate_limit_exceeded, "Too many requests. Please try again later.", { retry_after: Math.ceil((row.resetAt - now) / 1000) });
   }

@@ -18,7 +18,9 @@ vi.mock("../../src/services/webhooks", async () => {
 });
 
 import type { OrganizationInvitationJSON, OrganizationMembershipJSON } from "@orbitid/shared";
-import { acceptInvitationByTicket, onUserEmailVerified } from "../../src/services/orgs";
+import { acceptInvitation, acceptInvitationByTicket, onUserEmailVerified } from "../../src/services/orgs";
+import { eq } from "drizzle-orm";
+import * as schema from "../../src/db/schema";
 import {
   api, createOrg, errorCode, eventsOf, invite, lastMail, mailOutbox, memberships, seedAuth, seedUser, setup,
 } from "./helpers";
@@ -194,5 +196,20 @@ describe("organization invitations", () => {
     const blocked = await api(app, "POST", `/v1/client/organizations/${org.id}/invitations`, { cookie: ownerAuth.cookie, body: { email_address: "two@acme.test" } });
     expect(blocked.status).toBe(403);
     expect(errorCode(blocked.body)).toBe("organization_membership_quota_exceeded");
+  });
+
+  it("does not create a membership for an invitation revoked after it was read", async () => {
+    const { ctx, app } = await setup();
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const ownerAuth = await seedAuth(ctx, owner.id);
+    const org = await createOrg(app, ownerAuth.cookie, "Acme");
+    const invitee = await seedUser(ctx, { email: "late@acme.test" });
+    const created = await invite(app, ownerAuth.cookie, org.id, "late@acme.test", "org:member");
+
+    const stale = (await ctx.db.select().from(schema.organizationInvitations).where(eq(schema.organizationInvitations.id, created.id)))[0]!;
+    await ctx.db.update(schema.organizationInvitations).set({ status: "revoked" }).where(eq(schema.organizationInvitations.id, created.id));
+
+    expect(await acceptInvitation(ctx, stale, invitee.id)).toBeNull();
+    expect((await ctx.db.select().from(schema.organizationMemberships).where(eq(schema.organizationMemberships.userId, invitee.id))).length).toBe(0);
   });
 });

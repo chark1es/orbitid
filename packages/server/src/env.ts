@@ -33,10 +33,16 @@ export function loadEnv(overrides: Partial<Env> = {}): Env {
   if (nodeEnv === "production" && encryptionKey && encryptionKey.length < 32) {
     throw new Error("ORBITID_ENCRYPTION_KEY must be at least 32 characters long, for example `openssl rand -base64 32`.");
   }
+  const databaseUrl = overrides.databaseUrl ?? e.ORBITID_DATABASE_URL ?? e.DATABASE_URL;
+  const baseUrl = (overrides.baseUrl ?? e.ORBITID_BASE_URL ?? `http://localhost:${port}`).replace(/\/$/, "");
+  const local = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(baseUrl);
+  if (!encryptionKey && (!local || /^postgres(ql)?:/.test(databaseUrl ?? ""))) {
+    throw new Error("ORBITID_ENCRYPTION_KEY is required with Postgres or a public ORBITID_BASE_URL. Without it the built-in development key would protect stored secrets. Use `openssl rand -base64 32`.");
+  }
   return {
     port,
-    baseUrl: (overrides.baseUrl ?? e.ORBITID_BASE_URL ?? `http://localhost:${port}`).replace(/\/$/, ""),
-    databaseUrl: overrides.databaseUrl ?? e.ORBITID_DATABASE_URL ?? e.DATABASE_URL ?? (e.ORBITID_DATABASE_PATH ? `sqlite:${e.ORBITID_DATABASE_PATH}` : `sqlite:${resolve(dataDir, "orbitid.db")}`),
+    baseUrl,
+    databaseUrl: databaseUrl ?? (e.ORBITID_DATABASE_PATH ? `sqlite:${e.ORBITID_DATABASE_PATH}` : `sqlite:${resolve(dataDir, "orbitid.db")}`),
     encryptionKey: encryptionKey ?? "dev-only-insecure-encryption-key-change-me!!",
     encryptionKeyProvided: !!encryptionKey,
     secretKey: overrides.secretKey ?? e.ORBITID_SECRET_KEY ?? "",

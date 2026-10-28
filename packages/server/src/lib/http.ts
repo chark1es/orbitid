@@ -1,3 +1,4 @@
+import { getConnInfo } from "@hono/node-server/conninfo";
 import type { Context } from "hono";
 import { z, ZodError, type ZodTypeAny } from "zod";
 import { OrbitError, ErrorCodes } from "@orbitid/shared";
@@ -39,8 +40,23 @@ export const paginationSchema = z.object({
 });
 export function parsePagination(c: Context) { return validate(paginationSchema, c.req.query()); }
 
+/**
+ * The caller's address. Forwarding headers are client-controlled unless a proxy you run sets them, so by default
+ * the socket address is used. Behind `n` trusted proxies set `ORBITID_TRUST_PROXY=n` (`true` means 1): the address
+ * is then the nth entry from the right of `X-Forwarded-For`, the one your outermost proxy appended.
+ */
 export function clientIp(c: Context): string {
-  return c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || c.req.header("x-real-ip") || "127.0.0.1";
+  const hops = process.env.ORBITID_TRUST_PROXY === "true" ? 1 : Number(process.env.ORBITID_TRUST_PROXY ?? 0);
+  if (hops > 0) {
+    const chain = (c.req.header("x-forwarded-for") ?? "").split(",").map((part) => part.trim()).filter(Boolean);
+    const forwarded = chain[chain.length - hops] ?? c.req.header("x-real-ip");
+    if (forwarded) return forwarded;
+  }
+  try {
+    return getConnInfo(c).remote.address ?? "127.0.0.1";
+  } catch {
+    return "127.0.0.1";
+  }
 }
 export const now = () => Date.now();
 export const notFound = (what: string) => new OrbitError(404, ErrorCodes.resource_not_found, `${what} not found`);

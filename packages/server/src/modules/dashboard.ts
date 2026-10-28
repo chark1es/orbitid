@@ -26,7 +26,12 @@ export function dashboardHandler(ctx: AppContext): ((c: Context) => Response | P
   const indexHtml = () => readFileSync(indexPath, "utf8").replace("</head>", `${bootstrap}</head>`);
 
   return (c) => {
-    const path = decodeURIComponent(new URL(c.req.url).pathname);
+    let path: string;
+    try {
+      path = decodeURIComponent(new URL(c.req.url).pathname);
+    } catch {
+      return c.text("Bad request", 400);
+    }
     if (API_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`))) return c.notFound();
     const candidate = normalize(join(root, path));
     if (candidate.startsWith(root + sep) && existsSync(candidate) && statSync(candidate).isFile() && candidate !== indexPath) {

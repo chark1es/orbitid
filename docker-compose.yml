@@ -25,6 +25,7 @@ services:
       ORBITID_DATABASE_URL: postgres://orbitid:${POSTGRES_PASSWORD:-orbitid}@postgres:5432/orbitid
       ORBITID_BASE_URL: ${ORBITID_BASE_URL:-http://localhost:4000}
       ORBITID_ENCRYPTION_KEY: ${ORBITID_ENCRYPTION_KEY:?Set ORBITID_ENCRYPTION_KEY in .env (openssl rand -base64 32)}
+      ORBITID_TRUST_PROXY: ${ORBITID_TRUST_PROXY:-0}
     ports:
       - "${ORBITID_PORT:-4000}:4000"
     volumes:

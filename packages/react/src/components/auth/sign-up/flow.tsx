@@ -16,7 +16,7 @@ import {
 import { useAuthRuntime } from "../_shared/w6";
 import { OrbitIDOptionsContext } from "../../../provider";
 import { currentClient } from "../_shared/api";
-import { redirectUrlFromQuery } from "../_shared/guards";
+import { safeRedirectUrlFromLocation } from "../../../lib/redirects";
 import type { SignUpProps, SignUpResource } from "../_shared/types";
 
 export const SIGN_UP_STEPS = [
@@ -139,7 +139,7 @@ export function useSignUpFlow(props: SignUpProps, step: SignUpStep, go: (step: S
   const redirectTarget =
     props.forceRedirectUrl ??
     options.signUpForceRedirectUrl ??
-    redirectUrlFromQuery() ??
+    safeRedirectUrlFromLocation({ allowedRedirectOrigins: options.allowedRedirectOrigins }) ??
     props.fallbackRedirectUrl ??
     options.signUpFallbackRedirectUrl;
 

@@ -12,6 +12,12 @@ describe("production defaults", () => {
     expect(() => loadEnv({ nodeEnv: "production", encryptionKey: "k".repeat(32) })).not.toThrow();
   });
 
+  it("refuses the built-in development key with Postgres or a public URL", () => {
+    expect(() => loadEnv({ nodeEnv: "development", databaseUrl: "postgres://u:p@db/orbit" })).toThrow(/ORBITID_ENCRYPTION_KEY/);
+    expect(() => loadEnv({ nodeEnv: "development", baseUrl: "https://auth.example.com" })).toThrow(/ORBITID_ENCRYPTION_KEY/);
+    expect(() => loadEnv({ nodeEnv: "development", databaseUrl: "sqlite:./x.db", baseUrl: "http://localhost:4000" })).not.toThrow();
+  });
+
   it("derives the same secret key from the encryption key on every boot", async () => {
     const options = { databaseUrl: ":memory:", nodeEnv: "production", encryptionKey: "k".repeat(40), baseUrl: "https://auth.example.com" } as const;
     const [a, b] = [await createContext(options), await createContext(options)];

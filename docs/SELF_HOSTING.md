@@ -14,16 +14,16 @@ OrbitID is one server process plus a database. The server exposes the API your a
 cp .env.example .env
 openssl rand -base64 32          # paste the output as ORBITID_ENCRYPTION_KEY in .env
 docker compose up -d
-docker compose logs orbitid      # prints your keys and the dashboard URL
+docker compose logs orbitid      # prints the dashboard URL and your publishable key
 ```
 
-The compose file starts Postgres 17 and OrbitID, runs the migrations on boot, and keeps data in two named volumes. Open `http://localhost:4000`, paste the secret key from the log, and you are in the dashboard.
-
-To print the keys again at any time:
+The compose file starts Postgres 17 and OrbitID, runs the migrations on boot, and keeps data in two named volumes. Open `http://localhost:4000` and sign in to the dashboard with the secret key. A production instance shows only the end of the secret key in its log; print the whole key with:
 
 ```bash
 docker compose exec orbitid node_modules/.bin/tsx packages/server/src/cli.ts keys
 ```
+
+The secret key is derived from `ORBITID_ENCRYPTION_KEY`, so it is the same after every restart.
 
 ## Without Docker
 
@@ -51,6 +51,7 @@ Only infrastructure comes from environment variables. Everything about how sign-
 | `ORBITID_DATA_DIR` | `./data` | Uploads and, for SQLite, the database file. |
 | `ORBITID_DASHBOARD_DIR` | built dashboard next to the server | Folder holding the built dashboard. |
 | `ORBITID_DATABASE_POOL` | `10` | Maximum Postgres connections. |
+| `ORBITID_TRUST_PROXY` | `0` | Number of reverse proxies in front of the server. Rate limits and session records use the socket address unless this is set; with `1` they use the last `X-Forwarded-For` entry. Set it only when a proxy you run sets that header. |
 
 ## First steps in the dashboard
 
@@ -74,4 +75,4 @@ Everything lives in the database, plus uploaded profile images and organization 
 
 ## Behind a reverse proxy
 
-Set `ORBITID_BASE_URL` to the public URL, terminate TLS at the proxy, and forward `X-Forwarded-For` so session records show the client address. Cross-site POST callbacks (SAML, Apple sign-in) need an `https` base URL.
+Set `ORBITID_BASE_URL` to the public URL, terminate TLS at the proxy, and set `ORBITID_TRUST_PROXY=1` so rate limits and session records see the client address instead of the proxy's. Do not set it when the server is reachable without a proxy: clients could then choose their own address. Cross-site POST callbacks (SAML, Apple sign-in) need an `https` base URL.

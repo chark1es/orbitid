@@ -572,7 +572,7 @@ export function SignUpSuccessStep() {
   const { t, environment, navigate } = runtime;
   return (
     <div className="flex flex-col items-center gap-3 py-2 text-center">
-      <CheckCircle2Icon className="size-10 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+      <CheckCircle2Icon className="size-10 text-go" aria-hidden="true" />
       <p className="text-sm font-medium">{t("signUp.success.title", { applicationName: environment.app.name })}</p>
       <p className="text-sm text-muted-foreground">{t("signUp.success.message")}</p>
       <Button type="button" className="w-full" onClick={() => navigate(environment.app.homeUrl)}>

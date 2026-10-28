@@ -1,36 +1,44 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { redirectUrlFromQuery } from "../components/auth/_shared/guards";
+import { isValidRedirectUrl, safeRedirectUrlFromLocation } from "../lib/redirects";
 
 function visit(search: string) {
   window.history.replaceState(null, "", `/sign-in${search}`);
 }
+const query = (value: string) => `?redirect_url=${encodeURIComponent(value)}`;
 
-describe("redirectUrlFromQuery", () => {
+describe("safeRedirectUrlFromLocation", () => {
   afterEach(() => visit(""));
 
   it("returns nothing without a redirect_url", () => {
     visit("");
-    expect(redirectUrlFromQuery()).toBeUndefined();
+    expect(safeRedirectUrlFromLocation()).toBeUndefined();
   });
 
-  it("keeps a same-origin URL as a path", () => {
-    visit(`?redirect_url=${encodeURIComponent(`${window.location.origin}/api-keys?tab=1#top`)}`);
-    expect(redirectUrlFromQuery()).toBe("/api-keys?tab=1#top");
+  it("follows a relative path and a same-origin URL", () => {
+    visit(query("/account"));
+    expect(safeRedirectUrlFromLocation()).toBe("/account");
+    const sameOrigin = `${window.location.origin}/api-keys?tab=1#top`;
+    visit(query(sameOrigin));
+    expect(safeRedirectUrlFromLocation()).toBe(sameOrigin);
   });
 
-  it("keeps a relative path", () => {
-    visit("?redirect_url=%2Faccount");
-    expect(redirectUrlFromQuery()).toBe("/account");
+  it("follows an allowlisted origin and no other", () => {
+    visit(query("https://app.example.com/home"));
+    expect(safeRedirectUrlFromLocation()).toBeUndefined();
+    expect(safeRedirectUrlFromLocation({ allowedRedirectOrigins: ["https://app.example.com"] })).toBe("https://app.example.com/home");
   });
 
-  it("drops other origins and protocol-relative URLs", () => {
-    visit("?redirect_url=https%3A%2F%2Fevil.example%2Fphish");
-    expect(redirectUrlFromQuery()).toBeUndefined();
-    visit("?redirect_url=%2F%2Fevil.example%2Fphish");
-    expect(redirectUrlFromQuery()).toBeUndefined();
-    visit(`?redirect_url=${encodeURIComponent(`${window.location.origin}//evil.example/phish`)}`);
-    expect(redirectUrlFromQuery()).toBeUndefined();
-    visit("?redirect_url=%2F%5Cevil.example");
-    expect(redirectUrlFromQuery()).toBeUndefined();
+  it("drops anything a browser would read as another origin", () => {
+    for (const target of ["https://evil.example/phish", "//evil.example/phish", "/\\evil.example", "/\t/evil.example", "\\\\evil.example", "javascript:alert(1)"]) {
+      visit(query(target));
+      expect(safeRedirectUrlFromLocation(), target).toBeUndefined();
+    }
+  });
+});
+
+describe("isValidRedirectUrl", () => {
+  it("rejects control characters", () => {
+    expect(isValidRedirectUrl("/ok\nx")).toBe(false);
+    expect(isValidRedirectUrl("/ok")).toBe(true);
   });
 });

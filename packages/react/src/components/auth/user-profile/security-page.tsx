@@ -64,7 +64,7 @@ export function SecurityPage({ onNavigate }: { onNavigate: (page: string) => voi
     <div className="flex flex-col gap-6">
       <FormError message={error} />
       {notice ? (
-        <p role="status" className="rounded-md border border-emerald-600/20 bg-emerald-600/10 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-300">
+        <p role="status" className="rounded-md border border-go/20 bg-go/10 px-3 py-2 text-sm text-foreground">
           {notice}
         </p>
       ) : null}

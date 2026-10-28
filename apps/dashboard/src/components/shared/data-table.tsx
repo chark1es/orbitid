@@ -67,6 +67,7 @@ export function DataTable<T>({
               return (
                 <TableHead
                   key={column.id}
+                  aria-sort={column.sortKey && onSort ? (active ? (sortDescending ? "descending" : "ascending") : "none") : undefined}
                   className={cn(
                     "h-9 whitespace-nowrap text-[0.75rem] font-semibold uppercase tracking-[0.04em] text-muted-foreground",
                     column.headerClassName,

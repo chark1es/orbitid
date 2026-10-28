@@ -10,7 +10,7 @@ async function appWithDashboard() {
   mkdirSync(join(dir, "assets"));
   writeFileSync(join(dir, "index.html"), "<html><head><title>OrbitID</title></head><body><div id=root></div></body></html>");
   writeFileSync(join(dir, "assets", "app-abc123.js"), "console.log('dashboard')");
-  const ctx = await createContext({ databaseUrl: ":memory:", secretKey: "sk_test_dash", baseUrl: "https://auth.example.com", dashboardDir: dir });
+  const ctx = await createContext({ databaseUrl: ":memory:", secretKey: "sk_test_dash", baseUrl: "https://auth.example.com", encryptionKey: "d".repeat(40), dashboardDir: dir });
   return { ctx, app: createApp(ctx) };
 }
 
@@ -31,6 +31,11 @@ describe("dashboard hosting", () => {
 
     const route = await app.request("/users/user_123");
     expect(await route.text()).toContain('id=root');
+  });
+
+  it("answers a malformed percent-escape with 400 instead of an error", async () => {
+    const { app } = await appWithDashboard();
+    for (const path of ["/%", "/%zz", "/assets/%E0%A4%A"]) expect((await app.request(path)).status).toBe(400);
   });
 
   it("never shadows the API and refuses path traversal", async () => {
