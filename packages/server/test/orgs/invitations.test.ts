@@ -139,7 +139,7 @@ describe("organization invitations", () => {
 
     const anonymous = await api(app, "GET", `/v1/client/organization_invitations/accept?ticket=${encodeURIComponent(ticket2)}`);
     expect(anonymous.status).toBe(302);
-    expect(anonymous.headers.get("location")).toContain("__orbit_ticket=");
+    expect(anonymous.headers.get("location")).not.toContain("__orbit_ticket=");
 
     // the ticket is never sent to an origin the instance does not trust
     const hostile = await api(app, "GET", `/v1/client/organization_invitations/accept?ticket=${encodeURIComponent(ticket2)}&redirect_url=${encodeURIComponent("https://evil.example/steal")}`);

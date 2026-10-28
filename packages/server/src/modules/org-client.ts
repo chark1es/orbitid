@@ -92,7 +92,8 @@ export default function routes(ctx: AppContext) {
     }
     const requested = validateRedirectUrl(ctx, c.req.query("redirect_url") || invitation.redirectUrl);
     const target = new URL(requested ?? (ctx.settings.get().application.homeUrl || ctx.env.baseUrl));
-    target.searchParams.set("__orbit_ticket", ticket);
+    // No `__orbit_ticket` here: the SDK would present it as a sign-in ticket, which it is not. A signed-out invitee
+    // signs up or in normally, and verifying the invited address joins the organization.
     return c.redirect(target.toString(), 302);
   });
 

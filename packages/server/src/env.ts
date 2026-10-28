@@ -30,7 +30,7 @@ export function loadEnv(overrides: Partial<Env> = {}): Env {
   if (nodeEnv === "production" && !encryptionKey) {
     throw new Error("ORBITID_ENCRYPTION_KEY is required in production. Use a random string of at least 32 characters, for example `openssl rand -base64 32`.");
   }
-  if (nodeEnv === "production" && encryptionKey && encryptionKey.length < 32) {
+  if (encryptionKey && encryptionKey.length < 32) {
     throw new Error("ORBITID_ENCRYPTION_KEY must be at least 32 characters long, for example `openssl rand -base64 32`.");
   }
   const databaseUrl = overrides.databaseUrl ?? e.ORBITID_DATABASE_URL ?? e.DATABASE_URL;
