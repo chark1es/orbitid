@@ -210,7 +210,10 @@ describe("database transfer", () => {
       expect(names).toContain(emitted);
     }
     // Every table that references another is listed after it.
-    const { getTableConfig } = await import("drizzle-orm/sqlite-core");
+    const { dialect } = await import("../src/db/dialect");
+    const getTableConfig = (dialect === "postgres"
+      ? (await import("drizzle-orm/pg-core")).getTableConfig
+      : (await import("drizzle-orm/sqlite-core")).getTableConfig) as (table: never) => { name: string; foreignKeys: { reference(): { foreignTable: unknown } }[] };
     for (const entry of order) {
       const config = getTableConfig(entry.table as never);
       for (const fk of config.foreignKeys) {

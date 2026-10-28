@@ -1,12 +1,10 @@
 // OIDC/OAuth2 provider service: applications, authorization codes, tokens, consent, device grant.
 //
-// Storage notes (no schema changes; the schema is lead-owned):
+// Storage notes:
 //  - codes/access/refresh tokens are random opaque strings; only sha256 hashes are stored in `oauth_grants`.
-//  - for access/refresh rows the unused `nonce` column stores the *family id* of the token chain, which is what
-//    makes refresh-token rotation and reuse detection possible. Their unused `redirectUri` column stores the
-//    authorizing session id (`sid:<id>`), which is what keeps `sid` and the org claims tied to that session.
-//  - code rows keep the OIDC `nonce` in `nonce`, together with the authorizing session id, as a small JSON
-//    object; their `redirectUri` keeps holding the redirect URI.
+//  - `family_id` ties the access and refresh tokens of one authorization together (refresh rotation and reuse
+//    detection); `session_id` keeps `sid` and the org claims tied to the authorizing session; `nonce` is the
+//    OIDC nonce of an authorization code.
 import { createHash, randomInt } from "node:crypto";
 import { and, asc, count, desc, eq, gt, inArray } from "drizzle-orm";
 import { createLocalJWKSet, jwtVerify } from "jose";
@@ -225,7 +223,8 @@ export async function issueAuthorizationCode(ctx: AppContext, input: IssueCodeIn
             redirectUri: input.redirectUri,
             codeChallenge: input.codeChallenge ?? null,
             codeChallengeMethod: input.codeChallenge ? (input.codeChallengeMethod ?? "S256") : null,
-            nonce: encodeCodeMeta({ nonce: input.nonce ?? null, sid: input.sessionId ?? null }),
+            nonce: input.nonce ?? null,
+            sessionId: input.sessionId ?? null,
             revoked: false,
             expiresAt: Date.now() + AUTHORIZATION_CODE_TTL_SECONDS * 1000,
             createdAt: Date.now(),
@@ -243,7 +242,7 @@ export const isGrantLive = (row: GrantRow, at = Date.now()) => !row.revoked && r
 export async function revokeGrantFamily(ctx: AppContext, family: string): Promise<void> {
   if (!family) return;
   await ctx.db.update(s.oauthGrants).set({ revoked: true })
-            .where(and(inArray(s.oauthGrants.kind, ["access", "refresh"]), eq(s.oauthGrants.nonce, family)));
+            .where(and(inArray(s.oauthGrants.kind, ["access", "refresh"]), eq(s.oauthGrants.familyId, family)));
 }
 
 export interface TokenSet {
@@ -256,27 +255,6 @@ export interface TokenSet {
 }
 
 type UserRow = typeof s.users.$inferSelect;
-
-/** Codes carry the OIDC `nonce`; access/refresh rows have no nonce to spare (it holds the family id). */
-interface CodeMeta { nonce: string | null; sid: string | null }
-const encodeCodeMeta = (meta: CodeMeta): string => JSON.stringify({ nonce: meta.nonce, sid: meta.sid });
-function decodeCodeMeta(raw: string | null): CodeMeta {
-  if (!raw) return { nonce: null, sid: null };
-  try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    if (parsed && typeof parsed === "object") {
-      return { nonce: typeof parsed.nonce === "string" ? parsed.nonce : null, sid: typeof parsed.sid === "string" ? parsed.sid : null };
-    }
-  } catch {
-    // Rows written before the session binding existed hold the bare nonce.
-  }
-  return { nonce: raw, sid: null };
-}
-
-/** Access/refresh rows carry the authorizing session id in the otherwise unused `redirectUri` column. */
-const SESSION_MARKER = "sid:";
-const encodeSession = (sessionId: string | null | undefined): string | null => (sessionId ? `${SESSION_MARKER}${sessionId}` : null);
-const decodeSession = (raw: string | null): string | null => (raw?.startsWith(SESSION_MARKER) ? raw.slice(SESSION_MARKER.length) || null : null);
 
 export async function primaryEmail(ctx: AppContext, user: UserRow) {
   if (!user.primaryEmailAddressId) return null;
@@ -397,11 +375,10 @@ export async function issueTokenSet(ctx: AppContext, input: TokenSetInput): Prom
             tokenHash: sha256(accessToken),
             scopes: scope,
             // the authorizing session (org claims, `sid`); see the storage note at the top of this file
-            redirectUri: encodeSession(sessionId),
+            sessionId: sessionId ?? null,
             codeChallenge: null,
             codeChallengeMethod: null,
-            // family id (see the storage note at the top of this file)
-            nonce: input.family,
+            familyId: input.family,
             revoked: false,
             expiresAt: now + ACCESS_TOKEN_TTL_SECONDS * 1000,
             createdAt: now,
@@ -423,10 +400,10 @@ export async function issueTokenSet(ctx: AppContext, input: TokenSetInput): Prom
                   userId: input.user.id,
                   tokenHash: sha256(refreshToken),
                   scopes: scope,
-                  redirectUri: encodeSession(sessionId),
+                  sessionId: sessionId ?? null,
                   codeChallenge: null,
                   codeChallengeMethod: null,
-                  nonce: input.family,
+                  familyId: input.family,
                   revoked: false,
                   expiresAt: now + REFRESH_TOKEN_TTL_SECONDS * 1000,
                   createdAt: now,
@@ -479,7 +456,7 @@ export async function exchangeAuthorizationCode(ctx: AppContext, input: CodeExch
     .returning({ id: s.oauthGrants.id }));
   if (!claimed) throw new OAuthError(400, "invalid_grant", "Authorization code is invalid or expired");
 
-  const meta = decodeCodeMeta(row.nonce);
+  const meta = { nonce: row.nonce, sid: row.sessionId };
   return issueTokenSet(ctx, {
     application: input.application,
     user,
@@ -496,7 +473,7 @@ export async function exchangeRefreshToken(ctx: AppContext, application: Applica
   if (!row || row.kind !== "refresh" || row.applicationId !== application.id) {
     throw new OAuthError(400, "invalid_grant", "Refresh token is invalid");
   }
-  const family = row.nonce ?? "";
+  const family = row.familyId ?? "";
   if (row.revoked) {
     // A rotated-out token was presented again: assume theft and invalidate the whole chain.
     await revokeGrantFamily(ctx, family);
@@ -519,7 +496,7 @@ export async function exchangeRefreshToken(ctx: AppContext, application: Applica
   }
   return issueTokenSet(ctx, {
     application, user, scopes: parseScopes(row.scopes), family, nonce: null,
-    sessionId: decodeSession(row.redirectUri),
+    sessionId: row.sessionId,
   });
 }
 
@@ -563,7 +540,7 @@ export async function userInfoClaims(ctx: AppContext, row: GrantRow, user: UserR
     claims.email = email?.email ?? null;
     claims.email_verified = !!email?.verified;
   }
-  if (scopes.includes("organizations")) await appendOrgClaims(claims, ctx, user.id, decodeSession(row.redirectUri));
+  if (scopes.includes("organizations")) await appendOrgClaims(claims, ctx, user.id, row.sessionId);
   return claims;
 }
 
@@ -589,7 +566,7 @@ export async function recordConsent(ctx: AppContext, applicationId: string, user
 export async function revokeToken(ctx: AppContext, application: ApplicationRow, token: string): Promise<void> {
   const row = await findGrantByToken(ctx, token);
   if (!row || row.applicationId !== application.id) return;
-  if (row.kind === "refresh" && row.nonce) await revokeGrantFamily(ctx, row.nonce);
+  if (row.kind === "refresh" && row.familyId) await revokeGrantFamily(ctx, row.familyId);
   else await ctx.db.update(s.oauthGrants).set({ revoked: true }).where(eq(s.oauthGrants.id, row.id));
 }
 

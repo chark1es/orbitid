@@ -488,11 +488,16 @@ export function defineSchema(kit: Kit) {
     redirectUri: text("redirect_uri"),
     codeChallenge: text("code_challenge"),
     codeChallengeMethod: text("code_challenge_method"),
+    /** OIDC `nonce` of an authorization code. */
     nonce: text("nonce"),
+    /** Token chain id: access and refresh tokens from one authorization share it, so reuse can revoke the whole family. */
+    familyId: text("family_id"),
+    /** Session that authorized the grant; keeps `sid` and organization claims tied to it. */
+    sessionId: text("session_id"),
     revoked: bool("revoked").notNull().default(false),
     expiresAt: int("expires_at").notNull(),
     createdAt: ts("created_at"),
-  });
+  }, (t) => [index("oauth_grants_family_idx").on(t.familyId)]);
   const oauthConsents = table("oauth_consents", {
     applicationId: text("application_id").notNull().references(() => oauthApplications.id, { onDelete: "cascade" }),
     userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
