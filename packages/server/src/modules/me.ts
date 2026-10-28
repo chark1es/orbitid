@@ -16,7 +16,7 @@ import { serializeEmail, serializeExternalAccount, serializePasskey, serializePh
 import { assertPasswordValid, hashPassword, verifyPassword } from "../services/passwords";
 import { disableTotp, finishTotpSetup, generateBackupCodes, startTotpSetup } from "../services/mfa";
 import { beginPasskeyRegistration, finishPasskeyRegistration, listPasskeys } from "../services/passkeys";
-import { endSession, endSessionsForUser } from "../services/sessions";
+import { activatePendingSessions, endSession, endSessionsForUser } from "../services/sessions";
 import { sendEmail, sendSms } from "../services/mail";
 import { onUserEmailVerified } from "../services/orgs";
 import {
@@ -422,7 +422,7 @@ export default function routes(ctx: AppContext) {
     const adapter = await getOAuthAdapter(ctx, provider);
     if (!adapter) throw new OrbitError(400, ErrorCodes.oauth_provider_not_enabled, "Unsupported provider", { param_name: "strategy" });
     const redirectUrl = validateRedirectUrl(ctx, body.redirect_url) ?? ctx.settings.get().application.homeUrl;
-    const authStart = await createOAuthAuthorization(ctx, provider, {
+    const authStart = await createOAuthAuthorization(ctx, c, provider, {
       clientId: client.id, kind: "connect", userId: user.id, redirectUrl,
       additionalScopes: body.additional_scopes,
     });
@@ -499,6 +499,7 @@ export default function routes(ctx: AppContext) {
     const body = await parseBody(c, totpAttemptSchema);
     hit(ctx, `totp:attempt:${user.id}`, 20, 60_000);
     const { backupCodes } = finishTotpSetup(ctx, user, body.code);
+    activatePendingSessions(ctx, user.id);
     await emitUserUpdated(user.id);
     return c.json({
       response: {

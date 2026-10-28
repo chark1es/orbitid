@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import * as schema from "../../src/db/schema";
 import { latestCodeFor } from "../../src/services/mail";
 import { sha256 } from "../../src/lib/crypto";
-import { rotateSigningKey } from "../../src/services/tokens";
+import { rotateSigningKey, signJwt, signSessionToken, verifySessionToken } from "../../src/services/tokens";
 import { errorsOf, getClient, setup, signUpUser, testClient } from "./helpers";
 
 describe("sessions & tokens", () => {
@@ -145,6 +145,21 @@ describe("sessions & tokens", () => {
 
     const foreignOrg = await user.client.json(`/v1/client/sessions/${user.sessionId}/touch`, { body: { active_organization_id: "org_other" } });
     expect(errorsOf(foreignOrg)[0]?.code).toBe("not_a_member_in_organization");
+
+    // an explicit null switches back to the personal account and drops the org claims
+    await user.client.json(`/v1/client/sessions/${user.sessionId}/touch`, { body: { active_organization_id: null } });
+    const personal = await user.client.json<{ jwt: string }>(`/v1/client/sessions/${user.sessionId}/tokens`, { method: "POST", body: {} });
+    const { payload: personalClaims } = await jwtVerify(personal.jwt, createLocalJWKSet(jwks), { issuer: ctx.env.baseUrl });
+    expect(personalClaims.org_id).toBeUndefined();
+  });
+
+  it("does not accept a token with an audience as a session token", async () => {
+    const { app, ctx } = await setup();
+    const user = await signUpUser(app);
+    const forged = await signJwt(ctx, { sub: user.userId, sid: user.sessionId }, { expiresInSeconds: 60, audience: "orbitid-m2m", issuer: ctx.env.baseUrl });
+    await expect(verifySessionToken(ctx, forged)).rejects.toThrow("Invalid session token");
+    const genuine = await signSessionToken(ctx, user.sessionId);
+    await expect(verifySessionToken(ctx, genuine)).resolves.toMatchObject({ sid: user.sessionId });
   });
 
   it("touches, ends and removes sessions", async () => {

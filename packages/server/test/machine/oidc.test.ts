@@ -3,6 +3,8 @@ import { createHash, randomBytes } from "node:crypto";
 import { decodeProtectedHeader, jwtVerify } from "jose";
 import { setup, authHeaders, insertUser, insertClientSession, BASE_URL } from "./helpers";
 import { TEST_PUBLIC_JWK } from "./fake-tokens";
+import { eq } from "drizzle-orm";
+import * as schema from "../../src/db/schema";
 
 vi.mock("../../src/services/tokens", () => import("./fake-tokens"));
 
@@ -191,6 +193,19 @@ describe("OIDC provider — token lifecycle", () => {
       client_id: app.client_id, client_secret: app.client_secret,
     });
     expect(deadRefresh.status).toBe(400);
+  });
+
+  it("stops issuing and honouring tokens once the user is banned", async () => {
+    const { tokens } = await codeFlow(h, app, session.cookie);
+    h.ctx.db.update(schema.users).set({ banned: true }).where(eq(schema.users.id, user.userId)).run();
+
+    const refresh = await form(h, "/oauth/token", {
+      grant_type: "refresh_token", refresh_token: tokens.refresh_token, client_id: app.client_id, client_secret: app.client_secret,
+    });
+    expect(refresh.status).toBe(400);
+    expect((await refresh.json()).error).toBe("invalid_grant");
+    const userinfo = await h.app.request("/oauth/userinfo", { headers: { authorization: `Bearer ${tokens.access_token}` } });
+    expect(userinfo.status).toBe(401);
   });
 
   it("introspects and revokes tokens (RFC 7662 / 7009)", async () => {

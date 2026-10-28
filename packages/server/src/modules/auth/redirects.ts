@@ -9,21 +9,10 @@ export function validateRedirectUrl(ctx: AppContext, value: string | null | unde
   if (!value) return null;
   const raw = value.trim();
   if (!raw) return null;
-  // Relative (path or query) redirects are always allowed, but protocol-relative URLs are not.
-  if (raw.startsWith("//") || raw.startsWith("\\")) {
-    throw new OrbitError(422, ErrorCodes.form_param_format_invalid, `${param} must not be protocol-relative`, { param_name: param });
-  }
-  if (raw.startsWith("/")) {
-    const base = ctx.settings.get().application.homeUrl || ctx.env.baseUrl;
-    try {
-      return new URL(raw, base).toString();
-    } catch {
-      throw new OrbitError(422, ErrorCodes.form_param_format_invalid, `${param} is not a valid URL`, { param_name: param });
-    }
-  }
+  // Resolve first, then judge the result: "/\\evil.example" and "//evil.example" normalize to another host.
   let url: URL;
   try {
-    url = new URL(raw);
+    url = new URL(raw, ctx.settings.get().application.homeUrl || ctx.env.baseUrl);
   } catch {
     throw new OrbitError(422, ErrorCodes.form_param_format_invalid, `${param} is not a valid URL`, { param_name: param });
   }

@@ -147,6 +147,9 @@ export async function verifySessionToken(
       ? await jwtVerify(token, getKey, verifyOptions)
       : await jwtVerify(token, key!, verifyOptions);
     const claims = payload as unknown as SessionClaims;
+    if (payload.aud !== undefined && options.audience === undefined) {
+      return { valid: false, reason: "invalid", message: "Token is not a session token" };
+    }
     if (!partyMatches(claims.azp, options.authorizedParties)) {
       return { valid: false, reason: "unauthorized-party", claims };
     }

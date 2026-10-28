@@ -140,19 +140,21 @@ async function createOidcConnection(h: Harness, overrides: Record<string, unknow
   return res.json();
 }
 
-async function startFlow(h: Harness, connectionId: string, clientId: string, identifier = "ada@acme.com") {
+/** What a browser does: start with its client cookie, keep the binding cookie the server sets for the callback. */
+async function startFlow(h: Harness, connectionId: string, client: ReturnType<typeof insertClient>, identifier = "ada@acme.com") {
   const res = await h.app.request(`/v1/client/enterprise/start?${new URLSearchParams({
-    client_id: clientId, identifier, redirect_url: "http://localhost:3000/after",
-  })}`);
+    client_id: client.clientId, identifier, redirect_url: "http://localhost:3000/after",
+  })}`, { headers: { cookie: `__client=${client.token}` } });
   expect(res.status).toBe(302);
   const location = new URL(res.headers.get("location")!);
   const query = Object.fromEntries(location.searchParams);
   const stateRow = h.ctx.db.select().from(s.oauthStates).where(eq(s.oauthStates.state, query.state!)).get()!;
-  return { location, query, stateRow, connectionId };
+  const binding = /__orbit_oauth=([^;]+)/.exec(res.headers.get("set-cookie") ?? "")?.[1];
+  return { location, query, stateRow, connectionId, cookie: `__client=${client.token}; __orbit_oauth=${binding}` };
 }
 
-const callback = (h: Harness, connectionId: string, params: Record<string, string>) =>
-  h.app.request(`/v1/client/enterprise/oidc_callback/${connectionId}?${new URLSearchParams(params)}`);
+const callback = (h: Harness, connectionId: string, params: Record<string, string>, cookie?: string) =>
+  h.app.request(`/v1/client/enterprise/oidc_callback/${connectionId}?${new URLSearchParams(params)}`, cookie ? { headers: { cookie } } : undefined);
 
 describe("enterprise OIDC connections", () => {
   let h: Harness;
@@ -175,7 +177,7 @@ describe("enterprise OIDC connections", () => {
     expect(stored).toMatch(/^v1\./);
     expect(stored).not.toContain("mock-secret");
 
-    const start = await startFlow(h, conn.id, insertClient(h.ctx).clientId);
+    const start = await startFlow(h, conn.id, insertClient(h.ctx));
     expect(start.query.client_id).toBe("mock-client");
     expect(start.query.code_challenge).toBeTruthy();
     expect(start.query.code_challenge_method).toBe("S256");
@@ -185,15 +187,22 @@ describe("enterprise OIDC connections", () => {
   it("completes the authorization-code + PKCE callback and maps the profile", async () => {
     const conn = await createOidcConnection(h);
     const client = insertClient(h.ctx);
-    const start = await startFlow(h, conn.id, client.clientId);
+    const start = await startFlow(h, conn.id, client);
     idp.expectedNonce = start.stateRow.nonce!;
 
-    const res = await callback(h, conn.id, { code: "good-code", state: start.query.state! });
+    // Another browser holding the link cannot finish the flow.
+    const foreign = await callback(h, conn.id, { code: "good-code", state: start.query.state! }, `__client=${insertClient(h.ctx).token}`);
+    expect(foreign.status).toBe(400);
+    expect(handleExternalIdentity).not.toHaveBeenCalled();
+
+    const restarted = await startFlow(h, conn.id, client);
+    idp.expectedNonce = restarted.stateRow.nonce!;
+    const res = await callback(h, conn.id, { code: "good-code", state: restarted.query.state! }, restarted.cookie);
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe(`http://localhost:3000/after?provider=oidc_${conn.id}&email=ada@acme.com`);
 
     const verifier = idp.lastTokenRequest!.get("code_verifier")!;
-    expect(createHash("sha256").update(verifier).digest("base64url")).toBe(start.query.code_challenge);
+    expect(createHash("sha256").update(verifier).digest("base64url")).toBe(restarted.query.code_challenge);
     expect(idp.lastTokenRequest!.get("client_id")).toBe("mock-client");
     expect(idp.lastTokenRequest!.get("client_secret")).toBe("mock-secret");
 
@@ -212,30 +221,30 @@ describe("enterprise OIDC connections", () => {
     });
 
     // The state is single use.
-    const replay = await callback(h, conn.id, { code: "good-code", state: start.query.state! });
+    const replay = await callback(h, conn.id, { code: "good-code", state: restarted.query.state! }, restarted.cookie);
     expect(replay.status).toBe(400);
   });
 
   it("caches the discovery document", async () => {
     const conn = await createOidcConnection(h);
     const client = insertClient(h.ctx);
-    await startFlow(h, conn.id, client.clientId);
-    await startFlow(h, conn.id, client.clientId);
+    await startFlow(h, conn.id, client);
+    await startFlow(h, conn.id, client);
     expect(idp.discoveryHits).toBe(1);
   });
 
   it("rejects a nonce mismatch and IdP errors", async () => {
     const conn = await createOidcConnection(h);
     const client = insertClient(h.ctx);
-    const start = await startFlow(h, conn.id, client.clientId);
+    const start = await startFlow(h, conn.id, client);
     idp.expectedNonce = "different-nonce";
-    const mismatch = await callback(h, conn.id, { code: "good-code", state: start.query.state! });
+    const mismatch = await callback(h, conn.id, { code: "good-code", state: start.query.state! }, start.cookie);
     expect(mismatch.status).toBe(400);
     expect((await mismatch.json()).errors[0].code).toBe("oauth_callback_error");
     expect(handleExternalIdentity).not.toHaveBeenCalled();
 
-    const second = await startFlow(h, conn.id, client.clientId);
-    const idpError = await callback(h, conn.id, { error: "access_denied", error_description: "user said no", state: second.query.state! });
+    const second = await startFlow(h, conn.id, client);
+    const idpError = await callback(h, conn.id, { error: "access_denied", error_description: "user said no", state: second.query.state! }, second.cookie);
     expect(idpError.status).toBe(400);
 
     const unknownState = await callback(h, conn.id, { code: "good-code", state: "nonsense" });
@@ -248,7 +257,7 @@ describe("enterprise OIDC connections", () => {
     await h.app.request(`/v1/enterprise_connections/${conn.id}`, { method: "PATCH", headers: authHeaders(), body: json({ active: false }) });
     const inactive = await h.app.request(`/v1/client/enterprise/start?${new URLSearchParams({
       client_id: client.clientId, identifier: "ada@acme.com", redirect_url: "http://localhost:3000/after",
-    })}`);
+    })}`, { headers: { cookie: `__client=${client.token}` } });
     expect(inactive.status).toBe(404);
 
     const saml = await h.app.request("/v1/enterprise_connections", {

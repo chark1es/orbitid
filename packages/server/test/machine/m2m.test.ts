@@ -118,6 +118,16 @@ describe("m2m — tokens", () => {
     expect((await after.json()).errors[0].code).toBe("authorization_invalid");
   });
 
+  it("rejects claims that could forge a session or organization role", async () => {
+    const machine = await createMachine(h);
+    for (const claims of [{ sid: "sess_x" }, { org_role: "org:admin" }, { org_permissions: ["org:sys_profile:manage"] }, { act: { sub: "user_1" } }]) {
+      const res = await h.app.request("/v1/m2m/tokens", {
+        method: "POST", headers: authHeaders(), body: json({ machine_id: machine.id, token_format: "jwt", claims }),
+      });
+      expect(res.status).toBe(422);
+    }
+  });
+
   it("issues RS256 JWTs (sub = machine id, scopes) verifiable with the instance JWKS", async () => {
     const other = await createMachine(h, "target");
     const machine = await createMachine(h, "issuer", { scoped_machines: [other.id] });

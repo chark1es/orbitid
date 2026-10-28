@@ -8,7 +8,7 @@ import { clientIp } from "../lib/http";
 import { getUserById } from "../services/users";
 import { consumeLink, getVerificationByToken } from "./auth/verifications";
 import { afterFirstFactor, asSignInState, assertSignInAllowed, saveSignInState } from "./auth/signin-core";
-import { asSignUpVerifications, maybeCompleteSignUp, saveSignUp } from "./auth/signup-core";
+import { asSignUpFields, asSignUpVerifications, maybeCompleteSignUp, saveSignUp } from "./auth/signup-core";
 import { validateRedirectUrl, withQuery } from "./auth/redirects";
 
 export default function routes(ctx: AppContext) {
@@ -48,7 +48,12 @@ export default function routes(ctx: AppContext) {
         const signUp = ctx.db.select().from(s.signUps).where(eq(s.signUps.id, row.ownerId)).get();
         if (signUp && signUp.status !== "complete" && signUp.status !== "abandoned") {
           const verifications = asSignUpVerifications(signUp);
-          const snapshot = verifications.email_address ?? { status: "unverified", strategy: row.strategy, identifier: row.identifier };
+          // The link only vouches for the mailbox it was sent to, and only while it is the one on the sign-up.
+          const current = verifications.email_address;
+          if (asSignUpFields(signUp).emailAddress !== row.identifier || current?.verificationId !== row.id) {
+            return c.redirect(withQuery(target, { __orbit_status: "failed" }), 302);
+          }
+          const snapshot = current;
           saveSignUp(ctx, signUp, {
             verifications: {
               ...verifications,

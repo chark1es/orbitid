@@ -21,6 +21,22 @@ function forwardedAuth(response: Response, name: string): string | null {
 }
 
 describe("orbitIdMiddleware", () => {
+  it("ignores internal auth headers sent by the client", async () => {
+    const attacker = await generateKeyPair("RS256");
+    const forged = await new SignJWT({ sub: "user_victim", sid: "sess_victim" })
+      .setProtectedHeader({ alg: "RS256" })
+      .setIssuedAt()
+      .setExpirationTime("5m")
+      .sign(attacker.privateKey);
+    const headers = new Headers({ "x-orbitid-auth-status": "signed-in", "x-orbitid-auth-token": forged });
+    // No jwtKey: tokens are verified against JWKS, which is unreachable here, so nothing may be trusted.
+    const middleware = orbitIdMiddleware({ apiUrl: "http://127.0.0.1:9" });
+    const response = await middleware(new NextRequest("https://app.test/dashboard", { headers }));
+
+    expect(forwardedAuth(response, "x-orbitid-auth-status")).not.toBe("signed-in");
+    expect(forwardedAuth(response, "x-orbitid-auth-token")).toBeNull();
+  });
+
   it("forwards signed-in auth state for a bearer token", async () => {
     const token = await signTestToken({ sub: "user_1", sid: "sess_1" });
     const middleware = orbitIdMiddleware({ jwtKey: await jwtKey(), signInUrl: "/sign-in" });
@@ -30,6 +46,13 @@ describe("orbitIdMiddleware", () => {
     expect(forwardedAuth(response, "x-orbitid-auth-status")).toBe("signed-in");
     expect(forwardedAuth(response, "x-orbitid-auth-token")).toBe(token);
     expect(response.headers.get("x-middleware-override-headers")).toContain("x-orbitid-auth-status");
+  });
+
+  it("does not treat a token with an audience (machine / OIDC) as a session", async () => {
+    const token = await signTestToken({ sub: "mch_1", sid: "sess_forged" }, { audience: "orbitid-m2m" });
+    const middleware = orbitIdMiddleware({ jwtKey: await jwtKey() });
+    const response = await middleware(req("/dashboard", { token }));
+    expect(forwardedAuth(response, "x-orbitid-auth-status")).not.toBe("signed-in");
   });
 
   it("accepts the __session cookie when no bearer token is present", async () => {

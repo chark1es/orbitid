@@ -19,6 +19,27 @@ async function enableTotp(client: TestClient) {
 }
 
 describe("MFA", () => {
+  it("gives a pending session until required MFA is enrolled", async () => {
+    const { app, ctx } = await setup();
+    await ctx.settings.update({ mfa: { required: true }, attributes: { authenticatorApp: { enabled: true } } });
+    const user = await signUpUser(app);
+    const statusOf = () => ctx.db.select().from(schema.sessions).where(eq(schema.sessions.id, user.sessionId)).get()?.status;
+    expect(statusOf()).toBe("pending");
+
+    const minted = await user.client.json<{ jwt: string }>(`/v1/client/sessions/${user.sessionId}/tokens`, { method: "POST", body: {} });
+    expect(JSON.parse(Buffer.from(minted.jwt.split(".")[1]!, "base64url").toString()).sts).toBe("pending");
+
+    await enableTotp(user.client);
+    expect(statusOf()).toBe("active");
+  });
+
+  it("does not lock users out when no second factor can be enrolled", async () => {
+    const { app, ctx } = await setup();
+    await ctx.settings.update({ mfa: { required: true } });
+    const user = await signUpUser(app);
+    expect(ctx.db.select().from(schema.sessions).where(eq(schema.sessions.id, user.sessionId)).get()?.status).toBe("active");
+  });
+
   it("enrolls TOTP, keeps the secret encrypted and requires it at sign-in", async () => {
     const { app, ctx } = await setup();
     const user = await signUpUser(app);

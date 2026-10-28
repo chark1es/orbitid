@@ -229,7 +229,7 @@ function CreateOrganizationView({
                 ref={logoInputRef}
                 id="create-org-logo"
                 type="file"
-                accept="image/png,image/jpeg,image/svg+xml,image/webp"
+                accept="image/png,image/jpeg,image/webp"
                 className="sr-only"
                 onChange={(event) => setLogoFile(event.target.files?.[0] ?? null)}
               />

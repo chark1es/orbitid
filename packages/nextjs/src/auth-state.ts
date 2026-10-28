@@ -189,18 +189,20 @@ export function createAuthObject(params: CreateAuthObjectParams): AuthObject {
   const env = params.env ?? getServerEnv();
   const sessionStatus = claims?.sts ?? (status === "signed-in" ? "active" : null);
   const userToken = params.getTokenOverride ?? (async () => token);
+  // A pending session (e.g. required MFA not yet set up) is not a signed-in user.
+  const authenticated = sessionStatus === "pending" ? null : claims;
 
   const auth: AuthObject = {
-    userId: claims?.sub ?? null,
+    userId: authenticated?.sub ?? null,
     sessionId: claims?.sid ?? null,
-    orgId: claims?.org_id ?? null,
-    orgRole: claims?.org_role ?? null,
-    orgSlug: claims?.org_slug ?? null,
-    orgPermissions: claims?.org_permissions ?? null,
-    actor: claims?.act ?? null,
+    orgId: authenticated?.org_id ?? null,
+    orgRole: authenticated?.org_role ?? null,
+    orgSlug: authenticated?.org_slug ?? null,
+    orgPermissions: authenticated?.org_permissions ?? null,
+    actor: authenticated?.act ?? null,
     sessionClaims: claims,
     sessionStatus,
-    isAuthenticated: status === "signed-in" && claims !== null,
+    isAuthenticated: status === "signed-in" && authenticated !== null,
     getToken: userToken,
     has: createHasChecker(claims, sessionStatus),
     redirectToSignIn(opts?: { returnBackUrl?: string }): never {

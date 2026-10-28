@@ -125,13 +125,10 @@ async function signInExistingUser(ctx: AppContext, flow: ExternalIdentityFlow, u
   return { redirectTo: withQuery(target, successStatus(result.status === "complete" ? "complete" : "needs_second_factor")) };
 }
 
-/** Completes a sign-up-owned OAuth flow for a user that already exists (OAuth account matched). */
-async function completeSignUpForExistingUser(ctx: AppContext, flow: ExternalIdentityFlow, signUpId: string, user: UserRow): Promise<{ redirectTo: string }> {
-  assertSignInAllowed(user);
-  const sessionId = await createSession(ctx, { clientId: flow.clientId, userId: user.id, firstFactor: true });
-  ctx.db.update(s.signUps).set({ status: "complete", createdUserId: user.id, createdSessionId: sessionId, updatedAt: Date.now() }).where(eq(s.signUps.id, signUpId)).run();
-  abandonOtherAttempts(ctx, flow.clientId, "sign_up", signUpId);
-  return { redirectTo: withQuery(flow.actionCompleteRedirectUrl || flow.redirectUrl, successStatus("complete")) };
+/** An OAuth sign-up that matched an existing user is a sign-in, so that user's second factor still applies. */
+async function completeSignUpForExistingUser(ctx: AppContext, flow: ExternalIdentityFlow, signUpId: string, user: UserRow, profile: ExternalProfile): Promise<{ redirectTo: string }> {
+  ctx.db.update(s.signUps).set({ status: "abandoned", updatedAt: Date.now() }).where(eq(s.signUps.id, signUpId)).run();
+  return signInExistingUser(ctx, { ...flow, kind: "sign_in", ownerId: undefined }, user, profile);
 }
 
 /**
@@ -176,13 +173,13 @@ export async function handleExternalIdentity(
       if (existingUser) {
         await assertSignInIdentityAllowed(ctx, profile.email);
         linkExternalAccount(ctx, existingUser.id, profile);
-        return completeSignUpForExistingUser(ctx, flow, signUp.id, existingUser);
+        return completeSignUpForExistingUser(ctx, flow, signUp.id, existingUser, profile);
       }
       const verifiedEmailUser = profile.email && profile.emailVerified ? findUserByVerifiedEmail(ctx, profile.email) : undefined;
       if (verifiedEmailUser) {
         await assertSignInIdentityAllowed(ctx, profile.email);
         linkExternalAccount(ctx, verifiedEmailUser.id, profile);
-        return completeSignUpForExistingUser(ctx, flow, signUp.id, verifiedEmailUser);
+        return completeSignUpForExistingUser(ctx, flow, signUp.id, verifiedEmailUser, profile);
       }
       // Signing up with an email that belongs to an existing account must not create a duplicate.
       if (profile.email) {

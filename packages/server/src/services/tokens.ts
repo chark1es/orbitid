@@ -275,7 +275,8 @@ export async function verifySessionToken(ctx: AppContext, jwt: string): Promise<
   const jwks = await getJwks(ctx);
   try {
     const { payload } = await jwtVerify(jwt, createLocalJWKSet(jwks), { issuer: ctx.env.baseUrl });
-    if (typeof payload.sid !== "string" || typeof payload.sub !== "string") {
+    // Session tokens never carry an audience; machine and OIDC tokens signed by the same key do.
+    if (typeof payload.sid !== "string" || typeof payload.sub !== "string" || payload.aud !== undefined) {
       throw new OrbitError(401, ErrorCodes.authentication_invalid, "Not a session token");
     }
     return payload as SessionClaims;

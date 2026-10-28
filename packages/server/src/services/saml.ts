@@ -5,7 +5,7 @@
 // client is constructed per request and therefore has no in-memory request cache.
 import { X509Certificate } from "node:crypto";
 import { createRemoteJWKSet, jwtVerify } from "jose";
-import { SAML, ValidateInResponseTo, type Profile } from "@node-saml/node-saml";
+import { SAML, ValidateInResponseTo, type CacheProvider, type Profile } from "@node-saml/node-saml";
 import { and, eq } from "drizzle-orm";
 import { ErrorCodes, OrbitError, type EnterpriseConnectionJSON } from "@orbitid/shared";
 import type { AppContext } from "../context";
@@ -94,6 +94,55 @@ export function oidcConfig(conn: ConnectionRow): OidcConfig {
   return { clientId: cfg.clientId, clientSecretEnc: cfg.clientSecretEnc, discoveryUrl: cfg.discoveryUrl, discovery: cfg.discovery };
 }
 
+const SAML_CACHE_TTL_MS = 10 * 60_000;
+const SAML_ASSERTION_TTL_MS = 60 * 60_000;
+
+/**
+ * Remembers AuthnRequest IDs (so a response must answer a request we issued, once) and assertion IDs
+ * (so a captured response cannot be replayed). Rows live in `oauth_states`; better-sqlite3 is synchronous,
+ * so each check-then-write below is atomic.
+ */
+function samlCache(ctx: AppContext): CacheProvider {
+  const rowKey = (key: string) => `saml:${key}`;
+  const live = (key: string) => {
+    const row = ctx.db.select().from(s.oauthStates).where(eq(s.oauthStates.state, rowKey(key))).get();
+    if (row && row.expiresAt <= Date.now()) {
+      ctx.db.delete(s.oauthStates).where(eq(s.oauthStates.state, rowKey(key))).run();
+      return undefined;
+    }
+    return row;
+  };
+  const write = (key: string, value: string, expiresAt: number) =>
+    ctx.db.insert(s.oauthStates).values({ state: rowKey(key), provider: "saml_cache", flow: { value }, expiresAt }).run();
+  const valueOf = (row: { flow: Record<string, unknown> } | undefined) => (row ? String(row.flow.value) : null);
+  return {
+    async saveAsync(key, value) {
+      ctx.db.delete(s.oauthStates).where(eq(s.oauthStates.state, rowKey(key))).run();
+      write(key, value, Date.now() + SAML_CACHE_TTL_MS);
+      return { value, createdAt: Date.now() };
+    },
+    async getAsync(key) {
+      return valueOf(live(key));
+    },
+    async removeAsync(key) {
+      if (!key) return null;
+      const value = valueOf(live(key));
+      ctx.db.delete(s.oauthStates).where(eq(s.oauthStates.state, rowKey(key))).run();
+      return value;
+    },
+    async consumeAsync(key) {
+      const value = valueOf(live(key));
+      ctx.db.delete(s.oauthStates).where(eq(s.oauthStates.state, rowKey(key))).run();
+      return value;
+    },
+    async saveIfAbsentAsync(key, value, expiresAtMs) {
+      if (live(key)) return false;
+      write(key, value, Math.min(expiresAtMs, Date.now() + SAML_ASSERTION_TTL_MS));
+      return true;
+    },
+  };
+}
+
 export function samlClient(ctx: AppContext, conn: ConnectionRow): SAML {
   const cfg = samlConfig(conn);
   return new SAML({
@@ -105,8 +154,11 @@ export function samlClient(ctx: AppContext, conn: ConnectionRow): SAML {
     wantAssertionsSigned: true,
     // IdPs commonly sign the assertion only; assertion signature is mandatory above.
     wantAuthnResponseSigned: false,
-    // Flow state is validated via RelayState; a per-request client has no request-id cache.
-    validateInResponseTo: ValidateInResponseTo.never,
+    // Responses must answer a request we issued; IdP-initiated logins (when allowed) carry no InResponseTo.
+    validateInResponseTo: conn.allowIdpInitiated ? ValidateInResponseTo.ifPresent : ValidateInResponseTo.always,
+    cacheProvider: samlCache(ctx),
+    requestIdExpirationPeriodMs: SAML_CACHE_TTL_MS,
+    rejectReplayedAssertions: true,
     acceptedClockSkewMs: 5000,
     disableRequestedAuthnContext: true,
   });

@@ -195,7 +195,10 @@ export function orbitIdMiddleware(
 
   return async (req: NextRequest): Promise<Response> => {
     const env = getServerEnv(options);
-    const state = await resolveRequestAuthState(req.headers, req.url, env);
+    // Internal auth headers are ours to set; anything the client sent is discarded.
+    const incoming = new Headers(req.headers);
+    for (const name of Object.values(AUTH_HEADERS)) incoming.delete(name);
+    const state = await resolveRequestAuthState(incoming, req.url, env);
 
     if (options.debug) {
       console.debug(`[orbitid] ${req.method} ${req.nextUrl?.pathname ?? req.url} → ${state.status}`, state.reason ?? "");

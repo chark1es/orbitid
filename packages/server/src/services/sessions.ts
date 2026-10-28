@@ -5,6 +5,7 @@ import * as s from "../db/schema";
 import { newId } from "../lib/ids";
 import { serializeSession } from "../serializers";
 import { sendEmail } from "./mail";
+import { mfaEnrollmentRequired } from "./mfa";
 import { primaryEmail, touchUser, type UserRow } from "./users";
 import { emitEvent } from "./webhooks";
 
@@ -38,11 +39,14 @@ export async function createSession(ctx: AppContext, input: CreateSessionInput):
   }
   const lifetimeMs = Math.min(st.session.lifetimeSeconds, input.maxLifetimeSeconds ?? Number.POSITIVE_INFINITY) * 1000;
   const id = newId("sess");
+  // Required MFA without an enrolled factor yields a "pending" session: it can enrol a factor, nothing else.
+  const owner = ctx.db.select().from(s.users).where(eq(s.users.id, input.userId)).get();
+  const pending = !input.actor && !!owner && mfaEnrollmentRequired(ctx, owner);
   ctx.db.insert(s.sessions).values({
     id,
     clientId: input.clientId,
     userId: input.userId,
-    status: "active",
+    status: pending ? "pending" : "active",
     lastActiveAt: now,
     expireAt: now + lifetimeMs,
     abandonAt: now + lifetimeMs,
@@ -59,6 +63,15 @@ export async function createSession(ctx: AppContext, input: CreateSessionInput):
   const row = ctx.db.select().from(s.sessions).where(eq(s.sessions.id, id)).get()!;
   await emitSessionEvent(ctx, "session.created", row);
   return id;
+}
+
+/** Promotes a user's pending sessions once they have enrolled a second factor. */
+export function activatePendingSessions(ctx: AppContext, userId: string) {
+  const now = Date.now();
+  ctx.db.update(s.sessions)
+    .set({ status: "active", secondFactorVerifiedAt: now, updatedAt: now })
+    .where(and(eq(s.sessions.userId, userId), eq(s.sessions.status, "pending")))
+    .run();
 }
 
 /** Email notification for a new device/sign-in. Optional (called by sign-in flows when notifications are desired). */

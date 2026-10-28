@@ -117,6 +117,9 @@ export function authenticateMachineSecret(ctx: AppContext, secret: string): Mach
   return row && safeEqual(row.secretHash, hash) ? row : null;
 }
 
+/** Claims that identify tokens or sessions; a machine token must never be able to forge them. */
+const RESERVED_CLAIMS = new Set(["iss", "aud", "sub", "exp", "iat", "nbf", "jti", "azp", "sid", "sts", "fva", "act", "scopes"]);
+
 export interface IssueTokenInput {
   secondsUntilExpiration?: number | null;
   claims?: Record<string, unknown> | null;
@@ -130,6 +133,8 @@ export async function issueMachineToken(ctx: AppContext, machine: MachineRow, in
   if (!Number.isFinite(ttl) || ttl <= 0) throw new OrbitError(422, ErrorCodes.form_param_value_invalid, "seconds_until_expiration must be positive", { param_name: "seconds_until_expiration" });
   const expiresAt = Date.now() + Math.floor(ttl) * 1000;
   const id = newId(ID_PREFIX.m2mToken);
+  const reserved = Object.keys(input.claims ?? {}).filter((key) => RESERVED_CLAIMS.has(key) || key.startsWith("org_"));
+  if (reserved.length) throw new OrbitError(422, ErrorCodes.form_param_value_invalid, `claims may not set ${reserved.join(", ")}`, { param_name: "claims" });
   const claims: Record<string, unknown> = {
     ...(input.claims ?? {}),
     sub: machine.id,

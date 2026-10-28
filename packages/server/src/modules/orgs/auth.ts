@@ -43,7 +43,7 @@ export async function tryResolveCaller(ctx: AppContext, c: Context): Promise<Cal
     // Malformed / expired / foreign tokens simply mean "not signed in" for organization routes.
     const claims = await verifySessionToken(ctx, bearer).catch(() => null);
     const row = claims?.sid ? ctx.db.select().from(s.sessions).where(eq(s.sessions.id, claims.sid)).get() : undefined;
-    if (activeSession(row)) return sessionUser(ctx, row);
+    if (activeSession(row) && row.userId === claims?.sub) return sessionUser(ctx, row);
     return null;
   }
 

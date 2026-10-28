@@ -23,9 +23,12 @@ export interface TestClient {
 }
 
 export function testClient(app: ReturnType<typeof createApp>, initialCookie?: string): TestClient {
-  let cookie = initialCookie;
+  const jar = new Map<string, string>();
+  if (initialCookie) for (const part of initialCookie.split(/;\s*/)) { const [name, ...rest] = part.split("="); if (name) jar.set(name, rest.join("=")); }
+  const header = () => (jar.size ? [...jar].map(([name, value]) => `${name}=${value}`).join("; ") : undefined);
   const request = async (path: string, init: { method?: string; body?: unknown; headers?: Record<string, string> } = {}) => {
     const headers = new Headers(init.headers);
+    const cookie = header();
     if (cookie) headers.set("cookie", cookie);
     let body: BodyInit | undefined;
     if (init.body instanceof FormData) {
@@ -40,10 +43,13 @@ export function testClient(app: ReturnType<typeof createApp>, initialCookie?: st
       body,
       redirect: "manual",
     });
-    const setCookie = res.headers.get("set-cookie");
-    if (setCookie) {
-      const match = /(?:^|,\s*)__client=([^;]+)/.exec(setCookie) ?? /__client=([^;]+)/.exec(setCookie);
-      if (match) cookie = `__client=${match[1]}`;
+    for (const line of res.headers.getSetCookie()) {
+      const [pair, ...attributes] = line.split(/;\s*/);
+      const [name, ...rest] = pair!.split("=");
+      const value = rest.join("=");
+      const expired = attributes.some((a) => /^max-age=0$/i.test(a)) || value === "";
+      if (expired) jar.delete(name!);
+      else jar.set(name!, value);
     }
     return res;
   };
@@ -59,7 +65,7 @@ export function testClient(app: ReturnType<typeof createApp>, initialCookie?: st
       }
     },
     get cookie() {
-      return cookie;
+      return header();
     },
   };
 }

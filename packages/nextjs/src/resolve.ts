@@ -6,7 +6,6 @@ import {
 } from "./auth-state";
 import type { ResolvedServerEnv } from "./env";
 import {
-  decodeSessionClaims,
   getSessionToken,
   readCookieValue,
   verifySessionToken,
@@ -15,9 +14,9 @@ import {
 /**
  * Resolve signed-in/signed-out/handshake state from raw request headers.
  *
- * Set by `orbitIdMiddleware` (trusted) or recomputed from the `Authorization`/`__session` token when
- * the app calls `auth()` without middleware. A forwarded status header is only trusted when the
- * accompanying token decodes; when `jwtKey` is configured the token is re-verified here.
+ * Set by `orbitIdMiddleware` or recomputed from the `Authorization`/`__session` token when the app
+ * calls `auth()` without middleware. A forwarded `signed-in` state is only honoured after its token
+ * has been cryptographically verified.
  */
 export async function resolveRequestAuthState(
   headers: Headers,
@@ -30,22 +29,17 @@ export async function resolveRequestAuthState(
     if (forwarded.status !== "signed-in" || !forwarded.token) {
       return { ...forwarded, url };
     }
-    if (env.jwtKey) {
-      const verified = await verifySessionToken(forwarded.token, {
-        jwtKey: env.jwtKey,
-        authorizedParties: env.authorizedParties,
-        clockSkewInMs: env.clockSkewInMs,
-      });
-      if (!verified.valid) {
-        return signedOut(url, verified.reason, verified.message);
-      }
-      return { status: "signed-in", token: forwarded.token, claims: verified.claims, url };
-    }
-    const claims = decodeSessionClaims(forwarded.token);
-    if (!claims) {
-      return signedOut(url, "invalid");
-    }
-    return { status: "signed-in", token: forwarded.token, claims, url };
+    // The header may have been set by the client on a path the middleware does not cover, so the
+    // forwarded token is verified like any other.
+    const verified = await verifySessionToken(forwarded.token, {
+      jwtKey: env.jwtKey,
+      jwksUrl: env.jwksUrl,
+      apiUrl: env.apiUrl,
+      authorizedParties: env.authorizedParties,
+      clockSkewInMs: env.clockSkewInMs,
+    });
+    if (!verified.valid) return signedOut(url, verified.reason, verified.message);
+    return { status: "signed-in", token: forwarded.token, claims: verified.claims, url };
   }
 
   const { token } = getSessionToken(headers, COOKIES.session);

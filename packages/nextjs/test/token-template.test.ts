@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { signTestToken } from "./helpers";
+import { getTestKeys, signTestToken } from "./helpers";
 
 const { getToken, headerStore } = vi.hoisted(() => ({
   getToken: vi.fn(),
@@ -28,7 +28,8 @@ vi.mock("next/navigation", () => ({
 
 import { auth } from "../src/server-auth";
 
-beforeEach(() => {
+beforeEach(async () => {
+  process.env.ORBITID_JWT_KEY = (await getTestKeys()).publicKeyPem;
   headerStore.clear();
   getToken.mockReset();
   process.env.ORBITID_SECRET_KEY = "sk_test_secret";

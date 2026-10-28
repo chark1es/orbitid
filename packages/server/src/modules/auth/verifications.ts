@@ -9,7 +9,7 @@ import { randomCode, randomToken, safeEqual, sha256 } from "../../lib/crypto";
 export type VerificationRow = typeof s.verifications.$inferSelect;
 export type VerificationPurpose =
   | "sign_in_first_factor" | "sign_in_second_factor" | "sign_up_email" | "sign_up_phone"
-  | "reset_password" | "reverify" | "add_email" | "add_phone" | "passkey_registration" | "passkey_authentication";
+  | "reset_password" | "reverify_first_factor" | "reverify_second_factor" | "add_email" | "add_phone" | "passkey_registration" | "passkey_authentication";
 
 export interface IssueVerificationInput {
   purpose: VerificationPurpose;
@@ -104,7 +104,6 @@ export function verificationJSON(row: VerificationRow | null | undefined, fallba
 /** Verifies a numeric code, counting attempts and enforcing expiry/attempt limits. */
 export function checkCode(ctx: AppContext, row: VerificationRow | undefined, code: string | undefined): VerificationRow {
   if (!row) throw new OrbitError(422, ErrorCodes.form_code_incorrect, "There is no pending verification to check");
-  if (row.verifiedAt) return row;
   if (isExpired(row)) throw new OrbitError(422, ErrorCodes.verification_expired, "That verification code has expired. Request a new one.");
   if (row.attempts >= row.maxAttempts) throw new OrbitError(422, ErrorCodes.too_many_attempts, "Too many incorrect attempts. Request a new code.");
   const trimmed = (code ?? "").trim();

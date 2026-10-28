@@ -128,6 +128,10 @@ export async function verifyToken(token: string, options: VerifyTokenOptions = {
   if (typeof payload.sub !== "string" || typeof payload.sid !== "string") {
     throw new TokenVerificationError("token-invalid", "Session token is missing the sub/sid claims");
   }
+  // Machine and OIDC tokens share the signing key but carry an audience; session tokens do not.
+  if (payload.aud !== undefined && options.audience === undefined) {
+    throw new TokenVerificationError("token-invalid", "Token is not a session token");
+  }
 
   if (options.authorizedParties) {
     const azp = payload.azp;

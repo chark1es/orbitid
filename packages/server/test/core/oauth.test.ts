@@ -162,6 +162,65 @@ describe("social OAuth", () => {
     expect(completed.response.created_session_id).toMatch(/^sess_/);
   });
 
+  it("still demands the second factor when an OAuth sign-up matches an MFA-enrolled user", async () => {
+    const { app, ctx } = await setup();
+    await enableGoogle(ctx);
+    const owner = await signUpUser(app, { email: "mfa-oauth@example.com" });
+    ctx.db.update(schema.users).set({ totpVerified: true }).where(eq(schema.users.id, owner.userId)).run();
+    registerOAuthProvider("google", fakeGoogle({ provider: "google", providerUserId: "g-mfa", email: "mfa-oauth@example.com", emailVerified: true }));
+
+    const attacker = testClient(app);
+    const created = await attacker.json<{ response: { verifications: { external_account: { external_verification_redirect_url: string } } } }>("/v1/client/sign_ups", {
+      body: { strategy: "oauth_google", redirect_url: "http://localhost:3000/done" },
+    });
+    const authorize = new URL(created.response.verifications.external_account.external_verification_redirect_url);
+    const callback = await attacker.request(`/v1/oauth_callback/google?state=${authorize.searchParams.get("state")}&code=good-code`);
+    expect(callback.headers.get("location")).toContain("__orbit_status=needs_second_factor");
+
+    const state = await getClient(attacker);
+    expect(state.response.sessions).toHaveLength(0);
+    expect(state.response.sign_in?.status).toBe("needs_second_factor");
+  });
+
+  it("does not treat an OAuth profile's email as verifying a different email on the sign-up", async () => {
+    const { app, ctx } = await setup();
+    await enableGoogle(ctx);
+    registerOAuthProvider("google", fakeGoogle({ provider: "google", providerUserId: "g-attacker", email: "attacker@example.com", emailVerified: true }));
+
+    const client = testClient(app);
+    const created = await client.json<{ response: { id: string; verifications: { external_account: { external_verification_redirect_url: string } } } }>("/v1/client/sign_ups", {
+      body: { strategy: "oauth_google", email_address: "victim@example.com", redirect_url: "http://localhost:3000/done" },
+    });
+    const authorize = new URL(created.response.verifications.external_account.external_verification_redirect_url);
+    await client.request(`/v1/oauth_callback/google?state=${authorize.searchParams.get("state")}&code=good-code`);
+
+    const result = await client.json<{ response: { status: string; unverified_fields: string[]; missing_fields: string[] } }>(`/v1/client/sign_ups/${created.response.id}`, {
+      method: "PATCH",
+      body: { password: "Sup3rSecret!" },
+    });
+    expect(result.response.status).not.toBe("complete");
+    expect(result.response.unverified_fields).toContain("email_address");
+    const victim = ctx.db.select().from(schema.emailAddresses).where(eq(schema.emailAddresses.email, "victim@example.com")).get();
+    expect(victim?.verified ?? false).toBe(false);
+  });
+
+  it("refuses a callback that arrives in a different browser than the one that started the flow", async () => {
+    const { app, ctx } = await setup();
+    await enableGoogle(ctx);
+    registerOAuthProvider("google", fakeGoogle({ provider: "google", providerUserId: "g-csrf", email: "csrf@example.com", emailVerified: true }));
+
+    const initiator = testClient(app);
+    const started = await initiator.json<{ response: { first_factor_verification: { external_verification_redirect_url: string } } }>("/v1/client/sign_ins", {
+      body: { strategy: "oauth_google", redirect_url: "http://localhost:3000/done" },
+    });
+    const state = new URL(started.response.first_factor_verification.external_verification_redirect_url).searchParams.get("state");
+
+    const victim = testClient(app);
+    const callback = await victim.request(`/v1/oauth_callback/google?state=${state}&code=good-code`);
+    expect(callback.headers.get("location")).toContain("__orbit_error=oauth_callback_error");
+    expect(victim.cookie ?? "").not.toContain("__client=");
+  });
+
   it("rejects unconfigured providers", async () => {
     const { app } = await setup();
     const client = testClient(app);

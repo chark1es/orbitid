@@ -7,6 +7,7 @@ import * as s from "../db/schema";
 import { getOAuthAdapter } from "../services/oauth-providers";
 import { handleExternalIdentity, type ExternalProfile } from "../services/external-identity";
 import { regenerateClientToken } from "./auth/client-auth";
+import { browserMatches } from "./auth/browser-binding";
 import { takeOAuthState, type StoredOAuthFlow } from "./auth/oauth-flow";
 import { withQuery } from "./auth/redirects";
 
@@ -66,6 +67,9 @@ export default function routes(ctx: AppContext) {
     }
     if (!flow) return c.redirect(withQuery(ctx.settings.get().application.homeUrl, { __orbit_error: ErrorCodes.oauth_callback_error }), 302);
     const target = flow.actionCompleteRedirectUrl || flow.redirectUrl;
+    if (!browserMatches(c, flow.browserHash)) {
+      return c.redirect(withQuery(target, { __orbit_error: ErrorCodes.oauth_callback_error, __orbit_error_message: "This sign-in was started in a different browser" }), 302);
+    }
     if (params.error) {
       return c.redirect(withQuery(target, { __orbit_error: ErrorCodes.oauth_callback_error, __orbit_error_message: params.error }), 302);
     }
@@ -92,7 +96,7 @@ export default function routes(ctx: AppContext) {
       return c.redirect(withQuery(target, { __orbit_error: code, __orbit_error_message: message }), 302);
     }
 
-    // Rebind the __client cookie to the flow's client (form_post callbacks may not send SameSite=Lax cookies).
+    // The browser is proven to be the initiator, so it takes over the flow's client (form_post callbacks do not carry the Lax client cookie).
     const client = ctx.db.select().from(s.clients).where(eq(s.clients.id, flow.clientId)).get();
     if (!client) {
       return c.redirect(withQuery(target, { __orbit_error: ErrorCodes.client_state_invalid }), 302);

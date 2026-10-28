@@ -145,7 +145,7 @@ export default function routes(ctx: AppContext) {
       saveSignUp(ctx, row, { fields: oauthFields });
       const provider = providerKeyFromStrategy(body.strategy);
       if (!isProviderEnabled(ctx, provider)) throw new OrbitError(400, ErrorCodes.oauth_provider_not_enabled, `Social provider "${provider}" is not enabled`, { param_name: "strategy" });
-      const auth = await createOAuthAuthorization(ctx, provider, {
+      const auth = await createOAuthAuthorization(ctx, c, provider, {
         clientId: client.id, kind: "sign_up", ownerId: row.id,
         redirectUrl: redirectUrl ?? ctx.settings.get().application.homeUrl,
         actionCompleteRedirectUrl: actionComplete ?? undefined,

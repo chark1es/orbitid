@@ -386,7 +386,7 @@ export async function exchangeAuthorizationCode(ctx: AppContext, input: CodeExch
   }
 
   const user = ctx.db.select().from(s.users).where(eq(s.users.id, row.userId)).get();
-  if (!user) throw new OAuthError(400, "invalid_grant", "User no longer exists");
+  if (!user || user.banned) throw new OAuthError(400, "invalid_grant", "User is not allowed to sign in");
   ctx.db.update(s.oauthGrants).set({ revoked: true }).where(eq(s.oauthGrants.id, row.id)).run();
 
   return issueTokenSet(ctx, {
@@ -413,7 +413,10 @@ export async function exchangeRefreshToken(ctx: AppContext, application: Applica
   }
   if (row.expiresAt <= Date.now()) throw new OAuthError(400, "invalid_grant", "Refresh token has expired");
   const user = ctx.db.select().from(s.users).where(eq(s.users.id, row.userId)).get();
-  if (!user) throw new OAuthError(400, "invalid_grant", "User no longer exists");
+  if (!user || user.banned) {
+    revokeGrantFamily(ctx, family);
+    throw new OAuthError(400, "invalid_grant", "User is not allowed to sign in");
+  }
 
   ctx.db.update(s.oauthGrants).set({ revoked: true }).where(eq(s.oauthGrants.id, row.id)).run();
   return issueTokenSet(ctx, { application, user, scopes: parseScopes(row.scopes), family, nonce: null });
@@ -424,7 +427,7 @@ export function accessGrantFromToken(ctx: AppContext, token: string): { row: Gra
   const row = findGrantByToken(ctx, token);
   if (!row || row.kind !== "access" || !isGrantLive(row)) throw new OAuthError(401, "invalid_token", "Access token is invalid or expired");
   const user = ctx.db.select().from(s.users).where(eq(s.users.id, row.userId)).get();
-  if (!user) throw new OAuthError(401, "invalid_token", "User no longer exists");
+  if (!user || user.banned) throw new OAuthError(401, "invalid_token", "User is not allowed to sign in");
   return { row, user };
 }
 

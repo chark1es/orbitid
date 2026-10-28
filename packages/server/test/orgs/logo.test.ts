@@ -32,6 +32,10 @@ describe("organization logos", () => {
     const unsupported = await api(app, "PUT", `/v1/client/organizations/${org.id}/logo`, { cookie: ownerAuth.cookie, body: { file: `data:text/plain;base64,${Buffer.from("hi").toString("base64")}` } });
     expect(unsupported.status).toBe(422);
 
+    const svg = await api(app, "PUT", `/v1/client/organizations/${org.id}/logo`, { cookie: ownerAuth.cookie, body: { file: `data:image/svg+xml;base64,${Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>").toString("base64")}` } });
+    expect(svg.status).toBe(422);
+    expect(served.headers.get("x-content-type-options")).toBe("nosniff");
+
     const removed = await api<{ response: OrganizationJSON }>(app, "DELETE", `/v1/client/organizations/${org.id}/logo`, { cookie: ownerAuth.cookie });
     expect(removed.body.response.has_image).toBe(false);
     expect((await app.request(pathOf(replaced.body.response.image_url))).status).toBe(404);

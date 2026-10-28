@@ -97,19 +97,21 @@ export function buildAuthObject(
   options: BuildAuthObjectOptions = {},
 ): AuthObject {
   const signInUrl = options.signInUrl ?? "/sign-in";
+  // A pending session (e.g. required MFA not yet set up) is not a signed-in user.
+  const authenticated = claims && claims.sts !== "pending" ? claims : null;
   return {
-    userId: claims?.sub ?? null,
+    userId: authenticated?.sub ?? null,
     sessionId: claims?.sid ?? null,
-    orgId: claims?.org_id ?? null,
-    orgRole: claims?.org_role ?? null,
-    orgSlug: claims?.org_slug ?? null,
-    orgPermissions: claims?.org_permissions ?? null,
-    actor: claims?.act ?? null,
+    orgId: authenticated?.org_id ?? null,
+    orgRole: authenticated?.org_role ?? null,
+    orgSlug: authenticated?.org_slug ?? null,
+    orgPermissions: authenticated?.org_permissions ?? null,
+    actor: authenticated?.act ?? null,
     sessionClaims: claims,
     sessionStatus: claims?.sts ?? (claims ? "active" : null),
     getToken,
-    has: createClaimsHasCheck(claims),
-    isAuthenticated: !!claims?.sub,
+    has: createClaimsHasCheck(authenticated),
+    isAuthenticated: !!authenticated?.sub,
     redirectToSignIn: (redirectOptions) => buildSignInRedirect(signInUrl, redirectOptions?.returnBackUrl ?? options.returnBackUrl),
   };
 }

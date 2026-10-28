@@ -38,7 +38,7 @@ const prepareSecondSchema = z.object({ strategy: z.enum(["totp", "phone_code", "
 const attemptSecondSchema = z.object({ strategy: z.enum(["totp", "phone_code", "backup_code"]), code: z.string().min(1) });
 
 const sessionVerification = (ctx: AppContext, sessionId: string): VerificationJSON | null => {
-  const row = getVerification(ctx, "reverify", sessionId);
+  const row = getVerification(ctx, "reverify_first_factor", sessionId) ?? getVerification(ctx, "reverify_second_factor", sessionId);
   return verificationJSON(row);
 };
 
@@ -48,7 +48,7 @@ const withVerification = (ctx: AppContext, session: SessionJSON, extra?: Verific
 });
 
 /** Maps a file extension to a content type (uploads only ever get image types). */
-const IMAGE_TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml" };
+const IMAGE_TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
 
 export default function routes(ctx: AppContext) {
   const app = new Hono();
@@ -93,7 +93,7 @@ export default function routes(ctx: AppContext) {
     const client = requireClientRow(ctx, c);
     const row = requireSession(ctx, client.id, sessionParam(c));
     const body = await parseBody(c, touchSchema);
-    const updated = await touchSession(ctx, row, { organizationId: body.active_organization_id ?? undefined });
+    const updated = await touchSession(ctx, row, { organizationId: body.active_organization_id });
     const json = await serializeClient(ctx, client, { azp: clientAzp(c) });
     return c.json({ response: serializeSession(ctx, updated, { withUser: true }), client: json });
   });
@@ -146,13 +146,13 @@ export default function routes(ctx: AppContext) {
     if (strategy === "email_code") {
       const email = body.email_address_id ? emails.find((e) => e.id === body.email_address_id) : emails[0];
       if (!email) throw new OrbitError(400, ErrorCodes.strategy_for_user_invalid, "This user has no verified email address");
-      const issued = issueVerification(ctx, { purpose: "reverify", strategy: "email_code", identifier: email.email, ownerId: row.id, lifetimeSeconds: ctx.settings.get().email.codeLifetimeSeconds });
+      const issued = issueVerification(ctx, { purpose: "reverify_first_factor", strategy: "email_code", identifier: email.email, ownerId: row.id, lifetimeSeconds: ctx.settings.get().email.codeLifetimeSeconds });
       await sendEmail(ctx, { to: email.email, template: "verification_code", vars: { code: issued.code, expires_in_minutes: Math.round(ctx.settings.get().email.codeLifetimeSeconds / 60) } });
       verification = verificationJSON(issued.row);
     } else if (strategy === "phone_code") {
       const phone = body.phone_number_id ? phones.find((p) => p.id === body.phone_number_id) : phones[0];
       if (!phone) throw new OrbitError(400, ErrorCodes.strategy_for_user_invalid, "This user has no verified phone number");
-      const issued = issueVerification(ctx, { purpose: "reverify", strategy: "phone_code", identifier: phone.phone, ownerId: row.id, lifetimeSeconds: ctx.settings.get().email.codeLifetimeSeconds });
+      const issued = issueVerification(ctx, { purpose: "reverify_first_factor", strategy: "phone_code", identifier: phone.phone, ownerId: row.id, lifetimeSeconds: ctx.settings.get().email.codeLifetimeSeconds });
       await sendSms(ctx, phone.phone, `Your ${ctx.settings.get().application.name} verification code is ${issued.code}`);
       verification = verificationJSON(issued.row);
     } else {
@@ -177,13 +177,14 @@ export default function routes(ctx: AppContext) {
       }
       resetFailedAttempts(ctx, user.id);
     } else {
-      const verification = getVerification(ctx, "reverify", row.id);
+      const verification = getVerification(ctx, "reverify_first_factor", row.id);
+      if (verification && verification.strategy !== strategy) throw new OrbitError(422, ErrorCodes.form_code_incorrect, "That verification code is incorrect", { param_name: "code" });
       checkCode(ctx, verification, body.code);
     }
     markSessionReverified(ctx, row.id, "first_factor");
     const verification = strategy === "password"
       ? { status: "verified" as const, strategy: "password", attempts: null, expire_at: null }
-      : verificationJSON(getVerification(ctx, "reverify", row.id));
+      : verificationJSON(getVerification(ctx, "reverify_first_factor", row.id));
     const clientJson = await serializeClient(ctx, client, { azp: clientAzp(c) });
     return c.json({ response: verification, client: clientJson });
   });
@@ -199,7 +200,7 @@ export default function routes(ctx: AppContext) {
       const phones = verifiedSecondFactorPhones(ctx, user);
       const phone = body.phone_number_id ? phones.find((p) => p.id === body.phone_number_id) : phones.find((p) => p.defaultSecondFactor) ?? phones[0];
       if (!phone) throw new OrbitError(400, ErrorCodes.strategy_for_user_invalid, "This user has no verified second-factor phone number");
-      const issued = issueVerification(ctx, { purpose: "reverify", strategy: "phone_code", identifier: phone.phone, ownerId: row.id, lifetimeSeconds: ctx.settings.get().email.codeLifetimeSeconds });
+      const issued = issueVerification(ctx, { purpose: "reverify_second_factor", strategy: "phone_code", identifier: phone.phone, ownerId: row.id, lifetimeSeconds: ctx.settings.get().email.codeLifetimeSeconds });
       await sendSms(ctx, phone.phone, `Your ${ctx.settings.get().application.name} verification code is ${issued.code}`);
       verification = verificationJSON(issued.row);
     } else if (body.strategy === "totp" && !user.totpVerified) {
@@ -222,12 +223,14 @@ export default function routes(ctx: AppContext) {
     } else if (body.strategy === "backup_code") {
       if (!consumeBackupCode(ctx, user, body.code)) throw new OrbitError(422, ErrorCodes.form_code_incorrect, "That backup code is incorrect or already used", { param_name: "code" });
     } else {
-      const verification = getVerification(ctx, "reverify", row.id);
+      const verification = getVerification(ctx, "reverify_second_factor", row.id);
+      const eligible = verification && verifiedSecondFactorPhones(ctx, user).some((phone) => phone.phone === verification.identifier);
+      if (!eligible) throw new OrbitError(422, ErrorCodes.form_code_incorrect, "That verification code is incorrect", { param_name: "code" });
       checkCode(ctx, verification, body.code);
     }
     markSessionReverified(ctx, row.id, "second_factor");
     const verification = body.strategy === "phone_code"
-      ? verificationJSON(getVerification(ctx, "reverify", row.id))
+      ? verificationJSON(getVerification(ctx, "reverify_second_factor", row.id))
       : { status: "verified" as const, strategy: body.strategy, attempts: null, expire_at: null };
     const clientJson = await serializeClient(ctx, client, { azp: clientAzp(c) });
     return c.json({ response: verification, client: clientJson });
@@ -247,6 +250,7 @@ export default function routes(ctx: AppContext) {
       throw new OrbitError(404, ErrorCodes.resource_not_found, "Image not found");
     }
     c.header("Content-Type", type);
+    c.header("X-Content-Type-Options", "nosniff");
     c.header("Cache-Control", "public, max-age=31536000, immutable");
     return c.body(new Uint8Array(data).buffer);
   });

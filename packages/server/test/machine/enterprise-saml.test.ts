@@ -1,5 +1,7 @@
 import { beforeAll, describe, it, expect, beforeEach, vi } from "vitest";
-import { execFileSync } from "node:child_process";
+import { execFileSync, } from "node:child_process";
+import { inflateRawSync } from "node:zlib";
+import { randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -58,6 +60,9 @@ interface AssertionOptions {
   tamper?: boolean;
   destination?: string;
   audience?: string;
+  /** ID of the AuthnRequest this response answers (omit for IdP-initiated responses). */
+  inResponseTo?: string;
+  assertionId?: string;
 }
 
 /** Builds a Base64 SAML POST response with a signed Assertion (like a real IdP). */
@@ -69,16 +74,18 @@ function signedSamlResponse(opts: AssertionOptions): string {
   const attributeXml = Object.entries(attributes)
     .map(([name, value]) => `<saml:Attribute Name="${name}"><saml:AttributeValue xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="xs:string">${value}</saml:AttributeValue></saml:Attribute>`)
     .join("");
+  const assertionId = opts.assertionId ?? `_assertion${randomBytes(8).toString("hex")}`;
+  const inResponseTo = opts.inResponseTo ? ` InResponseTo="${opts.inResponseTo}"` : "";
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="_response1" Version="2.0" IssueInstant="${now.toISOString()}" Destination="${opts.destination ?? opts.acsUrl}">
+<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="_response${randomBytes(8).toString("hex")}" Version="2.0" IssueInstant="${now.toISOString()}" Destination="${opts.destination ?? opts.acsUrl}"${inResponseTo}>
   <saml:Issuer>${IDP_ENTITY_ID}</saml:Issuer>
   <samlp:Status><samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></samlp:Status>
-  <saml:Assertion ID="_assertion1" Version="2.0" IssueInstant="${now.toISOString()}">
+  <saml:Assertion ID="${assertionId}" Version="2.0" IssueInstant="${now.toISOString()}">
     <saml:Issuer>${IDP_ENTITY_ID}</saml:Issuer>
     <saml:Subject>
       <saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress">${opts.nameID ?? "ada@acme.com"}</saml:NameID>
       <saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">
-        <saml:SubjectConfirmationData NotOnOrAfter="${notAfter}" Recipient="${opts.acsUrl}"/>
+        <saml:SubjectConfirmationData NotOnOrAfter="${notAfter}" Recipient="${opts.acsUrl}"${inResponseTo}/>
       </saml:SubjectConfirmation>
     </saml:Subject>
     <saml:Conditions NotBefore="${notBefore}" NotOnOrAfter="${notAfter}">
@@ -114,12 +121,28 @@ async function createSamlConnection(h: Harness, overrides: Record<string, unknow
   return res.json();
 }
 
-const acs = (h: Harness, id: string, body: Record<string, string>) =>
+const acs = (h: Harness, id: string, body: Record<string, string>, cookie?: string) =>
   h.app.request(`/v1/saml/${id}/acs`, {
     method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
+    headers: { "content-type": "application/x-www-form-urlencoded", ...(cookie ? { cookie } : {}) },
     body: new URLSearchParams(body).toString(),
   });
+
+/** What a browser does: start the flow carrying its client cookie, keep the binding cookie the server sets. */
+async function startSaml(h: Harness, params: Record<string, string> = { identifier: "ada@acme.com" }, client = insertClient(h.ctx)) {
+  const res = await h.app.request(`/v1/client/enterprise/start?${new URLSearchParams({
+    client_id: client.clientId, redirect_url: "http://localhost:3000/after", ...params,
+  })}`, { headers: { cookie: `__client=${client.token}` } });
+  const binding = /__orbit_oauth=([^;]+)/.exec(res.headers.get("set-cookie") ?? "")?.[1];
+  const location = res.headers.get("location") ? new URL(res.headers.get("location")!) : null;
+  const samlRequest = location?.searchParams.get("SAMLRequest");
+  const requestId = samlRequest ? /ID="([^"]+)"/.exec(inflateRawSync(Buffer.from(samlRequest, "base64")).toString("utf8"))?.[1] : undefined;
+  return {
+    res, client, requestId,
+    relayState: location?.searchParams.get("RelayState") ?? undefined,
+    cookie: `__client=${client.token}${binding ? `; __orbit_oauth=${binding}` : ""}`,
+  };
+}
 
 describe("enterprise connections — backend CRUD", () => {
   let h: Harness;
@@ -201,6 +224,9 @@ describe("SAML service provider", () => {
     handleExternalIdentity.mockClear();
   });
 
+  const response = (conn: { saml: { sp_entity_id: string; acs_url: string } }, extra: Partial<AssertionOptions> = {}) =>
+    signedSamlResponse({ spEntityId: conn.saml.sp_entity_id, acsUrl: conn.saml.acs_url, ...extra });
+
   it("serves SP metadata and starts an SP-initiated login", async () => {
     const conn = await createSamlConnection(h);
     const metadata = await h.app.request(`/v1/saml/${conn.id}/metadata`);
@@ -211,36 +237,27 @@ describe("SAML service provider", () => {
     expect(xml).toContain(conn.saml.acs_url);
     expect(xml).toContain(conn.saml.sp_entity_id);
 
-    const client = insertClient(h.ctx);
-    const res = await h.app.request(`/v1/client/enterprise/start?${new URLSearchParams({
-      client_id: client.clientId, identifier: "ada@acme.com", redirect_url: "http://localhost:3000/after",
-    })}`);
-    expect(res.status).toBe(302);
-    const location = new URL(res.headers.get("location")!);
+    const start = await startSaml(h);
+    expect(start.res.status).toBe(302);
+    const location = new URL(start.res.headers.get("location")!);
     expect(location.origin + location.pathname).toBe(IDP_SSO_URL);
-    expect(location.searchParams.get("SAMLRequest")).toBeTruthy();
-    expect(location.searchParams.get("RelayState")).toBeTruthy();
+    expect(start.requestId).toBeTruthy();
+    expect(start.relayState).toBeTruthy();
+    expect(start.cookie).toContain("__orbit_oauth=");
   });
 
   it("validates a signed assertion, maps attributes and continues the identity flow", async () => {
     const conn = await createSamlConnection(h);
-    const client = insertClient(h.ctx);
-    const start = await h.app.request(`/v1/client/enterprise/start?${new URLSearchParams({
-      client_id: client.clientId, email_address: "ada@acme.com", redirect_url: "http://localhost:3000/after",
-    })}`);
-    const relayState = new URL(start.headers.get("location")!).searchParams.get("RelayState")!;
+    const start = await startSaml(h, { email_address: "ada@acme.com" });
 
-    const response = await acs(h, conn.id, {
-      SAMLResponse: signedSamlResponse({ spEntityId: conn.saml.sp_entity_id, acsUrl: conn.saml.acs_url }),
-      RelayState: relayState,
-    });
-    expect(response.status).toBe(302);
-    expect(response.headers.get("location")).toBe("http://localhost:3000/after?provider=saml_" + conn.id);
+    const res = await acs(h, conn.id, { SAMLResponse: response(conn, { inResponseTo: start.requestId }), RelayState: start.relayState! }, start.cookie);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("http://localhost:3000/after?provider=saml_" + conn.id);
 
     expect(handleExternalIdentity).toHaveBeenCalledTimes(1);
     const [ctxArg, flow, profile] = handleExternalIdentity.mock.calls[0]!;
     expect(ctxArg).toBe(h.ctx);
-    expect(flow).toMatchObject({ kind: "sign_in", clientId: client.clientId, redirectUrl: "http://localhost:3000/after", connectionId: conn.id });
+    expect(flow).toMatchObject({ kind: "sign_in", clientId: start.client.clientId, redirectUrl: "http://localhost:3000/after", connectionId: conn.id });
     expect(profile).toMatchObject({
       provider: `saml_${conn.id}`,
       providerUserId: "ada@acme.com",
@@ -255,85 +272,105 @@ describe("SAML service provider", () => {
     const conn = await createSamlConnection(h, {
       attribute_mapping: { email: "mail", first_name: "givenName", last_name: "sn", user_id: "uid" },
     });
-    const client = insertClient(h.ctx);
-    const start = await h.app.request(`/v1/client/enterprise/start?${new URLSearchParams({
-      client_id: client.clientId, identifier: "ada@acme.com", redirect_url: "http://localhost:3000/after",
-    })}`);
-    const relayState = new URL(start.headers.get("location")!).searchParams.get("RelayState")!;
+    const start = await startSaml(h);
 
-    const response = await acs(h, conn.id, {
-      SAMLResponse: signedSamlResponse({
-        spEntityId: conn.saml.sp_entity_id,
-        acsUrl: conn.saml.acs_url,
+    const res = await acs(h, conn.id, {
+      SAMLResponse: response(conn, {
+        inResponseTo: start.requestId,
         nameID: "ada-army-id",
         attributes: { mail: "ada@acme.com", givenName: "Ada", sn: "Byron", uid: "army-1" },
       }),
-      RelayState: relayState,
-    });
-    expect(response.status).toBe(302);
+      RelayState: start.relayState!,
+    }, start.cookie);
+    expect(res.status).toBe(302);
     const profile = handleExternalIdentity.mock.calls[0]![2];
     expect(profile).toMatchObject({ providerUserId: "army-1", email: "ada@acme.com", firstName: "Ada", lastName: "Byron" });
   });
 
   it("rejects an assertion signed by an untrusted key or tampered after signing", async () => {
     const conn = await createSamlConnection(h);
-    const client = insertClient(h.ctx);
-    const start = await h.app.request(`/v1/client/enterprise/start?${new URLSearchParams({
-      client_id: client.clientId, identifier: "ada@acme.com", redirect_url: "http://localhost:3000/after",
-    })}`);
-    const relayState = new URL(start.headers.get("location")!).searchParams.get("RelayState")!;
+    const start = await startSaml(h);
 
     const wrongKey = await acs(h, conn.id, {
-      SAMLResponse: signedSamlResponse({ spEntityId: conn.saml.sp_entity_id, acsUrl: conn.saml.acs_url, key: otherKey, cert: otherCert }),
-      RelayState: relayState,
-    });
+      SAMLResponse: response(conn, { inResponseTo: start.requestId, key: otherKey, cert: otherCert }),
+      RelayState: start.relayState!,
+    }, start.cookie);
     expect(wrongKey.status).toBe(400);
     expect((await wrongKey.json()).errors[0].code).toBe("verification_failed");
 
     const tampered = await acs(h, conn.id, {
-      SAMLResponse: signedSamlResponse({ spEntityId: conn.saml.sp_entity_id, acsUrl: conn.saml.acs_url, tamper: true }),
-      RelayState: relayState,
-    });
+      SAMLResponse: response(conn, { inResponseTo: start.requestId, tamper: true }),
+      RelayState: start.relayState!,
+    }, start.cookie);
     expect(tampered.status).toBe(400);
     expect(handleExternalIdentity).not.toHaveBeenCalled();
   });
 
   it("rejects unknown RelayState and audience mismatches", async () => {
     const conn = await createSamlConnection(h);
-    const unknownState = await acs(h, conn.id, {
-      SAMLResponse: signedSamlResponse({ spEntityId: conn.saml.sp_entity_id, acsUrl: conn.saml.acs_url }),
-      RelayState: "forged-state",
-    });
+    const unknownState = await acs(h, conn.id, { SAMLResponse: response(conn), RelayState: "forged-state" });
     expect(unknownState.status).toBe(400);
 
-    const client = insertClient(h.ctx);
-    const start = await h.app.request(`/v1/client/enterprise/start?${new URLSearchParams({
-      client_id: client.clientId, identifier: "ada@acme.com", redirect_url: "http://localhost:3000/after",
-    })}`);
-    const relayState = new URL(start.headers.get("location")!).searchParams.get("RelayState")!;
+    const start = await startSaml(h);
     const wrongAudience = await acs(h, conn.id, {
-      SAMLResponse: signedSamlResponse({ spEntityId: conn.saml.sp_entity_id, acsUrl: conn.saml.acs_url, audience: "https://other-sp.example" }),
-      RelayState: relayState,
-    });
+      SAMLResponse: response(conn, { inResponseTo: start.requestId, audience: "https://other-sp.example" }),
+      RelayState: start.relayState!,
+    }, start.cookie);
     expect(wrongAudience.status).toBe(400);
     expect(handleExternalIdentity).not.toHaveBeenCalled();
   });
 
-  it("supports IdP-initiated login only when the connection allows it", async () => {
+  it("only accepts a response to a request the service provider issued, once", async () => {
+    const conn = await createSamlConnection(h);
+    const start = await startSaml(h);
+
+    const unsolicited = await acs(h, conn.id, { SAMLResponse: response(conn, { inResponseTo: "_never_issued" }), RelayState: start.relayState! }, start.cookie);
+    expect(unsolicited.status).toBe(400);
+
+    // The failed attempt consumed the RelayState, so start again and answer correctly.
+    const second = await startSaml(h);
+    const captured = response(conn, { inResponseTo: second.requestId, assertionId: "_captured" });
+    expect((await acs(h, conn.id, { SAMLResponse: captured, RelayState: second.relayState! }, second.cookie)).status).toBe(302);
+
+    // An attacker replays the captured response with a flow they started themselves.
+    const attacker = await startSaml(h);
+    const replay = await acs(h, conn.id, { SAMLResponse: captured, RelayState: attacker.relayState! }, attacker.cookie);
+    expect(replay.status).toBe(400);
+    expect(handleExternalIdentity).toHaveBeenCalledTimes(1);
+  });
+
+  it("will not complete a flow in a browser other than the one that started it", async () => {
+    const conn = await createSamlConnection(h);
+    const start = await startSaml(h);
+    const victim = await acs(h, conn.id, { SAMLResponse: response(conn, { inResponseTo: start.requestId }), RelayState: start.relayState! }, `__client=${insertClient(h.ctx).token}`);
+    expect(victim.status).toBe(400);
+    expect(handleExternalIdentity).not.toHaveBeenCalled();
+  });
+
+  it("binds the flow to the browser's own client, whatever client_id the link carries", async () => {
+    await createSamlConnection(h);
+    const victim = insertClient(h.ctx);
+    const attacker = insertClient(h.ctx);
+    const noCookie = await h.app.request(`/v1/client/enterprise/start?${new URLSearchParams({ client_id: victim.clientId, identifier: "ada@acme.com" })}`);
+    expect(noCookie.status).toBe(422);
+    const wrongClient = await h.app.request(`/v1/client/enterprise/start?${new URLSearchParams({ client_id: victim.clientId, identifier: "ada@acme.com" })}`, {
+      headers: { cookie: `__client=${attacker.token}` },
+    });
+    expect(wrongClient.status).toBe(422);
+  });
+
+  it("supports IdP-initiated login only when the connection allows it, and hands the browser its client", async () => {
     const conn = await createSamlConnection(h, { allow_idp_initiated: false });
     const clientsBefore = h.ctx.db.select().from(s.clients).all().length;
-    const rejected = await acs(h, conn.id, {
-      SAMLResponse: signedSamlResponse({ spEntityId: conn.saml.sp_entity_id, acsUrl: conn.saml.acs_url }),
-    });
+    const rejected = await acs(h, conn.id, { SAMLResponse: response(conn) });
     expect(rejected.status).toBe(400);
     expect(handleExternalIdentity).not.toHaveBeenCalled();
 
     await h.app.request(`/v1/enterprise_connections/${conn.id}`, { method: "PATCH", headers: authHeaders(), body: json({ allow_idp_initiated: true }) });
-    const accepted = await acs(h, conn.id, {
-      SAMLResponse: signedSamlResponse({ spEntityId: conn.saml.sp_entity_id, acsUrl: conn.saml.acs_url }),
-    });
+    const accepted = await acs(h, conn.id, { SAMLResponse: response(conn) });
     expect(accepted.status).toBe(302);
     expect(h.ctx.db.select().from(s.clients).all().length).toBe(clientsBefore + 1);
+    expect(accepted.headers.get("set-cookie")).toMatch(/__client=[^;]+/);
     const flow = handleExternalIdentity.mock.calls[0]![1];
     expect(flow.kind).toBe("sign_in");
     expect(flow.redirectUrl).toBe("http://localhost:3000");
@@ -344,19 +381,21 @@ describe("SAML service provider", () => {
     const client = insertClient(h.ctx);
     const inline = await h.app.request(`/v1/saml/${conn.id}/sso?${new URLSearchParams({
       client_id: client.clientId, redirect_url: "http://localhost:3000/after",
-    })}`);
+    })}`, { headers: { cookie: `__client=${client.token}` } });
     expect(inline.status).toBe(302);
-    const state = new URL(inline.headers.get("location")!).searchParams.get("RelayState")!;
+    const binding = /__orbit_oauth=([^;]+)/.exec(inline.headers.get("set-cookie") ?? "")?.[1];
+    const inlineLocation = new URL(inline.headers.get("location")!);
+    const state = inlineLocation.searchParams.get("RelayState")!;
+    const requestId = /ID="([^"]+)"/.exec(inflateRawSync(Buffer.from(inlineLocation.searchParams.get("SAMLRequest")!, "base64")).toString("utf8"))![1];
 
     const resumed = await h.app.request(`/v1/saml/${conn.id}/sso?flow=${encodeURIComponent(state)}`);
     expect(resumed.status).toBe(302);
     expect(new URL(resumed.headers.get("location")!).searchParams.get("RelayState")).toBe(state);
 
     // Resuming does not consume the state: the assertion that comes back still completes the flow.
-    const completed = await acs(h, conn.id, {
-      SAMLResponse: signedSamlResponse({ spEntityId: conn.saml.sp_entity_id, acsUrl: conn.saml.acs_url }),
-      RelayState: state,
-    });
+    const resumedRequestId = /ID="([^"]+)"/.exec(inflateRawSync(Buffer.from(new URL(resumed.headers.get("location")!).searchParams.get("SAMLRequest")!, "base64")).toString("utf8"))![1];
+    expect(resumedRequestId).not.toBe(requestId);
+    const completed = await acs(h, conn.id, { SAMLResponse: response(conn, { inResponseTo: resumedRequestId }), RelayState: state }, `__client=${client.token}; __orbit_oauth=${binding}`);
     expect(completed.status).toBe(302);
     expect(handleExternalIdentity).toHaveBeenCalledTimes(1);
 
@@ -366,21 +405,14 @@ describe("SAML service provider", () => {
 
   it("refuses starting SSO with a disallowed redirect URL or an inactive connection", async () => {
     const conn = await createSamlConnection(h);
-    const client = insertClient(h.ctx);
-    const badRedirect = await h.app.request(`/v1/client/enterprise/start?${new URLSearchParams({
-      client_id: client.clientId, identifier: "ada@acme.com", redirect_url: "https://evil.example/steal",
-    })}`);
-    expect(badRedirect.status).toBe(422);
+    const bad = await startSaml(h, { identifier: "ada@acme.com", redirect_url: "https://evil.example/steal" });
+    expect(bad.res.status).toBe(422);
 
     await h.app.request(`/v1/enterprise_connections/${conn.id}`, { method: "PATCH", headers: authHeaders(), body: json({ active: false }) });
-    const inactive = await h.app.request(`/v1/client/enterprise/start?${new URLSearchParams({
-      client_id: client.clientId, identifier: "ada@acme.com", redirect_url: "http://localhost:3000/after",
-    })}`);
-    expect(inactive.status).toBe(404);
+    const inactive = await startSaml(h);
+    expect(inactive.res.status).toBe(404);
 
-    const inactiveAcs = await acs(h, conn.id, {
-      SAMLResponse: signedSamlResponse({ spEntityId: conn.saml.sp_entity_id, acsUrl: conn.saml.acs_url }),
-    });
+    const inactiveAcs = await acs(h, conn.id, { SAMLResponse: response(conn) });
     expect(inactiveAcs.status).toBe(403);
   });
 });

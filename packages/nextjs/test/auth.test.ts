@@ -45,9 +45,9 @@ async function captureError(action: () => Promise<unknown>): Promise<Error & { d
 
 const originalEnv = { ...process.env };
 
-beforeEach(() => {
+beforeEach(async () => {
   headerStore.clear();
-  delete process.env.ORBITID_JWT_KEY;
+  process.env.ORBITID_JWT_KEY = (await getTestKeys()).publicKeyPem;
   delete process.env.ORBITID_SECRET_KEY;
   delete process.env.NEXT_PUBLIC_ORBITID_SIGN_IN_URL;
   delete process.env.NEXT_PUBLIC_ORBITID_SIGN_UP_URL;

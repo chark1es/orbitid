@@ -133,13 +133,19 @@ export function computeRequirements(ctx: AppContext, fields: SignUpFields, verif
     if (!present) continue;
     if (kind !== "email_address" && kind !== "phone_number") continue;
     if (!attr.verifyAtSignUp) continue;
-    const snapshot = kind === "email_address" ? verifications.email_address : verifications.phone_number;
-    if (snapshot?.status === "verified") continue;
-    // A verified OAuth email satisfies the email requirement without a code.
-    if (kind === "email_address" && verifications.external_account?.status === "verified" && snapshot?.strategy.startsWith("from_oauth_")) continue;
-    unverified.push(kind);
+    const verified = kind === "email_address" ? emailIsVerified(fields, verifications) : verifications.phone_number?.status === "verified";
+    if (!verified) unverified.push(kind);
   }
   return { required_fields: required, optional_fields: optional, missing_fields: missing, unverified_fields: unverified };
+}
+
+/**
+ * An email counts as verified only when the verified snapshot was issued for the address that is on the
+ * sign-up now: a code, link or OAuth profile for one mailbox must never vouch for another.
+ */
+export function emailIsVerified(fields: SignUpFields, verifications: SignUpVerifications): boolean {
+  const snapshot = verifications.email_address;
+  return snapshot?.status === "verified" && !!fields.emailAddress && snapshot.identifier === fields.emailAddress;
 }
 
 export function buildSignUpJSON(ctx: AppContext, row: SignUpRow): SignUpJSON {
@@ -244,8 +250,7 @@ export interface CompleteSignUpOptions { ip?: string; userAgent?: string }
 export async function completeSignUp(ctx: AppContext, row: SignUpRow, opts: CompleteSignUpOptions = {}): Promise<{ userId: string; sessionId: string; user: UserRow }> {
   const fields = asSignUpFields(row);
   const verifications = asSignUpVerifications(row);
-  const emailVerified = verifications.email_address?.status === "verified"
-    || (verifications.external_account?.status === "verified" && !!fields.emailAddress);
+  const emailVerified = emailIsVerified(fields, verifications);
   const phoneVerified = verifications.phone_number?.status === "verified";
 
   const user = await createUser(ctx, {

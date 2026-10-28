@@ -1,12 +1,13 @@
 // Enterprise SSO: backend CRUD `/v1/enterprise_connections`, Frontend API
 // `/v1/client/enterprise/*` (start + OIDC callback) and the SAML service provider at `/v1/saml/:id/*`.
 import { Hono, type Context } from "hono";
+import { getCookie } from "hono/cookie";
 import { and, desc, eq, sql } from "drizzle-orm";
-import { ErrorCodes, OrbitError } from "@orbitid/shared";
+import { COOKIES, ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../context";
 import * as s from "../db/schema";
 import { clientIp, parseBody, parsePagination } from "../lib/http";
-import { randomToken } from "../lib/crypto";
+import { randomToken, sha256 } from "../lib/crypto";
 import { handleExternalIdentity } from "../services/external-identity";
 import { pkceChallengeFor } from "../services/oidc";
 import {
@@ -14,6 +15,8 @@ import {
   findActiveConnection, findConnectionForIdentifier, getOidcDiscovery, profileToExternalProfile, samlAuthorizeUrl,
   serializeConnection, serviceProviderMetadata, validateSamlResponse, verifyEnterpriseIdToken,
 } from "../services/saml";
+import { bindBrowser, browserMatches } from "./auth/browser-binding";
+import { setClientCookie } from "./auth/client-auth";
 import { createClient } from "./machine/auth";
 import { connectionBodySchema, connectionPatchSchema, createConnection, updateConnection } from "./machine/enterprise-config";
 import {
@@ -35,15 +38,17 @@ const oidcCallbackUrl = (ctx: AppContext, id: string) => `${ctx.env.baseUrl}/v1/
 /** Builds the flow record shared by SP-initiated SAML and enterprise OIDC logins. */
 function flowFromQuery(ctx: AppContext, c: Context, connection: ConnectionRow): EnterpriseFlow {
   const q = c.req.query();
-  const clientId = q.client_id;
-  if (!clientId) throw new OrbitError(422, ErrorCodes.form_param_missing, "client_id is missing", { param_name: "client_id" });
-  if (!ctx.db.select().from(s.clients).where(eq(s.clients.id, clientId)).get()) {
-    throw new OrbitError(404, ErrorCodes.client_state_invalid, "Client not found");
+  // The client is the browser's own; a `client_id` in a link must never choose whose session gets created.
+  const token = getCookie(c, COOKIES.client);
+  const client = token ? ctx.db.select().from(s.clients).where(eq(s.clients.tokenHash, sha256(token))).get() : undefined;
+  if (!client || (q.client_id && q.client_id !== client.id)) {
+    throw new OrbitError(422, ErrorCodes.client_state_invalid, "This browser has no sign-in in progress", { param_name: "client_id" });
   }
   const homeUrl = ctx.settings.get().application.homeUrl;
   return {
     kind: q.action === "sign_up" ? "sign_up" : "sign_in",
-    clientId,
+    clientId: client.id,
+    browserHash: bindBrowser(ctx, c),
     redirectUrl: assertAllowedRedirectUrl(ctx, q.redirect_url || homeUrl, "redirect_url"),
     actionCompleteRedirectUrl: q.action_complete_redirect_url
       ? assertAllowedRedirectUrl(ctx, q.action_complete_redirect_url, "action_complete_redirect_url")
@@ -140,6 +145,7 @@ function frontendRoutes(ctx: AppContext): Hono {
 
     const state = takeEnterpriseState(ctx, q.state, providerFor("oidc", connection.id));
     if (!state) throw new OrbitError(400, ErrorCodes.verification_failed, "Enterprise SSO state is invalid or expired");
+    if (!browserMatches(c, state.flow.browserHash)) throw new OrbitError(400, ErrorCodes.verification_failed, "This sign-in was started in a different browser");
 
     const discovery = await getOidcDiscovery(ctx, connection);
     const tokens = await exchangeEnterpriseOidcCode(ctx, connection, discovery, {
@@ -206,9 +212,11 @@ function samlRoutes(ctx: AppContext): Hono {
     if (relayState) {
       const state = takeEnterpriseState(ctx, relayState, providerFor("saml", connection.id));
       if (!state) throw new OrbitError(400, ErrorCodes.verification_failed, "Enterprise SSO state is invalid or expired");
+      if (!browserMatches(c, state.flow.browserHash)) throw new OrbitError(400, ErrorCodes.verification_failed, "This sign-in was started in a different browser");
       flow = state.flow;
     } else if (connection.allowIdpInitiated) {
-      const { client } = createClient(ctx, { ip: clientIp(c), userAgent: c.req.header("user-agent") });
+      const { client, token } = createClient(ctx, { ip: clientIp(c), userAgent: c.req.header("user-agent") });
+      setClientCookie(c, ctx, token);
       flow = {
         kind: "sign_in",
         clientId: client.id,

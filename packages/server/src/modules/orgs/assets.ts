@@ -10,10 +10,10 @@ import { parseBody } from "../../lib/http";
 export const UPLOAD_DIR = "uploads/orgs";
 const MAX_LOGO_BYTES = 5 * 1024 * 1024;
 const LOGO_TYPES: Record<string, string> = {
-  "image/png": "png", "image/jpeg": "jpg", "image/jpg": "jpg", "image/gif": "gif", "image/webp": "webp", "image/svg+xml": "svg",
+  "image/png": "png", "image/jpeg": "jpg", "image/jpg": "jpg", "image/gif": "gif", "image/webp": "webp"
 };
 const EXT_CONTENT_TYPES: Record<string, string> = {
-  png: "image/png", jpg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml",
+  png: "image/png", jpg: "image/jpeg", gif: "image/gif", webp: "image/webp"
 };
 export function uploadDir(ctx: AppContext): string {
   const dir = resolve(ctx.env.dataDir, UPLOAD_DIR);
@@ -24,7 +24,7 @@ export function uploadDir(ctx: AppContext): string {
 /** Persists an organization logo and returns its public file name. */
 export function storeLogo(ctx: AppContext, orgId: string, data: Uint8Array, mime: string): string {
   const ext = LOGO_TYPES[mime.toLowerCase()];
-  if (!ext) throw new OrbitError(422, ErrorCodes.form_param_format_invalid, `Unsupported image type "${mime}". Use PNG, JPEG, GIF, WebP or SVG.`, { param_name: "file" });
+  if (!ext) throw new OrbitError(422, ErrorCodes.form_param_format_invalid, `Unsupported image type "${mime}". Use PNG, JPEG, GIF or WebP.`, { param_name: "file" });
   if (data.byteLength > MAX_LOGO_BYTES) throw new OrbitError(413, ErrorCodes.form_param_format_invalid, "Logo must be smaller than 5MB", { param_name: "file" });
   const file = `${orgId}_${Date.now().toString(36)}.${ext}`;
   writeFileSync(resolve(uploadDir(ctx), file), data);

@@ -45,15 +45,16 @@ export async function signTestToken(
     sid: claims.sid ?? "sess_test",
     ...claims,
   };
-  return new SignJWT(payload)
+  // Session tokens carry no audience; tests can ask for one to build non-session tokens.
+  const jwt = new SignJWT(payload)
     .setProtectedHeader({ alg: "RS256", kid: "test-key" })
     .setSubject(claims.sub ?? "user_test")
     .setIssuedAt(now)
     .setNotBefore(now - 5)
     .setExpirationTime(now + expiresIn)
-    .setIssuer(options.issuer ?? "http://localhost:4000")
-    .setAudience(options.audience ?? "orbitid")
-    .sign(privateKey);
+    .setIssuer(options.issuer ?? "http://localhost:4000");
+  if (options.audience) jwt.setAudience(options.audience);
+  return jwt.sign(privateKey);
 }
 
 export async function signExpiredToken(claims: TestClaims = {}): Promise<string> {

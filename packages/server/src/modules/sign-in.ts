@@ -206,7 +206,7 @@ export default function routes(ctx: AppContext) {
     if (strategy?.startsWith("oauth_")) {
       const provider = providerKeyFromStrategy(strategy);
       if (!isProviderEnabled(ctx, provider)) throw new OrbitError(400, ErrorCodes.oauth_provider_not_enabled, `Social provider "${provider}" is not enabled`, { param_name: "strategy" });
-      const auth = await createOAuthAuthorization(ctx, provider, {
+      const auth = await createOAuthAuthorization(ctx, c, provider, {
         clientId: client.id, kind: "sign_in", ownerId: row.id,
         redirectUrl: redirectUrl ?? ctx.settings.get().application.homeUrl,
         actionCompleteRedirectUrl: actionComplete ?? undefined,
@@ -384,7 +384,7 @@ export default function routes(ctx: AppContext) {
         if (strategy.startsWith("oauth_")) {
           const provider = providerKeyFromStrategy(strategy);
           if (!isProviderEnabled(ctx, provider)) throw new OrbitError(400, ErrorCodes.oauth_provider_not_enabled, `Social provider "${provider}" is not enabled`, { param_name: "strategy" });
-          const auth = await createOAuthAuthorization(ctx, provider, {
+          const auth = await createOAuthAuthorization(ctx, c, provider, {
             clientId: client.id, kind: "sign_in", ownerId: row.id,
             redirectUrl: state.redirectUrl ?? ctx.settings.get().application.homeUrl,
             actionCompleteRedirectUrl: state.actionCompleteRedirectUrl,
@@ -486,7 +486,10 @@ export default function routes(ctx: AppContext) {
     const row = load(client.id, c.req.param("id"));
     const body = await parseBody(c, resetPasswordSchema);
     const state = asSignInState(row);
-    if (!state.resetPassword?.verified) throw new OrbitError(400, ErrorCodes.client_state_invalid, "Password reset has not been verified");
+    // The authorization is single-use: only a live attempt that is still waiting for a new password counts.
+    if (row.status !== "needs_new_password" || row.abandonAt <= Date.now() || !state.resetPassword?.verified) {
+      throw new OrbitError(400, ErrorCodes.client_state_invalid, "Password reset has not been verified");
+    }
     const user = userForRow(row);
     if (user.banned) throw new OrbitError(403, ErrorCodes.user_banned, "This user has been banned");
     await assertPasswordValid(ctx, body.password);
@@ -499,7 +502,8 @@ export default function routes(ctx: AppContext) {
     }
     const signOut = body.sign_out_of_other_sessions ?? ctx.settings.get().password.signOutOfOtherSessionsOnChange;
     if (signOut) await endSessionsForUser(ctx, user.id, "revoked");
-    const saved = saveSignInState(ctx, row, { ...state, first: { strategy: state.resetPassword.strategy, status: "verified" } });
+    const { resetPassword, ...rest } = state;
+    const saved = saveSignInState(ctx, row, { ...rest, first: { strategy: resetPassword.strategy, status: "verified" } });
     const result = await afterFirstFactor(ctx, saved, user, { ip: clientIp(c), userAgent: c.req.header("user-agent") ?? undefined });
     if (result.sessionId) await notifySession(user, result.sessionId);
     return respond(c, client.id, reload(row.id));

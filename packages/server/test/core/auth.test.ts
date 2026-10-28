@@ -69,6 +69,27 @@ describe("sign-up", () => {
     expect(errorsOf(again)[0]?.code).toBe("client_state_invalid");
   });
 
+  it("does not let a magic link for one mailbox verify another address on the same sign-up", async () => {
+    const { app } = await setup();
+    const client = testClient(app);
+    const created = await client.json<{ response: { id: string } }>("/v1/client/sign_ups", {
+      body: { email_address: "attacker@example.com", password: "Sup3rSecret!" },
+    });
+    const id = created.response.id;
+    await client.json(`/v1/client/sign_ups/${id}/prepare_verification`, { body: { strategy: "email_link" } });
+    const link = lastLink("attacker@example.com")!;
+
+    // Same sign-up, different mailbox: the outstanding link must no longer count.
+    await client.json(`/v1/client/sign_ups/${id}`, { method: "PATCH", body: { email_address: "victim@example.com" } });
+    const landing = await app.request(link, { redirect: "manual" });
+    expect(landing.headers.get("location")).toContain("__orbit_status=failed");
+
+    const after = await client.json<{ response: { status: string; unverified_fields: string[]; created_user_id: string | null } }>(`/v1/client/sign_ups/${id}`);
+    expect(after.response.status).toBe("missing_requirements");
+    expect(after.response.unverified_fields).toEqual(["email_address"]);
+    expect(after.response.created_user_id).toBeNull();
+  });
+
   it("rejects duplicate emails and weak passwords", async () => {
     const { app } = await setup();
     await signUpUser(app, { email: "taken@example.com" });
@@ -281,6 +302,10 @@ describe("sign-in", () => {
       body: { password: "Br4ndNewPass!" },
     });
     expect(done.response.status).toBe("complete");
+
+    // The reset authorization was consumed: the old attempt cannot change the password again.
+    const replay = await client.json(`/v1/client/sign_ins/${created.response.id}/reset_password`, { body: { password: "Hij4cked-Pass!" } });
+    expect(errorsOf(replay)[0]?.code).toBe("client_state_invalid");
 
     const { state } = await signInWithPassword(app, user.email, "Br4ndNewPass!");
     expect(state.response.sessions).toHaveLength(1);

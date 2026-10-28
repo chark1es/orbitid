@@ -139,6 +139,11 @@ describe("organization invitations", () => {
     expect(anonymous.status).toBe(302);
     expect(anonymous.headers.get("location")).toContain("__orbit_ticket=");
 
+    // the ticket is never sent to an origin the instance does not trust
+    const hostile = await api(app, "GET", `/v1/client/organization_invitations/accept?ticket=${encodeURIComponent(ticket2)}&redirect_url=${encodeURIComponent("https://evil.example/steal")}`);
+    expect(hostile.status).toBe(422);
+    expect(hostile.headers.get("location")).toBeNull();
+
     // authenticated matching user is joined before the redirect
     const linkUser = seedUser(ctx, { email: "link@acme.test", verified: true });
     const linkAuth = seedAuth(ctx, linkUser.id);

@@ -10,6 +10,7 @@ import * as s from "../db/schema";
 import { safeEqual, sha256 } from "../lib/crypto";
 import { newId } from "../lib/ids";
 import { parseBody } from "../lib/http";
+import { validateRedirectUrl } from "./auth/redirects";
 import { emitEvent } from "../services/webhooks";
 import { sendEmail } from "../services/mail";
 import { serializeMembership, serializeOrganization } from "../serializers";
@@ -33,7 +34,6 @@ import {
   orgIdFromSuggestionId, serializeMembershipRequest, serializeOrganizationDomain, serializeOrganizationInvitation, serializeRole, serializeSuggestion,
 } from "./orgs/serializers";
 
-const metadata = z.record(z.string(), z.unknown());
 const emailList = z.array(z.string().min(3));
 
 /** Rejects addresses already members or already invited, so bulk sends stay idempotent. */
@@ -70,7 +70,7 @@ export default function routes(ctx: AppContext) {
     if (!/^[A-Za-z0-9_.-]+$/.test(file)) return c.json({ errors: [{ code: ErrorCodes.resource_not_found, message: "Not found" }] }, 404);
     try {
       const bytes = readFileSync(resolve(uploadDir(ctx), file));
-      return new Response(new Uint8Array(bytes), { status: 200, headers: { "content-type": logoContentType(file), "cache-control": "public, max-age=31536000, immutable" } });
+      return new Response(new Uint8Array(bytes), { status: 200, headers: { "content-type": logoContentType(file), "x-content-type-options": "nosniff", "cache-control": "public, max-age=31536000, immutable" } });
     } catch {
       return c.json({ errors: [{ code: ErrorCodes.resource_not_found, message: "Not found" }] }, 404);
     }
@@ -90,7 +90,8 @@ export default function routes(ctx: AppContext) {
         await acceptInvitation(ctx, invitation, caller.userId);
       }
     }
-    const target = new URL(c.req.query("redirect_url") || invitation.redirectUrl || ctx.settings.get().application.homeUrl || ctx.env.baseUrl);
+    const requested = validateRedirectUrl(ctx, c.req.query("redirect_url") || invitation.redirectUrl);
+    const target = new URL(requested ?? (ctx.settings.get().application.homeUrl || ctx.env.baseUrl));
     target.searchParams.set("__orbit_ticket", ticket);
     return c.redirect(target.toString(), 302);
   });
@@ -206,8 +207,6 @@ export default function routes(ctx: AppContext) {
     const body = await parseBody(c, z.object({
       name: z.string().trim().min(1).max(256),
       slug: z.string().trim().min(1).max(50).optional(),
-      public_metadata: metadata.optional(),
-      private_metadata: metadata.optional(),
     }));
     const settings = ctx.settings.get();
     const now = Date.now();
@@ -218,8 +217,6 @@ export default function routes(ctx: AppContext) {
       slug: resolveSlug(ctx, settings.organizations.slugEnabled ? body.slug : undefined, body.name),
       maxAllowedMemberships: settings.organizations.maxAllowedMemberships,
       adminDeleteEnabled: settings.organizations.adminDeleteEnabled,
-      publicMetadata: body.public_metadata ?? {},
-      privateMetadata: body.private_metadata ?? {},
       createdBy: caller.userId,
       createdAt: now,
       updatedAt: now,
@@ -240,15 +237,11 @@ export default function routes(ctx: AppContext) {
     const body = await parseBody(c, z.object({
       name: z.string().trim().min(1).max(256).optional(),
       slug: z.string().trim().min(1).max(50).optional(),
-      public_metadata: metadata.optional(),
-      private_metadata: metadata.optional(),
     }));
     const settings = ctx.settings.get();
     const patch: Partial<typeof s.organizations.$inferInsert> = { updatedAt: Date.now() };
     if (body.name !== undefined) patch.name = body.name;
     if (body.slug !== undefined) patch.slug = settings.organizations.slugEnabled ? resolveSlug(ctx, body.slug, body.name ?? org.name, org.id) : org.slug;
-    if (body.public_metadata !== undefined) patch.publicMetadata = body.public_metadata;
-    if (body.private_metadata !== undefined) patch.privateMetadata = body.private_metadata;
     ctx.db.update(s.organizations).set(patch).where(eq(s.organizations.id, org.id)).run();
     const updated = ctx.db.select().from(s.organizations).where(eq(s.organizations.id, org.id)).get()!;
     await emitOrg("organization.updated", updated);
@@ -361,8 +354,6 @@ export default function routes(ctx: AppContext) {
       email_addresses: emailList.optional(),
       role: z.string().optional(),
       redirect_url: z.string().optional(),
-      public_metadata: metadata.optional(),
-      private_metadata: metadata.optional(),
       expires_in_days: z.coerce.number().int().min(1).max(365).optional(),
     }));
     const bulk = body.email_addresses !== undefined;
@@ -380,9 +371,7 @@ export default function routes(ctx: AppContext) {
         email,
         roleKey: body.role,
         inviterUserId: caller.userId,
-        redirectUrl: body.redirect_url ?? null,
-        publicMetadata: body.public_metadata,
-        privateMetadata: body.private_metadata,
+        redirectUrl: validateRedirectUrl(ctx, body.redirect_url),
         expiresAt: body.expires_in_days ? Date.now() + body.expires_in_days * 24 * 60 * 60 * 1000 : null,
       });
       await sendEmail(ctx, {

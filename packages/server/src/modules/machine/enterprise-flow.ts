@@ -16,6 +16,8 @@ export interface EnterpriseFlow {
   redirectUrl: string;
   actionCompleteRedirectUrl?: string;
   connectionId: string;
+  /** Hash of the cookie that binds the flow to the browser that started it. */
+  browserHash?: string;
 }
 
 export function createEnterpriseState(

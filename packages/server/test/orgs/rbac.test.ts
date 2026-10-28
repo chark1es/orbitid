@@ -255,15 +255,16 @@ describe("organization RBAC", () => {
 
     const owner = seedUser(ctx, { email: "owner@acme.test" });
     const ownerAuth = seedAuth(ctx, owner.id);
-    const created = await api<{ response: OrganizationJSON }>(app, "POST", "/v1/client/organizations", {
-      cookie: ownerAuth.cookie,
-      body: { name: "Secret Org", public_metadata: { plan: "free" }, private_metadata: { secret: "shh" } },
+    // Metadata is written by the Backend API only; the Frontend API serves the public half and never the private one.
+    const seeded = await backend<OrganizationJSON>(app, "POST", "/v1/organizations", {
+      name: "Secret Org", created_by: owner.id, public_metadata: { plan: "free" }, private_metadata: { secret: "shh" },
     });
-    expect(created.status).toBe(200);
-    expect(created.body.response.public_metadata).toEqual({ plan: "free" });
-    expect("private_metadata" in created.body.response).toBe(false);
+    expect(seeded.status).toBe(200);
+    const created = { body: { response: seeded.body } };
 
     const fetched = await api<{ response: OrganizationJSON }>(app, "GET", `/v1/client/organizations/${created.body.response.id}`, { cookie: ownerAuth.cookie });
+    expect(fetched.status).toBe(200);
+    expect(fetched.body.response.public_metadata).toEqual({ plan: "free" });
     expect("private_metadata" in fetched.body.response).toBe(false);
 
     const asBackend = await backend<OrganizationJSON>(app, "GET", `/v1/organizations/${created.body.response.id}`);

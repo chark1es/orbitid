@@ -82,6 +82,13 @@ export function supportedSecondFactors(ctx: AppContext, user: UserRow): SignInFa
 
 export const userHasMfa = (ctx: AppContext, user: UserRow): boolean => supportedSecondFactors(ctx, user).length > 0;
 
+/** `mfa.required` only bites when the user has no factor yet and the instance offers one they could enrol. */
+export function mfaEnrollmentRequired(ctx: AppContext, user: UserRow): boolean {
+  const st = ctx.settings.get();
+  const canEnrol = st.attributes.authenticatorApp.enabled || st.attributes.phoneNumber.usedForSecondFactor;
+  return st.mfa.required && canEnrol && !userHasMfa(ctx, user);
+}
+
 export interface TotpSetup { secret: string; uri: string; qrCode: string }
 
 /** Creates (but does not enable) a TOTP secret for a user. */
