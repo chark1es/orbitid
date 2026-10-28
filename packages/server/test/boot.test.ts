@@ -4,7 +4,7 @@ import { createContext } from "../src/bootstrap";
 
 /** Helper other tests can copy: in-memory instance with fixed keys. */
 export async function testApp() {
-  const ctx = await createContext({ databasePath: ":memory:", secretKey: "sk_test_testsecret", baseUrl: "http://localhost:4000" });
+  const ctx = await createContext({ databaseUrl: ":memory:", secretKey: "sk_test_testsecret", baseUrl: "http://localhost:4000" });
   return { ctx, app: createApp(ctx) };
 }
 

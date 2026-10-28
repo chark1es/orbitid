@@ -7,6 +7,7 @@ import {
   buildShortcodeContext, renderClaimsWithContext, renderTemplateClaims, renderTemplateValue,
 } from "../../src/services/jwt-templates";
 import { createSessionFixture, createUser, json, testApp, type ErrorBody } from "./helpers";
+import { first } from "../../src/lib/db";
 
 describe("jwt template shortcodes", () => {
   const context = {
@@ -69,12 +70,12 @@ describe("jwt template shortcodes", () => {
       public_metadata: { tier: "pro", team: { name: "core" } },
     });
     const orgId = newId("org");
-    ctx.db.insert(s.organizations).values({ id: orgId, name: "Acme", slug: "acme", publicMetadata: { plan: "enterprise" } }).run();
-    ctx.db.insert(s.organizationMemberships).values({ id: newId(ID_PREFIX.membership), organizationId: orgId, userId: user.id, roleKey: "org:member" }).run();
-    const { sessionId } = createSessionFixture(ctx, user.id);
-    ctx.db.update(s.sessions).set({ lastActiveOrganizationId: orgId }).where(eq(s.sessions.id, sessionId)).run();
+    await ctx.db.insert(s.organizations).values({ id: orgId, name: "Acme", slug: "acme", publicMetadata: { plan: "enterprise" } });
+    await ctx.db.insert(s.organizationMemberships).values({ id: newId(ID_PREFIX.membership), organizationId: orgId, userId: user.id, roleKey: "org:member" });
+    const { sessionId } = await createSessionFixture(ctx, user.id);
+    await ctx.db.update(s.sessions).set({ lastActiveOrganizationId: orgId }).where(eq(s.sessions.id, sessionId));
 
-    const shortcodes = buildShortcodeContext(ctx, { userId: user.id, sessionId });
+    const shortcodes = await buildShortcodeContext(ctx, { userId: user.id, sessionId });
     expect(shortcodes.user).toMatchObject({ id: user.id, full_name: "Ada Lovelace", primary_email_address: "ada@example.com", email_verified: true });
     expect(shortcodes.org).toMatchObject({ slug: "acme", role: "org:member" });
     expect(shortcodes.session).toMatchObject({ id: sessionId });
@@ -118,7 +119,7 @@ describe("jwt template CRUD", () => {
       await api("POST", "/v1/jwt_templates", { name: "hasura", claims: { "https://hasura.io/jwt/claims": { "x-hasura-user-id": "{{user.id}}" } } }),
     );
     expect(created).toMatchObject({ object: "jwt_template", name: "hasura", lifetime: 60, allowed_clock_skew: 5, custom_signing_key: false, signing_algorithm: "RS256" });
-    expect(ctx.db.select().from(s.jwtTemplates).all()[0]!.signingKeyEnc).toBeNull();
+    expect((await ctx.db.select().from(s.jwtTemplates))[0]!.signingKeyEnc).toBeNull();
 
     expect((await api("POST", "/v1/jwt_templates", { name: "hasura" })).status).toBe(422);
     expect((await json<PaginatedList<JwtTemplateJSON>>(await api("GET", "/v1/jwt_templates"))).total_count).toBe(1);
@@ -150,21 +151,21 @@ describe("jwt template CRUD", () => {
     const { api, ctx } = await testApp();
     const rs = await json<JwtTemplateJSON>(await api("POST", "/v1/jwt_templates", { name: "custom-rs", claims: { a: "{{user.id}}" }, custom_signing_key: true }));
     expect(rs.custom_signing_key).toBe(true);
-    const row = ctx.db.select().from(s.jwtTemplates).where(eq(s.jwtTemplates.id, rs.id)).get()!;
+    const row = first(await ctx.db.select().from(s.jwtTemplates).where(eq(s.jwtTemplates.id, rs.id)))!;
     expect(row.signingKeyEnc).toMatch(/^v1\./);
     expect(row.signingKeyEnc).not.toContain('"kty"');
 
     const es = await json<JwtTemplateJSON>(await api("POST", "/v1/jwt_templates", { name: "custom-es", custom_signing_key: true, signing_algorithm: "ES256" }));
-    const esRow = ctx.db.select().from(s.jwtTemplates).where(eq(s.jwtTemplates.id, es.id)).get()!;
+    const esRow = first(await ctx.db.select().from(s.jwtTemplates).where(eq(s.jwtTemplates.id, es.id)))!;
     expect(esRow.signingAlgorithm).toBe("ES256");
     expect(esRow.signingKeyEnc).toMatch(/^v1\./);
 
     const rotated = await json<JwtTemplateJSON>(await api("PATCH", `/v1/jwt_templates/${rs.id}`, { signing_algorithm: "HS256" }));
     expect(rotated.signing_algorithm).toBe("HS256");
-    expect(ctx.db.select().from(s.jwtTemplates).where(eq(s.jwtTemplates.id, rs.id)).get()!.signingKeyEnc).not.toBe(row.signingKeyEnc);
+    expect(first(await ctx.db.select().from(s.jwtTemplates).where(eq(s.jwtTemplates.id, rs.id)))!.signingKeyEnc).not.toBe(row.signingKeyEnc);
 
     const cleared = await json<JwtTemplateJSON>(await api("PATCH", `/v1/jwt_templates/${rs.id}`, { custom_signing_key: false }));
     expect(cleared.custom_signing_key).toBe(false);
-    expect(ctx.db.select().from(s.jwtTemplates).where(eq(s.jwtTemplates.id, rs.id)).get()!.signingKeyEnc).toBeNull();
+    expect(first(await ctx.db.select().from(s.jwtTemplates).where(eq(s.jwtTemplates.id, rs.id)))!.signingKeyEnc).toBeNull();
   });
 });

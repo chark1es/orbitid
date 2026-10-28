@@ -92,7 +92,7 @@ describe("instance invitations", () => {
   it("reports expired invitations and refuses their tickets", async () => {
     const { api, ctx } = await testApp();
     const invitation = await json<InvitationJSON>(await api("POST", "/v1/invitations", { email_address: "stale@example.com", notify: false }));
-    ctx.db.update(s.invitations).set({ expiresAt: Date.now() - 1 }).where(eq(s.invitations.id, invitation.id)).run();
+    await ctx.db.update(s.invitations).set({ expiresAt: Date.now() - 1 }).where(eq(s.invitations.id, invitation.id));
 
     expect((await json<InvitationJSON>(await api("GET", `/v1/invitations/${invitation.id}`))).status).toBe("expired");
     await expect(redeemTicket(ctx, ticketFromUrl(invitation.url!))).rejects.toMatchObject({ code: ErrorCodes.ticket_expired });

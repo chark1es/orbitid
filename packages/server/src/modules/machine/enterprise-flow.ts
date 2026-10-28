@@ -4,6 +4,7 @@ import { ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../../context";
 import { oauthStates } from "../../db/schema";
 import { randomToken } from "../../lib/crypto";
+import { first } from "../../lib/db";
 
 export const ENTERPRISE_STATE_TTL_MS = 10 * 60 * 1000;
 
@@ -20,19 +21,19 @@ export interface EnterpriseFlow {
   browserHash?: string;
 }
 
-export function createEnterpriseState(
+export async function createEnterpriseState(
   ctx: AppContext,
   input: { provider: string; flow: EnterpriseFlow; codeVerifier?: string | null; nonce?: string | null },
-): string {
+): Promise<string> {
   const state = randomToken(24);
-  ctx.db.insert(oauthStates).values({
-    state,
-    provider: input.provider,
-    codeVerifier: input.codeVerifier ?? null,
-    nonce: input.nonce ?? null,
-    flow: input.flow as unknown as Record<string, unknown>,
-    expiresAt: Date.now() + ENTERPRISE_STATE_TTL_MS,
-  }).run();
+  await ctx.db.insert(oauthStates).values({
+            state,
+            provider: input.provider,
+            codeVerifier: input.codeVerifier ?? null,
+            nonce: input.nonce ?? null,
+            flow: input.flow as unknown as Record<string, unknown>,
+            expiresAt: Date.now() + ENTERPRISE_STATE_TTL_MS,
+          });
   return state;
 }
 
@@ -43,19 +44,19 @@ export interface EnterpriseState {
 }
 
 /** Reads and deletes a state row (single use). Returns null for unknown, expired or provider-mismatched states. */
-export function takeEnterpriseState(ctx: AppContext, state: string, provider: string): EnterpriseState | null {
+export async function takeEnterpriseState(ctx: AppContext, state: string, provider: string): Promise<EnterpriseState | null> {
   if (!state) return null;
-  const row = ctx.db.select().from(oauthStates).where(eq(oauthStates.state, state)).get();
+  const row = first(await ctx.db.select().from(oauthStates).where(eq(oauthStates.state, state)));
   if (!row || row.provider !== provider) return null;
-  ctx.db.delete(oauthStates).where(eq(oauthStates.state, state)).run();
+  await ctx.db.delete(oauthStates).where(eq(oauthStates.state, state));
   if (row.expiresAt <= Date.now()) return null;
   return { flow: row.flow as unknown as EnterpriseFlow, codeVerifier: row.codeVerifier, nonce: row.nonce };
 }
 
 /** Reads a state row without consuming it (used for `GET /v1/saml/:id/sso?flow=…`). */
-export function peekEnterpriseState(ctx: AppContext, state: string, provider: string): EnterpriseState | null {
+export async function peekEnterpriseState(ctx: AppContext, state: string, provider: string): Promise<EnterpriseState | null> {
   if (!state) return null;
-  const row = ctx.db.select().from(oauthStates).where(eq(oauthStates.state, state)).get();
+  const row = first(await ctx.db.select().from(oauthStates).where(eq(oauthStates.state, state)));
   if (!row || row.provider !== provider || row.expiresAt <= Date.now()) return null;
   return { flow: row.flow as unknown as EnterpriseFlow, codeVerifier: row.codeVerifier, nonce: row.nonce };
 }

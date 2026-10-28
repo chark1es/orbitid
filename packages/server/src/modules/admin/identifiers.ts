@@ -12,6 +12,7 @@ import { audit } from "../../services/audit";
 import type { AppContext } from "../../context";
 import { bool, deleted, getUserOrThrow, listParams, metadataSchema, normalizeEmail, page } from "./shared";
 import { createInvitation } from "./invitations";
+import { first } from "../../lib/db";
 
 /** `email_address` / `phone_number` / `web3_wallet`, inferred from the identifier shape. */
 function identifierType(identifier: string): "email_address" | "phone_number" | "web3_wallet" {
@@ -22,16 +23,16 @@ function identifierType(identifier: string): "email_address" | "phone_number" | 
 
 /** Bumps `updated_at` and emits `user.updated` after an identifier change. */
 async function touchUser(ctx: AppContext, userId: string): Promise<void> {
-  ctx.db.update(s.users).set({ updatedAt: Date.now() }).where(eq(s.users.id, userId)).run();
-  const user = ctx.db.select().from(s.users).where(eq(s.users.id, userId)).get();
-  if (user) await emitEvent(ctx, "user.updated", serializeUser(ctx, user, { backend: true }));
+  await ctx.db.update(s.users).set({ updatedAt: Date.now() }).where(eq(s.users.id, userId));
+  const user = first(await ctx.db.select().from(s.users).where(eq(s.users.id, userId)));
+  if (user) await emitEvent(ctx, "user.updated", await serializeUser(ctx, user, { backend: true }));
 }
 
 export default function routes(ctx: AppContext) {
   const app = new Hono();
 
   // ───────────── email addresses ─────────────
-  app.get("/email_addresses", (c) => {
+  app.get("/email_addresses", async (c) => {
     const { limit, offset } = listParams(c);
     const conds: SQL[] = [];
     const userId = c.req.query("user_id");
@@ -39,13 +40,13 @@ export default function routes(ctx: AppContext) {
     const email = c.req.query("email_address");
     if (email) conds.push(eq(s.emailAddresses.email, normalizeEmail(email)));
     const where = conds.length ? and(...conds) : undefined;
-    const rows = ctx.db.select().from(s.emailAddresses).where(where).limit(limit).offset(offset).all();
-    const total = Number(ctx.db.select({ n: sql<number>`count(*)` }).from(s.emailAddresses).where(where).get()?.n ?? 0);
+    const rows = (await ctx.db.select().from(s.emailAddresses).where(where).limit(limit).offset(offset));
+    const total = Number(first(await ctx.db.select({ n: sql<number>`count(*)` }).from(s.emailAddresses).where(where))?.n ?? 0);
     return c.json(page(rows.map(serializeEmail), total));
   });
 
-  app.get("/email_addresses/:id", (c) => {
-    const row = ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.id, c.req.param("id"))).get();
+  app.get("/email_addresses/:id", async (c) => {
+    const row = first(await ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.id, c.req.param("id"))));
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Email address not found.");
     return c.json(serializeEmail(row));
   });
@@ -60,46 +61,44 @@ export default function routes(ctx: AppContext) {
         primary: bool.default(false),
       }),
     );
-    const user = getUserOrThrow(ctx, body.user_id);
+    const user = await getUserOrThrow(ctx, body.user_id);
     const email = normalizeEmail(body.email_address);
-    const existing = ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.email, email)).get();
+    const existing = first(await ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.email, email)));
     if (existing) {
       const code = existing.userId === user.id ? ErrorCodes.duplicate_record : ErrorCodes.form_identifier_exists;
       throw new OrbitError(422, code, `${email} is already in use.`, { param_name: "email_address" });
     }
     const now = Date.now();
-    const row = ctx.db
-      .insert(s.emailAddresses)
-      .values({
-        id: newId(ID_PREFIX.email),
-        userId: user.id,
-        email,
-        verified: body.verified,
-        verifiedAt: body.verified ? now : null,
-        verifiedStrategy: body.verified ? "email_code" : null,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning()
-      .get()!;
+    const row = first(await ctx.db
+          .insert(s.emailAddresses)
+          .values({
+            id: newId(ID_PREFIX.email),
+            userId: user.id,
+            email,
+            verified: body.verified,
+            verifiedAt: body.verified ? now : null,
+            verifiedStrategy: body.verified ? "email_code" : null,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning())!;
     if (body.primary || !user.primaryEmailAddressId) {
-      ctx.db.update(s.users).set({ primaryEmailAddressId: row.id, updatedAt: now }).where(eq(s.users.id, user.id)).run();
+      await ctx.db.update(s.users).set({ primaryEmailAddressId: row.id, updatedAt: now }).where(eq(s.users.id, user.id));
     }
     await touchUser(ctx, user.id);
-    audit(ctx, { actor: "secret_key", action: "email_address.created", targetType: "email_address", targetId: row.id, metadata: { user_id: user.id, email_address: email } });
+    await audit(ctx, { actor: "secret_key", action: "email_address.created", targetType: "email_address", targetId: row.id, metadata: { user_id: user.id, email_address: email } });
     return c.json(serializeEmail(row));
   });
 
   app.patch("/email_addresses/:id", async (c) => {
-    const row = ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.id, c.req.param("id"))).get();
+    const row = first(await ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.id, c.req.param("id"))));
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Email address not found.");
     const body = await parseBody(c, z.object({ verified: bool.optional(), primary: bool.optional() }));
     if (body.verified) {
-      const clash = ctx.db
-        .select()
-        .from(s.emailAddresses)
-        .where(and(eq(s.emailAddresses.email, row.email), eq(s.emailAddresses.verified, true)))
-        .get();
+      const clash = first(await ctx.db
+              .select()
+              .from(s.emailAddresses)
+              .where(and(eq(s.emailAddresses.email, row.email), eq(s.emailAddresses.verified, true))));
       if (clash && clash.id !== row.id) {
         throw new OrbitError(422, ErrorCodes.form_identifier_exists, `${row.email} is already verified on another account.`, { param_name: "email_address" });
       }
@@ -111,30 +110,30 @@ export default function routes(ctx: AppContext) {
       patch.verifiedAt = body.verified ? now : null;
       patch.verifiedStrategy = body.verified ? (row.verifiedStrategy ?? "email_code") : null;
     }
-    ctx.db.update(s.emailAddresses).set(patch).where(eq(s.emailAddresses.id, row.id)).run();
+    await ctx.db.update(s.emailAddresses).set(patch).where(eq(s.emailAddresses.id, row.id));
     if (body.primary) {
-      ctx.db.update(s.users).set({ primaryEmailAddressId: row.id, updatedAt: now }).where(eq(s.users.id, row.userId!)).run();
+      await ctx.db.update(s.users).set({ primaryEmailAddressId: row.id, updatedAt: now }).where(eq(s.users.id, row.userId!));
     }
     await touchUser(ctx, row.userId!);
-    const updated = ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.id, row.id)).get()!;
+    const updated = first(await ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.id, row.id)))!;
     return c.json(serializeEmail(updated));
   });
 
   app.delete("/email_addresses/:id", async (c) => {
-    const row = ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.id, c.req.param("id"))).get();
+    const row = first(await ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.id, c.req.param("id"))));
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Email address not found.");
-    const user = row.userId ? ctx.db.select().from(s.users).where(eq(s.users.id, row.userId)).get() : undefined;
-    ctx.db.delete(s.emailAddresses).where(eq(s.emailAddresses.id, row.id)).run();
+    const user = row.userId ? first(await ctx.db.select().from(s.users).where(eq(s.users.id, row.userId))) : undefined;
+    await ctx.db.delete(s.emailAddresses).where(eq(s.emailAddresses.id, row.id));
     if (user?.primaryEmailAddressId === row.id) {
-      ctx.db.update(s.users).set({ primaryEmailAddressId: null, updatedAt: Date.now() }).where(eq(s.users.id, user.id)).run();
+      await ctx.db.update(s.users).set({ primaryEmailAddressId: null, updatedAt: Date.now() }).where(eq(s.users.id, user.id));
     }
     if (row.userId) await touchUser(ctx, row.userId);
-    audit(ctx, { actor: "secret_key", action: "email_address.deleted", targetType: "email_address", targetId: row.id, metadata: { email_address: row.email } });
+    await audit(ctx, { actor: "secret_key", action: "email_address.deleted", targetType: "email_address", targetId: row.id, metadata: { email_address: row.email } });
     return c.json(deleted("email_address", row.id));
   });
 
   // ───────────── phone numbers ─────────────
-  app.get("/phone_numbers", (c) => {
+  app.get("/phone_numbers", async (c) => {
     const { limit, offset } = listParams(c);
     const conds: SQL[] = [];
     const userId = c.req.query("user_id");
@@ -142,13 +141,13 @@ export default function routes(ctx: AppContext) {
     const phone = c.req.query("phone_number");
     if (phone) conds.push(eq(s.phoneNumbers.phone, phone.trim()));
     const where = conds.length ? and(...conds) : undefined;
-    const rows = ctx.db.select().from(s.phoneNumbers).where(where).limit(limit).offset(offset).all();
-    const total = Number(ctx.db.select({ n: sql<number>`count(*)` }).from(s.phoneNumbers).where(where).get()?.n ?? 0);
+    const rows = (await ctx.db.select().from(s.phoneNumbers).where(where).limit(limit).offset(offset));
+    const total = Number(first(await ctx.db.select({ n: sql<number>`count(*)` }).from(s.phoneNumbers).where(where))?.n ?? 0);
     return c.json(page(rows.map(serializePhone), total));
   });
 
-  app.get("/phone_numbers/:id", (c) => {
-    const row = ctx.db.select().from(s.phoneNumbers).where(eq(s.phoneNumbers.id, c.req.param("id"))).get();
+  app.get("/phone_numbers/:id", async (c) => {
+    const row = first(await ctx.db.select().from(s.phoneNumbers).where(eq(s.phoneNumbers.id, c.req.param("id"))));
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Phone number not found.");
     return c.json(serializePhone(row));
   });
@@ -165,39 +164,38 @@ export default function routes(ctx: AppContext) {
         default_second_factor: bool.default(false),
       }),
     );
-    const user = getUserOrThrow(ctx, body.user_id);
+    const user = await getUserOrThrow(ctx, body.user_id);
     const phone = body.phone_number.trim();
-    const existing = ctx.db.select().from(s.phoneNumbers).where(eq(s.phoneNumbers.phone, phone)).get();
+    const existing = first(await ctx.db.select().from(s.phoneNumbers).where(eq(s.phoneNumbers.phone, phone)));
     if (existing) {
       const code = existing.userId === user.id ? ErrorCodes.duplicate_record : ErrorCodes.form_identifier_exists;
       throw new OrbitError(422, code, `${phone} is already in use.`, { param_name: "phone_number" });
     }
     const now = Date.now();
-    const row = ctx.db
-      .insert(s.phoneNumbers)
-      .values({
-        id: newId(ID_PREFIX.phone),
-        userId: user.id,
-        phone,
-        verified: body.verified,
-        verifiedAt: body.verified ? now : null,
-        reservedForSecondFactor: body.reserved_for_second_factor || body.default_second_factor,
-        defaultSecondFactor: body.default_second_factor,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning()
-      .get()!;
+    const row = first(await ctx.db
+          .insert(s.phoneNumbers)
+          .values({
+            id: newId(ID_PREFIX.phone),
+            userId: user.id,
+            phone,
+            verified: body.verified,
+            verifiedAt: body.verified ? now : null,
+            reservedForSecondFactor: body.reserved_for_second_factor || body.default_second_factor,
+            defaultSecondFactor: body.default_second_factor,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning())!;
     if (body.primary || !user.primaryPhoneNumberId) {
-      ctx.db.update(s.users).set({ primaryPhoneNumberId: row.id, updatedAt: now }).where(eq(s.users.id, user.id)).run();
+      await ctx.db.update(s.users).set({ primaryPhoneNumberId: row.id, updatedAt: now }).where(eq(s.users.id, user.id));
     }
     await touchUser(ctx, user.id);
-    audit(ctx, { actor: "secret_key", action: "phone_number.created", targetType: "phone_number", targetId: row.id, metadata: { user_id: user.id, phone_number: phone } });
+    await audit(ctx, { actor: "secret_key", action: "phone_number.created", targetType: "phone_number", targetId: row.id, metadata: { user_id: user.id, phone_number: phone } });
     return c.json(serializePhone(row));
   });
 
   app.patch("/phone_numbers/:id", async (c) => {
-    const row = ctx.db.select().from(s.phoneNumbers).where(eq(s.phoneNumbers.id, c.req.param("id"))).get();
+    const row = first(await ctx.db.select().from(s.phoneNumbers).where(eq(s.phoneNumbers.id, c.req.param("id"))));
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Phone number not found.");
     const body = await parseBody(
       c,
@@ -219,36 +217,36 @@ export default function routes(ctx: AppContext) {
       patch.defaultSecondFactor = body.default_second_factor;
       if (body.default_second_factor) patch.reservedForSecondFactor = true;
     }
-    ctx.db.update(s.phoneNumbers).set(patch).where(eq(s.phoneNumbers.id, row.id)).run();
+    await ctx.db.update(s.phoneNumbers).set(patch).where(eq(s.phoneNumbers.id, row.id));
     if (body.default_second_factor) {
-      ctx.db.update(s.phoneNumbers).set({ defaultSecondFactor: false }).where(and(eq(s.phoneNumbers.userId, row.userId!), sql`${s.phoneNumbers.id} != ${row.id}`)).run();
+      await ctx.db.update(s.phoneNumbers).set({ defaultSecondFactor: false }).where(and(eq(s.phoneNumbers.userId, row.userId!), sql`${s.phoneNumbers.id} != ${row.id}`));
     }
     if (body.primary) {
-      ctx.db.update(s.users).set({ primaryPhoneNumberId: row.id, updatedAt: now }).where(eq(s.users.id, row.userId!)).run();
+      await ctx.db.update(s.users).set({ primaryPhoneNumberId: row.id, updatedAt: now }).where(eq(s.users.id, row.userId!));
     }
     await touchUser(ctx, row.userId!);
-    const updated = ctx.db.select().from(s.phoneNumbers).where(eq(s.phoneNumbers.id, row.id)).get()!;
+    const updated = first(await ctx.db.select().from(s.phoneNumbers).where(eq(s.phoneNumbers.id, row.id)))!;
     return c.json(serializePhone(updated));
   });
 
   app.delete("/phone_numbers/:id", async (c) => {
-    const row = ctx.db.select().from(s.phoneNumbers).where(eq(s.phoneNumbers.id, c.req.param("id"))).get();
+    const row = first(await ctx.db.select().from(s.phoneNumbers).where(eq(s.phoneNumbers.id, c.req.param("id"))));
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Phone number not found.");
-    const user = row.userId ? ctx.db.select().from(s.users).where(eq(s.users.id, row.userId)).get() : undefined;
-    ctx.db.delete(s.phoneNumbers).where(eq(s.phoneNumbers.id, row.id)).run();
+    const user = row.userId ? first(await ctx.db.select().from(s.users).where(eq(s.users.id, row.userId))) : undefined;
+    await ctx.db.delete(s.phoneNumbers).where(eq(s.phoneNumbers.id, row.id));
     if (user?.primaryPhoneNumberId === row.id) {
-      ctx.db.update(s.users).set({ primaryPhoneNumberId: null, updatedAt: Date.now() }).where(eq(s.users.id, user.id)).run();
+      await ctx.db.update(s.users).set({ primaryPhoneNumberId: null, updatedAt: Date.now() }).where(eq(s.users.id, user.id));
     }
     if (row.userId) await touchUser(ctx, row.userId);
-    audit(ctx, { actor: "secret_key", action: "phone_number.deleted", targetType: "phone_number", targetId: row.id, metadata: { phone_number: row.phone } });
+    await audit(ctx, { actor: "secret_key", action: "phone_number.deleted", targetType: "phone_number", targetId: row.id, metadata: { phone_number: row.phone } });
     return c.json(deleted("phone_number", row.id));
   });
 
   // ───────────── allowlist ─────────────
-  app.get("/allowlist_identifiers", (c) => {
+  app.get("/allowlist_identifiers", async (c) => {
     const { limit, offset } = listParams(c);
-    const rows = ctx.db.select().from(s.allowlistIdentifiers).limit(limit).offset(offset).all();
-    const total = Number(ctx.db.select({ n: sql<number>`count(*)` }).from(s.allowlistIdentifiers).get()?.n ?? 0);
+    const rows = (await ctx.db.select().from(s.allowlistIdentifiers).limit(limit).offset(offset));
+    const total = Number(first(await ctx.db.select({ n: sql<number>`count(*)` }).from(s.allowlistIdentifiers))?.n ?? 0);
     return c.json(page(rows.map(serializeAllowlist), total));
   });
 
@@ -258,7 +256,7 @@ export default function routes(ctx: AppContext) {
       z.object({ identifier: z.string().min(1), notify: bool.default(false), public_metadata: metadataSchema.optional() }),
     );
     const identifier = body.identifier.trim().toLowerCase();
-    if (ctx.db.select().from(s.allowlistIdentifiers).where(eq(s.allowlistIdentifiers.identifier, identifier)).get()) {
+    if (first(await ctx.db.select().from(s.allowlistIdentifiers).where(eq(s.allowlistIdentifiers.identifier, identifier)))) {
       throw new OrbitError(422, ErrorCodes.duplicate_record, "This identifier is already allowlisted.", { param_name: "identifier" });
     }
     const type = identifierType(identifier);
@@ -270,52 +268,50 @@ export default function routes(ctx: AppContext) {
       const { row } = await createInvitation(ctx, { email: identifier, publicMetadata: body.public_metadata, notify: true, ignoreExisting: true });
       invitationId = row.id;
     }
-    const row = ctx.db
-      .insert(s.allowlistIdentifiers)
-      .values({ id: newId(ID_PREFIX.allow), identifier, identifierType: type, invitationId, createdAt: now, updatedAt: now })
-      .returning()
-      .get()!;
-    audit(ctx, { actor: "secret_key", action: "allowlist_identifier.created", targetType: "allowlist_identifier", targetId: row.id, metadata: { identifier } });
+    const row = first(await ctx.db
+          .insert(s.allowlistIdentifiers)
+          .values({ id: newId(ID_PREFIX.allow), identifier, identifierType: type, invitationId, createdAt: now, updatedAt: now })
+          .returning())!;
+    await audit(ctx, { actor: "secret_key", action: "allowlist_identifier.created", targetType: "allowlist_identifier", targetId: row.id, metadata: { identifier } });
     return c.json(serializeAllowlist(row));
   });
 
-  app.delete("/allowlist_identifiers/:id", (c) => {
-    const row = ctx.db.select().from(s.allowlistIdentifiers).where(eq(s.allowlistIdentifiers.id, c.req.param("id"))).get();
+  app.delete("/allowlist_identifiers/:id", async (c) => {
+    const row = first(await ctx.db.select().from(s.allowlistIdentifiers).where(eq(s.allowlistIdentifiers.id, c.req.param("id"))));
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Allowlist identifier not found.");
-    ctx.db.delete(s.allowlistIdentifiers).where(eq(s.allowlistIdentifiers.id, row.id)).run();
-    audit(ctx, { actor: "secret_key", action: "allowlist_identifier.deleted", targetType: "allowlist_identifier", targetId: row.id, metadata: { identifier: row.identifier } });
+    await ctx.db.delete(s.allowlistIdentifiers).where(eq(s.allowlistIdentifiers.id, row.id));
+    await audit(ctx, { actor: "secret_key", action: "allowlist_identifier.deleted", targetType: "allowlist_identifier", targetId: row.id, metadata: { identifier: row.identifier } });
     return c.json(deleted("allowlist_identifier", row.id));
   });
 
   // ───────────── blocklist ─────────────
-  app.get("/blocklist_identifiers", (c) => {
+  app.get("/blocklist_identifiers", async (c) => {
     const { limit, offset } = listParams(c);
-    const rows = ctx.db.select().from(s.blocklistIdentifiers).limit(limit).offset(offset).all();
-    const total = Number(ctx.db.select({ n: sql<number>`count(*)` }).from(s.blocklistIdentifiers).get()?.n ?? 0);
+    const rows = (await ctx.db.select().from(s.blocklistIdentifiers).limit(limit).offset(offset));
+    const total = Number(first(await ctx.db.select({ n: sql<number>`count(*)` }).from(s.blocklistIdentifiers))?.n ?? 0);
     return c.json(page(rows.map(serializeBlocklist), total));
   });
 
   app.post("/blocklist_identifiers", async (c) => {
     const body = await parseBody(c, z.object({ identifier: z.string().min(1) }));
     const identifier = body.identifier.trim().toLowerCase();
-    if (ctx.db.select().from(s.blocklistIdentifiers).where(eq(s.blocklistIdentifiers.identifier, identifier)).get()) {
+    if (first(await ctx.db.select().from(s.blocklistIdentifiers).where(eq(s.blocklistIdentifiers.identifier, identifier)))) {
       throw new OrbitError(422, ErrorCodes.duplicate_record, "This identifier is already blocklisted.", { param_name: "identifier" });
     }
     if (!ctx.settings.get().restrictions.blocklistEnabled) await ctx.settings.update({ restrictions: { blocklistEnabled: true } });
-    const row = ctx.db
-      .insert(s.blocklistIdentifiers)
-      .values({ id: newId(ID_PREFIX.block), identifier, identifierType: identifierType(identifier), createdAt: Date.now(), updatedAt: Date.now() })
-      .returning()
-      .get()!;
-    audit(ctx, { actor: "secret_key", action: "blocklist_identifier.created", targetType: "blocklist_identifier", targetId: row.id, metadata: { identifier } });
+    const row = first(await ctx.db
+          .insert(s.blocklistIdentifiers)
+          .values({ id: newId(ID_PREFIX.block), identifier, identifierType: identifierType(identifier), createdAt: Date.now(), updatedAt: Date.now() })
+          .returning())!;
+    await audit(ctx, { actor: "secret_key", action: "blocklist_identifier.created", targetType: "blocklist_identifier", targetId: row.id, metadata: { identifier } });
     return c.json(serializeBlocklist(row));
   });
 
-  app.delete("/blocklist_identifiers/:id", (c) => {
-    const row = ctx.db.select().from(s.blocklistIdentifiers).where(eq(s.blocklistIdentifiers.id, c.req.param("id"))).get();
+  app.delete("/blocklist_identifiers/:id", async (c) => {
+    const row = first(await ctx.db.select().from(s.blocklistIdentifiers).where(eq(s.blocklistIdentifiers.id, c.req.param("id"))));
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Blocklist identifier not found.");
-    ctx.db.delete(s.blocklistIdentifiers).where(eq(s.blocklistIdentifiers.id, row.id)).run();
-    audit(ctx, { actor: "secret_key", action: "blocklist_identifier.deleted", targetType: "blocklist_identifier", targetId: row.id, metadata: { identifier: row.identifier } });
+    await ctx.db.delete(s.blocklistIdentifiers).where(eq(s.blocklistIdentifiers.id, row.id));
+    await audit(ctx, { actor: "secret_key", action: "blocklist_identifier.deleted", targetType: "blocklist_identifier", targetId: row.id, metadata: { identifier: row.identifier } });
     return c.json(deleted("blocklist_identifier", row.id));
   });
 

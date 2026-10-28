@@ -4,8 +4,8 @@ export interface Env {
   port: number;
   /** Public URL of this server (Frontend API / issuer), e.g. http://localhost:4000 */
   baseUrl: string;
-  /** sqlite file path, or ":memory:" */
-  databasePath: string;
+  /** `postgres://…` (recommended), `pglite://…`, `sqlite:<file>` or ":memory:" (throwaway database for tests). */
+  databaseUrl: string;
   /** 32+ char secret for AES-GCM at-rest encryption of private keys / OAuth tokens */
   encryptionKey: string;
   /** Backend API secret (sk_test_...). If empty, the bootstrap generates one into <dataDir>/keys.json */
@@ -21,7 +21,7 @@ export function loadEnv(overrides: Partial<Env> = {}): Env {
   return {
     port,
     baseUrl: (overrides.baseUrl ?? e.ORBITID_BASE_URL ?? `http://localhost:${port}`).replace(/\/$/, ""),
-    databasePath: overrides.databasePath ?? e.ORBITID_DATABASE_PATH ?? resolve(dataDir, "orbitid.db"),
+    databaseUrl: overrides.databaseUrl ?? e.ORBITID_DATABASE_URL ?? e.DATABASE_URL ?? (e.ORBITID_DATABASE_PATH ? `sqlite:${e.ORBITID_DATABASE_PATH}` : `sqlite:${resolve(dataDir, "orbitid.db")}`),
     encryptionKey: overrides.encryptionKey ?? e.ORBITID_ENCRYPTION_KEY ?? "dev-only-insecure-encryption-key-change-me!!",
     secretKey: overrides.secretKey ?? e.ORBITID_SECRET_KEY ?? "",
     dataDir,

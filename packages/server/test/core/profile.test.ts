@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import * as schema from "../../src/db/schema";
 import { latestCodeFor, latestEmail } from "../../src/services/mail";
 import { errorsOf, getClient, setup, signInWithPassword, signUpUser, testClient } from "./helpers";
+import { first } from "../../src/lib/db";
 
 describe("environment", () => {
   it("returns the public environment without secrets", async () => {
@@ -105,9 +106,9 @@ describe("profile", () => {
     expect(latestEmail(user.email, "password_changed")).toBeDefined();
 
     // The session used for the request stays; every other session is revoked.
-    const revoked = ctx.db.select().from(schema.sessions).where(eq(schema.sessions.id, user.sessionId)).get()!;
+    const revoked = first(await ctx.db.select().from(schema.sessions).where(eq(schema.sessions.id, user.sessionId)))!;
     expect(revoked.status).toBe("revoked");
-    const current = ctx.db.select().from(schema.sessions).where(eq(schema.sessions.id, other.response.created_session_id)).get()!;
+    const current = first(await ctx.db.select().from(schema.sessions).where(eq(schema.sessions.id, other.response.created_session_id)))!;
     expect(current.status).toBe("active");
 
     const { state } = await signInWithPassword(app, user.email, "N3wPassword!");
@@ -129,7 +130,7 @@ describe("profile", () => {
     const listed = await user.client.json<{ response: unknown[] }>("/v1/client/me/passkeys");
     expect(listed.response).toHaveLength(0);
     // The passkey row is created only after the attestation is verified.
-    expect(ctx.db.select().from(schema.passkeys).where(eq(schema.passkeys.id, created.response.id)).get()).toBeUndefined();
+    expect(first(await ctx.db.select().from(schema.passkeys).where(eq(schema.passkeys.id, created.response.id)))).toBeUndefined();
 
     // Discoverable passkey sign-in: prepare returns full WebAuthn request options in `nonce`.
     const signInClient = testClient(app);
@@ -166,10 +167,10 @@ describe("profile", () => {
     await ctx.settings.update({ attributes: { passkey: { enabled: true, usedForFirstFactor: true } } });
     const user = await signUpUser(app);
     const now = Date.now();
-    ctx.db.insert(schema.passkeys).values({
-      id: "pkey_test", userId: user.userId, name: "Laptop", credentialId: "cred_test", publicKey: "pk_test",
-      counter: 0, createdAt: now, updatedAt: now,
-    }).run();
+    await ctx.db.insert(schema.passkeys).values({
+                  id: "pkey_test", userId: user.userId, name: "Laptop", credentialId: "cred_test", publicKey: "pk_test",
+                  counter: 0, createdAt: now, updatedAt: now,
+                });
     const renamed = await user.client.json<{ response: { name: string } }>("/v1/client/me/passkeys/pkey_test", { method: "PATCH", body: { name: "Work laptop" } });
     expect(renamed.response.name).toBe("Work laptop");
     const deleted = await user.client.json<{ response: { deleted: boolean } }>("/v1/client/me/passkeys/pkey_test", { method: "DELETE" });
@@ -210,7 +211,7 @@ describe("profile", () => {
     const user = await signUpUser(app);
     const res = await user.client.json<{ response: { deleted: boolean; id: string } }>("/v1/client/me", { method: "DELETE" });
     expect(res.response.deleted).toBe(true);
-    expect(ctx.db.select().from(schema.users).where(eq(schema.users.id, user.userId)).get()).toBeUndefined();
+    expect(first(await ctx.db.select().from(schema.users).where(eq(schema.users.id, user.userId)))).toBeUndefined();
     const state = await getClient(user.client);
     expect(state.response.sessions).toHaveLength(0);
   });

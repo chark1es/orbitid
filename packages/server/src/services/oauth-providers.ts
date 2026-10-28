@@ -668,10 +668,10 @@ function genericAdapter(cfg: OAuthProviderConfig, redirectUri: string): OAuthAda
   });
 }
 
-function customOidcAdapter(cfg: OAuthProviderConfig, redirectUri: string): OAuthAdapter {
+async function customOidcAdapter(cfg: OAuthProviderConfig, redirectUri: string): Promise<OAuthAdapter> {
   if (!cfg.discoveryUrl) throw new OrbitError(400, ErrorCodes.oauth_provider_not_enabled, "Custom OIDC provider is missing its discovery URL");
   const client = new OAuth2Client(cfg.clientId, cfg.clientSecret, redirectUri);
-  const discovery = loadDiscovery(cfg.discoveryUrl);
+  const discovery = await loadDiscovery(cfg.discoveryUrl);
   return {
     key: cfg.key,
     async createAuthorizationUrl({ state, codeVerifier, scopes }) {

@@ -4,10 +4,11 @@ import { eq } from "drizzle-orm";
 import * as s from "../../src/db/schema";
 import { setup, authHeaders } from "./helpers";
 import { TEST_PUBLIC_JWK } from "./fake-tokens";
+import { first } from "../../src/lib/db";
 
 vi.mock("../../src/services/tokens", () => import("./fake-tokens"));
 
-type Harness = Awaited<ReturnType<typeof setup>>;
+type Harness = Awaited<Awaited<ReturnType<typeof setup>>>;
 const json = (body: unknown) => JSON.stringify(body);
 
 async function createMachine(h: Harness, name = "worker-1", extra: Record<string, unknown> = {}) {
@@ -32,7 +33,7 @@ describe("m2m — machines", () => {
     expect(machine.default_token_ttl).toBe(3600);
     expect(machine.scoped_machines).toEqual([]);
 
-    const row = h.ctx.db.select().from(s.machines).where(eq(s.machines.id, machine.id)).get()!;
+    const row = first(await h.ctx.db.select().from(s.machines).where(eq(s.machines.id, machine.id)))!;
     expect(row.secretHash).not.toBe(machine.secret);
 
     const list = await h.app.request("/v1/m2m/machines", { headers: authHeaders() });
@@ -98,7 +99,7 @@ describe("m2m — tokens", () => {
     expect(token.machine_id).toBe(machine.id);
     expect(token.claims).toMatchObject({ run: "42", sub: machine.id });
 
-    const stored = h.ctx.db.select().from(s.m2mTokens).where(eq(s.m2mTokens.id, token.id)).get()!;
+    const stored = first(await h.ctx.db.select().from(s.m2mTokens).where(eq(s.m2mTokens.id, token.id)))!;
     expect(stored.tokenHash).not.toBe(token.token);
 
     const verified = await h.app.request("/v1/m2m/tokens/verify", { method: "POST", headers: authHeaders(), body: json({ token: token.token }) });
@@ -159,7 +160,7 @@ describe("m2m — tokens", () => {
     const machine = await createMachine(h);
     const created = await h.app.request("/v1/m2m/tokens", { method: "POST", headers: authHeaders(), body: json({ machine_id: machine.id }) });
     const token = await created.json();
-    h.ctx.db.update(s.m2mTokens).set({ expiresAt: Date.now() - 1 }).where(eq(s.m2mTokens.id, token.id)).run();
+    await h.ctx.db.update(s.m2mTokens).set({ expiresAt: Date.now() - 1 }).where(eq(s.m2mTokens.id, token.id));
 
     const expired = await h.app.request("/v1/m2m/tokens/verify", { method: "POST", headers: authHeaders(), body: json({ token: token.token }) });
     expect(expired.status).toBe(401);
@@ -213,7 +214,7 @@ describe("m2m — tokens", () => {
     const token = await (await h.app.request("/v1/m2m/tokens", { method: "POST", headers: authHeaders(), body: json({ machine_id: machine.id }) })).json();
     const deleted = await h.app.request(`/v1/m2m/machines/${machine.id}`, { method: "DELETE", headers: authHeaders() });
     expect(deleted.status).toBe(200);
-    expect(h.ctx.db.select().from(s.m2mTokens).where(eq(s.m2mTokens.id, token.id)).get()).toBeUndefined();
+    expect(first(await h.ctx.db.select().from(s.m2mTokens).where(eq(s.m2mTokens.id, token.id)))).toBeUndefined();
 
     const verify = await h.app.request("/v1/m2m/tokens/verify", { method: "POST", headers: authHeaders(), body: json({ token: token.token }) });
     expect(verify.status).toBe(401);

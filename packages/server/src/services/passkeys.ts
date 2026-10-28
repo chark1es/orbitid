@@ -13,6 +13,7 @@ import type { AppContext } from "../context";
 import * as s from "../db/schema";
 import { newId } from "../lib/ids";
 import type { UserRow } from "./users";
+import { first } from "../lib/db";
 
 export type PasskeyRow = typeof s.passkeys.$inferSelect;
 
@@ -33,17 +34,16 @@ export function relyingParty(ctx: AppContext, originHint?: string | null): Relyi
   return { rpID: host, origin };
 }
 
-function storeChallenge(ctx: AppContext, purpose: "passkey_registration" | "passkey_authentication", ownerId: string, challenge: string, data: Record<string, unknown>) {
-  ctx.db.insert(s.verifications).values({
-    id: newId("ver"), purpose, strategy: "passkey", identifier: challenge, ownerId,
-    data, attempts: 0, maxAttempts: 5, expiresAt: Date.now() + CHALLENGE_TTL_MS, createdAt: Date.now(),
-  }).run();
+async function storeChallenge(ctx: AppContext, purpose: "passkey_registration" | "passkey_authentication", ownerId: string, challenge: string, data: Record<string, unknown>) {
+  await ctx.db.insert(s.verifications).values({
+            id: newId("ver"), purpose, strategy: "passkey", identifier: challenge, ownerId,
+            data, attempts: 0, maxAttempts: 5, expiresAt: Date.now() + CHALLENGE_TTL_MS, createdAt: Date.now(),
+          });
 }
 
-function loadChallenge(ctx: AppContext, purpose: string, ownerId: string) {
-  const rows = ctx.db.select().from(s.verifications)
-    .where(and(eq(s.verifications.purpose, purpose), eq(s.verifications.ownerId, ownerId)))
-    .all()
+async function loadChallenge(ctx: AppContext, purpose: string, ownerId: string) {
+  const rows = (await ctx.db.select().from(s.verifications)
+      .where(and(eq(s.verifications.purpose, purpose), eq(s.verifications.ownerId, ownerId))))
     .filter((r) => !r.verifiedAt && r.expiresAt > Date.now());
   return rows.sort((a, b) => b.createdAt - a.createdAt)[0];
 }
@@ -61,7 +61,7 @@ export interface BeginPasskeyRegistrationInput {
 /** Starts a registration ceremony; the passkey row is only created once the attestation verifies. */
 export async function beginPasskeyRegistration(ctx: AppContext, input: BeginPasskeyRegistrationInput) {
   const st = ctx.settings.get();
-  const existing = ctx.db.select().from(s.passkeys).where(eq(s.passkeys.userId, input.userId)).all();
+  const existing = (await ctx.db.select().from(s.passkeys).where(eq(s.passkeys.userId, input.userId)));
   const passkeyId = newId("pkey");
   const options = await generateRegistrationOptions({
     rpName: st.application.name,
@@ -78,9 +78,9 @@ export async function beginPasskeyRegistration(ctx: AppContext, input: BeginPass
         ? { residentKey: "preferred", userVerification: "preferred", authenticatorAttachment: "cross-platform" }
         : { residentKey: "preferred", userVerification: "preferred" },
   });
-  storeChallenge(ctx, "passkey_registration", passkeyId, options.challenge, {
-    rpID: input.rp.rpID, origin: input.rp.origin, userId: input.userId, name: input.name,
-  });
+  await storeChallenge(ctx, "passkey_registration", passkeyId, options.challenge, {
+        rpID: input.rp.rpID, origin: input.rp.origin, userId: input.userId, name: input.name,
+      });
   return { passkeyId, options };
 }
 
@@ -91,7 +91,7 @@ export async function finishPasskeyRegistration(ctx: AppContext, input: {
   rp: RelyingParty;
   name?: string;
 }) {
-  const stored = loadChallenge(ctx, "passkey_registration", input.passkeyId);
+  const stored = await loadChallenge(ctx, "passkey_registration", input.passkeyId);
   if (!stored || stored.data?.userId !== input.userId) {
     throw new OrbitError(400, ErrorCodes.verification_expired, "Passkey registration expired. Please try again.");
   }
@@ -110,29 +110,29 @@ export async function finishPasskeyRegistration(ctx: AppContext, input: {
   } catch {
     verified = false;
   }
-  ctx.db.update(s.verifications).set({ attempts: stored.attempts + 1, verifiedAt: verified ? Date.now() : null }).where(eq(s.verifications.id, stored.id)).run();
+  await ctx.db.update(s.verifications).set({ attempts: stored.attempts + 1, verifiedAt: verified ? Date.now() : null }).where(eq(s.verifications.id, stored.id));
   if (!verified || !info) {
     throw new OrbitError(400, ErrorCodes.passkey_registration_failure, "Passkey registration could not be verified");
   }
-  if (ctx.db.select().from(s.passkeys).where(eq(s.passkeys.credentialId, info.credentialID)).get()) {
+  if (first(await ctx.db.select().from(s.passkeys).where(eq(s.passkeys.credentialId, info.credentialID)))) {
     throw new OrbitError(409, ErrorCodes.passkey_registration_failure, "This authenticator is already registered");
   }
   const now = Date.now();
   const name = input.name?.trim() || (typeof stored.data?.name === "string" ? stored.data.name : "") || "Passkey";
-  ctx.db.insert(s.passkeys).values({
-    id: input.passkeyId,
-    userId: input.userId,
-    name,
-    credentialId: info.credentialID,
-    publicKey: Buffer.from(info.credentialPublicKey).toString("base64url"),
-    counter: info.counter,
-    transports: (input.credential.response.transports ?? []) as string[],
-    deviceType: info.credentialDeviceType,
-    backedUp: info.credentialBackedUp,
-    createdAt: now,
-    updatedAt: now,
-  }).run();
-  return ctx.db.select().from(s.passkeys).where(eq(s.passkeys.id, input.passkeyId)).get()!;
+  await ctx.db.insert(s.passkeys).values({
+            id: input.passkeyId,
+            userId: input.userId,
+            name,
+            credentialId: info.credentialID,
+            publicKey: Buffer.from(info.credentialPublicKey).toString("base64url"),
+            counter: info.counter,
+            transports: (input.credential.response.transports ?? []) as string[],
+            deviceType: info.credentialDeviceType,
+            backedUp: info.credentialBackedUp,
+            createdAt: now,
+            updatedAt: now,
+          });
+  return first(await ctx.db.select().from(s.passkeys).where(eq(s.passkeys.id, input.passkeyId)))!;
 }
 
 /** Options for `navigator.credentials.get()`. With `userId` limits to that user's credentials. */
@@ -144,7 +144,7 @@ export async function beginPasskeyAuthentication(ctx: AppContext, input: {
 }) {
   const creds = input.allowCredentials
     ?? (input.userId
-      ? ctx.db.select().from(s.passkeys).where(eq(s.passkeys.userId, input.userId)).all().map((p) => ({ id: p.credentialId, transports: p.transports ?? undefined }))
+      ? (await ctx.db.select().from(s.passkeys).where(eq(s.passkeys.userId, input.userId))).map((p) => ({ id: p.credentialId, transports: p.transports ?? undefined }))
       : []);
   const options = await generateAuthenticationOptions({
     rpID: input.rp.rpID,
@@ -152,9 +152,9 @@ export async function beginPasskeyAuthentication(ctx: AppContext, input: {
     allowCredentials: creds.map((c) => ({ id: c.id, transports: (c.transports ?? undefined) as AuthenticatorTransportFuture[] | undefined })),
     userVerification: "preferred",
   });
-  storeChallenge(ctx, "passkey_authentication", input.ownerId, options.challenge, {
-    rpID: input.rp.rpID, origin: input.rp.origin, userId: input.userId ?? null,
-  });
+  await storeChallenge(ctx, "passkey_authentication", input.ownerId, options.challenge, {
+        rpID: input.rp.rpID, origin: input.rp.origin, userId: input.userId ?? null,
+      });
   return options;
 }
 
@@ -163,11 +163,11 @@ export async function finishPasskeyAuthentication(ctx: AppContext, input: {
   credential: AuthenticationResponseJSON;
   rp: RelyingParty;
 }): Promise<{ user: UserRow; passkey: PasskeyRow }> {
-  const stored = loadChallenge(ctx, "passkey_authentication", input.ownerId);
+  const stored = await loadChallenge(ctx, "passkey_authentication", input.ownerId);
   if (!stored) throw new OrbitError(400, ErrorCodes.verification_expired, "Passkey sign-in expired. Please try again.");
-  const passkey = ctx.db.select().from(s.passkeys).where(eq(s.passkeys.credentialId, input.credential.id)).get();
+  const passkey = first(await ctx.db.select().from(s.passkeys).where(eq(s.passkeys.credentialId, input.credential.id)));
   if (!passkey) {
-    ctx.db.update(s.verifications).set({ attempts: stored.attempts + 1 }).where(eq(s.verifications.id, stored.id)).run();
+    await ctx.db.update(s.verifications).set({ attempts: stored.attempts + 1 }).where(eq(s.verifications.id, stored.id));
     throw new OrbitError(400, ErrorCodes.passkey_authentication_failure, "Unknown passkey");
   }
   let verified = false;
@@ -191,14 +191,14 @@ export async function finishPasskeyAuthentication(ctx: AppContext, input: {
   } catch {
     verified = false;
   }
-  ctx.db.update(s.verifications).set({ attempts: stored.attempts + 1, verifiedAt: verified ? Date.now() : null }).where(eq(s.verifications.id, stored.id)).run();
+  await ctx.db.update(s.verifications).set({ attempts: stored.attempts + 1, verifiedAt: verified ? Date.now() : null }).where(eq(s.verifications.id, stored.id));
   if (!verified) {
     throw new OrbitError(400, ErrorCodes.passkey_authentication_failure, "Passkey could not be verified");
   }
-  ctx.db.update(s.passkeys).set({ counter: newCounter, lastUsedAt: Date.now(), updatedAt: Date.now() }).where(eq(s.passkeys.id, passkey.id)).run();
-  const user = ctx.db.select().from(s.users).where(eq(s.users.id, passkey.userId)).get()!;
-  return { user, passkey: ctx.db.select().from(s.passkeys).where(eq(s.passkeys.id, passkey.id)).get()! };
+  await ctx.db.update(s.passkeys).set({ counter: newCounter, lastUsedAt: Date.now(), updatedAt: Date.now() }).where(eq(s.passkeys.id, passkey.id));
+  const user = first(await ctx.db.select().from(s.users).where(eq(s.users.id, passkey.userId)))!;
+  return { user, passkey: first(await ctx.db.select().from(s.passkeys).where(eq(s.passkeys.id, passkey.id)))! };
 }
 
-export const listPasskeys = (ctx: AppContext, userId: string) =>
-  ctx.db.select().from(s.passkeys).where(eq(s.passkeys.userId, userId)).all();
+export const listPasskeys = async (ctx: AppContext, userId: string) =>
+  (await ctx.db.select().from(s.passkeys).where(eq(s.passkeys.userId, userId)));

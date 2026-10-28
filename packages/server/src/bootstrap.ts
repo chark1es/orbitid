@@ -11,10 +11,10 @@ import { seedRbac } from "./services/orgs";
 /** Creates DB, runs migrations, loads/creates keys, seeds RBAC. Does not listen. */
 export async function createContext(overrides: Partial<Env> = {}): Promise<AppContext> {
   const env = loadEnv(overrides);
-  const { db, raw } = createDb(env.databasePath);
-  runMigrations(db);
+  const handle = await createDb(env.databaseUrl);
+  await runMigrations(handle);
   let secretKey = env.secretKey;
-  if (!secretKey && env.databasePath !== ":memory:") {
+  if (!secretKey && env.databaseUrl !== ":memory:") {
     mkdirSync(env.dataDir, { recursive: true });
     const f = resolve(env.dataDir, "keys.json");
     if (existsSync(f)) secretKey = JSON.parse(readFileSync(f, "utf8")).secretKey;
@@ -22,8 +22,12 @@ export async function createContext(overrides: Partial<Env> = {}): Promise<AppCo
   }
   if (!secretKey) secretKey = `sk_test_${randomToken(24)}`;
   const ctx: AppContext = {
-    db, raw, env: { ...env, secretKey }, settings: createSettingsStore(db),
+    db: handle.db,
+    database: { driver: handle.driver, dialect: handle.dialect, label: handle.label },
+    env: { ...env, secretKey },
+    settings: await createSettingsStore(handle.db),
     publishableKey: encodePublishableKey(env.baseUrl, env.nodeEnv === "production" ? "live" : "test"),
+    close: () => handle.close(),
   };
   await seedRbac(ctx);
   return ctx;

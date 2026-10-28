@@ -13,6 +13,7 @@ import { instanceStats } from "../../services/stats";
 import { rotateSigningKey } from "../../services/tokens";
 import type { AppContext, DeepPartial } from "../../context";
 import { listParams } from "./shared";
+import { first } from "../../lib/db";
 
 const MASK = "••••";
 const TESTING_TOKEN_TTL_MS = 3_600_000;
@@ -106,7 +107,7 @@ export default function routes(ctx: AppContext) {
       if (err instanceof ZodError) throw zodToOrbit(err);
       throw err;
     }
-    audit(ctx, { actor: "secret_key", action: "instance.updated", targetType: "instance", targetId: "default", metadata: { fields: Object.keys(patch) } });
+    await audit(ctx, { actor: "secret_key", action: "instance.updated", targetType: "instance", targetId: "default", metadata: { fields: Object.keys(patch) } });
     return c.json(instanceJson(ctx));
   });
 
@@ -121,57 +122,56 @@ export default function routes(ctx: AppContext) {
   app.post("/instance/signing_keys/rotate", async (c) => {
     // services/tokens.ts owns the signing keys; report the stored row so the shape stays stable.
     const { kid } = await rotateSigningKey(ctx);
-    const key = ctx.db.select().from(s.signingKeys).where(eq(s.signingKeys.kid, kid)).get();
-    audit(ctx, { actor: "secret_key", action: "instance.signing_key.rotated", targetType: "instance", targetId: "default", metadata: { kid } });
+    const key = first(await ctx.db.select().from(s.signingKeys).where(eq(s.signingKeys.kid, kid)));
+    await audit(ctx, { actor: "secret_key", action: "instance.signing_key.rotated", targetType: "instance", targetId: "default", metadata: { kid } });
     return c.json({ object: "signing_key", kid, algorithm: key?.alg ?? "RS256", active: key?.active ?? true });
   });
 
-  app.post("/testing_tokens", (c) => {
+  app.post("/testing_tokens", async (c) => {
     if (!ctx.settings.get().security.testingTokensEnabled) {
       throw new OrbitError(400, ErrorCodes.not_allowed_access, "Testing tokens are disabled on this instance.");
     }
     const token = `tt_${randomToken(32)}`;
     const now = Date.now();
     const expiresAt = now + TESTING_TOKEN_TTL_MS;
-    ctx.db
-      .insert(s.verifications)
-      .values({
-        id: newId(ID_PREFIX.verification),
-        purpose: "testing_token",
-        strategy: "testing_token",
-        identifier: "",
-        ownerId: "",
-        tokenHash: sha256(token),
-        expiresAt,
-        createdAt: now,
-      })
-      .run();
-    audit(ctx, { actor: "secret_key", action: "testing_token.created", targetType: "instance", targetId: "default" });
+    await ctx.db
+                  .insert(s.verifications)
+                  .values({
+                    id: newId(ID_PREFIX.verification),
+                    purpose: "testing_token",
+                    strategy: "testing_token",
+                    identifier: "",
+                    ownerId: "",
+                    tokenHash: sha256(token),
+                    expiresAt,
+                    createdAt: now,
+                  });
+    await audit(ctx, { actor: "secret_key", action: "testing_token.created", targetType: "instance", targetId: "default" });
     return c.json({ object: "testing_token", token, expires_at: expiresAt });
   });
 
-  app.get("/audit_logs", (c) => {
+  app.get("/audit_logs", async (c) => {
     const { limit, offset, order_by } = listParams(c);
     const numeric = (name: string) => {
       const raw = c.req.query(name);
       const value = raw === undefined ? undefined : Number(raw);
       return value === undefined || Number.isNaN(value) ? undefined : value;
     };
-    const result = listAuditLogs(ctx, {
-      limit,
-      offset,
-      orderBy: order_by,
-      actor: c.req.query("actor") || undefined,
-      action: c.req.query("action") || undefined,
-      targetType: c.req.query("target_type") || undefined,
-      targetId: c.req.query("target_id") || undefined,
-      after: numeric("after"),
-      before: numeric("before"),
-    });
+    const result = await listAuditLogs(ctx, {
+          limit,
+          offset,
+          orderBy: order_by,
+          actor: c.req.query("actor") || undefined,
+          action: c.req.query("action") || undefined,
+          targetType: c.req.query("target_type") || undefined,
+          targetId: c.req.query("target_id") || undefined,
+          after: numeric("after"),
+          before: numeric("before"),
+        });
     return c.json(result);
   });
 
-  app.get("/stats", (c: Context) => c.json(instanceStats(ctx)));
+  app.get("/stats", async (c: Context) => c.json(await instanceStats(ctx)));
 
   return app;
 }

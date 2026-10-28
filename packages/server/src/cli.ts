@@ -10,4 +10,4 @@ async function main() {
   console.log(`  Secret key      : ${ctx.env.secretKey}`);
   console.log(`  JWKS            : ${ctx.env.baseUrl}/.well-known/jwks.json\n`);
 }
-main().catch((e) => { console.error(e); process.exit(1); });
+await main().catch((e) => { console.error(e); process.exit(1); });

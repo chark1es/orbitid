@@ -1,5 +1,8 @@
 // Aggregate instance statistics for the dashboard overview (`GET /v1/stats`).
+import { and, asc, desc, eq, exists, gt, gte, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
+import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
 import type { AppContext } from "../context";
+import * as s from "../db/schema";
 
 export interface DailyCount { date: string; count: number }
 export interface InstanceStatsJSON {
@@ -24,36 +27,40 @@ function lastDays(n: number, now: number): string[] {
   return out;
 }
 
-/** Groups `table.column` rows by UTC day for the last 30 days. */
-function byDay(ctx: AppContext, table: "users" | "sessions", column: "created_at", now: number): DailyCount[] {
-  const rows = ctx.raw
-    .prepare(`SELECT date(${column} / 1000, 'unixepoch') AS day, count(*) AS count FROM ${table} WHERE ${column} >= ? GROUP BY day`)
-    .all(now - 30 * DAY_MS) as { day: string; count: number }[];
-  const counts = new Map(rows.map((r) => [r.day, Number(r.count)]));
+/** Counts rows per UTC day for the last 30 days, bucketed here so it works the same on every database. */
+async function byDay(ctx: AppContext, createdAt: { column: PgColumn }, from: PgTable, now: number): Promise<DailyCount[]> {
+  const rows = await ctx.db.select({ at: createdAt.column }).from(from).where(gte(createdAt.column, now - 30 * DAY_MS));
+  const counts = new Map<string, number>();
+  for (const { at } of rows) {
+    const day = new Date(Number(at)).toISOString().slice(0, 10);
+    counts.set(day, (counts.get(day) ?? 0) + 1);
+  }
   return lastDays(30, now).map((date) => ({ date, count: counts.get(date) ?? 0 }));
 }
 
-export function instanceStats(ctx: AppContext): InstanceStatsJSON {
+export async function instanceStats(ctx: AppContext): Promise<InstanceStatsJSON> {
   const now = Date.now();
-  const raw = ctx.raw;
-
-  const scalar = (query: string, ...params: unknown[]) => {
-    const row = raw.prepare(query).get(...params) as { n?: number } | undefined;
-    return Number(row?.n ?? 0);
+  const total = async (table: PgTable, where?: SQL) => {
+    const [row] = await ctx.db.select({ n: sql<number>`count(*)`.mapWith(Number) }).from(table).where(where);
+    return row?.n ?? 0;
   };
+  const providers = await ctx.db
+    .select({ provider: s.externalAccounts.provider, count: sql<number>`count(*)`.mapWith(Number) })
+    .from(s.externalAccounts)
+    .groupBy(s.externalAccounts.provider)
+    .orderBy(desc(sql`count(*)`), asc(s.externalAccounts.provider))
+    .limit(10);
 
   return {
-    users_total: scalar(`SELECT count(*) AS n FROM users`),
-    users_active_7d: scalar(`SELECT count(*) AS n FROM users WHERE last_active_at IS NOT NULL AND last_active_at >= ?`, now - 7 * DAY_MS),
-    sessions_active: scalar(`SELECT count(*) AS n FROM sessions WHERE status = 'active' AND expire_at > ?`, now),
-    organizations_total: scalar(`SELECT count(*) AS n FROM organizations`),
-    signups_by_day: byDay(ctx, "users", "created_at", now),
-    signins_by_day: byDay(ctx, "sessions", "created_at", now),
-    banned_users: scalar(`SELECT count(*) AS n FROM users WHERE banned = 1`),
-    locked_users: scalar(`SELECT count(*) AS n FROM users WHERE locked = 1 AND (lockout_expires_at IS NULL OR lockout_expires_at > ?)`, now),
-    mfa_enabled_users: scalar(`SELECT count(*) AS n FROM users WHERE totp_verified = 1 OR (backup_codes IS NOT NULL AND backup_codes != '[]')`),
-    top_social_providers: (raw
-      .prepare(`SELECT provider, count(*) AS count FROM external_accounts GROUP BY provider ORDER BY count DESC, provider ASC LIMIT 10`)
-      .all() as { provider: string; count: number }[]).map((r) => ({ provider: r.provider, count: Number(r.count) })),
+    users_total: await total(s.users),
+    users_active_7d: await total(s.users, and(isNotNull(s.users.lastActiveAt), gte(s.users.lastActiveAt, now - 7 * DAY_MS))),
+    sessions_active: await total(s.sessions, and(eq(s.sessions.status, "active"), gt(s.sessions.expireAt, now))),
+    organizations_total: await total(s.organizations),
+    signups_by_day: await byDay(ctx, { column: s.users.createdAt }, s.users, now),
+    signins_by_day: await byDay(ctx, { column: s.sessions.createdAt }, s.sessions, now),
+    banned_users: await total(s.users, eq(s.users.banned, true)),
+    locked_users: await total(s.users, and(eq(s.users.locked, true), or(isNull(s.users.lockoutExpiresAt), gt(s.users.lockoutExpiresAt, now)))),
+    mfa_enabled_users: await total(s.users, or(eq(s.users.totpVerified, true), exists(ctx.db.select({ one: sql`1` }).from(s.phoneNumbers).where(and(eq(s.phoneNumbers.userId, s.users.id), eq(s.phoneNumbers.reservedForSecondFactor, true), eq(s.phoneNumbers.verified, true)))))),
+    top_social_providers: providers,
   };
 }

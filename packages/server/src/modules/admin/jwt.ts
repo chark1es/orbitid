@@ -11,6 +11,7 @@ import * as s from "../../db/schema";
 import { audit } from "../../services/audit";
 import type { AppContext } from "../../context";
 import { bool, deleted, listParams, metadataSchema, page } from "./shared";
+import { first } from "../../lib/db";
 
 /** Claims owned by the session token machinery; templates must not be able to override them. */
 const RESERVED_CLAIMS = ["iss", "sub", "exp", "iat", "nbf", "jti", "azp", "sid", "act", "sts", "fva", "org_id", "org_slug", "org_role", "org_permissions"];
@@ -70,15 +71,15 @@ const updateSchema = createSchema.partial();
 export default function routes(ctx: AppContext) {
   const app = new Hono();
 
-  app.get("/jwt_templates", (c) => {
+  app.get("/jwt_templates", async (c) => {
     const { limit, offset } = listParams(c);
-    const rows = ctx.db.select().from(s.jwtTemplates).orderBy(s.jwtTemplates.createdAt).limit(limit).offset(offset).all();
-    const total = Number(ctx.db.select({ n: sql<number>`count(*)` }).from(s.jwtTemplates).get()?.n ?? 0);
+    const rows = (await ctx.db.select().from(s.jwtTemplates).orderBy(s.jwtTemplates.createdAt).limit(limit).offset(offset));
+    const total = Number(first(await ctx.db.select({ n: sql<number>`count(*)` }).from(s.jwtTemplates))?.n ?? 0);
     return c.json(page(rows.map((row) => serializeTemplate(ctx, row)), total));
   });
 
-  app.get("/jwt_templates/:id", (c) => {
-    const row = ctx.db.select().from(s.jwtTemplates).where(eq(s.jwtTemplates.id, c.req.param("id"))).get();
+  app.get("/jwt_templates/:id", async (c) => {
+    const row = first(await ctx.db.select().from(s.jwtTemplates).where(eq(s.jwtTemplates.id, c.req.param("id"))));
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "JWT template not found.");
     return c.json(serializeTemplate(ctx, row));
   });
@@ -86,37 +87,36 @@ export default function routes(ctx: AppContext) {
   app.post("/jwt_templates", async (c) => {
     const body = await parseBody(c, createSchema);
     assertAllowedClaims(body.claims);
-    if (ctx.db.select().from(s.jwtTemplates).where(eq(s.jwtTemplates.name, body.name)).get()) {
+    if (first(await ctx.db.select().from(s.jwtTemplates).where(eq(s.jwtTemplates.name, body.name)))) {
       throw new OrbitError(422, ErrorCodes.duplicate_record, "A JWT template with this name already exists.", { param_name: "name" });
     }
     const now = Date.now();
-    const row = ctx.db
-      .insert(s.jwtTemplates)
-      .values({
-        id: newId(ID_PREFIX.jwtTemplate),
-        name: body.name,
-        claims: body.claims,
-        lifetime: body.lifetime,
-        allowedClockSkew: body.allowed_clock_skew,
-        customSigningKey: body.custom_signing_key,
-        signingAlgorithm: body.signing_algorithm,
-        signingKeyEnc: body.custom_signing_key ? await generateSigningKey(ctx, body.signing_algorithm) : null,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning()
-      .get()!;
-    audit(ctx, { actor: "secret_key", action: "jwt_template.created", targetType: "jwt_template", targetId: row.id, metadata: { name: row.name } });
+    const row = first(await ctx.db
+          .insert(s.jwtTemplates)
+          .values({
+            id: newId(ID_PREFIX.jwtTemplate),
+            name: body.name,
+            claims: body.claims,
+            lifetime: body.lifetime,
+            allowedClockSkew: body.allowed_clock_skew,
+            customSigningKey: body.custom_signing_key,
+            signingAlgorithm: body.signing_algorithm,
+            signingKeyEnc: body.custom_signing_key ? await generateSigningKey(ctx, body.signing_algorithm) : null,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning())!;
+    await audit(ctx, { actor: "secret_key", action: "jwt_template.created", targetType: "jwt_template", targetId: row.id, metadata: { name: row.name } });
     return c.json(serializeTemplate(ctx, row));
   });
 
   app.patch("/jwt_templates/:id", async (c) => {
-    const existing = ctx.db.select().from(s.jwtTemplates).where(eq(s.jwtTemplates.id, c.req.param("id"))).get();
+    const existing = first(await ctx.db.select().from(s.jwtTemplates).where(eq(s.jwtTemplates.id, c.req.param("id"))));
     if (!existing) throw new OrbitError(404, ErrorCodes.resource_not_found, "JWT template not found.");
     const body = await parseBody(c, updateSchema);
     if (body.claims) assertAllowedClaims(body.claims);
     if (body.name && body.name !== existing.name) {
-      const taken = ctx.db.select().from(s.jwtTemplates).where(eq(s.jwtTemplates.name, body.name)).get();
+      const taken = first(await ctx.db.select().from(s.jwtTemplates).where(eq(s.jwtTemplates.name, body.name)));
       if (taken) throw new OrbitError(422, ErrorCodes.duplicate_record, "A JWT template with this name already exists.", { param_name: "name" });
     }
     const patch: Partial<typeof s.jwtTemplates.$inferInsert> = { updatedAt: Date.now() };
@@ -134,17 +134,17 @@ export default function routes(ctx: AppContext) {
     if (needsKey) patch.signingKeyEnc = await generateSigningKey(ctx, algorithm);
     if (!customKey) patch.signingKeyEnc = null;
 
-    ctx.db.update(s.jwtTemplates).set(patch).where(eq(s.jwtTemplates.id, existing.id)).run();
-    const updated = ctx.db.select().from(s.jwtTemplates).where(eq(s.jwtTemplates.id, existing.id)).get()!;
-    audit(ctx, { actor: "secret_key", action: "jwt_template.updated", targetType: "jwt_template", targetId: updated.id, metadata: { name: updated.name } });
+    await ctx.db.update(s.jwtTemplates).set(patch).where(eq(s.jwtTemplates.id, existing.id));
+    const updated = first(await ctx.db.select().from(s.jwtTemplates).where(eq(s.jwtTemplates.id, existing.id)))!;
+    await audit(ctx, { actor: "secret_key", action: "jwt_template.updated", targetType: "jwt_template", targetId: updated.id, metadata: { name: updated.name } });
     return c.json(serializeTemplate(ctx, updated));
   });
 
-  app.delete("/jwt_templates/:id", (c) => {
-    const existing = ctx.db.select().from(s.jwtTemplates).where(eq(s.jwtTemplates.id, c.req.param("id"))).get();
+  app.delete("/jwt_templates/:id", async (c) => {
+    const existing = first(await ctx.db.select().from(s.jwtTemplates).where(eq(s.jwtTemplates.id, c.req.param("id"))));
     if (!existing) throw new OrbitError(404, ErrorCodes.resource_not_found, "JWT template not found.");
-    ctx.db.delete(s.jwtTemplates).where(eq(s.jwtTemplates.id, existing.id)).run();
-    audit(ctx, { actor: "secret_key", action: "jwt_template.deleted", targetType: "jwt_template", targetId: existing.id, metadata: { name: existing.name } });
+    await ctx.db.delete(s.jwtTemplates).where(eq(s.jwtTemplates.id, existing.id));
+    await audit(ctx, { actor: "secret_key", action: "jwt_template.deleted", targetType: "jwt_template", targetId: existing.id, metadata: { name: existing.name } });
     return c.json(deleted("jwt_template", existing.id));
   });
 

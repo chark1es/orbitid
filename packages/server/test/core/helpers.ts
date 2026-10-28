@@ -5,7 +5,7 @@ import { clearMailOutbox, latestCodeFor, latestEmail, latestLinkFor } from "../.
 /** In-memory instance + a fetch-like client that persists the `__client` cookie. */
 export async function setup(overrides: Parameters<typeof createContext>[0] = {}) {
   const ctx = await createContext({
-    databasePath: ":memory:",
+    databaseUrl: ":memory:",
     secretKey: "sk_test_testsecret",
     baseUrl: "http://localhost:4000",
     nodeEnv: "test",

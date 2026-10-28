@@ -8,6 +8,7 @@ import * as s from "../../db/schema";
 import { publicUserData, serializeOrganization, verifiedVerification } from "../../serializers";
 import { pendingInvitationsForDomain, pendingSuggestionsForDomain } from "../../services/org-domains";
 import { serializePermission, serializeRole } from "../../services/rbac";
+import { first } from "../../lib/db";
 
 export { serializeRole, serializePermission };
 
@@ -22,8 +23,8 @@ export function effectiveInvitationStatus(row: InvitationRow): OrganizationInvit
   return row.status as OrganizationInvitationJSON["status"];
 }
 
-export function serializeOrganizationInvitation(ctx: AppContext, row: InvitationRow, opts: { backend?: boolean; url?: string | null } = {}): OrganizationInvitationJSON {
-  const role = ctx.db.select().from(s.roles).where(eq(s.roles.key, row.roleKey)).get();
+export async function serializeOrganizationInvitation(ctx: AppContext, row: InvitationRow, opts: { backend?: boolean; url?: string | null } = {}): Promise<OrganizationInvitationJSON> {
+  const role = first(await ctx.db.select().from(s.roles).where(eq(s.roles.key, row.roleKey)));
   const json: OrganizationInvitationJSON = {
     object: "organization_invitation",
     id: row.id,
@@ -41,42 +42,41 @@ export function serializeOrganizationInvitation(ctx: AppContext, row: Invitation
   return json;
 }
 
-function domainVerification(ctx: AppContext, domain: DomainRow): VerificationJSON {
+async function domainVerification(ctx: AppContext, domain: DomainRow): Promise<VerificationJSON> {
   if (domain.verified) return verifiedVerification("email_code", domain.updatedAt);
-  const v = ctx.db
-    .select()
-    .from(s.verifications)
-    .where(and(eq(s.verifications.ownerId, domain.id), eq(s.verifications.purpose, "org_domain")))
-    .orderBy(desc(s.verifications.createdAt))
-    .get();
+  const v = first(await ctx.db
+      .select()
+      .from(s.verifications)
+      .where(and(eq(s.verifications.ownerId, domain.id), eq(s.verifications.purpose, "org_domain")))
+      .orderBy(desc(s.verifications.createdAt)));
   if (!v || (v.consumedAt && !v.verifiedAt)) return { status: "unverified", strategy: "email_code", attempts: 0, expire_at: null };
   return { status: "unverified", strategy: "email_code", attempts: v.attempts, expire_at: v.expiresAt };
 }
 
-export function serializeOrganizationDomain(ctx: AppContext, row: DomainRow): OrganizationDomainJSON {
+export async function serializeOrganizationDomain(ctx: AppContext, row: DomainRow): Promise<OrganizationDomainJSON> {
   return {
     object: "organization_domain",
     id: row.id,
     organization_id: row.organizationId,
     name: row.name,
     enrollment_mode: row.enrollmentMode as OrganizationDomainJSON["enrollment_mode"],
-    verification: domainVerification(ctx, row),
+    verification: await domainVerification(ctx, row),
     affiliation_email_address: row.affiliationEmailAddress,
-    total_pending_invitations: pendingInvitationsForDomain(ctx, row.organizationId, row.name),
-    total_pending_suggestions: pendingSuggestionsForDomain(ctx, row.organizationId, row.name),
+    total_pending_invitations: await pendingInvitationsForDomain(ctx, row.organizationId, row.name),
+    total_pending_suggestions: await pendingSuggestionsForDomain(ctx, row.organizationId, row.name),
     created_at: row.createdAt,
     updated_at: row.updatedAt,
   };
 }
 
-export function serializeMembershipRequest(ctx: AppContext, row: RequestRow): OrganizationMembershipRequestJSON {
-  const user = ctx.db.select().from(s.users).where(eq(s.users.id, row.userId)).get();
+export async function serializeMembershipRequest(ctx: AppContext, row: RequestRow): Promise<OrganizationMembershipRequestJSON> {
+  const user = first(await ctx.db.select().from(s.users).where(eq(s.users.id, row.userId)));
   return {
     object: "organization_membership_request",
     id: row.id,
     organization_id: row.organizationId,
     status: row.status as OrganizationMembershipRequestJSON["status"],
-    public_user_data: user ? publicUserData(ctx, user) : { user_id: row.userId, first_name: null, last_name: null, image_url: "", has_image: false, identifier: "" },
+    public_user_data: user ? await publicUserData(ctx, user) : { user_id: row.userId, first_name: null, last_name: null, image_url: "", has_image: false, identifier: "" },
     created_at: row.createdAt,
     updated_at: row.updatedAt,
   };
@@ -88,13 +88,13 @@ const SUGGESTION_PREFIX = "orgsug_";
 export const suggestionId = (orgId: string): string => `${SUGGESTION_PREFIX}${orgId}`;
 export const orgIdFromSuggestionId = (id: string): string | null => (id.startsWith(SUGGESTION_PREFIX) ? id.slice(SUGGESTION_PREFIX.length) : null);
 
-export function serializeSuggestion(
+export async function serializeSuggestion(
   ctx: AppContext,
   organization: OrganizationRow,
   domain: DomainRow,
   status: OrganizationSuggestionJSON["status"] = "pending",
-): OrganizationSuggestionJSON {
-  const org = serializeOrganization(ctx, organization, { counts: false });
+): Promise<OrganizationSuggestionJSON> {
+  const org = await serializeOrganization(ctx, organization, { counts: false });
   return {
     object: "organization_suggestion",
     id: suggestionId(organization.id),

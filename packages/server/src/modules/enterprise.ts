@@ -22,13 +22,14 @@ import { connectionBodySchema, connectionPatchSchema, createConnection, updateCo
 import {
   assertAllowedRedirectUrl, createEnterpriseState, peekEnterpriseState, takeEnterpriseState, type EnterpriseFlow,
 } from "./machine/enterprise-flow";
+import { first } from "../lib/db";
 
 type ConnectionRow = typeof s.enterpriseConnections.$inferSelect;
 
 const providerFor = (protocol: string, id: string) => `enterprise_${protocol}_${id}`;
 
-function requireConnection(ctx: AppContext, id: string): ConnectionRow {
-  const row = ctx.db.select().from(s.enterpriseConnections).where(eq(s.enterpriseConnections.id, id)).get();
+async function requireConnection(ctx: AppContext, id: string): Promise<ConnectionRow> {
+  const row = first(await ctx.db.select().from(s.enterpriseConnections).where(eq(s.enterpriseConnections.id, id)));
   if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Enterprise connection not found");
   return row;
 }
@@ -36,11 +37,11 @@ function requireConnection(ctx: AppContext, id: string): ConnectionRow {
 const oidcCallbackUrl = (ctx: AppContext, id: string) => `${ctx.env.baseUrl}/v1/client/enterprise/oidc_callback/${id}`;
 
 /** Builds the flow record shared by SP-initiated SAML and enterprise OIDC logins. */
-function flowFromQuery(ctx: AppContext, c: Context, connection: ConnectionRow): EnterpriseFlow {
+async function flowFromQuery(ctx: AppContext, c: Context, connection: ConnectionRow): Promise<EnterpriseFlow> {
   const q = c.req.query();
   // The client is the browser's own; a `client_id` in a link must never choose whose session gets created.
   const token = getCookie(c, COOKIES.client);
-  const client = token ? ctx.db.select().from(s.clients).where(eq(s.clients.tokenHash, sha256(token))).get() : undefined;
+  const client = token ? first(await ctx.db.select().from(s.clients).where(eq(s.clients.tokenHash, sha256(token)))) : undefined;
   if (!client || (q.client_id && q.client_id !== client.id)) {
     throw new OrbitError(422, ErrorCodes.client_state_invalid, "This browser has no sign-in in progress", { param_name: "client_id" });
   }
@@ -66,10 +67,10 @@ function backendRoutes(ctx: AppContext): Hono {
 
   app.post("/enterprise_connections", async (c) => {
     const body = await parseBody(c, connectionBodySchema);
-    return c.json(serializeConnection(ctx, createConnection(ctx, body)), 201);
+    return c.json(serializeConnection(ctx, await createConnection(ctx, body)), 201);
   });
 
-  app.get("/enterprise_connections", (c) => {
+  app.get("/enterprise_connections", async (c) => {
     const page = parsePagination(c);
     const protocol = c.req.query("protocol");
     const active = c.req.query("active");
@@ -77,23 +78,23 @@ function backendRoutes(ctx: AppContext): Hono {
     if (protocol) filters.push(eq(s.enterpriseConnections.protocol, protocol));
     if (active === "true" || active === "false") filters.push(eq(s.enterpriseConnections.active, active === "true"));
     const where = filters.length ? and(...filters) : undefined;
-    const data = ctx.db.select().from(s.enterpriseConnections).where(where)
-      .orderBy(desc(s.enterpriseConnections.createdAt)).limit(page.limit).offset(page.offset).all();
-    const totalCount = ctx.db.select({ n: sql<number>`count(*)` }).from(s.enterpriseConnections).where(where).get()?.n ?? 0;
+    const data = (await ctx.db.select().from(s.enterpriseConnections).where(where)
+          .orderBy(desc(s.enterpriseConnections.createdAt)).limit(page.limit).offset(page.offset));
+    const totalCount = first(await ctx.db.select({ n: sql<number>`count(*)` }).from(s.enterpriseConnections).where(where))?.n ?? 0;
     return c.json({ data: data.map((row) => serializeConnection(ctx, row)), total_count: totalCount });
   });
 
-  app.get("/enterprise_connections/:id", (c) => c.json(serializeConnection(ctx, requireConnection(ctx, c.req.param("id")))));
+  app.get("/enterprise_connections/:id", async (c) => c.json(serializeConnection(ctx, await requireConnection(ctx, c.req.param("id")))));
 
   app.patch("/enterprise_connections/:id", async (c) => {
-    const row = requireConnection(ctx, c.req.param("id"));
+    const row = await requireConnection(ctx, c.req.param("id"));
     const body = await parseBody(c, connectionPatchSchema);
-    return c.json(serializeConnection(ctx, updateConnection(ctx, row, body)));
+    return c.json(serializeConnection(ctx, await updateConnection(ctx, row, body)));
   });
 
-  app.delete("/enterprise_connections/:id", (c) => {
-    const row = requireConnection(ctx, c.req.param("id"));
-    ctx.db.delete(s.enterpriseConnections).where(eq(s.enterpriseConnections.id, row.id)).run();
+  app.delete("/enterprise_connections/:id", async (c) => {
+    const row = await requireConnection(ctx, c.req.param("id"));
+    await ctx.db.delete(s.enterpriseConnections).where(eq(s.enterpriseConnections.id, row.id));
     return c.json({ object: "enterprise_connection", id: row.id, deleted: true });
   });
 
@@ -108,24 +109,24 @@ function frontendRoutes(ctx: AppContext): Hono {
     const q = c.req.query();
     let connection: ConnectionRow | null = null;
     if (q.connection_id) {
-      connection = findActiveConnection(ctx, q.connection_id);
+      connection = await findActiveConnection(ctx, q.connection_id);
       if (!connection) throw new OrbitError(404, ErrorCodes.resource_not_found, "Enterprise connection not found");
     } else {
-      connection = findConnectionForIdentifier(ctx, q.identifier ?? q.domain ?? q.email_address ?? "");
+      connection = await findConnectionForIdentifier(ctx, q.identifier ?? q.domain ?? q.email_address ?? "");
       if (!connection) throw new OrbitError(404, ErrorCodes.resource_not_found, "No enterprise connection matches this identifier");
     }
 
-    const flow = flowFromQuery(ctx, c, connection);
+    const flow = await flowFromQuery(ctx, c, connection);
     const provider = providerFor(connection.protocol, connection.id);
 
     if (connection.protocol === "saml") {
-      const state = createEnterpriseState(ctx, { provider, flow });
+      const state = await createEnterpriseState(ctx, { provider, flow });
       return c.redirect(await samlAuthorizeUrl(ctx, connection, state));
     }
     const discovery = await getOidcDiscovery(ctx, connection);
     const nonce = randomToken(16);
     const codeVerifier = randomToken(32);
-    const state = createEnterpriseState(ctx, { provider, flow, codeVerifier, nonce });
+    const state = await createEnterpriseState(ctx, { provider, flow, codeVerifier, nonce });
     return c.redirect(enterpriseOidcAuthorizeUrl(connection, discovery, {
       redirectUri: oidcCallbackUrl(ctx, connection.id),
       state,
@@ -136,14 +137,14 @@ function frontendRoutes(ctx: AppContext): Hono {
 
   /** Enterprise OIDC: code exchange against the IdP, id_token verification, then the shared identity flow. */
   app.get("/enterprise/oidc_callback/:id", async (c) => {
-    const connection = requireConnection(ctx, c.req.param("id"));
+    const connection = await requireConnection(ctx, c.req.param("id"));
     if (connection.protocol !== "oidc") throw new OrbitError(404, ErrorCodes.resource_not_found, "Enterprise OIDC connection not found");
     if (!connection.active) throw new OrbitError(403, ErrorCodes.not_allowed_access, "Enterprise connection is inactive");
     const q = c.req.query();
     if (q.error) throw new OrbitError(400, ErrorCodes.oauth_callback_error, `The identity provider returned an error: ${q.error_description ?? q.error}`);
     if (!q.code || !q.state) throw new OrbitError(400, ErrorCodes.form_param_missing, "code and state are required");
 
-    const state = takeEnterpriseState(ctx, q.state, providerFor("oidc", connection.id));
+    const state = await takeEnterpriseState(ctx, q.state, providerFor("oidc", connection.id));
     if (!state) throw new OrbitError(400, ErrorCodes.verification_failed, "Enterprise SSO state is invalid or expired");
     if (!browserMatches(c, state.flow.browserHash)) throw new OrbitError(400, ErrorCodes.verification_failed, browserMismatchMessage(ctx, c));
 
@@ -175,31 +176,31 @@ function frontendRoutes(ctx: AppContext): Hono {
 function samlRoutes(ctx: AppContext): Hono {
   const app = new Hono();
 
-  app.get("/:id/metadata", (c) => {
-    const connection = requireConnection(ctx, c.req.param("id"));
+  app.get("/:id/metadata", async (c) => {
+    const connection = await requireConnection(ctx, c.req.param("id"));
     if (connection.protocol !== "saml") throw new OrbitError(404, ErrorCodes.resource_not_found, "SAML connection not found");
     return c.body(serviceProviderMetadata(ctx, connection), 200, { "content-type": "application/xml; charset=utf-8" });
   });
 
   /** SP-initiated login: `?flow=<relay state>` resumes an existing flow, otherwise the query is the flow. */
   app.get("/:id/sso", async (c) => {
-    const connection = requireConnection(ctx, c.req.param("id"));
+    const connection = await requireConnection(ctx, c.req.param("id"));
     if (connection.protocol !== "saml") throw new OrbitError(404, ErrorCodes.resource_not_found, "SAML connection not found");
     if (!connection.active) throw new OrbitError(403, ErrorCodes.not_allowed_access, "Enterprise connection is inactive");
     const provider = providerFor("saml", connection.id);
     const state = c.req.query("flow");
     if (state) {
       // Peek (not consume): the ACS consumes the state when the assertion comes back.
-      if (!peekEnterpriseState(ctx, state, provider)) throw new OrbitError(400, ErrorCodes.verification_failed, "Enterprise SSO state is invalid or expired");
+      if (!await peekEnterpriseState(ctx, state, provider)) throw new OrbitError(400, ErrorCodes.verification_failed, "Enterprise SSO state is invalid or expired");
       return c.redirect(await samlAuthorizeUrl(ctx, connection, state));
     }
-    const flow = flowFromQuery(ctx, c, connection);
-    return c.redirect(await samlAuthorizeUrl(ctx, connection, createEnterpriseState(ctx, { provider, flow })));
+    const flow = await flowFromQuery(ctx, c, connection);
+    return c.redirect(await samlAuthorizeUrl(ctx, connection, await createEnterpriseState(ctx, { provider, flow })));
   });
 
   /** Assertion Consumer Service: validates the signed assertion, then runs the shared identity flow. */
   app.post("/:id/acs", async (c) => {
-    const connection = requireConnection(ctx, c.req.param("id"));
+    const connection = await requireConnection(ctx, c.req.param("id"));
     if (connection.protocol !== "saml") throw new OrbitError(404, ErrorCodes.resource_not_found, "SAML connection not found");
     if (!connection.active) throw new OrbitError(403, ErrorCodes.not_allowed_access, "Enterprise connection is inactive");
 
@@ -210,12 +211,12 @@ function samlRoutes(ctx: AppContext): Hono {
 
     let flow: EnterpriseFlow | null = null;
     if (relayState) {
-      const state = takeEnterpriseState(ctx, relayState, providerFor("saml", connection.id));
+      const state = await takeEnterpriseState(ctx, relayState, providerFor("saml", connection.id));
       if (!state) throw new OrbitError(400, ErrorCodes.verification_failed, "Enterprise SSO state is invalid or expired");
       if (!browserMatches(c, state.flow.browserHash)) throw new OrbitError(400, ErrorCodes.verification_failed, browserMismatchMessage(ctx, c));
       flow = state.flow;
     } else if (connection.allowIdpInitiated) {
-      const { client, token } = createClient(ctx, { ip: clientIp(c), userAgent: c.req.header("user-agent") });
+      const { client, token } = await createClient(ctx, { ip: clientIp(c), userAgent: c.req.header("user-agent") });
       setClientCookie(c, ctx, token);
       flow = {
         kind: "sign_in",

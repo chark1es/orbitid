@@ -6,6 +6,7 @@ import { ErrorCodes, OrbitError } from "@orbitid/shared";
 import { validate } from "../../lib/http";
 import * as s from "../../db/schema";
 import type { AppContext } from "../../context";
+import { first } from "../../lib/db";
 
 /** Accepts JSON booleans plus urlencoded `"true"`/`"false"`/`"1"`/`"0"`. */
 export const bool = z.preprocess((value) => {
@@ -44,8 +45,8 @@ export function parseOrderBy(raw: string | undefined, columns: Record<string, An
 
 export const normalizeEmail = (value: string) => value.trim().toLowerCase();
 
-export function getUserOrThrow(ctx: AppContext, id: string): typeof s.users.$inferSelect {
-  const user = ctx.db.select().from(s.users).where(eq(s.users.id, id)).get();
+export async function getUserOrThrow(ctx: AppContext, id: string): Promise<typeof s.users.$inferSelect> {
+  const user = first(await ctx.db.select().from(s.users).where(eq(s.users.id, id)));
   if (!user) throw new OrbitError(404, ErrorCodes.resource_not_found, "User not found.", { param_name: "user_id" });
   return user;
 }

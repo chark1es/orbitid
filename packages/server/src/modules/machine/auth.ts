@@ -12,6 +12,7 @@ import { clients, sessions } from "../../db/schema";
 import { randomToken, sha256 } from "../../lib/crypto";
 import { newId } from "../../lib/ids";
 import { verifySessionToken } from "../../services/tokens";
+import { first } from "../../lib/db";
 
 type ClientRow = typeof clients.$inferSelect;
 type SessionRow = typeof sessions.$inferSelect;
@@ -28,22 +29,21 @@ const isLiveSession = (row: SessionRow | undefined | null): row is SessionRow =>
   !!row && row.status === "active" && row.expireAt > Date.now();
 
 /** Client's newest active session, preferring the one the client marked as active. */
-function activeSessionForClient(ctx: AppContext, client: ClientRow): SessionRow | null {
+async function activeSessionForClient(ctx: AppContext, client: ClientRow): Promise<SessionRow | null> {
   if (client.lastActiveSessionId) {
-    const preferred = ctx.db.select().from(sessions).where(eq(sessions.id, client.lastActiveSessionId)).get();
+    const preferred = first(await ctx.db.select().from(sessions).where(eq(sessions.id, client.lastActiveSessionId)));
     if (isLiveSession(preferred)) return preferred;
   }
-  const row = ctx.db.select().from(sessions)
-    .where(eq(sessions.clientId, client.id))
-    .orderBy(desc(sessions.lastActiveAt))
-    .limit(10)
-    .all()
+  const row = (await ctx.db.select().from(sessions)
+      .where(eq(sessions.clientId, client.id))
+      .orderBy(desc(sessions.lastActiveAt))
+      .limit(10))
     .find(isLiveSession);
   return row ?? null;
 }
 
-function callerFromClient(ctx: AppContext, client: ClientRow): MachineCaller {
-  const session = activeSessionForClient(ctx, client);
+async function callerFromClient(ctx: AppContext, client: ClientRow): Promise<MachineCaller> {
+  const session = await activeSessionForClient(ctx, client);
   return { clientId: client.id, client, sessionId: session?.id ?? null, session, userId: session?.userId ?? null };
 }
 
@@ -56,15 +56,15 @@ export async function resolveCaller(ctx: AppContext, c: Context): Promise<Machin
   const bearer = (c.req.header("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
 
   if (cookie) {
-    const client = ctx.db.select().from(clients).where(eq(clients.tokenHash, sha256(cookie))).get();
+    const client = first(await ctx.db.select().from(clients).where(eq(clients.tokenHash, sha256(cookie))));
     if (client) return callerFromClient(ctx, client);
   }
   if (bearer && !bearer.startsWith("sk_")) {
     try {
       const claims = await verifySessionToken(ctx, bearer);
-      const session = ctx.db.select().from(sessions).where(eq(sessions.id, claims.sid)).get();
+      const session = first(await ctx.db.select().from(sessions).where(eq(sessions.id, claims.sid)));
       if (isLiveSession(session) && session.userId === claims.sub) {
-        const client = ctx.db.select().from(clients).where(eq(clients.id, session.clientId)).get();
+        const client = first(await ctx.db.select().from(clients).where(eq(clients.id, session.clientId)));
         if (client) return { clientId: client.id, client, sessionId: session.id, session, userId: session.userId };
       }
     } catch {
@@ -91,7 +91,7 @@ export async function requireUserCaller(ctx: AppContext, c: Context): Promise<Ma
 }
 
 /** Creates a client row + its opaque cookie token (used for IdP-initiated SSO where no browser client exists yet). */
-export function createClient(ctx: AppContext, info: { ip?: string; userAgent?: string } = {}): { client: ClientRow; token: string } {
+export async function createClient(ctx: AppContext, info: { ip?: string; userAgent?: string } = {}): Promise<{ client: ClientRow; token: string }> {
   const token = randomToken(32);
   const client: ClientRow = {
     id: newId(ID_PREFIX.client),
@@ -102,6 +102,6 @@ export function createClient(ctx: AppContext, info: { ip?: string; userAgent?: s
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
-  ctx.db.insert(clients).values(client).run();
+  await ctx.db.insert(clients).values(client);
   return { client, token };
 }

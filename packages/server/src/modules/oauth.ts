@@ -10,6 +10,7 @@ import { regenerateClientToken } from "./auth/client-auth";
 import { browserMatches, browserMismatchMessage } from "./auth/browser-binding";
 import { takeOAuthState, type StoredOAuthFlow } from "./auth/oauth-flow";
 import { withQuery } from "./auth/redirects";
+import { first } from "../lib/db";
 
 async function readCallback(c: Context): Promise<{ state: string; code?: string; error?: string; userJson?: string }> {
   if (c.req.method === "POST") {
@@ -59,7 +60,7 @@ export default function routes(ctx: AppContext) {
     const params = await readCallback(c);
     let flow: StoredOAuthFlow | null = null;
     try {
-      flow = takeOAuthState(ctx, params.state, provider);
+      flow = await takeOAuthState(ctx, params.state, provider);
     } catch (err) {
       const message = err instanceof OrbitError ? err.message : "The OAuth state is invalid or has expired";
       const home = ctx.settings.get().application.homeUrl;
@@ -97,11 +98,11 @@ export default function routes(ctx: AppContext) {
     }
 
     // The browser is proven to be the initiator, so it takes over the flow's client (form_post callbacks do not carry the Lax client cookie).
-    const client = ctx.db.select().from(s.clients).where(eq(s.clients.id, flow.clientId)).get();
+    const client = first(await ctx.db.select().from(s.clients).where(eq(s.clients.id, flow.clientId)));
     if (!client) {
       return c.redirect(withQuery(target, { __orbit_error: ErrorCodes.client_state_invalid }), 302);
     }
-    regenerateClientToken(ctx, c, flow.clientId);
+    await regenerateClientToken(ctx, c, flow.clientId);
 
     const result = await handleExternalIdentity(ctx, {
       clientId: flow.clientId,

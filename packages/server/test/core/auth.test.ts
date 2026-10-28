@@ -5,6 +5,7 @@ import { setCaptchaVerifierForTests } from "../../src/services/captcha";
 import { sha256 } from "../../src/lib/crypto";
 import * as schema from "../../src/db/schema";
 import { errorsOf, getClient, lastLink, setup, signInWithPassword, signUpUser, testClient } from "./helpers";
+import { first } from "../../src/lib/db";
 
 describe("sign-up", () => {
   it("creates an account from email + password, verifies the email code and returns a session", async () => {
@@ -39,10 +40,10 @@ describe("sign-up", () => {
     expect(state.response.sessions[0]!.user!.id).toBe(completed.response.created_user_id);
     expect(state.response.sign_up).toBeNull();
 
-    const events = ctx.db.select().from(schema.webhookEvents).all().filter((e) => e.type === "user.created");
+    const events = (await ctx.db.select().from(schema.webhookEvents)).filter((e) => e.type === "user.created");
     expect(events.length).toBeGreaterThan(0);
 
-    const user = ctx.db.select().from(schema.users).where(eq(schema.users.id, completed.response.created_user_id)).get();
+    const user = first(await ctx.db.select().from(schema.users).where(eq(schema.users.id, completed.response.created_user_id)));
     expect(user?.passwordHash).not.toBe("Sup3rSecret!");
     expect(user?.passwordHash).toMatch(/^\$argon2id\$/);
   });
@@ -115,9 +116,9 @@ describe("sign-up", () => {
     const { app, ctx } = await setup();
     await ctx.settings.update({ restrictions: { allowlistEnabled: true } });
     const now = Date.now();
-    ctx.db.insert(schema.allowlistIdentifiers).values({
-      id: "alid_test", identifier: "allowed@example.com", identifierType: "email_address", createdAt: now, updatedAt: now,
-    }).run();
+    await ctx.db.insert(schema.allowlistIdentifiers).values({
+                  id: "alid_test", identifier: "allowed@example.com", identifierType: "email_address", createdAt: now, updatedAt: now,
+                });
     const blocked = await testClient(app).json("/v1/client/sign_ups", { body: { email_address: "blocked@example.com", password: "Sup3rSecret!" } });
     expect(errorsOf(blocked)[0]?.code).toBe("sign_up_restricted");
     const allowed = await testClient(app).json<{ response: { status: string } }>("/v1/client/sign_ups", {
@@ -130,9 +131,9 @@ describe("sign-up", () => {
     const { app, ctx } = await setup();
     const ticket = "invite-ticket-123";
     const now = Date.now();
-    ctx.db.insert(schema.invitations).values({
-      id: "inv_test", email: "invitee@example.com", status: "pending", tokenHash: sha256(ticket), createdAt: now, updatedAt: now,
-    }).run();
+    await ctx.db.insert(schema.invitations).values({
+                  id: "inv_test", email: "invitee@example.com", status: "pending", tokenHash: sha256(ticket), createdAt: now, updatedAt: now,
+                });
     await ctx.settings.update({ signUp: { mode: "restricted" } });
 
     const client = testClient(app);
@@ -153,7 +154,7 @@ describe("sign-up", () => {
       body: { strategy: "email_code", code },
     });
     expect(completed.response.status).toBe("complete");
-    const invitation = ctx.db.select().from(schema.invitations).where(eq(schema.invitations.id, "inv_test")).get()!;
+    const invitation = first(await ctx.db.select().from(schema.invitations).where(eq(schema.invitations.id, "inv_test")))!;
     expect(invitation.status).toBe("accepted");
   });
 
@@ -175,7 +176,7 @@ describe("sign-up", () => {
       body: { strategy: "email_code", code: latestCodeFor("legal@example.com") },
     });
     expect(completed.response.status).toBe("complete");
-    const user = ctx.db.select().from(schema.users).where(eq(schema.users.id, completed.response.created_user_id)).get()!;
+    const user = first(await ctx.db.select().from(schema.users).where(eq(schema.users.id, completed.response.created_user_id)))!;
     expect(user.legalAcceptedAt).toBeGreaterThan(0);
   });
 
@@ -208,7 +209,7 @@ describe("sign-in", () => {
     });
     expect(byUsername.response.status).toBe("complete");
 
-    ctx.db.update(schema.users).set({ banned: true }).where(eq(schema.users.id, user.userId)).run();
+    await ctx.db.update(schema.users).set({ banned: true }).where(eq(schema.users.id, user.userId));
     const banned = await testClient(app).json("/v1/client/sign_ins", { body: { identifier: user.email, password: user.password } });
     expect(errorsOf(banned)[0]?.code).toBe("user_banned");
   });
@@ -364,10 +365,10 @@ describe("sign-in", () => {
   it("routes enterprise SSO domains to /v1/client/enterprise/start", async () => {
     const { app, ctx } = await setup();
     const now = Date.now();
-    ctx.db.insert(schema.enterpriseConnections).values({
-      id: "ent_test", name: "Acme Okta", protocol: "saml", provider: "okta", domains: ["corp.example"], active: true,
-      config: {}, createdAt: now, updatedAt: now,
-    }).run();
+    await ctx.db.insert(schema.enterpriseConnections).values({
+                  id: "ent_test", name: "Acme Okta", protocol: "saml", provider: "okta", domains: ["corp.example"], active: true,
+                  config: {}, createdAt: now, updatedAt: now,
+                });
     const client = testClient(app);
     const handoff = await client.json<{ response: { status: string; first_factor_verification: { strategy: string; external_verification_redirect_url: string } } }>("/v1/client/sign_ins", {
       body: { identifier: "someone@corp.example", strategy: "enterprise_sso" },

@@ -93,7 +93,7 @@ export default function routes(ctx: AppContext) {
   // ─────────── authorize ───────────
   app.get("/oauth/authorize", handle(async (c) => {
     const q = c.req.query();
-    const appRow = getApplicationByClientId(ctx, q.client_id ?? "");
+    const appRow = await getApplicationByClientId(ctx, q.client_id ?? "");
     if (!appRow) return c.json({ error: "invalid_request", error_description: "Unknown client_id" }, 400);
 
     let redirectUri: string;
@@ -129,19 +129,19 @@ export default function routes(ctx: AppContext) {
     }
 
     const prompt = q.prompt ?? "";
-    const needsConsent = appRow.consentScreenEnabled && (prompt === "consent" || !hasConsent(ctx, appRow.id, caller.userId, scopes));
+    const needsConsent = appRow.consentScreenEnabled && (prompt === "consent" || !await hasConsent(ctx, appRow.id, caller.userId, scopes));
     if (needsConsent && prompt === "none") return fail("consent_required", "The user has not consented to this request");
     if (needsConsent) return c.redirect(consentUrl(ctx, appRow.name, appRow.clientId, scopes.join(" "), currentUrl(c)));
 
-    const code = issueAuthorizationCode(ctx, {
-      application: appRow,
-      userId: caller.userId,
-      scopes,
-      redirectUri,
-      codeChallenge,
-      codeChallengeMethod,
-      nonce: q.nonce ?? null,
-    });
+    const code = await issueAuthorizationCode(ctx, {
+          application: appRow,
+          userId: caller.userId,
+          scopes,
+          redirectUri,
+          codeChallenge,
+          codeChallengeMethod,
+          nonce: q.nonce ?? null,
+        });
     return c.redirect(urlWith(redirectUri, { code, state }));
   }));
 
@@ -150,11 +150,11 @@ export default function routes(ctx: AppContext) {
     const caller = await resolveCaller(ctx, c);
     if (!caller?.userId) throw new OrbitError(401, ErrorCodes.authentication_invalid, "Authentication invalid. Please sign in again.");
     const clientId = c.req.query("client_id") ?? "";
-    const appRow = getApplicationByClientId(ctx, clientId);
+    const appRow = await getApplicationByClientId(ctx, clientId);
     if (!appRow) throw new OrbitError(404, ErrorCodes.resource_not_found, "OAuth application not found");
     const requested = parseScopes(c.req.query("scope") || "openid");
     const scopes = requested.map((scope) => ({ scope, description: SCOPE_DESCRIPTIONS[scope] ?? `Access to ${scope}` }));
-    const previouslyApproved = storedConsent(ctx, appRow.id, caller.userId);
+    const previouslyApproved = await storedConsent(ctx, appRow.id, caller.userId);
     return c.json({
       client: { id: appRow.id, client_id: appRow.clientId, name: appRow.name, logo_url: null, public: appRow.isPublic },
       scopes,
@@ -181,7 +181,7 @@ export default function routes(ctx: AppContext) {
     const caller = await resolveCaller(ctx, c);
     if (!caller?.userId) throw new OrbitError(401, ErrorCodes.authentication_invalid, "Authentication invalid. Please sign in again.");
     const body = await parseBody(c, consentBodySchema);
-    const appRow = getApplicationByClientId(ctx, body.client_id);
+    const appRow = await getApplicationByClientId(ctx, body.client_id);
     if (!appRow) throw new OrbitError(404, ErrorCodes.resource_not_found, "OAuth application not found");
     const redirectUri = assertRedirectUri(appRow, body.redirect_uri);
 
@@ -197,27 +197,27 @@ export default function routes(ctx: AppContext) {
     if (!body.approve) {
       return c.json({ redirect_url: urlWith(redirectUri, { error: "access_denied", error_description: "The user denied the request", state }) });
     }
-    recordConsent(ctx, appRow.id, caller.userId, scopes);
-    const code = issueAuthorizationCode(ctx, {
-      application: appRow,
-      userId: caller.userId,
-      scopes,
-      redirectUri,
-      codeChallenge: body.code_challenge ?? null,
-      codeChallengeMethod: body.code_challenge_method ?? null,
-      nonce: body.nonce ?? null,
-    });
+    await recordConsent(ctx, appRow.id, caller.userId, scopes);
+    const code = await issueAuthorizationCode(ctx, {
+          application: appRow,
+          userId: caller.userId,
+          scopes,
+          redirectUri,
+          codeChallenge: body.code_challenge ?? null,
+          codeChallengeMethod: body.code_challenge_method ?? null,
+          nonce: body.nonce ?? null,
+        });
     return c.json({ redirect_url: urlWith(redirectUri, { code, state }) });
   }));
 
   // ─────────── token ───────────
   app.post("/oauth/token", handle(async (c) => {
     const body = await parseBody(c, tokenRequestSchema);
-    const appRow = authenticateClient(ctx, {
-      authorization: c.req.header("authorization"),
-      clientId: body.client_id,
-      clientSecret: body.client_secret,
-    });
+    const appRow = await authenticateClient(ctx, {
+          authorization: c.req.header("authorization"),
+          clientId: body.client_id,
+          clientSecret: body.client_secret,
+        });
     if (body.grant_type === "authorization_code") {
       if (!body.code) throw new OAuthError(400, "invalid_request", "code is required");
       const tokens = await exchangeAuthorizationCode(ctx, {
@@ -237,23 +237,23 @@ export default function routes(ctx: AppContext) {
   }));
 
   // ─────────── userinfo ───────────
-  app.get("/oauth/userinfo", handle((c) => {
+  app.get("/oauth/userinfo", handle(async (c) => {
     const bearer = (c.req.header("authorization") ?? "").replace(/^Bearer\s+/i, "").trim() || (c.req.query("access_token") ?? "");
     if (!bearer) {
       c.header("WWW-Authenticate", 'Bearer realm="orbitid"');
       throw new OAuthError(401, "invalid_token", "An access token is required");
     }
-    const { row, user } = accessGrantFromToken(ctx, bearer);
-    return c.json(userInfoClaims(ctx, row, user));
+    const { row, user } = await accessGrantFromToken(ctx, bearer);
+    return c.json(await userInfoClaims(ctx, row, user));
   }));
-  app.post("/oauth/userinfo", handle((c) => {
+  app.post("/oauth/userinfo", handle(async (c) => {
     const bearer = (c.req.header("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
     if (!bearer) {
       c.header("WWW-Authenticate", 'Bearer realm="orbitid"');
       throw new OAuthError(401, "invalid_token", "An access token is required");
     }
-    const { row, user } = accessGrantFromToken(ctx, bearer);
-    return c.json(userInfoClaims(ctx, row, user));
+    const { row, user } = await accessGrantFromToken(ctx, bearer);
+    return c.json(await userInfoClaims(ctx, row, user));
   }));
 
   // ─────────── revocation (RFC 7009) ───────────
@@ -264,12 +264,12 @@ export default function routes(ctx: AppContext) {
       client_id: z.string().optional(),
       client_secret: z.string().optional(),
     }));
-    const appRow = authenticateClient(ctx, {
-      authorization: c.req.header("authorization"),
-      clientId: body.client_id,
-      clientSecret: body.client_secret,
-    });
-    revokeToken(ctx, appRow, body.token);
+    const appRow = await authenticateClient(ctx, {
+          authorization: c.req.header("authorization"),
+          clientId: body.client_id,
+          clientSecret: body.client_secret,
+        });
+    await revokeToken(ctx, appRow, body.token);
     return c.body(null, 200);
   }));
 
@@ -281,12 +281,12 @@ export default function routes(ctx: AppContext) {
       client_id: z.string().optional(),
       client_secret: z.string().optional(),
     }));
-    const appRow = authenticateClient(ctx, {
-      authorization: c.req.header("authorization"),
-      clientId: body.client_id,
-      clientSecret: body.client_secret,
-    });
-    return c.json(introspectToken(ctx, appRow, body.token));
+    const appRow = await authenticateClient(ctx, {
+          authorization: c.req.header("authorization"),
+          clientId: body.client_id,
+          clientSecret: body.client_secret,
+        });
+    return c.json(await introspectToken(ctx, appRow, body.token));
   }));
 
   // ─────────── machine tokens (client_credentials, machine secret) ───────────
@@ -307,7 +307,7 @@ export default function routes(ctx: AppContext) {
     const machineId = basic?.clientId ?? body.machine_id;
     const machineSecret = basic?.clientSecret ?? body.machine_secret;
     if (!machineId || !machineSecret) throw new OAuthError(401, "invalid_client", "machine_id and machine_secret are required");
-    const machine = authenticateMachineSecret(ctx, machineSecret);
+    const machine = await authenticateMachineSecret(ctx, machineSecret);
     if (!machine || machine.id !== machineId) throw new OAuthError(401, "invalid_client", "Machine authentication failed");
     let claims: Record<string, unknown> | null = null;
     if (typeof body.claims === "string") {
@@ -341,46 +341,46 @@ export default function routes(ctx: AppContext) {
 
   app.post("/v1/oauth_applications", async (c) => {
     const body = await parseBody(c, applicationSchema);
-    const { row, clientSecret } = createApplication(ctx, {
-      name: body.name,
-      redirectUris: body.redirect_uris,
-      scopes: body.scopes,
-      isPublic: body.public,
-      consentScreenEnabled: body.consent_screen_enabled,
-      pkceRequired: body.pkce_required,
-    });
+    const { row, clientSecret } = await createApplication(ctx, {
+          name: body.name,
+          redirectUris: body.redirect_uris,
+          scopes: body.scopes,
+          isPublic: body.public,
+          consentScreenEnabled: body.consent_screen_enabled,
+          pkceRequired: body.pkce_required,
+        });
     return c.json(serializeApplication(row, { clientSecret }), 201);
   });
 
-  app.get("/v1/oauth_applications", (c) => {
+  app.get("/v1/oauth_applications", async (c) => {
     const page = parsePagination(c);
-    const { data, totalCount } = listApplications(ctx, { limit: page.limit, offset: page.offset });
+    const { data, totalCount } = await listApplications(ctx, { limit: page.limit, offset: page.offset });
     return c.json({ data: data.map((r) => serializeApplication(r)), total_count: totalCount });
   });
 
-  app.get("/v1/oauth_applications/:id", (c) => c.json(serializeApplication(requireApplication(ctx, c.req.param("id")))));
+  app.get("/v1/oauth_applications/:id", async (c) => c.json(serializeApplication(await requireApplication(ctx, c.req.param("id")))));
 
   app.patch("/v1/oauth_applications/:id", async (c) => {
-    const row = requireApplication(ctx, c.req.param("id"));
+    const row = await requireApplication(ctx, c.req.param("id"));
     const body = await parseBody(c, applicationPatchSchema);
-    return c.json(serializeApplication(updateApplication(ctx, row, {
-      name: body.name,
-      redirectUris: body.redirect_uris,
-      scopes: body.scopes,
-      consentScreenEnabled: body.consent_screen_enabled,
-      pkceRequired: body.pkce_required,
-    })));
+    return c.json(serializeApplication(await updateApplication(ctx, row, {
+              name: body.name,
+              redirectUris: body.redirect_uris,
+              scopes: body.scopes,
+              consentScreenEnabled: body.consent_screen_enabled,
+              pkceRequired: body.pkce_required,
+            })));
   });
 
-  app.delete("/v1/oauth_applications/:id", (c) => {
-    const row = requireApplication(ctx, c.req.param("id"));
-    deleteApplication(ctx, row);
+  app.delete("/v1/oauth_applications/:id", async (c) => {
+    const row = await requireApplication(ctx, c.req.param("id"));
+    await deleteApplication(ctx, row);
     return c.json({ object: "oauth_application", id: row.id, deleted: true });
   });
 
-  app.post("/v1/oauth_applications/:id/rotate_secret", (c) => {
-    const row = requireApplication(ctx, c.req.param("id"));
-    const { row: updated, clientSecret } = rotateClientSecret(ctx, row);
+  app.post("/v1/oauth_applications/:id/rotate_secret", async (c) => {
+    const row = await requireApplication(ctx, c.req.param("id"));
+    const { row: updated, clientSecret } = await rotateClientSecret(ctx, row);
     return c.json(serializeApplication(updated, { clientSecret }));
   });
 

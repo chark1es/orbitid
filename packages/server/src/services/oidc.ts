@@ -12,6 +12,7 @@ import * as s from "../db/schema";
 import { randomToken, safeEqual, sha256 } from "../lib/crypto";
 import { newId } from "../lib/ids";
 import { signJwt } from "./tokens";
+import { first } from "../lib/db";
 
 type ApplicationRow = typeof s.oauthApplications.$inferSelect;
 type GrantRow = typeof s.oauthGrants.$inferSelect;
@@ -60,18 +61,18 @@ export function generateClientSecret(): string {
   return `oas_${randomToken(24)}`;
 }
 
-export function getApplication(ctx: AppContext, id: string): ApplicationRow | null {
-  return ctx.db.select().from(s.oauthApplications).where(eq(s.oauthApplications.id, id)).get() ?? null;
+export async function getApplication(ctx: AppContext, id: string): Promise<ApplicationRow | null> {
+  return first(await ctx.db.select().from(s.oauthApplications).where(eq(s.oauthApplications.id, id))) ?? null;
 }
 
-export function requireApplication(ctx: AppContext, id: string): ApplicationRow {
-  const row = getApplication(ctx, id);
+export async function requireApplication(ctx: AppContext, id: string): Promise<ApplicationRow> {
+  const row = await getApplication(ctx, id);
   if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "OAuth application not found");
   return row;
 }
 
-export function getApplicationByClientId(ctx: AppContext, clientId: string): ApplicationRow | null {
-  return ctx.db.select().from(s.oauthApplications).where(eq(s.oauthApplications.clientId, clientId)).get() ?? null;
+export async function getApplicationByClientId(ctx: AppContext, clientId: string): Promise<ApplicationRow | null> {
+  return first(await ctx.db.select().from(s.oauthApplications).where(eq(s.oauthApplications.clientId, clientId))) ?? null;
 }
 
 export interface CreateApplicationInput {
@@ -83,7 +84,7 @@ export interface CreateApplicationInput {
   pkceRequired?: boolean;
 }
 
-export function createApplication(ctx: AppContext, input: CreateApplicationInput): { row: ApplicationRow; clientSecret?: string } {
+export async function createApplication(ctx: AppContext, input: CreateApplicationInput): Promise<{ row: ApplicationRow; clientSecret?: string }> {
   const now = Date.now();
   const clientSecret = input.isPublic ? undefined : generateClientSecret();
   const row: ApplicationRow = {
@@ -99,35 +100,35 @@ export function createApplication(ctx: AppContext, input: CreateApplicationInput
     createdAt: now,
     updatedAt: now,
   };
-  ctx.db.insert(s.oauthApplications).values(row).run();
+  await ctx.db.insert(s.oauthApplications).values(row);
   return { row, clientSecret };
 }
 
-export function updateApplication(ctx: AppContext, row: ApplicationRow, patch: Partial<Pick<CreateApplicationInput, "name" | "redirectUris" | "scopes" | "consentScreenEnabled" | "pkceRequired">>): ApplicationRow {
+export async function updateApplication(ctx: AppContext, row: ApplicationRow, patch: Partial<Pick<CreateApplicationInput, "name" | "redirectUris" | "scopes" | "consentScreenEnabled" | "pkceRequired">>): Promise<ApplicationRow> {
   const set: Partial<ApplicationRow> = { updatedAt: Date.now() };
   if (patch.name !== undefined) set.name = patch.name;
   if (patch.redirectUris !== undefined) set.redirectUris = patch.redirectUris;
   if (patch.scopes !== undefined) set.scopes = patch.scopes;
   if (patch.consentScreenEnabled !== undefined) set.consentScreenEnabled = patch.consentScreenEnabled;
   if (patch.pkceRequired !== undefined) set.pkceRequired = patch.pkceRequired;
-  ctx.db.update(s.oauthApplications).set(set).where(eq(s.oauthApplications.id, row.id)).run();
-  return getApplication(ctx, row.id)!;
+  await ctx.db.update(s.oauthApplications).set(set).where(eq(s.oauthApplications.id, row.id));
+  return (await getApplication(ctx, row.id))!;
 }
 
-export function deleteApplication(ctx: AppContext, row: ApplicationRow): void {
-  ctx.db.delete(s.oauthApplications).where(eq(s.oauthApplications.id, row.id)).run();
+export async function deleteApplication(ctx: AppContext, row: ApplicationRow): Promise<void> {
+  await ctx.db.delete(s.oauthApplications).where(eq(s.oauthApplications.id, row.id));
 }
 
-export function rotateClientSecret(ctx: AppContext, row: ApplicationRow): { row: ApplicationRow; clientSecret: string } {
+export async function rotateClientSecret(ctx: AppContext, row: ApplicationRow): Promise<{ row: ApplicationRow; clientSecret: string }> {
   if (row.isPublic) throw new OrbitError(422, ErrorCodes.form_param_value_invalid, "Public applications do not have a client secret");
   const clientSecret = generateClientSecret();
-  ctx.db.update(s.oauthApplications).set({ clientSecretHash: sha256(clientSecret), updatedAt: Date.now() }).where(eq(s.oauthApplications.id, row.id)).run();
-  return { row: getApplication(ctx, row.id)!, clientSecret };
+  await ctx.db.update(s.oauthApplications).set({ clientSecretHash: sha256(clientSecret), updatedAt: Date.now() }).where(eq(s.oauthApplications.id, row.id));
+  return { row: (await getApplication(ctx, row.id))!, clientSecret };
 }
 
-export function listApplications(ctx: AppContext, opts: { limit?: number; offset?: number } = {}): { data: ApplicationRow[]; totalCount: number } {
-  const data = ctx.db.select().from(s.oauthApplications).orderBy(desc(s.oauthApplications.createdAt)).limit(opts.limit ?? 10).offset(opts.offset ?? 0).all();
-  const totalCount = ctx.db.select({ n: sql<number>`count(*)` }).from(s.oauthApplications).get()?.n ?? 0;
+export async function listApplications(ctx: AppContext, opts: { limit?: number; offset?: number } = {}): Promise<{ data: ApplicationRow[]; totalCount: number }> {
+  const data = (await ctx.db.select().from(s.oauthApplications).orderBy(desc(s.oauthApplications.createdAt)).limit(opts.limit ?? 10).offset(opts.offset ?? 0));
+  const totalCount = first(await ctx.db.select({ n: sql<number>`count(*)` }).from(s.oauthApplications))?.n ?? 0;
   return { data, totalCount };
 }
 
@@ -167,12 +168,12 @@ export function parseBasicAuthorization(header: string | undefined): { clientId:
  * Client authentication for the token/revocation/introspection endpoints:
  * `client_secret_basic`, `client_secret_post`, or `none` for public clients.
  */
-export function authenticateClient(ctx: AppContext, input: { authorization?: string; clientId?: string; clientSecret?: string }): ApplicationRow {
+export async function authenticateClient(ctx: AppContext, input: { authorization?: string; clientId?: string; clientSecret?: string }): Promise<ApplicationRow> {
   const basic = parseBasicAuthorization(input.authorization);
   const clientId = basic?.clientId ?? input.clientId;
   const clientSecret = basic?.clientSecret ?? input.clientSecret;
   if (!clientId) throw new OAuthError(401, "invalid_client", "client_id is required");
-  const app = getApplicationByClientId(ctx, clientId);
+  const app = await getApplicationByClientId(ctx, clientId);
   if (!app) throw new OAuthError(401, "invalid_client", "Unknown client");
   if (app.isPublic) {
     if (clientSecret) throw new OAuthError(401, "invalid_client", "Public clients must not send a client secret");
@@ -200,38 +201,37 @@ export interface IssueCodeInput {
   nonce?: string | null;
 }
 
-export function issueAuthorizationCode(ctx: AppContext, input: IssueCodeInput): string {
+export async function issueAuthorizationCode(ctx: AppContext, input: IssueCodeInput): Promise<string> {
   const code = `oac_${randomToken(32)}`;
-  ctx.db.insert(s.oauthGrants).values({
-    id: newId(ID_PREFIX.oauthGrant),
-    kind: "code",
-    applicationId: input.application.id,
-    userId: input.userId,
-    tokenHash: sha256(code),
-    scopes: input.scopes.join(" "),
-    redirectUri: input.redirectUri,
-    codeChallenge: input.codeChallenge ?? null,
-    codeChallengeMethod: input.codeChallenge ? (input.codeChallengeMethod ?? "S256") : null,
-    nonce: input.nonce ?? null,
-    revoked: false,
-    expiresAt: Date.now() + AUTHORIZATION_CODE_TTL_SECONDS * 1000,
-    createdAt: Date.now(),
-  }).run();
+  await ctx.db.insert(s.oauthGrants).values({
+            id: newId(ID_PREFIX.oauthGrant),
+            kind: "code",
+            applicationId: input.application.id,
+            userId: input.userId,
+            tokenHash: sha256(code),
+            scopes: input.scopes.join(" "),
+            redirectUri: input.redirectUri,
+            codeChallenge: input.codeChallenge ?? null,
+            codeChallengeMethod: input.codeChallenge ? (input.codeChallengeMethod ?? "S256") : null,
+            nonce: input.nonce ?? null,
+            revoked: false,
+            expiresAt: Date.now() + AUTHORIZATION_CODE_TTL_SECONDS * 1000,
+            createdAt: Date.now(),
+          });
   return code;
 }
 
-export function findGrantByToken(ctx: AppContext, token: string): GrantRow | null {
-  return ctx.db.select().from(s.oauthGrants).where(eq(s.oauthGrants.tokenHash, sha256(token))).get() ?? null;
+export async function findGrantByToken(ctx: AppContext, token: string): Promise<GrantRow | null> {
+  return first(await ctx.db.select().from(s.oauthGrants).where(eq(s.oauthGrants.tokenHash, sha256(token)))) ?? null;
 }
 
 export const isGrantLive = (row: GrantRow, at = Date.now()) => !row.revoked && row.expiresAt > at;
 
 /** Revokes every token in a rotation family (refresh reuse detection / RFC 7009 on a refresh token). */
-export function revokeGrantFamily(ctx: AppContext, family: string): void {
+export async function revokeGrantFamily(ctx: AppContext, family: string): Promise<void> {
   if (!family) return;
-  ctx.db.update(s.oauthGrants).set({ revoked: true })
-    .where(and(inArray(s.oauthGrants.kind, ["access", "refresh"]), eq(s.oauthGrants.nonce, family)))
-    .run();
+  await ctx.db.update(s.oauthGrants).set({ revoked: true })
+            .where(and(inArray(s.oauthGrants.kind, ["access", "refresh"]), eq(s.oauthGrants.nonce, family)));
 }
 
 export interface TokenSet {
@@ -252,14 +252,14 @@ interface IdTokenInput {
   orgId?: string | null;
 }
 
-export function primaryEmail(ctx: AppContext, user: UserRow) {
+export async function primaryEmail(ctx: AppContext, user: UserRow) {
   if (!user.primaryEmailAddressId) return null;
-  return ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.id, user.primaryEmailAddressId)).get() ?? null;
+  return first(await ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.id, user.primaryEmailAddressId))) ?? null;
 }
 
 async function buildIdTokenClaims(ctx: AppContext, input: IdTokenInput): Promise<Record<string, unknown>> {
   const { user, scopes } = input;
-  const email = primaryEmail(ctx, user);
+  const email = await primaryEmail(ctx, user);
   const claims: Record<string, unknown> = { sub: user.id };
   if (input.nonce) claims.nonce = input.nonce;
   if (scopes.includes("profile")) {
@@ -276,10 +276,9 @@ async function buildIdTokenClaims(ctx: AppContext, input: IdTokenInput): Promise
     claims.email_verified = !!email?.verified;
   }
   if (input.orgId) {
-    const membership = ctx.db.select().from(s.organizationMemberships)
-      .where(and(eq(s.organizationMemberships.organizationId, input.orgId), eq(s.organizationMemberships.userId, user.id)))
-      .get();
-    const org = ctx.db.select().from(s.organizations).where(eq(s.organizations.id, input.orgId)).get();
+    const membership = first(await ctx.db.select().from(s.organizationMemberships)
+          .where(and(eq(s.organizationMemberships.organizationId, input.orgId), eq(s.organizationMemberships.userId, user.id))));
+    const org = first(await ctx.db.select().from(s.organizations).where(eq(s.organizations.id, input.orgId)));
     if (membership && org) {
       claims.org_id = org.id;
       claims.org_slug = org.slug;
@@ -303,22 +302,22 @@ export async function issueTokenSet(ctx: AppContext, input: TokenSetInput): Prom
   const now = Date.now();
   const scope = input.scopes.join(" ");
   const accessToken = `oat_${randomToken(32)}`;
-  ctx.db.insert(s.oauthGrants).values({
-    id: newId(ID_PREFIX.oauthGrant),
-    kind: "access",
-    applicationId: input.application.id,
-    userId: input.user.id,
-    tokenHash: sha256(accessToken),
-    scopes: scope,
-    redirectUri: null,
-    codeChallenge: null,
-    codeChallengeMethod: null,
-    // family id (see the storage note at the top of this file)
-    nonce: input.family,
-    revoked: false,
-    expiresAt: now + ACCESS_TOKEN_TTL_SECONDS * 1000,
-    createdAt: now,
-  }).run();
+  await ctx.db.insert(s.oauthGrants).values({
+            id: newId(ID_PREFIX.oauthGrant),
+            kind: "access",
+            applicationId: input.application.id,
+            userId: input.user.id,
+            tokenHash: sha256(accessToken),
+            scopes: scope,
+            redirectUri: null,
+            codeChallenge: null,
+            codeChallengeMethod: null,
+            // family id (see the storage note at the top of this file)
+            nonce: input.family,
+            revoked: false,
+            expiresAt: now + ACCESS_TOKEN_TTL_SECONDS * 1000,
+            createdAt: now,
+          });
 
   const set: TokenSet = {
     access_token: accessToken,
@@ -329,21 +328,21 @@ export async function issueTokenSet(ctx: AppContext, input: TokenSetInput): Prom
 
   if (input.scopes.includes("offline_access")) {
     const refreshToken = `ort_${randomToken(32)}`;
-    ctx.db.insert(s.oauthGrants).values({
-      id: newId(ID_PREFIX.oauthGrant),
-      kind: "refresh",
-      applicationId: input.application.id,
-      userId: input.user.id,
-      tokenHash: sha256(refreshToken),
-      scopes: scope,
-      redirectUri: null,
-      codeChallenge: null,
-      codeChallengeMethod: null,
-      nonce: input.family,
-      revoked: false,
-      expiresAt: now + REFRESH_TOKEN_TTL_SECONDS * 1000,
-      createdAt: now,
-    }).run();
+    await ctx.db.insert(s.oauthGrants).values({
+                  id: newId(ID_PREFIX.oauthGrant),
+                  kind: "refresh",
+                  applicationId: input.application.id,
+                  userId: input.user.id,
+                  tokenHash: sha256(refreshToken),
+                  scopes: scope,
+                  redirectUri: null,
+                  codeChallenge: null,
+                  codeChallengeMethod: null,
+                  nonce: input.family,
+                  revoked: false,
+                  expiresAt: now + REFRESH_TOKEN_TTL_SECONDS * 1000,
+                  createdAt: now,
+                });
     set.refresh_token = refreshToken;
   }
 
@@ -368,7 +367,7 @@ export interface CodeExchangeInput {
 
 /** `grant_type=authorization_code`: single use, PKCE enforced for public / pkceRequired clients. */
 export async function exchangeAuthorizationCode(ctx: AppContext, input: CodeExchangeInput): Promise<TokenSet> {
-  const row = findGrantByToken(ctx, input.code);
+  const row = await findGrantByToken(ctx, input.code);
   if (!row || row.kind !== "code" || row.applicationId !== input.application.id || row.revoked || row.expiresAt <= Date.now()) {
     throw new OAuthError(400, "invalid_grant", "Authorization code is invalid or expired");
   }
@@ -385,9 +384,9 @@ export async function exchangeAuthorizationCode(ctx: AppContext, input: CodeExch
     throw new OAuthError(400, "invalid_grant", "PKCE code_challenge is required for this client");
   }
 
-  const user = ctx.db.select().from(s.users).where(eq(s.users.id, row.userId)).get();
+  const user = first(await ctx.db.select().from(s.users).where(eq(s.users.id, row.userId)));
   if (!user || user.banned) throw new OAuthError(400, "invalid_grant", "User is not allowed to sign in");
-  ctx.db.update(s.oauthGrants).set({ revoked: true }).where(eq(s.oauthGrants.id, row.id)).run();
+  await ctx.db.update(s.oauthGrants).set({ revoked: true }).where(eq(s.oauthGrants.id, row.id));
 
   return issueTokenSet(ctx, {
     application: input.application,
@@ -401,40 +400,40 @@ export async function exchangeAuthorizationCode(ctx: AppContext, input: CodeExch
 
 /** `grant_type=refresh_token`: rotating refresh tokens with reuse detection (reuse kills the family). */
 export async function exchangeRefreshToken(ctx: AppContext, application: ApplicationRow, refreshToken: string): Promise<TokenSet> {
-  const row = findGrantByToken(ctx, refreshToken);
+  const row = await findGrantByToken(ctx, refreshToken);
   if (!row || row.kind !== "refresh" || row.applicationId !== application.id) {
     throw new OAuthError(400, "invalid_grant", "Refresh token is invalid");
   }
   const family = row.nonce ?? "";
   if (row.revoked) {
     // A rotated-out token was presented again: assume theft and invalidate the whole chain.
-    revokeGrantFamily(ctx, family);
+    await revokeGrantFamily(ctx, family);
     throw new OAuthError(400, "invalid_grant", "Refresh token has already been used");
   }
   if (row.expiresAt <= Date.now()) throw new OAuthError(400, "invalid_grant", "Refresh token has expired");
-  const user = ctx.db.select().from(s.users).where(eq(s.users.id, row.userId)).get();
+  const user = first(await ctx.db.select().from(s.users).where(eq(s.users.id, row.userId)));
   if (!user || user.banned) {
-    revokeGrantFamily(ctx, family);
+    await revokeGrantFamily(ctx, family);
     throw new OAuthError(400, "invalid_grant", "User is not allowed to sign in");
   }
 
-  ctx.db.update(s.oauthGrants).set({ revoked: true }).where(eq(s.oauthGrants.id, row.id)).run();
+  await ctx.db.update(s.oauthGrants).set({ revoked: true }).where(eq(s.oauthGrants.id, row.id));
   return issueTokenSet(ctx, { application, user, scopes: parseScopes(row.scopes), family, nonce: null });
 }
 
 /** Resolves an access token to its grant + user (userinfo / introspection). */
-export function accessGrantFromToken(ctx: AppContext, token: string): { row: GrantRow; user: UserRow } {
-  const row = findGrantByToken(ctx, token);
+export async function accessGrantFromToken(ctx: AppContext, token: string): Promise<{ row: GrantRow; user: UserRow }> {
+  const row = await findGrantByToken(ctx, token);
   if (!row || row.kind !== "access" || !isGrantLive(row)) throw new OAuthError(401, "invalid_token", "Access token is invalid or expired");
-  const user = ctx.db.select().from(s.users).where(eq(s.users.id, row.userId)).get();
+  const user = first(await ctx.db.select().from(s.users).where(eq(s.users.id, row.userId)));
   if (!user || user.banned) throw new OAuthError(401, "invalid_token", "User is not allowed to sign in");
   return { row, user };
 }
 
 /** OIDC userinfo payload, filtered by the granted scopes. */
-export function userInfoClaims(ctx: AppContext, row: GrantRow, user: UserRow): Record<string, unknown> {
+export async function userInfoClaims(ctx: AppContext, row: GrantRow, user: UserRow): Promise<Record<string, unknown>> {
   const scopes = parseScopes(row.scopes);
-  const email = primaryEmail(ctx, user);
+  const email = await primaryEmail(ctx, user);
   const claims: Record<string, unknown> = { sub: user.id };
   if (scopes.includes("profile")) {
     const name = [user.firstName, user.lastName].filter(Boolean).join(" ") || user.username || email?.email || user.id;
@@ -452,37 +451,35 @@ export function userInfoClaims(ctx: AppContext, row: GrantRow, user: UserRow): R
   return claims;
 }
 
-export function storedConsent(ctx: AppContext, applicationId: string, userId: string): string[] | null {
-  const row = ctx.db.select().from(s.oauthConsents)
-    .where(and(eq(s.oauthConsents.applicationId, applicationId), eq(s.oauthConsents.userId, userId)))
-    .get();
+export async function storedConsent(ctx: AppContext, applicationId: string, userId: string): Promise<string[] | null> {
+  const row = first(await ctx.db.select().from(s.oauthConsents)
+      .where(and(eq(s.oauthConsents.applicationId, applicationId), eq(s.oauthConsents.userId, userId))));
   return row ? parseScopes(row.scopes) : null;
 }
 
-export function hasConsent(ctx: AppContext, applicationId: string, userId: string, scopes: string[]): boolean {
-  const granted = storedConsent(ctx, applicationId, userId);
+export async function hasConsent(ctx: AppContext, applicationId: string, userId: string, scopes: string[]): Promise<boolean> {
+  const granted = await storedConsent(ctx, applicationId, userId);
   return !!granted && scopes.every((scope) => granted.includes(scope));
 }
 
-export function recordConsent(ctx: AppContext, applicationId: string, userId: string, scopes: string[]): void {
-  const existing = storedConsent(ctx, applicationId, userId) ?? [];
+export async function recordConsent(ctx: AppContext, applicationId: string, userId: string, scopes: string[]): Promise<void> {
+  const existing = await storedConsent(ctx, applicationId, userId) ?? [];
   const merged = [...new Set([...existing, ...scopes])].join(" ");
-  ctx.db.insert(s.oauthConsents).values({ applicationId, userId, scopes: merged, createdAt: Date.now() })
-    .onConflictDoUpdate({ target: [s.oauthConsents.applicationId, s.oauthConsents.userId], set: { scopes: merged } })
-    .run();
+  await ctx.db.insert(s.oauthConsents).values({ applicationId, userId, scopes: merged, createdAt: Date.now() })
+            .onConflictDoUpdate({ target: [s.oauthConsents.applicationId, s.oauthConsents.userId], set: { scopes: merged } });
 }
 
 /** `POST /oauth/revoke` (RFC 7009): revoking a refresh token revokes its family. */
-export function revokeToken(ctx: AppContext, application: ApplicationRow, token: string): void {
-  const row = findGrantByToken(ctx, token);
+export async function revokeToken(ctx: AppContext, application: ApplicationRow, token: string): Promise<void> {
+  const row = await findGrantByToken(ctx, token);
   if (!row || row.applicationId !== application.id) return;
-  if (row.kind === "refresh" && row.nonce) revokeGrantFamily(ctx, row.nonce);
-  else ctx.db.update(s.oauthGrants).set({ revoked: true }).where(eq(s.oauthGrants.id, row.id)).run();
+  if (row.kind === "refresh" && row.nonce) await revokeGrantFamily(ctx, row.nonce);
+  else await ctx.db.update(s.oauthGrants).set({ revoked: true }).where(eq(s.oauthGrants.id, row.id));
 }
 
 /** `POST /oauth/introspect` (RFC 7662). Returns `{ active: false }` for unknown/foreign/expired tokens. */
-export function introspectToken(ctx: AppContext, application: ApplicationRow, token: string): Record<string, unknown> {
-  const row = findGrantByToken(ctx, token);
+export async function introspectToken(ctx: AppContext, application: ApplicationRow, token: string): Promise<Record<string, unknown>> {
+  const row = await findGrantByToken(ctx, token);
   if (!row || row.applicationId !== application.id || !isGrantLive(row) || row.kind === "code") return { active: false };
   return {
     active: true,

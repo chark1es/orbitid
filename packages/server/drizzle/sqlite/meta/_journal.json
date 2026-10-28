@@ -15,6 +15,13 @@
       "when": 1793155801776,
       "tag": "0001_fuzzy_cobalt_man",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793179011902,
+      "tag": "0002_same_rogue",
+      "breakpoints": true
     }
   ]
 }

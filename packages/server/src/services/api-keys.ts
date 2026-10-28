@@ -7,6 +7,7 @@ import { randomToken, sha256 } from "../lib/crypto";
 import { newId } from "../lib/ids";
 import { permissionsForRole } from "../serializers";
 import { emitEvent } from "./webhooks";
+import { first } from "../lib/db";
 
 type ApiKeyRow = typeof s.apiKeys.$inferSelect;
 
@@ -49,15 +50,15 @@ export function isApiKeyValid(row: ApiKeyRow, at = Date.now()): boolean {
   return !row.revoked && (row.expiresAt == null || row.expiresAt > at);
 }
 
-function assertSubjectExists(ctx: AppContext, subject: string): void {
+async function assertSubjectExists(ctx: AppContext, subject: string): Promise<void> {
   if (subject.startsWith("user_")) {
-    if (!ctx.db.select().from(s.users).where(eq(s.users.id, subject)).get()) {
+    if (!first(await ctx.db.select().from(s.users).where(eq(s.users.id, subject)))) {
       throw new OrbitError(422, ErrorCodes.form_param_value_invalid, "subject does not match an existing user", { param_name: "subject" });
     }
     return;
   }
   if (subject.startsWith("org_")) {
-    if (!ctx.db.select().from(s.organizations).where(eq(s.organizations.id, subject)).get()) {
+    if (!first(await ctx.db.select().from(s.organizations).where(eq(s.organizations.id, subject)))) {
       throw new OrbitError(422, ErrorCodes.form_param_value_invalid, "subject does not match an existing organization", { param_name: "subject" });
     }
     return;
@@ -76,8 +77,8 @@ export interface CreateApiKeyInput {
 }
 
 /** Creates a key and returns the row plus the plaintext secret (shown exactly once). */
-export function createApiKey(ctx: AppContext, input: CreateApiKeyInput): { row: ApiKeyRow; secret: string } {
-  assertSubjectExists(ctx, input.subject);
+export async function createApiKey(ctx: AppContext, input: CreateApiKeyInput): Promise<{ row: ApiKeyRow; secret: string }> {
+  await assertSubjectExists(ctx, input.subject);
   const secret = generateApiKeySecret();
   const now = Date.now();
   const row: ApiKeyRow = {
@@ -97,17 +98,17 @@ export function createApiKey(ctx: AppContext, input: CreateApiKeyInput): { row: 
     createdAt: now,
     updatedAt: now,
   };
-  ctx.db.insert(s.apiKeys).values(row).run();
+  await ctx.db.insert(s.apiKeys).values(row);
   void emitEvent(ctx, "apiKey.created", serializeApiKey(row));
   return { row, secret };
 }
 
-export function getApiKey(ctx: AppContext, id: string): ApiKeyRow | null {
-  return ctx.db.select().from(s.apiKeys).where(eq(s.apiKeys.id, id)).get() ?? null;
+export async function getApiKey(ctx: AppContext, id: string): Promise<ApiKeyRow | null> {
+  return first(await ctx.db.select().from(s.apiKeys).where(eq(s.apiKeys.id, id))) ?? null;
 }
 
-export function requireApiKey(ctx: AppContext, id: string): ApiKeyRow {
-  const row = getApiKey(ctx, id);
+export async function requireApiKey(ctx: AppContext, id: string): Promise<ApiKeyRow> {
+  const row = await getApiKey(ctx, id);
   if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "API key not found");
   return row;
 }
@@ -130,7 +131,7 @@ function orderFor(orderBy: string | undefined) {
   return desc_ ? desc(col) : asc(col);
 }
 
-export function listApiKeys(ctx: AppContext, opts: ListApiKeysOptions = {}): { data: ApiKeyRow[]; totalCount: number } {
+export async function listApiKeys(ctx: AppContext, opts: ListApiKeysOptions = {}): Promise<{ data: ApiKeyRow[]; totalCount: number }> {
   const now = Date.now();
   const filters = [];
   if (opts.subject) filters.push(eq(s.apiKeys.subject, opts.subject));
@@ -139,13 +140,12 @@ export function listApiKeys(ctx: AppContext, opts: ListApiKeysOptions = {}): { d
     filters.push(or(isNull(s.apiKeys.expiresAt), gt(s.apiKeys.expiresAt, now))!);
   }
   const where = filters.length ? and(...filters) : undefined;
-  const data = ctx.db.select().from(s.apiKeys)
-    .where(where)
-    .orderBy(orderFor(opts.orderBy))
-    .limit(opts.limit ?? 10)
-    .offset(opts.offset ?? 0)
-    .all();
-  const totalCount = ctx.db.select({ n: sql<number>`count(*)` }).from(s.apiKeys).where(where).get()?.n ?? 0;
+  const data = (await ctx.db.select().from(s.apiKeys)
+      .where(where)
+      .orderBy(orderFor(opts.orderBy))
+      .limit(opts.limit ?? 10)
+      .offset(opts.offset ?? 0));
+  const totalCount = first(await ctx.db.select({ n: sql<number>`count(*)` }).from(s.apiKeys).where(where))?.n ?? 0;
   return { data, totalCount };
 }
 
@@ -156,20 +156,20 @@ export interface UpdateApiKeyInput {
   claims?: Record<string, unknown> | null;
 }
 
-export function updateApiKey(ctx: AppContext, row: ApiKeyRow, patch: UpdateApiKeyInput): ApiKeyRow {
+export async function updateApiKey(ctx: AppContext, row: ApiKeyRow, patch: UpdateApiKeyInput): Promise<ApiKeyRow> {
   const set: Partial<ApiKeyRow> = { updatedAt: Date.now() };
   if (patch.name !== undefined) set.name = patch.name;
   if (patch.description !== undefined) set.description = patch.description;
   if (patch.scopes !== undefined) set.scopes = patch.scopes;
   if (patch.claims !== undefined) set.claims = patch.claims;
-  ctx.db.update(s.apiKeys).set(set).where(eq(s.apiKeys.id, row.id)).run();
-  return getApiKey(ctx, row.id)!;
+  await ctx.db.update(s.apiKeys).set(set).where(eq(s.apiKeys.id, row.id));
+  return (await getApiKey(ctx, row.id))!;
 }
 
-export function revokeApiKey(ctx: AppContext, row: ApiKeyRow, reason?: string | null): ApiKeyRow {
+export async function revokeApiKey(ctx: AppContext, row: ApiKeyRow, reason?: string | null): Promise<ApiKeyRow> {
   if (!row.revoked) {
-    ctx.db.update(s.apiKeys).set({ revoked: true, revocationReason: reason ?? null, updatedAt: Date.now() }).where(eq(s.apiKeys.id, row.id)).run();
-    const updated = getApiKey(ctx, row.id)!;
+    await ctx.db.update(s.apiKeys).set({ revoked: true, revocationReason: reason ?? null, updatedAt: Date.now() }).where(eq(s.apiKeys.id, row.id));
+    const updated = (await getApiKey(ctx, row.id))!;
     void emitEvent(ctx, "apiKey.revoked", serializeApiKey(updated));
     return updated;
   }
@@ -177,8 +177,8 @@ export function revokeApiKey(ctx: AppContext, row: ApiKeyRow, reason?: string | 
 }
 
 /** Deletes the key (returns the deleted object's id). Emits `apiKey.revoked` — deletion revokes the credential. */
-export function deleteApiKey(ctx: AppContext, row: ApiKeyRow): void {
-  ctx.db.delete(s.apiKeys).where(eq(s.apiKeys.id, row.id)).run();
+export async function deleteApiKey(ctx: AppContext, row: ApiKeyRow): Promise<void> {
+  await ctx.db.delete(s.apiKeys).where(eq(s.apiKeys.id, row.id));
   void emitEvent(ctx, "apiKey.revoked", serializeApiKey({ ...row, revoked: true }));
 }
 
@@ -186,23 +186,23 @@ export function deleteApiKey(ctx: AppContext, row: ApiKeyRow): void {
  * Validates a plaintext secret, updates `last_used_at` and returns the key row.
  * Throws `401 api_key_invalid` for unknown, revoked, expired or orphaned keys.
  */
-export function verifyApiKey(ctx: AppContext, secret: string, opts: { touch?: boolean } = {}): ApiKeyRow {
+export async function verifyApiKey(ctx: AppContext, secret: string, opts: { touch?: boolean } = {}): Promise<ApiKeyRow> {
   const invalid = () => new OrbitError(401, ErrorCodes.api_key_invalid, "Invalid API key");
   if (typeof secret !== "string" || !secret.startsWith(SECRET_PREFIX)) throw invalid();
-  const row = ctx.db.select().from(s.apiKeys).where(eq(s.apiKeys.secretHash, sha256(secret))).get();
+  const row = first(await ctx.db.select().from(s.apiKeys).where(eq(s.apiKeys.secretHash, sha256(secret))));
   if (!row) throw invalid();
   if (!isApiKeyValid(row)) throw invalid();
-  if (!subjectExists(ctx, row.subject)) throw invalid();
+  if (!await subjectExists(ctx, row.subject)) throw invalid();
   if (opts.touch !== false) {
-    ctx.db.update(s.apiKeys).set({ lastUsedAt: Date.now() }).where(eq(s.apiKeys.id, row.id)).run();
+    await ctx.db.update(s.apiKeys).set({ lastUsedAt: Date.now() }).where(eq(s.apiKeys.id, row.id));
     return { ...row, lastUsedAt: Date.now() };
   }
   return row;
 }
 
-function subjectExists(ctx: AppContext, subject: string): boolean {
-  if (subject.startsWith("user_")) return !!ctx.db.select().from(s.users).where(eq(s.users.id, subject)).get();
-  if (subject.startsWith("org_")) return !!ctx.db.select().from(s.organizations).where(eq(s.organizations.id, subject)).get();
+async function subjectExists(ctx: AppContext, subject: string): Promise<boolean> {
+  if (subject.startsWith("user_")) return !!first(await ctx.db.select().from(s.users).where(eq(s.users.id, subject)));
+  if (subject.startsWith("org_")) return !!first(await ctx.db.select().from(s.organizations).where(eq(s.organizations.id, subject)));
   return false;
 }
 
@@ -210,13 +210,12 @@ function subjectExists(ctx: AppContext, subject: string): boolean {
  * Org-level authorization for `/organizations/:orgId/api_keys`: admin role, `org:sys_profile:manage`
  * or the custom `org:sys_api_keys:manage` permission.
  */
-export function assertOrgApiKeysPermission(ctx: AppContext, userId: string, organizationId: string): typeof s.organizationMemberships.$inferSelect {
-  const membership = ctx.db.select().from(s.organizationMemberships)
-    .where(and(eq(s.organizationMemberships.organizationId, organizationId), eq(s.organizationMemberships.userId, userId)))
-    .get();
+export async function assertOrgApiKeysPermission(ctx: AppContext, userId: string, organizationId: string): Promise<typeof s.organizationMemberships.$inferSelect> {
+  const membership = first(await ctx.db.select().from(s.organizationMemberships)
+      .where(and(eq(s.organizationMemberships.organizationId, organizationId), eq(s.organizationMemberships.userId, userId))));
   if (!membership) throw new OrbitError(403, ErrorCodes.not_a_member_in_organization, "You are not a member of this organization");
   if (membership.roleKey === ADMIN_ROLE) return membership;
-  const granted = permissionsForRole(ctx, membership.roleKey);
+  const granted = await permissionsForRole(ctx, membership.roleKey);
   if (granted.includes(ORG_PROFILE_MANAGE) || granted.includes(ORG_API_KEYS_PERMISSION)) return membership;
   throw new OrbitError(403, ErrorCodes.org_permission_required, `Missing permission ${ORG_API_KEYS_PERMISSION}`);
 }
