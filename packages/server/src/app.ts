@@ -23,6 +23,7 @@ import apiKeys from "./modules/api-keys";
 import m2m from "./modules/m2m";
 import oidc from "./modules/oidc";
 import enterprise from "./modules/enterprise";
+import docs from "./modules/docs";
 
 /** A race between a check and an insert surfaces as a unique-constraint error from either database. */
 function isUniqueViolation(err: unknown): boolean {
@@ -65,6 +66,7 @@ export function createApp(ctx: AppContext) {
   // Public / well-known
   app.route("/", jwks(ctx));
   app.route("/", oidc(ctx)); // /oauth/*, /.well-known/openid-configuration, + its own /v1/oauth_applications (secret key guarded internally)
+  app.route("/", docs(ctx)); // /docs (+ assets) and the public /v1/openapi.json
 
   // Frontend API (cookie/client authenticated)
   app.route("/v1/client/environment", environment(ctx));

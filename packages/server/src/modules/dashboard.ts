@@ -10,7 +10,7 @@ const MIME: Record<string, string> = {
 };
 
 /** Paths that belong to the API, never to the dashboard. */
-const API_PREFIXES = ["/v1", "/oauth", "/.well-known", "/health"];
+const API_PREFIXES = ["/v1", "/oauth", "/.well-known", "/health", "/docs"];
 
 /**
  * Serves the built dashboard (a single-page app) from `env.dashboardDir`. `index.html` gets the instance's
