@@ -70,6 +70,19 @@ export const passkey: Schema = obj({
   ...timestamps,
 });
 
+export const trustedDevice: Schema = obj({
+  object: lit("trusted_device"),
+  id: str(),
+  user_id: str(),
+  label: nullable(str({ description: "Browser and system taken from the user agent." })),
+  user_agent: nullable(str()),
+  ip_address: nullable(str()),
+  expires_at: int({ description: "Fixed at creation; using the device does not extend it." }),
+  last_used_at: nullable(int()),
+  revoked_at: nullable(int()),
+  ...timestamps,
+});
+
 export const user: Schema = obj({
   object: lit("user"),
   id: str(),
@@ -656,6 +669,7 @@ export const allSchemas: Record<string, Schema> = {
   PhoneNumber: phoneNumber,
   ExternalAccount: externalAccount,
   Passkey: passkey,
+  TrustedDevice: trustedDevice,
   User: user,
   Session: session,
   SignIn: signIn,

@@ -28,7 +28,8 @@ const DASHBOARD_FALLBACK = "GET /*";
 
 const isDocumentationRoute = (route: string): boolean => {
   const path = route.slice(route.indexOf(" ") + 1);
-  return path === "/docs" || path.startsWith("/docs/") || path === "/v1/openapi.json";
+  // The device verification page's own script and stylesheet are static assets of that page, not API operations.
+  return path === "/docs" || path.startsWith("/docs/") || path === "/v1/openapi.json" || path === "/oauth/device.js" || path === "/oauth/device.css";
 };
 
 async function boot() {

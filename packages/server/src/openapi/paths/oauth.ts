@@ -1,5 +1,5 @@
 /** OAuth 2.0 / OpenID Connect provider, discovery documents and application management. */
-import { arr, obj, opt, ref, str } from "../schema";
+import { arr, int, obj, opt, ref, str } from "../schema";
 import { backendListParams, idPath, op, queryParam, type DocumentedOperation } from "../operation";
 import * as body from "../requests";
 import { ok } from "./common";
@@ -103,6 +103,41 @@ export const oauthPaths: DocumentedOperation[] = [
     success: { status: 200, schema: ref("UserInfo") },
     errors: [401],
     errorShape: "oauth",
+  }),
+  op("post", "/oauth/device_authorization", "OAuth/OIDC", "startDeviceAuthorization", "Start a device authorization (RFC 8628)", {
+    security: "none",
+    description:
+      "For a CLI or TV: returns a `device_code` to poll the token endpoint with (`grant_type=urn:ietf:params:oauth:grant-type:device_code`) and a " +
+      "`user_code` to show. Confidential clients authenticate with their secret; public clients send `client_id` only. Disabled unless " +
+      "`oidcProvider.deviceAuthorizationEnabled` is on.",
+    body: { schema: obj({ client_id: str(), client_secret: opt(str()), scope: opt(str()) }), contentType: "application/x-www-form-urlencoded" },
+    success: {
+      status: 200,
+      schema: obj({
+        device_code: str(),
+        user_code: str({ example: "ABCD-EFGH" }),
+        verification_uri: str({ format: "uri" }),
+        verification_uri_complete: str({ format: "uri" }),
+        expires_in: int(),
+        interval: int(),
+      }),
+    },
+    errors: [401, 404, 429],
+    errorShape: "oauth",
+  }),
+  op("get", "/oauth/device", "OAuth/OIDC", "deviceVerificationPage", "Device verification page", {
+    security: "none",
+    description: "A server-rendered page where the user types the code shown on the device and approves it. It signs the user in through the application's own sign-in page when needed.",
+    parameters: [queryParam("user_code", str(), "Prefills the code box.")],
+    success: { status: 200, schema: str(), contentType: "text/html" },
+    errors: [404, 429],
+  }),
+  op("post", "/oauth/device", "OAuth/OIDC", "decideDeviceVerificationPage", "Submit the device verification form", {
+    security: "frontendOptional",
+    description: "Same-origin form post that approves or denies a code. Cross-site posts are refused.",
+    body: { schema: obj({ user_code: str(), action: { type: "string", enum: ["approve", "deny"] } }), contentType: "application/x-www-form-urlencoded" },
+    success: { status: 200, schema: str(), contentType: "text/html" },
+    errors: [403, 404, 429],
   }),
   op("post", "/oauth/revoke", "OAuth/OIDC", "revokeToken", "Revoke a token", {
     security: "none",

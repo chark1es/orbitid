@@ -333,6 +333,64 @@ export const frontendPaths: DocumentedOperation[] = [
     errors: [400, 403, 404, 429],
   }),
 
+  // trusted devices
+  op("get", "/v1/client/me/trusted_devices", tagMe, "listMyTrustedDevices", "List trusted devices", {
+    security: "frontend",
+    description: "Browsers that may skip the second factor. Only the caller's own, unexpired and unrevoked devices are listed; the token itself is never returned.",
+    success: { status: 200, schema: obj({ response: arr(ref("TrustedDevice")) }) },
+    errors: [403],
+  }),
+  op("delete", "/v1/client/me/trusted_devices/{id}", tagMe, "revokeMyTrustedDevice", "Revoke a trusted device", {
+    security: "frontend",
+    description: "The browser must complete its second factor again. A device that belongs to someone else answers 404.",
+    parameters: [pathParam("id", "Trusted device id (`tdev_…`).")],
+    success: { status: 200, schema: obj({ response: ref("TrustedDevice") }) },
+    errors: [403],
+  }),
+  op("get", "/v1/client/handshake", "Sessions", "handshake", "Refresh a session token during a page navigation", {
+    security: "none",
+    description:
+      "Used by the Next.js middleware. When a hard navigation arrives with an expired `__session` cookie but a live `__client` cookie, " +
+      "the app redirects the browser here with `redirect_url`. The server answers `302` to `redirect_url` with `__orbit_handshake=<session token>`, " +
+      "or `__orbit_handshake=signed_out` when there is no active session. `redirect_url` must be an allowed origin. The response is not cacheable " +
+      "and sends no referrer. See docs/HANDSHAKE.md.",
+    parameters: [queryParam("redirect_url", str({ description: "Absolute http(s) URL to return to." }), "Where to send the browser next.")],
+    success: { status: 302, description: "Redirect back to the app.", headers: { Location: { type: "string", description: "`redirect_url` with the `__orbit_handshake` parameter." } } },
+    errors: [429],
+  }),
+  op("get", "/v1/client/oauth/device", tagMe, "getDeviceAuthorization", "Look up a device code", {
+    security: "frontend",
+    description: "Shows the application and scopes behind a user code, so the signed-in user can confirm before approving. Only available when device authorization is enabled. Each lookup counts against a small per-code and per-address attempt budget.",
+    parameters: [queryParam("user_code", str({ description: "The code shown on the device, for example `ABCD-EFGH`." }), "The user code.")],
+    success: {
+      status: 200,
+      schema: obj({
+        user_code: str(),
+        status: { type: "string", enum: ["pending", "approved", "denied", "consumed"] },
+        expires_at: int(),
+        client: obj({ id: str(), client_id: str(), name: str(), public: { type: "boolean" } }),
+        scopes: arr(obj({ scope: str(), description: str() })),
+      }),
+    },
+    errors: [403, 404, 422, 429],
+  }),
+  op("post", "/v1/client/oauth/device/approve", tagMe, "decideDeviceAuthorization", "Approve or deny a device code", {
+    security: "frontend",
+    description: "The signed-in user approves or denies the device that showed `user_code`. A code that expired answers 410; one already decided answers 409.",
+    body: { schema: obj({ user_code: str(), action: { type: "string", enum: ["approve", "deny"] } }) },
+    success: {
+      status: 200,
+      schema: obj({
+        object: { const: "oauth_device_authorization" },
+        user_code: str(),
+        status: { type: "string", enum: ["approved", "denied"] },
+        client: obj({ id: str(), client_id: str(), name: str() }),
+        scopes: arr(str()),
+      }),
+    },
+    errors: [403, 404, 409, 422, 429],
+  }),
+
   // passkeys
   op("get", "/v1/client/me/passkeys", tagMe, "listMyPasskeys", "List passkeys", {
     security: "frontend",

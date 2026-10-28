@@ -3212,6 +3212,408 @@
         }
       }
     },
+    "/v1/client/me/trusted_devices": {
+      "get": {
+        "tags": [
+          "Users (frontend)"
+        ],
+        "summary": "List trusted devices",
+        "operationId": "listMyTrustedDevices",
+        "description": "Browsers that may skip the second factor. Only the caller's own, unexpired and unrevoked devices are listed; the token itself is never returned.",
+        "security": [
+          {
+            "ClientCookie": []
+          },
+          {
+            "SessionToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "response": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TrustedDevice"
+                      }
+                    }
+                  },
+                  "required": [
+                    "response"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/v1/client/me/trusted_devices/{id}": {
+      "delete": {
+        "tags": [
+          "Users (frontend)"
+        ],
+        "summary": "Revoke a trusted device",
+        "operationId": "revokeMyTrustedDevice",
+        "description": "The browser must complete its second factor again. A device that belongs to someone else answers 404.",
+        "security": [
+          {
+            "ClientCookie": []
+          },
+          {
+            "SessionToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Trusted device id (`tdev_…`).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "response": {
+                      "$ref": "#/components/schemas/TrustedDevice"
+                    }
+                  },
+                  "required": [
+                    "response"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/client/handshake": {
+      "get": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Refresh a session token during a page navigation",
+        "operationId": "handshake",
+        "description": "Used by the Next.js middleware. When a hard navigation arrives with an expired `__session` cookie but a live `__client` cookie, the app redirects the browser here with `redirect_url`. The server answers `302` to `redirect_url` with `__orbit_handshake=<session token>`, or `__orbit_handshake=signed_out` when there is no active session. `redirect_url` must be an allowed origin. The response is not cacheable and sends no referrer. See docs/HANDSHAKE.md.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "redirect_url",
+            "in": "query",
+            "required": false,
+            "description": "Where to send the browser next.",
+            "schema": {
+              "type": "string",
+              "description": "Absolute http(s) URL to return to."
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect back to the app.",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string",
+                  "description": "`redirect_url` with the `__orbit_handshake` parameter."
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/v1/client/oauth/device": {
+      "get": {
+        "tags": [
+          "Users (frontend)"
+        ],
+        "summary": "Look up a device code",
+        "operationId": "getDeviceAuthorization",
+        "description": "Shows the application and scopes behind a user code, so the signed-in user can confirm before approving. Only available when device authorization is enabled. Each lookup counts against a small per-code and per-address attempt budget.",
+        "security": [
+          {
+            "ClientCookie": []
+          },
+          {
+            "SessionToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_code",
+            "in": "query",
+            "required": false,
+            "description": "The user code.",
+            "schema": {
+              "type": "string",
+              "description": "The code shown on the device, for example `ABCD-EFGH`."
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user_code": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "approved",
+                        "denied",
+                        "consumed"
+                      ]
+                    },
+                    "expires_at": {
+                      "type": "integer"
+                    },
+                    "client": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "client_id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "public": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "client_id",
+                        "name",
+                        "public"
+                      ]
+                    },
+                    "scopes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "scope": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "scope",
+                          "description"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "user_code",
+                    "status",
+                    "expires_at",
+                    "client",
+                    "scopes"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/v1/client/oauth/device/approve": {
+      "post": {
+        "tags": [
+          "Users (frontend)"
+        ],
+        "summary": "Approve or deny a device code",
+        "operationId": "decideDeviceAuthorization",
+        "description": "The signed-in user approves or denies the device that showed `user_code`. A code that expired answers 410; one already decided answers 409.",
+        "security": [
+          {
+            "ClientCookie": []
+          },
+          {
+            "SessionToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "user_code": {
+                    "type": "string"
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "approve",
+                      "deny"
+                    ]
+                  }
+                },
+                "required": [
+                  "user_code",
+                  "action"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "const": "oauth_device_authorization"
+                    },
+                    "user_code": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "approved",
+                        "denied"
+                      ]
+                    },
+                    "client": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "client_id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "client_id",
+                        "name"
+                      ]
+                    },
+                    "scopes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "object",
+                    "user_code",
+                    "status",
+                    "client",
+                    "scopes"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
     "/v1/client/me/passkeys": {
       "get": {
         "tags": [
@@ -11594,6 +11996,111 @@
         }
       }
     },
+    "/v1/users/{id}/trusted_devices": {
+      "get": {
+        "tags": [
+          "Users (backend)"
+        ],
+        "summary": "List a user's trusted devices",
+        "operationId": "listUserTrustedDevices",
+        "security": [
+          {
+            "SecretKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "User id (`user_…`).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TrustedDevice"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/users/{id}/trusted_devices/{device_id}": {
+      "delete": {
+        "tags": [
+          "Users (backend)"
+        ],
+        "summary": "Revoke a user's trusted device",
+        "operationId": "revokeUserTrustedDevice",
+        "description": "The browser must complete its second factor on its next sign-in.",
+        "security": [
+          {
+            "SecretKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "User id (`user_…`).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "device_id",
+            "in": "path",
+            "required": true,
+            "description": "Trusted device id (`tdev_…`).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrustedDevice"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
     "/v1/users/{id}/mfa": {
       "delete": {
         "tags": [
@@ -14679,6 +15186,81 @@
           },
           "422": {
             "$ref": "#/components/responses/UnprocessableEntity"
+          }
+        }
+      }
+    },
+    "/v1/instance/email_test": {
+      "post": {
+        "tags": [
+          "Instance"
+        ],
+        "summary": "Send a test email and report the provider used",
+        "operationId": "testEmailDelivery",
+        "description": "Sends a message through the resolved transport (Resend, SMTP or the server log) and reports which one it used. A delivery failure answers 502 with a message that never contains the provider key. Rate limited per address and overall.",
+        "security": [
+          {
+            "SecretKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "to": {
+                    "type": "string",
+                    "description": "Recipient address."
+                  }
+                },
+                "required": [
+                  "to"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "provider": {
+                      "type": "string",
+                      "enum": [
+                        "resend",
+                        "smtp",
+                        "console"
+                      ]
+                    },
+                    "ok": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "provider",
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       }
@@ -18229,6 +18811,212 @@
         }
       }
     },
+    "/oauth/device_authorization": {
+      "post": {
+        "tags": [
+          "OAuth/OIDC"
+        ],
+        "summary": "Start a device authorization (RFC 8628)",
+        "operationId": "startDeviceAuthorization",
+        "description": "For a CLI or TV: returns a `device_code` to poll the token endpoint with (`grant_type=urn:ietf:params:oauth:grant-type:device_code`) and a `user_code` to show. Confidential clients authenticate with their secret; public clients send `client_id` only. Disabled unless `oidcProvider.deviceAuthorizationEnabled` is on.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "client_id": {
+                    "type": "string"
+                  },
+                  "client_secret": {
+                    "type": "string"
+                  },
+                  "scope": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "client_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "device_code": {
+                      "type": "string"
+                    },
+                    "user_code": {
+                      "type": "string",
+                      "example": "ABCD-EFGH"
+                    },
+                    "verification_uri": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "verification_uri_complete": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "expires_in": {
+                      "type": "integer"
+                    },
+                    "interval": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "device_code",
+                    "user_code",
+                    "verification_uri",
+                    "verification_uri_complete",
+                    "expires_in",
+                    "interval"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/OAuthBadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/OAuthUnauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/oauth/device": {
+      "get": {
+        "tags": [
+          "OAuth/OIDC"
+        ],
+        "summary": "Device verification page",
+        "operationId": "deviceVerificationPage",
+        "description": "A server-rendered page where the user types the code shown on the device and approves it. It signs the user in through the application's own sign-in page when needed.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "user_code",
+            "in": "query",
+            "required": false,
+            "description": "Prefills the code box.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "OAuth/OIDC"
+        ],
+        "summary": "Submit the device verification form",
+        "operationId": "decideDeviceVerificationPage",
+        "description": "Same-origin form post that approves or denies a code. Cross-site posts are refused.",
+        "security": [
+          {
+            "ClientCookie": []
+          },
+          {
+            "SessionToken": []
+          },
+          {}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "user_code": {
+                    "type": "string"
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "approve",
+                      "deny"
+                    ]
+                  }
+                },
+                "required": [
+                  "user_code",
+                  "action"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
     "/oauth/revoke": {
       "post": {
         "tags": [
@@ -19749,6 +20537,76 @@
           "name",
           "verification",
           "last_used_at",
+          "created_at",
+          "updated_at"
+        ]
+      },
+      "TrustedDevice": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "const": "trusted_device"
+          },
+          "id": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Browser and system taken from the user agent."
+          },
+          "user_agent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ip_address": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expires_at": {
+            "type": "integer",
+            "description": "Fixed at creation; using the device does not extend it."
+          },
+          "last_used_at": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "revoked_at": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "integer",
+            "description": "Epoch milliseconds."
+          },
+          "updated_at": {
+            "type": "integer",
+            "description": "Epoch milliseconds."
+          }
+        },
+        "required": [
+          "object",
+          "id",
+          "user_id",
+          "label",
+          "user_agent",
+          "ip_address",
+          "expires_at",
+          "last_used_at",
+          "revoked_at",
           "created_at",
           "updated_at"
         ]

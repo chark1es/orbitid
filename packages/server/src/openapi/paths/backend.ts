@@ -133,6 +133,19 @@ export const backendPaths: DocumentedOperation[] = [
     success: { status: 200, schema: obj({ object: { const: "user" }, id: str(), verified: { type: "boolean" } }) },
     errors: [404, 422, 429],
   }),
+  op("get", "/v1/users/{id}/trusted_devices", "Users (backend)", "listUserTrustedDevices", "List a user's trusted devices", {
+    security: "backend",
+    parameters: [userId],
+    ...ok(arr(ref("TrustedDevice"))),
+    errors: [404],
+  }),
+  op("delete", "/v1/users/{id}/trusted_devices/{device_id}", "Users (backend)", "revokeUserTrustedDevice", "Revoke a user's trusted device", {
+    security: "backend",
+    description: "The browser must complete its second factor on its next sign-in.",
+    parameters: [userId, pathParam("device_id", "Trusted device id (`tdev_…`).")],
+    ...ok(ref("TrustedDevice")),
+    errors: [404],
+  }),
   op("delete", "/v1/users/{id}/mfa", "Users (backend)", "resetUserMfa", "Reset a user's MFA", {
     security: "backend",
     description: "Disables the authenticator app and deletes backup codes, so the user can enrol again.",
@@ -508,6 +521,15 @@ export const backendPaths: DocumentedOperation[] = [
     body: { schema: body.testEmail },
     success: { status: 200, schema: obj({ status: { const: "ok" }, to: str() }) },
     errors: [422],
+  }),
+  op("post", "/v1/instance/email_test", "Instance", "testEmailDelivery", "Send a test email and report the provider used", {
+    security: "backend",
+    description:
+      "Sends a message through the resolved transport (Resend, SMTP or the server log) and reports which one it used. " +
+      "A delivery failure answers 502 with a message that never contains the provider key. Rate limited per address and overall.",
+    body: { schema: obj({ to: str({ description: "Recipient address." }) }) },
+    success: { status: 200, schema: obj({ provider: { type: "string", enum: ["resend", "smtp", "console"] }, ok: { const: true } }) },
+    errors: [422, 429],
   }),
   op("post", "/v1/instance/signing_keys/rotate", "Instance", "rotateSigningKey", "Rotate the session signing key", {
     security: "backend",
