@@ -20,7 +20,7 @@ OrbitID is open-source authentication and user management that a developer runs 
 Success is a developer who starts the container, opens the dashboard, copies two keys into an app, and has working sign-in within minutes, with the data in a database they control.
 
 ## Positioning
-The user's database, the user's server. There is no hosted service, no vendor account and no billing. Nothing phones home. The code is open source (MIT). It provides the pieces a hosted authentication product provides, but the data never leaves the operator's infrastructure.
+The user's database, the user's server. There is no hosted service, no vendor account and no billing. Nothing phones home. The code is open source (MIT). It provides the pieces a hosted authentication product provides, but user data stays in the operator's database; the only outbound calls are to integrations the operator turns on.
 
 ## Operating Context
 - Self-hosted: one container (or a plain `bun` process) plus Postgres. The dashboard is served by the server itself.

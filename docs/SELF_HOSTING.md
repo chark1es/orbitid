@@ -1,6 +1,6 @@
 # Self-hosting OrbitID
 
-OrbitID is one server process plus a database. The server exposes the API your apps call, signs session tokens, and serves the admin dashboard at its root URL. Nothing else runs, and nothing contacts a hosted service.
+OrbitID is one server process plus a database. The server exposes the API your apps call, signs session tokens, and serves the admin dashboard at its root URL. Nothing else runs, and there is no hosted service behind it. The only outbound calls are to integrations you turn on: email and SMS providers, social sign-in, CAPTCHA and the optional breached-password check.
 
 ## What you need
 
@@ -62,7 +62,7 @@ Only infrastructure comes from environment variables. Everything about how sign-
 
 ## Moving from SQLite to Postgres
 
-The two databases use the same tables and the same migrations history of their own. There is no automatic data copy. For an instance with real users, export users with the Backend API (`GET /v1/users`) and create them on the new instance with `POST /v1/users`, which accepts password digests.
+The two databases use the same tables, each with its own migration history. There is no automatic data copy. For a small instance you can re-create users on the new one with the Backend API (`GET /v1/users`, then `POST /v1/users`), but that carries over profile data only: the export does not include password digests, TOTP secrets, backup codes or passkeys, and user ids change. Plan on users resetting their passwords and enrolling second factors again, or start on Postgres from the beginning.
 
 ## Upgrading
 
@@ -70,7 +70,7 @@ Pull the new image or code and restart. The server applies pending migrations be
 
 ## Backups
 
-Everything lives in the database, plus uploaded profile images and organization logos under `ORBITID_DATA_DIR/uploads`. Back up both.
+Everything lives in the database, plus uploaded profile images and organization logos under `ORBITID_DATA_DIR/uploads`. Back up both, and keep a copy of `ORBITID_ENCRYPTION_KEY` (and `ORBITID_SECRET_KEY` if you set one) somewhere safe. A restore with a different encryption key cannot read the stored signing keys, TOTP secrets or OAuth tokens. A development instance without a key also needs `ORBITID_DATA_DIR/keys.json`.
 
 ## Behind a reverse proxy
 

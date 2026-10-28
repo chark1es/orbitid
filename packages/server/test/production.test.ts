@@ -7,6 +7,11 @@ describe("production defaults", () => {
     expect(() => loadEnv({ nodeEnv: "production" })).toThrow(/ORBITID_ENCRYPTION_KEY/);
   });
 
+  it("refuses an encryption key shorter than 32 characters", () => {
+    expect(() => loadEnv({ nodeEnv: "production", encryptionKey: "short" })).toThrow(/at least 32/);
+    expect(() => loadEnv({ nodeEnv: "production", encryptionKey: "k".repeat(32) })).not.toThrow();
+  });
+
   it("derives the same secret key from the encryption key on every boot", async () => {
     const options = { databaseUrl: ":memory:", nodeEnv: "production", encryptionKey: "k".repeat(40), baseUrl: "https://auth.example.com" } as const;
     const [a, b] = [await createContext(options), await createContext(options)];

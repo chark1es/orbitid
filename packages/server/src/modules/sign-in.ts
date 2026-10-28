@@ -23,7 +23,7 @@ import { assertIdentifiersAllowed } from "../services/restrictions";
 import { isProviderEnabled, providerKeyFromStrategy } from "../services/oauth-providers";
 import { clientAzp, getOrCreateClient, serializeClient } from "./auth/client-auth";
 import {
-  afterFirstFactor, asSignInState, assertSignInAllowed, buildSignInJSON, completeSignIn,
+  afterFirstFactor, asSignInState, assertSignInAllowed, buildSignInJSON, completeSignIn, computeFirstFactors,
   enterpriseConnectionForEmail, latestTransferableSignIn, resolveTicket, saveSignInState, verifiedEmailOf, verifiedPhoneOf,
 } from "./auth/signin-core";
 import type { FactorState, SignInState } from "./auth/signin-core";
@@ -119,8 +119,18 @@ export default function routes(ctx: AppContext) {
     if (session) await sendNewSignInEmail(ctx, user, session);
   }
 
+  /** A first factor the instance has switched off (or the user cannot use) is refused at the API, not just hidden in the UI. */
+  async function assertFirstFactorEnabled(user: UserRow, strategy: string) {
+    if (!["password", "email_code", "email_link", "phone_code"].includes(strategy)) return;
+    const allowed = await computeFirstFactors(ctx, user);
+    if (!allowed.some((factor) => factor.strategy === strategy)) {
+      throw new OrbitError(400, ErrorCodes.strategy_for_user_invalid, `Sign-in with "${strategy}" is not enabled for this account`, { param_name: "strategy" });
+    }
+  }
+
   async function attemptPassword(c: Context, clientId: string, row: SignInRow, password: string | undefined) {
     const user = await userForRow(row);
+    await assertFirstFactorEnabled(user, "password");
     if (!user.passwordHash) throw new OrbitError(400, ErrorCodes.strategy_for_user_invalid, "This account does not use a password", { param_name: "strategy" });
     if (!password) throw new OrbitError(422, ErrorCodes.form_param_missing, "password is missing", { param_name: "password" });
     if (!(await verifyPassword(user.passwordHash, password))) {
@@ -313,7 +323,10 @@ export default function routes(ctx: AppContext) {
     const strategy = body.strategy ?? state.first?.strategy ?? "password";
     const user = row.userId ? await getUserById(ctx, row.userId) : undefined;
     if (!user && strategy !== "passkey") throw new OrbitError(400, ErrorCodes.client_state_invalid, "Sign-in has no user");
-    if (user) assertSignInAllowed(user);
+    if (user) {
+      assertSignInAllowed(user);
+      await assertFirstFactorEnabled(user, strategy);
+    }
     const email = body.email_address_id
       ? first(await ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.id, body.email_address_id)))
       : user ? await verifiedEmailOf(ctx, user) : undefined;
@@ -419,6 +432,7 @@ export default function routes(ctx: AppContext) {
     if (strategy !== "passkey") {
       if (!existingUser) throw new OrbitError(400, ErrorCodes.client_state_invalid, "Sign-in has no user");
       assertSignInAllowed(existingUser);
+      await assertFirstFactorEnabled(existingUser, strategy);
     }
 
     if (strategy === "password") return attemptPassword(c, client.id, row, body.password);

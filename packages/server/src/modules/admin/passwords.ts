@@ -1,48 +1,16 @@
 // Password hashing for the Backend API (argon2id at rest, verification of imported digests).
-import { createRequire } from "node:module";
-import { scryptSync, timingSafeEqual } from "node:crypto";
-import { hash as argonHash, verify as argonVerify } from "@node-rs/argon2";
+import { hash as argonHash } from "@node-rs/argon2";
 import { ErrorCodes, OrbitError, type InstanceSettings } from "@orbitid/shared";
+import { optionalBcrypt, verifyPassword } from "../../services/passwords";
+
+export { verifyPassword };
 
 export const PASSWORD_HASHERS = ["argon2", "bcrypt", "scrypt"] as const;
 export type PasswordHasher = (typeof PASSWORD_HASHERS)[number];
 
-/** bcrypt is optional (only needed to verify digests imported from bcrypt-based systems). */
-function optionalBcrypt(): { compare?: (plain: string, hash: string) => Promise<boolean> } | null {
-  const require = createRequire(import.meta.url);
-  for (const id of ["bcryptjs", "bcrypt"]) {
-    try {
-      return require(id) as { compare?: (plain: string, hash: string) => Promise<boolean> };
-    } catch {
-      // not installed — try the next module id
-    }
-  }
-  return null;
-}
-
-/** argon2id with @node-rs/argon2 defaults (m=19456, t=2, p=1) — the same PHC string other workers' helpers produce. */
+/** argon2id with @node-rs/argon2 defaults (m=19456, t=2, p=1). */
 export function hashPassword(password: string): Promise<string> {
   return argonHash(password);
-}
-
-/** `scrypt$<N>$<r>$<p>$<saltBase64>$<keyBase64>` */
-function verifyScrypt(hash: string, password: string): boolean {
-  const [scheme, n, r, p, salt, digest] = hash.split("$");
-  if (scheme !== "scrypt" || !n || !r || !p || !salt || !digest) return false;
-  const expected = Buffer.from(digest, "base64");
-  const actual = scryptSync(password, Buffer.from(salt, "base64"), expected.length, { N: Number(n), r: Number(r), p: Number(p), maxmem: 512 * 1024 * 1024 });
-  return actual.length === expected.length && timingSafeEqual(actual, expected);
-}
-
-export async function verifyPassword(hash: string | null | undefined, password: string): Promise<boolean> {
-  if (!hash) return false;
-  if (hash.startsWith("$argon2")) return argonVerify(hash, password);
-  if (/^\$2[abxy]\$/.test(hash)) {
-    const bcrypt = optionalBcrypt();
-    return bcrypt?.compare ? await bcrypt.compare(password, hash) : false;
-  }
-  if (hash.startsWith("scrypt$")) return verifyScrypt(hash, password);
-  return false;
 }
 
 /** Rejects a `password_digest` whose hasher cannot be verified in this deployment. */

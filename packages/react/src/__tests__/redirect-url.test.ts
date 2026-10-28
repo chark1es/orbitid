@@ -28,5 +28,9 @@ describe("redirectUrlFromQuery", () => {
     expect(redirectUrlFromQuery()).toBeUndefined();
     visit("?redirect_url=%2F%2Fevil.example%2Fphish");
     expect(redirectUrlFromQuery()).toBeUndefined();
+    visit(`?redirect_url=${encodeURIComponent(`${window.location.origin}//evil.example/phish`)}`);
+    expect(redirectUrlFromQuery()).toBeUndefined();
+    visit("?redirect_url=%2F%5Cevil.example");
+    expect(redirectUrlFromQuery()).toBeUndefined();
   });
 });

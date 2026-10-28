@@ -2,7 +2,7 @@
 
 # OrbitID
 
-Open-source authentication and user management that runs on your own Postgres. One server, an admin dashboard, and SDKs for the browser, React, Next.js and backends. Sign-in, sessions, organizations, roles, API keys and webhooks are included. Nothing is hosted, nothing is billed, and nothing leaves your infrastructure.
+Open-source authentication and user management that runs on your own Postgres. One server, an admin dashboard, and SDKs for the browser, React, Next.js and backends. Sign-in, sessions, organizations, roles, API keys and webhooks are included. There is no hosted service and nothing is billed. User data stays in your database; the only outbound calls are to integrations you turn on, such as email, social sign-in or the breached-password check.
 
 You write `useUser`, `useAuth`, `<SignIn />`, `<UserButton />`, `auth()` and `has({ permission })` in your app, and the data lands in a database you control.
 

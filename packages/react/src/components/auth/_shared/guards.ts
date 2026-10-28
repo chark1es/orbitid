@@ -23,7 +23,9 @@ export function redirectUrlFromQuery(): string | undefined {
   try {
     const url = new URL(raw, window.location.origin);
     if (url.origin !== window.location.origin) return undefined;
-    return `${url.pathname}${url.search}${url.hash}`;
+    const target = `${url.pathname}${url.search}${url.hash}`;
+    // `//host` and `/\\host` would be read as another origin once handed to the router.
+    return /^\/[\\/]/.test(target) ? undefined : target;
   } catch {
     return undefined;
   }
