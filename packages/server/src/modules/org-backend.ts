@@ -30,6 +30,7 @@ import { deleteLogoFile, readLogoPayload, storeLogo } from "./orgs/assets";
 import {
   effectiveInvitationStatus, serializeMembershipRequest, serializeOrganizationDomain, serializeOrganizationInvitation,
 } from "./orgs/serializers";
+import { first } from "../lib/db";
 
 const metadata = z.record(z.string(), z.unknown());
 
@@ -45,10 +46,10 @@ export default function routes(ctx: AppContext) {
   const app = new Hono();
 
   // ─────────── organizations ───────────
-  app.get("/organizations", (c) => {
+  app.get("/organizations", async (c) => {
     const params = listParams(c);
     const ids = [...(c.req.queries("organization_ids") ?? []), ...(c.req.queries("organization_ids[]") ?? [])];
-    let rows = ctx.db.select().from(s.organizations).all();
+    let rows = (await ctx.db.select().from(s.organizations));
     if (ids.length) rows = rows.filter((o) => ids.includes(o.id));
     if (params.query) {
       const q = params.query;
@@ -59,7 +60,7 @@ export default function routes(ctx: AppContext) {
     });
     const { items, total } = page(sorted, params);
     const counts = c.req.query("include_members_count") !== "false";
-    return listResponse(c, items.map((o) => serializeOrganization(ctx, o, { backend: true, counts })), total);
+    return listResponse(c, (await Promise.all(items.map((o) => serializeOrganization(ctx, o, { backend: true, counts })))), total);
   });
 
   app.post("/organizations", async (c) => {
@@ -72,37 +73,37 @@ export default function routes(ctx: AppContext) {
       public_metadata: metadata.optional(),
       private_metadata: metadata.optional(),
     }));
-    if (body.created_by && !ctx.db.select().from(s.users).where(eq(s.users.id, body.created_by)).get()) {
+    if (body.created_by && !first(await ctx.db.select().from(s.users).where(eq(s.users.id, body.created_by)))) {
       throw new OrbitError(404, ErrorCodes.resource_not_found, "User not found", { param_name: "created_by" });
     }
     const settings = ctx.settings.get();
     const now = Date.now();
     const id = newId(ID_PREFIX.org);
-    ctx.db.insert(s.organizations).values({
-      id,
-      name: body.name,
-      slug: resolveSlug(ctx, body.slug, body.name),
-      maxAllowedMemberships: body.max_allowed_memberships ?? settings.organizations.maxAllowedMemberships,
-      adminDeleteEnabled: body.admin_delete_enabled ?? settings.organizations.adminDeleteEnabled,
-      publicMetadata: body.public_metadata ?? {},
-      privateMetadata: body.private_metadata ?? {},
-      createdBy: body.created_by ?? null,
-      createdAt: now,
-      updatedAt: now,
-    }).run();
-    const org = ctx.db.select().from(s.organizations).where(eq(s.organizations.id, id)).get()!;
-    if (body.created_by) await addMembership(ctx, { organizationId: org.id, userId: body.created_by, roleKey: creatorRoleKey(ctx) });
-    await emitEvent(ctx, "organization.created", orgEventPayload(ctx, org));
-    return c.json(serializeOrganization(ctx, org, { backend: true }));
+    await ctx.db.insert(s.organizations).values({
+                  id,
+                  name: body.name,
+                  slug: await resolveSlug(ctx, body.slug, body.name),
+                  maxAllowedMemberships: body.max_allowed_memberships ?? settings.organizations.maxAllowedMemberships,
+                  adminDeleteEnabled: body.admin_delete_enabled ?? settings.organizations.adminDeleteEnabled,
+                  publicMetadata: body.public_metadata ?? {},
+                  privateMetadata: body.private_metadata ?? {},
+                  createdBy: body.created_by ?? null,
+                  createdAt: now,
+                  updatedAt: now,
+                });
+    const org = first(await ctx.db.select().from(s.organizations).where(eq(s.organizations.id, id)))!;
+    if (body.created_by) await addMembership(ctx, { organizationId: org.id, userId: body.created_by, roleKey: await creatorRoleKey(ctx) });
+    await emitEvent(ctx, "organization.created", await orgEventPayload(ctx, org));
+    return c.json(await serializeOrganization(ctx, org, { backend: true }));
   });
 
-  app.get("/organizations/:id", (c) => {
-    const org = requireOrganization(ctx, c.req.param("id"));
-    return c.json(serializeOrganization(ctx, org, { backend: true }));
+  app.get("/organizations/:id", async (c) => {
+    const org = await requireOrganization(ctx, c.req.param("id"));
+    return c.json(await serializeOrganization(ctx, org, { backend: true }));
   });
 
   app.patch("/organizations/:id", async (c) => {
-    const org = requireOrganization(ctx, c.req.param("id"));
+    const org = await requireOrganization(ctx, c.req.param("id"));
     const body = await parseBody(c, z.object({
       name: z.string().trim().min(1).max(256).optional(),
       slug: z.string().trim().min(1).max(50).optional(),
@@ -113,69 +114,69 @@ export default function routes(ctx: AppContext) {
     }));
     const patch: Partial<typeof s.organizations.$inferInsert> = { updatedAt: Date.now() };
     if (body.name !== undefined) patch.name = body.name;
-    if (body.slug !== undefined) patch.slug = resolveSlug(ctx, body.slug, body.name ?? org.name, org.id);
+    if (body.slug !== undefined) patch.slug = await resolveSlug(ctx, body.slug, body.name ?? org.name, org.id);
     if (body.max_allowed_memberships !== undefined) patch.maxAllowedMemberships = body.max_allowed_memberships;
     if (body.admin_delete_enabled !== undefined) patch.adminDeleteEnabled = body.admin_delete_enabled;
     if (body.public_metadata !== undefined) patch.publicMetadata = mergeMetadata(org.publicMetadata, body.public_metadata);
     if (body.private_metadata !== undefined) patch.privateMetadata = mergeMetadata(org.privateMetadata, body.private_metadata);
-    ctx.db.update(s.organizations).set(patch).where(eq(s.organizations.id, org.id)).run();
-    const updated = ctx.db.select().from(s.organizations).where(eq(s.organizations.id, org.id)).get()!;
-    await emitEvent(ctx, "organization.updated", orgEventPayload(ctx, updated));
-    return c.json(serializeOrganization(ctx, updated, { backend: true }));
+    await ctx.db.update(s.organizations).set(patch).where(eq(s.organizations.id, org.id));
+    const updated = first(await ctx.db.select().from(s.organizations).where(eq(s.organizations.id, org.id)))!;
+    await emitEvent(ctx, "organization.updated", await orgEventPayload(ctx, updated));
+    return c.json(await serializeOrganization(ctx, updated, { backend: true }));
   });
 
   app.patch("/organizations/:id/metadata", async (c) => {
-    const org = requireOrganization(ctx, c.req.param("id"));
+    const org = await requireOrganization(ctx, c.req.param("id"));
     const body = await parseBody(c, z.object({ public_metadata: metadata.optional(), private_metadata: metadata.optional() }));
-    ctx.db.update(s.organizations).set({
-      publicMetadata: mergeMetadata(org.publicMetadata, body.public_metadata),
-      privateMetadata: mergeMetadata(org.privateMetadata, body.private_metadata),
-      updatedAt: Date.now(),
-    }).where(eq(s.organizations.id, org.id)).run();
-    const updated = ctx.db.select().from(s.organizations).where(eq(s.organizations.id, org.id)).get()!;
-    await emitEvent(ctx, "organization.updated", orgEventPayload(ctx, updated));
-    return c.json(serializeOrganization(ctx, updated, { backend: true }));
+    await ctx.db.update(s.organizations).set({
+                  publicMetadata: mergeMetadata(org.publicMetadata, body.public_metadata),
+                  privateMetadata: mergeMetadata(org.privateMetadata, body.private_metadata),
+                  updatedAt: Date.now(),
+                }).where(eq(s.organizations.id, org.id));
+    const updated = first(await ctx.db.select().from(s.organizations).where(eq(s.organizations.id, org.id)))!;
+    await emitEvent(ctx, "organization.updated", await orgEventPayload(ctx, updated));
+    return c.json(await serializeOrganization(ctx, updated, { backend: true }));
   });
 
   app.delete("/organizations/:id", async (c) => {
-    const org = requireOrganization(ctx, c.req.param("id"));
-    const payload = orgEventPayload(ctx, org);
+    const org = await requireOrganization(ctx, c.req.param("id"));
+    const payload = await orgEventPayload(ctx, org);
     deleteLogoFile(ctx, org.imageUrl);
-    ctx.db.delete(s.organizations).where(eq(s.organizations.id, org.id)).run();
+    await ctx.db.delete(s.organizations).where(eq(s.organizations.id, org.id));
     await emitEvent(ctx, "organization.deleted", payload);
     return c.json(deletedObject("organization", org.id));
   });
 
   app.put("/organizations/:id/logo", async (c) => {
-    const org = requireOrganization(ctx, c.req.param("id"));
+    const org = await requireOrganization(ctx, c.req.param("id"));
     const { data, mime } = await readLogoPayload(c);
     const file = storeLogo(ctx, org.id, data, mime);
     deleteLogoFile(ctx, org.imageUrl);
-    ctx.db.update(s.organizations).set({ imageUrl: `${ctx.env.baseUrl}/v1/client/organization_logos/${file}`, hasImage: true, updatedAt: Date.now() }).where(eq(s.organizations.id, org.id)).run();
-    const updated = ctx.db.select().from(s.organizations).where(eq(s.organizations.id, org.id)).get()!;
-    await emitEvent(ctx, "organization.updated", orgEventPayload(ctx, updated));
-    return c.json(serializeOrganization(ctx, updated, { backend: true }));
+    await ctx.db.update(s.organizations).set({ imageUrl: `${ctx.env.baseUrl}/v1/client/organization_logos/${file}`, hasImage: true, updatedAt: Date.now() }).where(eq(s.organizations.id, org.id));
+    const updated = first(await ctx.db.select().from(s.organizations).where(eq(s.organizations.id, org.id)))!;
+    await emitEvent(ctx, "organization.updated", await orgEventPayload(ctx, updated));
+    return c.json(await serializeOrganization(ctx, updated, { backend: true }));
   });
 
   app.delete("/organizations/:id/logo", async (c) => {
-    const org = requireOrganization(ctx, c.req.param("id"));
+    const org = await requireOrganization(ctx, c.req.param("id"));
     deleteLogoFile(ctx, org.imageUrl);
-    ctx.db.update(s.organizations).set({ imageUrl: null, hasImage: false, updatedAt: Date.now() }).where(eq(s.organizations.id, org.id)).run();
-    const updated = ctx.db.select().from(s.organizations).where(eq(s.organizations.id, org.id)).get()!;
-    await emitEvent(ctx, "organization.updated", orgEventPayload(ctx, updated));
-    return c.json(serializeOrganization(ctx, updated, { backend: true }));
+    await ctx.db.update(s.organizations).set({ imageUrl: null, hasImage: false, updatedAt: Date.now() }).where(eq(s.organizations.id, org.id));
+    const updated = first(await ctx.db.select().from(s.organizations).where(eq(s.organizations.id, org.id)))!;
+    await emitEvent(ctx, "organization.updated", await orgEventPayload(ctx, updated));
+    return c.json(await serializeOrganization(ctx, updated, { backend: true }));
   });
 
   // ─────────── memberships ───────────
-  app.get("/organizations/:id/memberships", (c) => {
-    const org = requireOrganization(ctx, c.req.param("id"));
+  app.get("/organizations/:id/memberships", async (c) => {
+    const org = await requireOrganization(ctx, c.req.param("id"));
     const params = listParams(c);
     const role = c.req.query("role");
     const userIds = [...(c.req.queries("user_id") ?? []), ...(c.req.queries("user_id[]") ?? [])];
-    let rows = ctx.db.select().from(s.organizationMemberships).where(eq(s.organizationMemberships.organizationId, org.id)).all();
+    let rows = (await ctx.db.select().from(s.organizationMemberships).where(eq(s.organizationMemberships.organizationId, org.id)));
     if (userIds.length) rows = rows.filter((r) => userIds.includes(r.userId));
     if (role) rows = rows.filter((r) => r.roleKey === role);
-    let serialized = rows.map((row) => serializeMembership(ctx, row, { backend: true }));
+    let serialized = await Promise.all(rows.map((row) => serializeMembership(ctx, row, { backend: true })));
     if (params.query) {
       const q = params.query;
       serialized = serialized.filter((m) => [m.public_user_data.identifier, m.public_user_data.first_name, m.public_user_data.last_name, m.public_user_data.user_id, m.role, m.role_name]
@@ -189,26 +190,26 @@ export default function routes(ctx: AppContext) {
   });
 
   app.post("/organizations/:id/memberships", async (c) => {
-    const org = requireOrganization(ctx, c.req.param("id"));
+    const org = await requireOrganization(ctx, c.req.param("id"));
     const body = await parseBody(c, z.object({
       user_id: z.string().min(1),
       role: z.string().optional(),
       public_metadata: metadata.optional(),
       private_metadata: metadata.optional(),
     }));
-    const user = ctx.db.select().from(s.users).where(eq(s.users.id, body.user_id)).get();
+    const user = first(await ctx.db.select().from(s.users).where(eq(s.users.id, body.user_id)));
     if (!user) throw new OrbitError(404, ErrorCodes.resource_not_found, "User not found", { param_name: "user_id" });
-    if (findMembership(ctx, org.id, user.id)) throw new OrbitError(409, ErrorCodes.duplicate_record, "User is already a member of this organization");
-    const roleKey = body.role ?? defaultRoleKey(ctx);
-    if (!roleByKey(ctx, roleKey)) throw new OrbitError(422, ErrorCodes.org_role_not_found, `Role ${roleKey} does not exist`, { param_name: "role" });
-    assertOrganizationCapacity(ctx, org);
+    if (await findMembership(ctx, org.id, user.id)) throw new OrbitError(409, ErrorCodes.duplicate_record, "User is already a member of this organization");
+    const roleKey = body.role ?? await defaultRoleKey(ctx);
+    if (!await roleByKey(ctx, roleKey)) throw new OrbitError(422, ErrorCodes.org_role_not_found, `Role ${roleKey} does not exist`, { param_name: "role" });
+    await assertOrganizationCapacity(ctx, org);
     const membership = await addMembership(ctx, { organizationId: org.id, userId: user.id, roleKey, publicMetadata: body.public_metadata, privateMetadata: body.private_metadata });
-    return c.json(serializeMembership(ctx, membership, { backend: true }));
+    return c.json(await serializeMembership(ctx, membership, { backend: true }));
   });
 
   app.patch("/organizations/:id/memberships/:userId", async (c) => {
-    const org = requireOrganization(ctx, c.req.param("id"));
-    const membership = requireMembership(ctx, org, c.req.param("userId"));
+    const org = await requireOrganization(ctx, c.req.param("id"));
+    const membership = await requireMembership(ctx, org, c.req.param("userId"));
     const body = await parseBody(c, z.object({
       role: z.string().optional(),
       public_metadata: metadata.optional(),
@@ -216,54 +217,54 @@ export default function routes(ctx: AppContext) {
     }));
     const patch: Partial<typeof s.organizationMemberships.$inferInsert> = { updatedAt: Date.now() };
     if (body.role !== undefined && body.role !== membership.roleKey) {
-      const role = roleByKey(ctx, body.role);
+      const role = await roleByKey(ctx, body.role);
       if (!role) throw new OrbitError(422, ErrorCodes.org_role_not_found, `Role ${body.role} does not exist`, { param_name: "role" });
-      if (isLastAdmin(ctx, membership) && !isAdminRole(ctx, role.key)) {
+      if (await isLastAdmin(ctx, membership) && !await isAdminRole(ctx, role.key)) {
         throw new OrbitError(403, ErrorCodes.last_admin_cannot_leave, "The last admin of an organization cannot be demoted", { role: membership.roleKey });
       }
       patch.roleKey = role.key;
     }
     if (body.public_metadata !== undefined) patch.publicMetadata = mergeMetadata(membership.publicMetadata, body.public_metadata);
     if (body.private_metadata !== undefined) patch.privateMetadata = mergeMetadata(membership.privateMetadata, body.private_metadata);
-    ctx.db.update(s.organizationMemberships).set(patch).where(eq(s.organizationMemberships.id, membership.id)).run();
-    const updated = ctx.db.select().from(s.organizationMemberships).where(eq(s.organizationMemberships.id, membership.id)).get()!;
-    await emitEvent(ctx, "organizationMembership.updated", serializeMembership(ctx, updated, { backend: true }));
-    return c.json(serializeMembership(ctx, updated, { backend: true }));
+    await ctx.db.update(s.organizationMemberships).set(patch).where(eq(s.organizationMemberships.id, membership.id));
+    const updated = first(await ctx.db.select().from(s.organizationMemberships).where(eq(s.organizationMemberships.id, membership.id)))!;
+    await emitEvent(ctx, "organizationMembership.updated", await serializeMembership(ctx, updated, { backend: true }));
+    return c.json(await serializeMembership(ctx, updated, { backend: true }));
   });
 
   app.patch("/organizations/:id/memberships/:userId/metadata", async (c) => {
-    const org = requireOrganization(ctx, c.req.param("id"));
-    const membership = requireMembership(ctx, org, c.req.param("userId"));
+    const org = await requireOrganization(ctx, c.req.param("id"));
+    const membership = await requireMembership(ctx, org, c.req.param("userId"));
     const body = await parseBody(c, z.object({ public_metadata: metadata.optional(), private_metadata: metadata.optional() }));
-    ctx.db.update(s.organizationMemberships).set({
-      publicMetadata: mergeMetadata(membership.publicMetadata, body.public_metadata),
-      privateMetadata: mergeMetadata(membership.privateMetadata, body.private_metadata),
-      updatedAt: Date.now(),
-    }).where(eq(s.organizationMemberships.id, membership.id)).run();
-    const updated = ctx.db.select().from(s.organizationMemberships).where(eq(s.organizationMemberships.id, membership.id)).get()!;
-    await emitEvent(ctx, "organizationMembership.updated", serializeMembership(ctx, updated, { backend: true }));
-    return c.json(serializeMembership(ctx, updated, { backend: true }));
+    await ctx.db.update(s.organizationMemberships).set({
+                  publicMetadata: mergeMetadata(membership.publicMetadata, body.public_metadata),
+                  privateMetadata: mergeMetadata(membership.privateMetadata, body.private_metadata),
+                  updatedAt: Date.now(),
+                }).where(eq(s.organizationMemberships.id, membership.id));
+    const updated = first(await ctx.db.select().from(s.organizationMemberships).where(eq(s.organizationMemberships.id, membership.id)))!;
+    await emitEvent(ctx, "organizationMembership.updated", await serializeMembership(ctx, updated, { backend: true }));
+    return c.json(await serializeMembership(ctx, updated, { backend: true }));
   });
 
   app.delete("/organizations/:id/memberships/:userId", async (c) => {
-    const org = requireOrganization(ctx, c.req.param("id"));
-    const membership = requireMembership(ctx, org, c.req.param("userId"));
-    if (isLastAdmin(ctx, membership)) {
+    const org = await requireOrganization(ctx, c.req.param("id"));
+    const membership = await requireMembership(ctx, org, c.req.param("userId"));
+    if (await isLastAdmin(ctx, membership)) {
       throw new OrbitError(403, ErrorCodes.last_admin_cannot_leave, "The last admin of an organization cannot be removed", { role: membership.roleKey });
     }
-    const payload = serializeMembership(ctx, membership, { backend: true });
-    ctx.db.delete(s.organizationMemberships).where(eq(s.organizationMemberships.id, membership.id)).run();
+    const payload = await serializeMembership(ctx, membership, { backend: true });
+    await ctx.db.delete(s.organizationMemberships).where(eq(s.organizationMemberships.id, membership.id));
     await emitEvent(ctx, "organizationMembership.deleted", payload);
     return c.json(deletedObject("organization_membership", membership.id));
   });
 
   // ─────────── invitations ───────────
-  app.get("/organizations/:id/invitations", (c) => {
-    const org = requireOrganization(ctx, c.req.param("id"));
+  app.get("/organizations/:id/invitations", async (c) => {
+    const org = await requireOrganization(ctx, c.req.param("id"));
     const params = listParams(c);
     const status = c.req.query("status");
-    let serialized = ctx.db.select().from(s.organizationInvitations).where(eq(s.organizationInvitations.organizationId, org.id)).all()
-      .map((row) => serializeOrganizationInvitation(ctx, row, { backend: true }));
+    const invitationRows = await ctx.db.select().from(s.organizationInvitations).where(eq(s.organizationInvitations.organizationId, org.id));
+    let serialized = await Promise.all(invitationRows.map((row) => serializeOrganizationInvitation(ctx, row, { backend: true })));
     if (status) serialized = serialized.filter((r) => r.status === status);
     if (params.query) serialized = serialized.filter((r) => r.email_address.includes(params.query!));
     const sorted = sortRows(serialized, params.orderBy ?? "-created_at", {
@@ -274,7 +275,7 @@ export default function routes(ctx: AppContext) {
   });
 
   app.post("/organizations/:id/invitations/bulk", async (c) => {
-    const org = requireOrganization(ctx, c.req.param("id"));
+    const org = await requireOrganization(ctx, c.req.param("id"));
     const body = await parseBody(c, z.object({
       email_addresses: z.array(z.string().min(3)).min(1),
       role: z.string().optional(),
@@ -303,13 +304,13 @@ export default function routes(ctx: AppContext) {
       });
       if (!result) continue;
       if (body.notify) await notifyInvitation(ctx, org, result.invitation.email, result.ticket, result.invitation.roleKey);
-      created.push(serializeOrganizationInvitation(ctx, result.invitation, { backend: true, url: body.notify ? null : invitationUrl(ctx, result.ticket) }));
+      created.push(await serializeOrganizationInvitation(ctx, result.invitation, { backend: true, url: body.notify ? null : invitationUrl(ctx, result.ticket) }));
     }
     return c.json(created);
   });
 
   app.post("/organizations/:id/invitations", async (c) => {
-    const org = requireOrganization(ctx, c.req.param("id"));
+    const org = await requireOrganization(ctx, c.req.param("id"));
     const body = await parseBody(c, z.object({
       email_address: z.string().min(3),
       role: z.string().optional(),
@@ -332,33 +333,35 @@ export default function routes(ctx: AppContext) {
       expiresAt: body.expires_at ?? (body.expires_in_days ? Date.now() + body.expires_in_days * 86_400_000 : null),
     });
     if (body.notify) await notifyInvitation(ctx, org, invitation.email, ticket, invitation.roleKey);
-    return c.json(serializeOrganizationInvitation(ctx, invitation, { backend: true, url: body.notify ? null : invitationUrl(ctx, ticket) }));
+    return c.json(await serializeOrganizationInvitation(ctx, invitation, { backend: true, url: body.notify ? null : invitationUrl(ctx, ticket) }));
   });
 
-  app.get("/organizations/:id/invitations/:invId", (c) => {
-    const org = requireOrganization(ctx, c.req.param("id"));
-    const invitation = findInvitation(ctx, org.id, c.req.param("invId"));
-    return c.json(serializeOrganizationInvitation(ctx, invitation, { backend: true }));
+  app.get("/organizations/:id/invitations/:invId", async (c) => {
+    const org = await requireOrganization(ctx, c.req.param("id"));
+    const invitation = await findInvitation(ctx, org.id, c.req.param("invId"));
+    return c.json(await serializeOrganizationInvitation(ctx, invitation, { backend: true }));
   });
 
   app.post("/organizations/:id/invitations/:invId/revoke", async (c) => {
-    const org = requireOrganization(ctx, c.req.param("id"));
-    const invitation = findInvitation(ctx, org.id, c.req.param("invId"));
+    const org = await requireOrganization(ctx, c.req.param("id"));
+    const invitation = await findInvitation(ctx, org.id, c.req.param("invId"));
     if (effectiveInvitationStatus(invitation) !== "pending") {
       throw new OrbitError(409, ErrorCodes.duplicate_record, `Invitation is ${effectiveInvitationStatus(invitation)}`);
     }
-    ctx.db.update(s.organizationInvitations).set({ status: "revoked", updatedAt: Date.now() }).where(eq(s.organizationInvitations.id, invitation.id)).run();
-    const updated = ctx.db.select().from(s.organizationInvitations).where(eq(s.organizationInvitations.id, invitation.id)).get()!;
-    await emitEvent(ctx, "organizationInvitation.revoked", serializeOrganizationInvitation(ctx, updated, { backend: true }));
-    return c.json(serializeOrganizationInvitation(ctx, updated, { backend: true }));
+    const revoked = first(await ctx.db.update(s.organizationInvitations).set({ status: "revoked", updatedAt: Date.now() })
+      .where(and(eq(s.organizationInvitations.id, invitation.id), eq(s.organizationInvitations.status, "pending")))
+      .returning());
+    if (!revoked) throw new OrbitError(409, ErrorCodes.duplicate_record, `Invitation is ${invitation.status}`);
+    await emitEvent(ctx, "organizationInvitation.revoked", await serializeOrganizationInvitation(ctx, revoked, { backend: true }));
+    return c.json(await serializeOrganizationInvitation(ctx, revoked, { backend: true }));
   });
 
   // ─────────── domains ───────────
-  app.get("/organizations/:id/domains", (c) => {
-    const org = requireOrganization(ctx, c.req.param("id"));
+  app.get("/organizations/:id/domains", async (c) => {
+    const org = await requireOrganization(ctx, c.req.param("id"));
     const params = listParams(c);
-    const serialized = ctx.db.select().from(s.organizationDomains).where(eq(s.organizationDomains.organizationId, org.id)).all()
-      .map((row) => serializeOrganizationDomain(ctx, row));
+    const domainRows = await ctx.db.select().from(s.organizationDomains).where(eq(s.organizationDomains.organizationId, org.id));
+    const serialized = await Promise.all(domainRows.map((row) => serializeOrganizationDomain(ctx, row)));
     const { items, total } = page(sortRows(serialized, params.orderBy ?? "-created_at", {
       created_at: (d) => d.created_at, updated_at: (d) => d.updated_at, name: (d) => d.name,
     }), params);
@@ -366,128 +369,127 @@ export default function routes(ctx: AppContext) {
   });
 
   app.post("/organizations/:id/domains", async (c) => {
-    const org = requireOrganization(ctx, c.req.param("id"));
+    const org = await requireOrganization(ctx, c.req.param("id"));
     const body = await parseBody(c, z.object({
       name: z.string().min(1),
       enrollment_mode: z.enum(["manual_invitation", "automatic_invitation", "automatic_suggestion"]).optional(),
     }));
     const name = normalizeDomain(body.name);
-    if (findDomainByName(ctx, org.id, name)) throw new OrbitError(409, ErrorCodes.duplicate_record, `${name} is already a domain of this organization`);
+    if (await findDomainByName(ctx, org.id, name)) throw new OrbitError(409, ErrorCodes.duplicate_record, `${name} is already a domain of this organization`);
     const now = Date.now();
     const id = newId(ID_PREFIX.domain);
-    ctx.db.insert(s.organizationDomains).values({
-      id, organizationId: org.id, name, enrollmentMode: body.enrollment_mode ?? "manual_invitation", verified: false, createdAt: now, updatedAt: now,
-    }).run();
-    const row = ctx.db.select().from(s.organizationDomains).where(eq(s.organizationDomains.id, id)).get()!;
+    await ctx.db.insert(s.organizationDomains).values({
+                  id, organizationId: org.id, name, enrollmentMode: body.enrollment_mode ?? "manual_invitation", verified: false, createdAt: now, updatedAt: now,
+                });
+    const row = first(await ctx.db.select().from(s.organizationDomains).where(eq(s.organizationDomains.id, id)))!;
     await emitDomainEvent(ctx, "organizationDomain.created", row);
-    return c.json(serializeOrganizationDomain(ctx, row));
+    return c.json(await serializeOrganizationDomain(ctx, row));
   });
 
-  app.get("/organizations/:id/domains/:did", (c) => {
-    const org = requireOrganization(ctx, c.req.param("id"));
-    const row = findDomain(ctx, org.id, c.req.param("did"));
+  app.get("/organizations/:id/domains/:did", async (c) => {
+    const org = await requireOrganization(ctx, c.req.param("id"));
+    const row = await findDomain(ctx, org.id, c.req.param("did"));
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Organization domain not found");
-    return c.json(serializeOrganizationDomain(ctx, row));
+    return c.json(await serializeOrganizationDomain(ctx, row));
   });
 
   app.patch("/organizations/:id/domains/:did", async (c) => {
-    const org = requireOrganization(ctx, c.req.param("id"));
-    const row = findDomain(ctx, org.id, c.req.param("did"));
+    const org = await requireOrganization(ctx, c.req.param("id"));
+    const row = await findDomain(ctx, org.id, c.req.param("did"));
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Organization domain not found");
     const body = await parseBody(c, z.object({
       enrollment_mode: z.enum(["manual_invitation", "automatic_invitation", "automatic_suggestion"]).optional(),
       delete_pending: z.boolean().optional(),
     }));
     if (body.delete_pending) {
-      for (const invitation of deletePendingForDomain(ctx, org.id, row.name)) {
-        await emitEvent(ctx, "organizationInvitation.revoked", serializeOrganizationInvitation(ctx, invitation, { backend: true }));
+      for (const invitation of await deletePendingForDomain(ctx, org.id, row.name)) {
+        await emitEvent(ctx, "organizationInvitation.revoked", await serializeOrganizationInvitation(ctx, invitation, { backend: true }));
       }
     }
-    if (body.enrollment_mode) ctx.db.update(s.organizationDomains).set({ enrollmentMode: body.enrollment_mode, updatedAt: Date.now() }).where(eq(s.organizationDomains.id, row.id)).run();
-    const updated = ctx.db.select().from(s.organizationDomains).where(eq(s.organizationDomains.id, row.id)).get()!;
+    if (body.enrollment_mode) await ctx.db.update(s.organizationDomains).set({ enrollmentMode: body.enrollment_mode, updatedAt: Date.now() }).where(eq(s.organizationDomains.id, row.id));
+    const updated = first(await ctx.db.select().from(s.organizationDomains).where(eq(s.organizationDomains.id, row.id)))!;
     if (updated.verified && updated.enrollmentMode === "automatic_invitation") await applyDomainEnrollment(ctx, updated);
     await emitDomainEvent(ctx, "organizationDomain.updated", updated);
-    return c.json(serializeOrganizationDomain(ctx, updated));
+    return c.json(await serializeOrganizationDomain(ctx, updated));
   });
 
   app.delete("/organizations/:id/domains/:did", async (c) => {
-    const org = requireOrganization(ctx, c.req.param("id"));
-    const row = findDomain(ctx, org.id, c.req.param("did"));
+    const org = await requireOrganization(ctx, c.req.param("id"));
+    const row = await findDomain(ctx, org.id, c.req.param("did"));
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Organization domain not found");
-    const payload = serializeOrganizationDomain(ctx, row);
-    ctx.db.delete(s.organizationDomains).where(eq(s.organizationDomains.id, row.id)).run();
+    const payload = await serializeOrganizationDomain(ctx, row);
+    await ctx.db.delete(s.organizationDomains).where(eq(s.organizationDomains.id, row.id));
     await emitEvent(ctx, "organizationDomain.deleted", payload);
     return c.json(deletedObject("organization_domain", row.id));
   });
 
   // ─────────── membership requests ───────────
-  app.get("/organizations/:id/membership_requests", (c) => {
-    const org = requireOrganization(ctx, c.req.param("id"));
+  app.get("/organizations/:id/membership_requests", async (c) => {
+    const org = await requireOrganization(ctx, c.req.param("id"));
     const params = listParams(c);
     const status = c.req.query("status");
-    const serialized = ctx.db.select().from(s.organizationMembershipRequests).where(eq(s.organizationMembershipRequests.organizationId, org.id)).all()
-      .filter((r) => !status || r.status === status)
-      .map((row) => serializeMembershipRequest(ctx, row));
+    const serialized = (await Promise.all((await ctx.db.select().from(s.organizationMembershipRequests).where(eq(s.organizationMembershipRequests.organizationId, org.id)))
+          .filter((r) => !status || r.status === status)
+          .map((row) => serializeMembershipRequest(ctx, row))));
     const { items, total } = page(serialized, params);
     return listResponse(c, items, total);
   });
 
   app.post("/organizations/:id/membership_requests", async (c) => {
-    const org = requireOrganization(ctx, c.req.param("id"));
+    const org = await requireOrganization(ctx, c.req.param("id"));
     const body = await parseBody(c, z.object({ user_id: z.string().min(1), status: z.enum(["pending", "accepted", "rejected"]).optional() }));
-    const user = ctx.db.select().from(s.users).where(eq(s.users.id, body.user_id)).get();
+    const user = first(await ctx.db.select().from(s.users).where(eq(s.users.id, body.user_id)));
     if (!user) throw new OrbitError(404, ErrorCodes.resource_not_found, "User not found", { param_name: "user_id" });
-    if (findMembership(ctx, org.id, user.id)) throw new OrbitError(409, ErrorCodes.duplicate_record, "User is already a member of this organization");
-    const pending = ctx.db
-      .select()
-      .from(s.organizationMembershipRequests)
-      .where(and(eq(s.organizationMembershipRequests.organizationId, org.id), eq(s.organizationMembershipRequests.userId, user.id), eq(s.organizationMembershipRequests.status, "pending")))
-      .get();
-    if (pending) return c.json(serializeMembershipRequest(ctx, pending));
+    if (await findMembership(ctx, org.id, user.id)) throw new OrbitError(409, ErrorCodes.duplicate_record, "User is already a member of this organization");
+    const pending = first(await ctx.db
+          .select()
+          .from(s.organizationMembershipRequests)
+          .where(and(eq(s.organizationMembershipRequests.organizationId, org.id), eq(s.organizationMembershipRequests.userId, user.id), eq(s.organizationMembershipRequests.status, "pending"))));
+    if (pending) return c.json(await serializeMembershipRequest(ctx, pending));
     const now = Date.now();
     const id = newId(ID_PREFIX.request);
-    ctx.db.insert(s.organizationMembershipRequests).values({ id, organizationId: org.id, userId: user.id, status: body.status ?? "pending", createdAt: now, updatedAt: now }).run();
-    const row = ctx.db.select().from(s.organizationMembershipRequests).where(eq(s.organizationMembershipRequests.id, id)).get()!;
-    return c.json(serializeMembershipRequest(ctx, row));
+    await ctx.db.insert(s.organizationMembershipRequests).values({ id, organizationId: org.id, userId: user.id, status: body.status ?? "pending", createdAt: now, updatedAt: now });
+    const row = first(await ctx.db.select().from(s.organizationMembershipRequests).where(eq(s.organizationMembershipRequests.id, id)))!;
+    return c.json(await serializeMembershipRequest(ctx, row));
   });
 
   app.post("/organizations/:id/membership_requests/:rid/accept", async (c) => {
-    const org = requireOrganization(ctx, c.req.param("id"));
-    const request = requireRequest(ctx, org.id, c.req.param("rid"));
+    const org = await requireOrganization(ctx, c.req.param("id"));
+    const request = await requireRequest(ctx, org.id, c.req.param("rid"));
     if (request.status !== "pending") throw new OrbitError(409, ErrorCodes.duplicate_record, `Membership request is ${request.status}`);
-    assertOrganizationCapacity(ctx, org);
-    const membership = await addMembership(ctx, { organizationId: org.id, userId: request.userId, roleKey: defaultRoleKey(ctx) });
-    ctx.db.update(s.organizationMembershipRequests).set({ status: "accepted", updatedAt: Date.now() }).where(eq(s.organizationMembershipRequests.id, request.id)).run();
-    return c.json(serializeMembership(ctx, membership, { backend: true }));
+    await assertOrganizationCapacity(ctx, org);
+    const membership = await addMembership(ctx, { organizationId: org.id, userId: request.userId, roleKey: await defaultRoleKey(ctx) });
+    await ctx.db.update(s.organizationMembershipRequests).set({ status: "accepted", updatedAt: Date.now() }).where(eq(s.organizationMembershipRequests.id, request.id));
+    return c.json(await serializeMembership(ctx, membership, { backend: true }));
   });
 
   app.post("/organizations/:id/membership_requests/:rid/reject", async (c) => {
-    const org = requireOrganization(ctx, c.req.param("id"));
-    const request = requireRequest(ctx, org.id, c.req.param("rid"));
+    const org = await requireOrganization(ctx, c.req.param("id"));
+    const request = await requireRequest(ctx, org.id, c.req.param("rid"));
     if (request.status !== "pending") throw new OrbitError(409, ErrorCodes.duplicate_record, `Membership request is ${request.status}`);
-    ctx.db.update(s.organizationMembershipRequests).set({ status: "rejected", updatedAt: Date.now() }).where(eq(s.organizationMembershipRequests.id, request.id)).run();
-    const updated = ctx.db.select().from(s.organizationMembershipRequests).where(eq(s.organizationMembershipRequests.id, request.id)).get()!;
-    return c.json(serializeMembershipRequest(ctx, updated));
+    await ctx.db.update(s.organizationMembershipRequests).set({ status: "rejected", updatedAt: Date.now() }).where(eq(s.organizationMembershipRequests.id, request.id));
+    const updated = first(await ctx.db.select().from(s.organizationMembershipRequests).where(eq(s.organizationMembershipRequests.id, request.id)))!;
+    return c.json(await serializeMembershipRequest(ctx, updated));
   });
 
-  app.get("/organizations/:id/roles", (c) => {
-    requireOrganization(ctx, c.req.param("id"));
+  app.get("/organizations/:id/roles", async (c) => {
+    await requireOrganization(ctx, c.req.param("id"));
     const params = listParams(c);
-    const rows = sortRows(ctx.db.select().from(s.roles).all(), params.orderBy ?? "created_at", {
+    const rows = sortRows((await ctx.db.select().from(s.roles)), params.orderBy ?? "created_at", {
       created_at: (r) => r.createdAt, updated_at: (r) => r.updatedAt, key: (r) => r.key, name: (r) => r.name,
     });
     const { items, total } = page(rows, params);
-    return listResponse(c, items.map((row) => serializeRole(ctx, row)), total);
+    return listResponse(c, (await Promise.all(items.map((row) => serializeRole(ctx, row)))), total);
   });
 
   // ─────────── roles ───────────
-  app.get("/roles", (c) => {
+  app.get("/roles", async (c) => {
     const params = listParams(c);
-    let rows = ctx.db.select().from(s.roles).all();
+    let rows = (await ctx.db.select().from(s.roles));
     if (params.query) rows = rows.filter((r) => [r.id, r.key, r.name].some((v) => v.toLowerCase().includes(params.query!)));
     const sorted = sortRows(rows, params.orderBy ?? "created_at", { created_at: (r) => r.createdAt, updated_at: (r) => r.updatedAt, key: (r) => r.key, name: (r) => r.name });
     const { items, total } = page(sorted, params);
-    return listResponse(c, items.map((row) => serializeRole(ctx, row)), total);
+    return listResponse(c, (await Promise.all(items.map((row) => serializeRole(ctx, row)))), total);
   });
 
   app.post("/roles", async (c) => {
@@ -499,28 +501,28 @@ export default function routes(ctx: AppContext) {
       permissions: z.array(z.string()).optional(),
     }));
     assertCustomKey(body.key, "role");
-    if (roleByKey(ctx, body.key)) throw new OrbitError(409, ErrorCodes.duplicate_record, `Role ${body.key} already exists`);
-    if (body.permissions) resolvePermissions(ctx, body.permissions);
+    if (await roleByKey(ctx, body.key)) throw new OrbitError(409, ErrorCodes.duplicate_record, `Role ${body.key} already exists`);
+    if (body.permissions) await resolvePermissions(ctx, body.permissions);
     const now = Date.now();
     const id = newId(ID_PREFIX.role);
-    ctx.db.insert(s.roles).values({
-      id, key: body.key, name: body.name, description: body.description ?? "", isCreatorEligible: body.is_creator_eligible ?? false, isSystem: false, createdAt: now, updatedAt: now,
-    }).run();
-    const row = ctx.db.select().from(s.roles).where(eq(s.roles.id, id)).get()!;
-    if (body.permissions?.length) setRolePermissions(ctx, row, body.permissions);
-    const created = ctx.db.select().from(s.roles).where(eq(s.roles.id, id)).get()!;
-    await emitEvent(ctx, "role.created", serializeRole(ctx, created));
-    return c.json(serializeRole(ctx, created));
+    await ctx.db.insert(s.roles).values({
+                  id, key: body.key, name: body.name, description: body.description ?? "", isCreatorEligible: body.is_creator_eligible ?? false, isSystem: false, createdAt: now, updatedAt: now,
+                });
+    const row = first(await ctx.db.select().from(s.roles).where(eq(s.roles.id, id)))!;
+    if (body.permissions?.length) await setRolePermissions(ctx, row, body.permissions);
+    const created = first(await ctx.db.select().from(s.roles).where(eq(s.roles.id, id)))!;
+    await emitEvent(ctx, "role.created", await serializeRole(ctx, created));
+    return c.json(await serializeRole(ctx, created));
   });
 
-  app.get("/roles/:id", (c) => {
-    const role = resolveRole(ctx, c.req.param("id"));
+  app.get("/roles/:id", async (c) => {
+    const role = await resolveRole(ctx, c.req.param("id"));
     if (!role) throw new OrbitError(404, ErrorCodes.resource_not_found, "Role not found");
-    return c.json(serializeRole(ctx, role));
+    return c.json(await serializeRole(ctx, role));
   });
 
   app.patch("/roles/:id", async (c) => {
-    const role = resolveRole(ctx, c.req.param("id"));
+    const role = await resolveRole(ctx, c.req.param("id"));
     if (!role) throw new OrbitError(404, ErrorCodes.resource_not_found, "Role not found");
     if (role.isSystem) throw new OrbitError(403, ErrorCodes.not_allowed_access, "System roles cannot be modified");
     const body = await parseBody(c, z.object({
@@ -533,53 +535,53 @@ export default function routes(ctx: AppContext) {
     if (body.name !== undefined) patch.name = body.name;
     if (body.description !== undefined) patch.description = body.description;
     if (body.is_creator_eligible !== undefined) patch.isCreatorEligible = body.is_creator_eligible;
-    ctx.db.update(s.roles).set(patch).where(eq(s.roles.id, role.id)).run();
-    if (body.permissions !== undefined) setRolePermissions(ctx, role, body.permissions);
-    const updated = ctx.db.select().from(s.roles).where(eq(s.roles.id, role.id)).get()!;
-    await emitEvent(ctx, "role.updated", serializeRole(ctx, updated));
-    return c.json(serializeRole(ctx, updated));
+    await ctx.db.update(s.roles).set(patch).where(eq(s.roles.id, role.id));
+    if (body.permissions !== undefined) await setRolePermissions(ctx, role, body.permissions);
+    const updated = first(await ctx.db.select().from(s.roles).where(eq(s.roles.id, role.id)))!;
+    await emitEvent(ctx, "role.updated", await serializeRole(ctx, updated));
+    return c.json(await serializeRole(ctx, updated));
   });
 
   app.delete("/roles/:id", async (c) => {
-    const role = resolveRole(ctx, c.req.param("id"));
+    const role = await resolveRole(ctx, c.req.param("id"));
     if (!role) throw new OrbitError(404, ErrorCodes.resource_not_found, "Role not found");
-    assertRoleDeletable(ctx, role);
-    const payload = serializeRole(ctx, role);
-    ctx.db.delete(s.roles).where(eq(s.roles.id, role.id)).run();
+    await assertRoleDeletable(ctx, role);
+    const payload = await serializeRole(ctx, role);
+    await ctx.db.delete(s.roles).where(eq(s.roles.id, role.id));
     await emitEvent(ctx, "role.deleted", payload);
     return c.json(deletedObject("role", role.id));
   });
 
   app.post("/roles/:id/permissions", async (c) => {
-    const role = resolveRole(ctx, c.req.param("id"));
+    const role = await resolveRole(ctx, c.req.param("id"));
     if (!role) throw new OrbitError(404, ErrorCodes.resource_not_found, "Role not found");
     const body = await parseBody(c, z.object({ permissions: z.array(z.string()) }));
-    setRolePermissions(ctx, role, body.permissions);
-    const updated = ctx.db.select().from(s.roles).where(eq(s.roles.id, role.id)).get()!;
-    await emitEvent(ctx, "role.updated", serializeRole(ctx, updated));
-    return c.json(serializeRole(ctx, updated));
+    await setRolePermissions(ctx, role, body.permissions);
+    const updated = first(await ctx.db.select().from(s.roles).where(eq(s.roles.id, role.id)))!;
+    await emitEvent(ctx, "role.updated", await serializeRole(ctx, updated));
+    return c.json(await serializeRole(ctx, updated));
   });
 
   app.delete("/roles/:id/permissions/:permissionId", async (c) => {
-    const role = resolveRole(ctx, c.req.param("id"));
+    const role = await resolveRole(ctx, c.req.param("id"));
     if (!role) throw new OrbitError(404, ErrorCodes.resource_not_found, "Role not found");
-    const permission = resolvePermission(ctx, c.req.param("permissionId"));
+    const permission = await resolvePermission(ctx, c.req.param("permissionId"));
     if (!permission) throw new OrbitError(404, ErrorCodes.resource_not_found, "Permission not found");
-    if (!ctx.db.select().from(s.rolePermissions).where(and(eq(s.rolePermissions.roleId, role.id), eq(s.rolePermissions.permissionId, permission.id))).get()) {
+    if (!first(await ctx.db.select().from(s.rolePermissions).where(and(eq(s.rolePermissions.roleId, role.id), eq(s.rolePermissions.permissionId, permission.id))))) {
       throw new OrbitError(404, ErrorCodes.resource_not_found, "Role does not have this permission");
     }
-    ctx.db.delete(s.rolePermissions).where(and(eq(s.rolePermissions.roleId, role.id), eq(s.rolePermissions.permissionId, permission.id))).run();
-    ctx.db.update(s.roles).set({ updatedAt: Date.now() }).where(eq(s.roles.id, role.id)).run();
-    const updated = ctx.db.select().from(s.roles).where(eq(s.roles.id, role.id)).get()!;
-    await emitEvent(ctx, "role.updated", serializeRole(ctx, updated));
-    return c.json(serializeRole(ctx, updated));
+    await ctx.db.delete(s.rolePermissions).where(and(eq(s.rolePermissions.roleId, role.id), eq(s.rolePermissions.permissionId, permission.id)));
+    await ctx.db.update(s.roles).set({ updatedAt: Date.now() }).where(eq(s.roles.id, role.id));
+    const updated = first(await ctx.db.select().from(s.roles).where(eq(s.roles.id, role.id)))!;
+    await emitEvent(ctx, "role.updated", await serializeRole(ctx, updated));
+    return c.json(await serializeRole(ctx, updated));
   });
 
   // ─────────── permissions ───────────
-  app.get("/permissions", (c) => {
+  app.get("/permissions", async (c) => {
     const params = listParams(c);
     const type = c.req.query("type");
-    let rows = ctx.db.select().from(s.permissions).all();
+    let rows = (await ctx.db.select().from(s.permissions));
     if (type) rows = rows.filter((r) => r.type === type);
     if (params.query) rows = rows.filter((r) => [r.id, r.key, r.name].some((v) => v.toLowerCase().includes(params.query!)));
     const sorted = sortRows(rows, params.orderBy ?? "created_at", { created_at: (r) => r.createdAt, updated_at: (r) => r.updatedAt, key: (r) => r.key });
@@ -594,44 +596,44 @@ export default function routes(ctx: AppContext) {
       description: z.string().max(1024).optional(),
     }));
     assertCustomKey(body.key, "permission");
-    if (ctx.db.select().from(s.permissions).where(eq(s.permissions.key, body.key)).get()) {
+    if (first(await ctx.db.select().from(s.permissions).where(eq(s.permissions.key, body.key)))) {
       throw new OrbitError(409, ErrorCodes.duplicate_record, `Permission ${body.key} already exists`);
     }
     const now = Date.now();
     const id = newId(ID_PREFIX.permission);
-    ctx.db.insert(s.permissions).values({ id, key: body.key, name: body.name, description: body.description ?? "", type: "user", createdAt: now, updatedAt: now }).run();
-    const row = ctx.db.select().from(s.permissions).where(eq(s.permissions.id, id)).get()!;
+    await ctx.db.insert(s.permissions).values({ id, key: body.key, name: body.name, description: body.description ?? "", type: "user", createdAt: now, updatedAt: now });
+    const row = first(await ctx.db.select().from(s.permissions).where(eq(s.permissions.id, id)))!;
     await emitEvent(ctx, "permission.created", serializePermission(row));
     return c.json(serializePermission(row));
   });
 
-  app.get("/permissions/:id", (c) => {
-    const row = resolvePermission(ctx, c.req.param("id"));
+  app.get("/permissions/:id", async (c) => {
+    const row = await resolvePermission(ctx, c.req.param("id"));
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Permission not found");
     return c.json(serializePermission(row));
   });
 
   app.patch("/permissions/:id", async (c) => {
-    const row = resolvePermission(ctx, c.req.param("id"));
+    const row = await resolvePermission(ctx, c.req.param("id"));
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Permission not found");
     if (row.type === "system") throw new OrbitError(403, ErrorCodes.not_allowed_access, "System permissions cannot be modified");
     const body = await parseBody(c, z.object({ name: z.string().trim().min(1).max(256).optional(), description: z.string().max(1024).optional() }));
-    ctx.db.update(s.permissions).set({
-      ...(body.name !== undefined ? { name: body.name } : {}),
-      ...(body.description !== undefined ? { description: body.description } : {}),
-      updatedAt: Date.now(),
-    }).where(eq(s.permissions.id, row.id)).run();
-    const updated = ctx.db.select().from(s.permissions).where(eq(s.permissions.id, row.id)).get()!;
+    await ctx.db.update(s.permissions).set({
+                  ...(body.name !== undefined ? { name: body.name } : {}),
+                  ...(body.description !== undefined ? { description: body.description } : {}),
+                  updatedAt: Date.now(),
+                }).where(eq(s.permissions.id, row.id));
+    const updated = first(await ctx.db.select().from(s.permissions).where(eq(s.permissions.id, row.id)))!;
     await emitEvent(ctx, "permission.updated", serializePermission(updated));
     return c.json(serializePermission(updated));
   });
 
   app.delete("/permissions/:id", async (c) => {
-    const row = resolvePermission(ctx, c.req.param("id"));
+    const row = await resolvePermission(ctx, c.req.param("id"));
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Permission not found");
     if (row.type === "system") throw new OrbitError(403, ErrorCodes.not_allowed_access, "System permissions cannot be deleted");
     const payload = serializePermission(row);
-    ctx.db.delete(s.permissions).where(eq(s.permissions.id, row.id)).run();
+    await ctx.db.delete(s.permissions).where(eq(s.permissions.id, row.id));
     await emitEvent(ctx, "permission.deleted", payload);
     return c.json(deletedObject("permission", row.id));
   });
@@ -639,35 +641,33 @@ export default function routes(ctx: AppContext) {
   return app;
 }
 
-function requireMembership(ctx: AppContext, org: typeof s.organizations.$inferSelect, userId: string) {
-  const membership = findMembership(ctx, org.id, userId);
+async function requireMembership(ctx: AppContext, org: typeof s.organizations.$inferSelect, userId: string) {
+  const membership = await findMembership(ctx, org.id, userId);
   if (!membership) throw new OrbitError(404, ErrorCodes.not_a_member_in_organization, "User is not a member of this organization");
   return membership;
 }
 
-function findInvitation(ctx: AppContext, orgId: string, id: string) {
-  const row = ctx.db
-    .select()
-    .from(s.organizationInvitations)
-    .where(and(eq(s.organizationInvitations.organizationId, orgId), eq(s.organizationInvitations.id, id)))
-    .get();
+async function findInvitation(ctx: AppContext, orgId: string, id: string) {
+  const row = first(await ctx.db
+      .select()
+      .from(s.organizationInvitations)
+      .where(and(eq(s.organizationInvitations.organizationId, orgId), eq(s.organizationInvitations.id, id))));
   if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Organization invitation not found");
   return row;
 }
 
-function requireRequest(ctx: AppContext, orgId: string, id: string) {
-  const row = ctx.db
-    .select()
-    .from(s.organizationMembershipRequests)
-    .where(and(eq(s.organizationMembershipRequests.organizationId, orgId), eq(s.organizationMembershipRequests.id, id)))
-    .get();
+async function requireRequest(ctx: AppContext, orgId: string, id: string) {
+  const row = first(await ctx.db
+      .select()
+      .from(s.organizationMembershipRequests)
+      .where(and(eq(s.organizationMembershipRequests.organizationId, orgId), eq(s.organizationMembershipRequests.id, id))));
   if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Membership request not found");
   return row;
 }
 
-function resolvePermission(ctx: AppContext, idOrKey: string) {
-  return ctx.db.select().from(s.permissions).where(eq(s.permissions.id, idOrKey)).get()
-    ?? ctx.db.select().from(s.permissions).where(eq(s.permissions.key, idOrKey)).get();
+async function resolvePermission(ctx: AppContext, idOrKey: string) {
+  return first(await ctx.db.select().from(s.permissions).where(eq(s.permissions.id, idOrKey)))
+    ?? first(await ctx.db.select().from(s.permissions).where(eq(s.permissions.key, idOrKey)));
 }
 
 

@@ -7,7 +7,7 @@ import { createSessionFixture, createUser, json, testApp } from "./helpers";
 async function mint(algorithm: "HS256" | "RS256") {
   const { api, ctx } = await testApp();
   const user = await createUser(api, { email_address: ["ada@example.com"] });
-  const { sessionId } = createSessionFixture(ctx, user.id);
+  const { sessionId } = await createSessionFixture(ctx, user.id);
   const template = await json<JwtTemplateJSON>(
     await api("POST", "/v1/jwt_templates", { name: "partner", claims: { email: "{{user.primary_email_address}}" }, custom_signing_key: true, signing_algorithm: algorithm }),
   );

@@ -11,6 +11,7 @@ import {
   revokeApiKey, serializeApiKey, updateApiKey, verifyApiKey,
 } from "../services/api-keys";
 import { requireUserCaller } from "./machine/auth";
+import { first } from "../lib/db";
 
 const scopesSchema = z.array(z.string().min(1)).max(100);
 const claimsSchema = z.record(z.string(), z.unknown());
@@ -54,48 +55,48 @@ function backendRoutes(ctx: AppContext): Hono {
 
   app.post("/api_keys", async (c) => {
     const body = await parseBody(c, createSchema);
-    const { row, secret } = createApiKey(ctx, {
-      name: body.name,
-      subject: body.subject,
-      scopes: body.scopes,
-      claims: body.claims ?? null,
-      secondsUntilExpiration: body.seconds_until_expiration ?? null,
-      description: body.description ?? null,
-      createdBy: body.created_by ?? null,
-    });
+    const { row, secret } = await createApiKey(ctx, {
+          name: body.name,
+          subject: body.subject,
+          scopes: body.scopes,
+          claims: body.claims ?? null,
+          secondsUntilExpiration: body.seconds_until_expiration ?? null,
+          description: body.description ?? null,
+          createdBy: body.created_by ?? null,
+        });
     return c.json(serializeApiKey(row, { secret }), 201);
   });
 
   app.post("/api_keys/verify", async (c) => {
     const body = await parseBody(c, z.object({ secret: z.string().min(1) }));
-    return c.json(serializeApiKey(verifyApiKey(ctx, body.secret)));
+    return c.json(serializeApiKey(await verifyApiKey(ctx, body.secret)));
   });
 
-  app.get("/api_keys", (c) => {
+  app.get("/api_keys", async (c) => {
     const page = parsePagination(c);
     const subject = c.req.query("subject") || undefined;
     const includeInvalid = ["true", "1"].includes(c.req.query("include_invalid") ?? "");
-    const { data, totalCount } = listApiKeys(ctx, { subject, includeInvalid, limit: page.limit, offset: page.offset, orderBy: page.order_by });
+    const { data, totalCount } = await listApiKeys(ctx, { subject, includeInvalid, limit: page.limit, offset: page.offset, orderBy: page.order_by });
     return c.json({ data: data.map((r) => serializeApiKey(r)), total_count: totalCount });
   });
 
-  app.get("/api_keys/:id", (c) => c.json(serializeApiKey(requireApiKey(ctx, c.req.param("id")))));
+  app.get("/api_keys/:id", async (c) => c.json(serializeApiKey(await requireApiKey(ctx, c.req.param("id")))));
 
   app.patch("/api_keys/:id", async (c) => {
-    const row = requireApiKey(ctx, c.req.param("id"));
+    const row = await requireApiKey(ctx, c.req.param("id"));
     const body = await parseBody(c, patchSchema);
-    return c.json(serializeApiKey(updateApiKey(ctx, row, body)));
+    return c.json(serializeApiKey(await updateApiKey(ctx, row, body)));
   });
 
   app.post("/api_keys/:id/revoke", async (c) => {
-    const row = requireApiKey(ctx, c.req.param("id"));
+    const row = await requireApiKey(ctx, c.req.param("id"));
     const body = await parseBody(c, revokeSchema);
-    return c.json(serializeApiKey(revokeApiKey(ctx, row, body.revocation_reason ?? null)));
+    return c.json(serializeApiKey(await revokeApiKey(ctx, row, body.revocation_reason ?? null)));
   });
 
-  app.delete("/api_keys/:id", (c) => {
-    const row = requireApiKey(ctx, c.req.param("id"));
-    deleteApiKey(ctx, row);
+  app.delete("/api_keys/:id", async (c) => {
+    const row = await requireApiKey(ctx, c.req.param("id"));
+    await deleteApiKey(ctx, row);
     return c.json({ object: "api_key", id: row.id, deleted: true });
   });
 
@@ -117,9 +118,9 @@ function frontendRoutes(ctx: AppContext): Hono {
   const orgSubject = async (c: Context) => {
     const caller = await requireUserCaller(ctx, c);
     const orgId = c.req.param("orgId")!;
-    const org = ctx.db.select().from(s.organizations).where(eq(s.organizations.id, orgId)).get();
+    const org = first(await ctx.db.select().from(s.organizations).where(eq(s.organizations.id, orgId)));
     if (!org) throw new OrbitError(404, ErrorCodes.organization_not_found, "Organization not found");
-    assertOrgApiKeysPermission(ctx, caller.userId, orgId);
+    await assertOrgApiKeysPermission(ctx, caller.userId, orgId);
     return { subject: orgId, actorId: caller.userId };
   };
 
@@ -128,53 +129,53 @@ function frontendRoutes(ctx: AppContext): Hono {
       const { subject } = await subjectOf(c);
       const page = parsePagination(c);
       const includeInvalid = ["true", "1"].includes(c.req.query("include_invalid") ?? "");
-      const { data } = listApiKeys(ctx, { subject, includeInvalid, limit: page.limit, offset: page.offset, orderBy: page.order_by });
+      const { data } = await listApiKeys(ctx, { subject, includeInvalid, limit: page.limit, offset: page.offset, orderBy: page.order_by });
       return listResponse(c, data.map((r) => serializeApiKey(r)));
     });
 
     app.post(base, async (c) => {
       const { subject, actorId } = await subjectOf(c);
       const body = await parseBody(c, fapiCreateSchema);
-      const { row, secret } = createApiKey(ctx, {
-        name: body.name,
-        subject,
-        scopes: body.scopes,
-        claims: body.claims ?? null,
-        secondsUntilExpiration: body.seconds_until_expiration ?? null,
-        description: body.description ?? null,
-        createdBy: actorId,
-      });
+      const { row, secret } = await createApiKey(ctx, {
+              name: body.name,
+              subject,
+              scopes: body.scopes,
+              claims: body.claims ?? null,
+              secondsUntilExpiration: body.seconds_until_expiration ?? null,
+              description: body.description ?? null,
+              createdBy: actorId,
+            });
       return c.json({ response: serializeApiKey(row, { secret }) }, 201);
     });
 
     app.get(`${base}/:id`, async (c) => {
       const { subject } = await subjectOf(c);
-      const row = requireApiKey(ctx, c.req.param("id"));
+      const row = await requireApiKey(ctx, c.req.param("id"));
       assertApiKeyOwnership(row, subject);
       return response(c, serializeApiKey(row));
     });
 
     app.patch(`${base}/:id`, async (c) => {
       const { subject } = await subjectOf(c);
-      const row = requireApiKey(ctx, c.req.param("id"));
+      const row = await requireApiKey(ctx, c.req.param("id"));
       assertApiKeyOwnership(row, subject);
       const body = await parseBody(c, patchSchema);
-      return response(c, serializeApiKey(updateApiKey(ctx, row, body)));
+      return response(c, serializeApiKey(await updateApiKey(ctx, row, body)));
     });
 
     app.post(`${base}/:id/revoke`, async (c) => {
       const { subject } = await subjectOf(c);
-      const row = requireApiKey(ctx, c.req.param("id"));
+      const row = await requireApiKey(ctx, c.req.param("id"));
       assertApiKeyOwnership(row, subject);
       const body = await parseBody(c, revokeSchema);
-      return response(c, serializeApiKey(revokeApiKey(ctx, row, body.revocation_reason ?? null)));
+      return response(c, serializeApiKey(await revokeApiKey(ctx, row, body.revocation_reason ?? null)));
     });
 
     app.delete(`${base}/:id`, async (c) => {
       const { subject } = await subjectOf(c);
-      const row = requireApiKey(ctx, c.req.param("id"));
+      const row = await requireApiKey(ctx, c.req.param("id"));
       assertApiKeyOwnership(row, subject);
-      deleteApiKey(ctx, row);
+      await deleteApiKey(ctx, row);
       return response(c, { object: "api_key", id: row.id, deleted: true });
     });
   };

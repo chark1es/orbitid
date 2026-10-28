@@ -8,6 +8,7 @@ import { newId } from "../../lib/ids";
 import {
   assertValidCertificate, assertValidDomains, DEFAULT_ATTRIBUTE_MAPPING, encryptClientSecret, normalizeDomains,
 } from "../../services/saml";
+import { first } from "../../lib/db";
 
 type ConnectionRow = typeof s.enterpriseConnections.$inferSelect;
 
@@ -66,7 +67,7 @@ function samlConfigFromBody(body: ConnectionBody) {
   };
 }
 
-export function createConnection(ctx: AppContext, body: ConnectionBody): ConnectionRow {
+export async function createConnection(ctx: AppContext, body: ConnectionBody): Promise<ConnectionRow> {
   const domains = normalizeDomains(body.domains);
   assertValidDomains(domains);
   const now = Date.now();
@@ -92,12 +93,12 @@ export function createConnection(ctx: AppContext, body: ConnectionBody): Connect
     createdAt: now,
     updatedAt: now,
   };
-  ctx.db.insert(s.enterpriseConnections).values(row).run();
+  await ctx.db.insert(s.enterpriseConnections).values(row);
   return row;
 }
 
 /** Applies a partial update. Protocol is immutable, SAML keeps its attribute mapping merged with defaults. */
-export function updateConnection(ctx: AppContext, row: ConnectionRow, patch: z.infer<typeof connectionPatchSchema>): ConnectionRow {
+export async function updateConnection(ctx: AppContext, row: ConnectionRow, patch: z.infer<typeof connectionPatchSchema>): Promise<ConnectionRow> {
   const set: Partial<ConnectionRow> = { updatedAt: Date.now() };
   if (patch.name !== undefined) set.name = patch.name;
   if (patch.provider !== undefined) set.provider = patch.provider;
@@ -130,6 +131,6 @@ export function updateConnection(ctx: AppContext, row: ConnectionRow, patch: z.i
     }
   }
   set.config = config as ConnectionRow["config"];
-  ctx.db.update(s.enterpriseConnections).set(set).where(eq(s.enterpriseConnections.id, row.id)).run();
-  return ctx.db.select().from(s.enterpriseConnections).where(eq(s.enterpriseConnections.id, row.id)).get()!;
+  await ctx.db.update(s.enterpriseConnections).set(set).where(eq(s.enterpriseConnections.id, row.id));
+  return first(await ctx.db.select().from(s.enterpriseConnections).where(eq(s.enterpriseConnections.id, row.id)))!;
 }

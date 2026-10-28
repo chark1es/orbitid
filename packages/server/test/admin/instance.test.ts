@@ -118,7 +118,7 @@ describe("instance settings", () => {
     const { api, ctx } = await testApp();
     const first = await json<{ object: string; kid: string; algorithm: string; active: boolean }>(await api("POST", "/v1/instance/signing_keys/rotate"));
     expect(first).toMatchObject({ object: "signing_key", algorithm: "RS256", active: true });
-    const keys = ctx.db.select().from(s.signingKeys).all();
+    const keys = (await ctx.db.select().from(s.signingKeys));
     expect(keys).toHaveLength(1);
     expect(keys[0]!.kid).toBe(first.kid);
     expect(keys[0]!.publicJwk).toMatchObject({ kty: "RSA" });
@@ -126,7 +126,7 @@ describe("instance settings", () => {
 
     const second = await json<{ kid: string }>(await api("POST", "/v1/instance/signing_keys/rotate"));
     expect(second.kid).not.toBe(first.kid);
-    const rotated = ctx.db.select().from(s.signingKeys).all();
+    const rotated = (await ctx.db.select().from(s.signingKeys));
     expect(rotated.filter((key) => key.active)).toHaveLength(1);
     expect(rotated.find((key) => key.kid === first.kid)!.active).toBe(false);
   });
@@ -138,7 +138,7 @@ describe("instance settings", () => {
     expect(created.token).toMatch(/^tt_/);
     expect(created.expires_at).toBeGreaterThan(Date.now());
 
-    const row = ctx.db.select().from(s.verifications).all().find((verification) => verification.purpose === "testing_token")!;
+    const row = (await ctx.db.select().from(s.verifications)).find((verification) => verification.purpose === "testing_token")!;
     expect(row.tokenHash).toBe(sha256(created.token));
 
     await ctx.settings.update({ security: { testingTokensEnabled: false } });
@@ -175,15 +175,14 @@ describe("audit logs & stats", () => {
     const locked = await createUser(api, { email_address: ["s4@example.com"] });
     await api("POST", `/v1/users/${banned.id}/ban`);
     await api("POST", `/v1/users/${locked.id}/lock`);
-    createSessionFixture(ctx, active.id);
+    await createSessionFixture(ctx, active.id);
 
     const orgId = newId("org");
-    ctx.db.insert(s.organizations).values({ id: orgId, name: "Acme" }).run();
+    await ctx.db.insert(s.organizations).values({ id: orgId, name: "Acme" });
     for (const [index, provider] of ["google", "google", "github"].entries()) {
-      ctx.db
-        .insert(s.externalAccounts)
-        .values({ id: newId(ID_PREFIX.external), userId: active.id, provider, providerUserId: `${provider}-${index}` })
-        .run();
+      await ctx.db
+                        .insert(s.externalAccounts)
+                        .values({ id: newId(ID_PREFIX.external), userId: active.id, provider, providerUserId: `${provider}-${index}` });
     }
 
     const stats = await json<StatsResponse>(await api("GET", "/v1/stats"));

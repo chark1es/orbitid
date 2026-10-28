@@ -22,12 +22,13 @@ import { onUserDeleted } from "../../src/services/orgs";
 import { api, backend, createOrg, eventsOf, invite, lastMail, seedAuth, seedUser, setup } from "./helpers";
 import * as s from "../../src/db/schema";
 import { eq } from "drizzle-orm";
+import { first } from "../../src/lib/db";
 
 describe("organization webhooks", () => {
   it("emits organization and membership events with backend payloads", async () => {
     const { ctx, app } = await setup();
-    const owner = seedUser(ctx, { email: "owner@acme.test" });
-    const ownerAuth = seedAuth(ctx, owner.id);
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const ownerAuth = await seedAuth(ctx, owner.id);
 
     const org = await createOrg(app, ownerAuth.cookie, "Acme");
     const created = eventsOf("organization.created") as OrganizationJSON[];
@@ -43,8 +44,8 @@ describe("organization webhooks", () => {
     await api(app, "PATCH", `/v1/client/organizations/${org.id}`, { cookie: ownerAuth.cookie, body: { name: "Acme Renamed" } });
     expect((eventsOf("organization.updated") as OrganizationJSON[]).at(-1)!.name).toBe("Acme Renamed");
 
-    const invitee = seedUser(ctx, { email: "invitee@acme.test", verified: true });
-    const inviteeAuth = seedAuth(ctx, invitee.id);
+    const invitee = await seedUser(ctx, { email: "invitee@acme.test", verified: true });
+    const inviteeAuth = await seedAuth(ctx, invitee.id);
     const invitation = await invite(app, ownerAuth.cookie, org.id, "invitee@acme.test");
     expect(eventsOf("organizationInvitation.created")).toHaveLength(1);
     await api(app, "POST", `/v1/client/me/organization_invitations/${invitation.id}/accept`, { cookie: inviteeAuth.cookie });
@@ -63,8 +64,8 @@ describe("organization webhooks", () => {
 
   it("emits invitation, domain, role and permission events", async () => {
     const { ctx, app } = await setup();
-    const owner = seedUser(ctx, { email: "owner@acme.test" });
-    const ownerAuth = seedAuth(ctx, owner.id);
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const ownerAuth = await seedAuth(ctx, owner.id);
     const org = await createOrg(app, ownerAuth.cookie, "Acme");
 
     const invitation = await invite(app, ownerAuth.cookie, org.id, "pending@acme.test");
@@ -99,26 +100,26 @@ describe("organization webhooks", () => {
 
   it("cleans up organizations when the user row was already deleted (cascade order)", async () => {
     const { ctx, app } = await setup();
-    const admin = seedUser(ctx, { email: "admin@acme.test" });
-    const member = seedUser(ctx, { email: "member@acme.test" });
+    const admin = await seedUser(ctx, { email: "admin@acme.test" });
+    const member = await seedUser(ctx, { email: "member@acme.test" });
     const promoteOrg = await backend<OrganizationJSON>(app, "POST", "/v1/organizations", { name: "Cascade Inc", created_by: admin.id });
     await backend(app, "POST", `/v1/organizations/${promoteOrg.body.id}/memberships`, { user_id: member.id, role: "org:member" });
     const orphanOrg = await backend<OrganizationJSON>(app, "POST", "/v1/organizations", { name: "Gone Inc", created_by: admin.id });
 
     // users.deleteUser removes the row first; memberships cascade away before the hook runs.
-    ctx.db.delete(s.users).where(eq(s.users.id, admin.id)).run();
+    await ctx.db.delete(s.users).where(eq(s.users.id, admin.id));
     await onUserDeleted(ctx, admin.id);
 
-    expect(ctx.db.select().from(s.organizations).where(eq(s.organizations.id, orphanOrg.body.id)).get()).toBeUndefined();
-    const remaining = ctx.db.select().from(s.organizationMemberships).where(eq(s.organizationMemberships.organizationId, promoteOrg.body.id)).all();
+    expect(first(await ctx.db.select().from(s.organizations).where(eq(s.organizations.id, orphanOrg.body.id)))).toBeUndefined();
+    const remaining = (await ctx.db.select().from(s.organizationMemberships).where(eq(s.organizationMemberships.organizationId, promoteOrg.body.id)));
     expect(remaining).toHaveLength(1);
     expect(remaining[0]!.roleKey).toBe("org:admin");
   });
 
   it("cleans up memberships and promotes or deletes organizations when a user is deleted", async () => {
     const { ctx, app } = await setup();
-    const admin = seedUser(ctx, { email: "admin@acme.test" });
-    const member = seedUser(ctx, { email: "member@acme.test" });
+    const admin = await seedUser(ctx, { email: "admin@acme.test" });
+    const member = await seedUser(ctx, { email: "member@acme.test" });
 
     // org with one admin + one member: admin deletion promotes the member
     const promoteOrg = await backend<OrganizationJSON>(app, "POST", "/v1/organizations", { name: "Promote Inc", created_by: admin.id });
@@ -128,12 +129,12 @@ describe("organization webhooks", () => {
 
     await onUserDeleted(ctx, admin.id);
 
-    const rows = ctx.db.select().from(s.organizationMemberships).where(eq(s.organizationMemberships.userId, admin.id)).all();
+    const rows = (await ctx.db.select().from(s.organizationMemberships).where(eq(s.organizationMemberships.userId, admin.id)));
     expect(rows).toHaveLength(0);
-    const promoted = ctx.db.select().from(s.organizationMemberships).where(eq(s.organizationMemberships.organizationId, promoteOrg.body.id)).all();
+    const promoted = (await ctx.db.select().from(s.organizationMemberships).where(eq(s.organizationMemberships.organizationId, promoteOrg.body.id)));
     expect(promoted).toHaveLength(1);
     expect(promoted[0]!.roleKey).toBe("org:admin");
-    expect(ctx.db.select().from(s.organizations).where(eq(s.organizations.id, orphanOrg.body.id)).get()).toBeUndefined();
+    expect(first(await ctx.db.select().from(s.organizations).where(eq(s.organizations.id, orphanOrg.body.id)))).toBeUndefined();
 
     const deletedMemberships = eventsOf("organizationMembership.deleted") as { public_user_data: { user_id: string } }[];
     expect(deletedMemberships.filter((m) => m.public_user_data.user_id === admin.id)).toHaveLength(2);

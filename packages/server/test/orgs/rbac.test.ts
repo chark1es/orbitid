@@ -25,11 +25,11 @@ import * as s from "../../src/db/schema";
 import { setup, seedUser, seedAuth, createOrg, invite, api, backend, errorCode, memberships, membershipFor } from "./helpers";
 
 async function adminAndMember(app: Parameters<typeof api>[0], ctx: Parameters<typeof seedUser>[0]) {
-  const owner = seedUser(ctx, { email: "owner@acme.test" });
-  const ownerAuth = seedAuth(ctx, owner.id);
+  const owner = await seedUser(ctx, { email: "owner@acme.test" });
+  const ownerAuth = await seedAuth(ctx, owner.id);
   const org = await createOrg(app, ownerAuth.cookie, "Acme", "acme");
-  const member = seedUser(ctx, { email: "member@acme.test" });
-  const memberAuth = seedAuth(ctx, member.id);
+  const member = await seedUser(ctx, { email: "member@acme.test" });
+  const memberAuth = await seedAuth(ctx, member.id);
   const invitation = await invite(app, ownerAuth.cookie, org.id, "member@acme.test");
   const accepted = await api(app, "POST", `/v1/client/me/organization_invitations/${invitation.id}/accept`, { cookie: memberAuth.cookie });
   expect(accepted.status).toBe(200);
@@ -64,8 +64,8 @@ describe("organization RBAC", () => {
     expect((await api(app, "DELETE", `/v1/client/organizations/${org.id}`, { cookie: memberAuth.cookie })).status).toBe(403);
 
     // non-members cannot read the organization at all
-    const outsider = seedUser(ctx, { email: "outsider@acme.test" });
-    const outsiderAuth = seedAuth(ctx, outsider.id);
+    const outsider = await seedUser(ctx, { email: "outsider@acme.test" });
+    const outsiderAuth = await seedAuth(ctx, outsider.id);
     const outsiderGet = await api(app, "GET", `/v1/client/organizations/${org.id}`, { cookie: outsiderAuth.cookie });
     expect(outsiderGet.status).toBe(404);
     expect(errorCode(outsiderGet.body)).toBe("not_a_member_in_organization");
@@ -107,8 +107,8 @@ describe("organization RBAC", () => {
 
   it("protects the last admin from leaving, being demoted or being removed", async () => {
     const { ctx, app } = await setup();
-    const owner = seedUser(ctx, { email: "owner@acme.test" });
-    const ownerAuth = seedAuth(ctx, owner.id);
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const ownerAuth = await seedAuth(ctx, owner.id);
     const org = await createOrg(app, ownerAuth.cookie, "Solo");
 
     const leave = await api(app, "DELETE", `/v1/client/me/organization_memberships/${org.id}`, { cookie: ownerAuth.cookie });
@@ -123,8 +123,8 @@ describe("organization RBAC", () => {
     expect(remove.status).toBe(403);
 
     // second admin can take over
-    const second = seedUser(ctx, { email: "second@acme.test" });
-    const secondAuth = seedAuth(ctx, second.id);
+    const second = await seedUser(ctx, { email: "second@acme.test" });
+    const secondAuth = await seedAuth(ctx, second.id);
     const invitation = await invite(app, ownerAuth.cookie, org.id, "second@acme.test", "org:admin");
     expect((await api(app, "POST", `/v1/client/me/organization_invitations/${invitation.id}/accept`, { cookie: secondAuth.cookie })).status).toBe(200);
 
@@ -142,30 +142,30 @@ describe("organization RBAC", () => {
 
   it("seeds system roles and permissions idempotently", async () => {
     const { ctx } = await setup();
-    const rolesBefore = ctx.db.select().from(s.roles).all();
-    const linksBefore = ctx.db.select().from(s.rolePermissions).all().length;
+    const rolesBefore = (await ctx.db.select().from(s.roles));
+    const linksBefore = (await ctx.db.select().from(s.rolePermissions)).length;
 
     await seedRbac(ctx);
     await seedRbac(ctx);
 
-    expect(ctx.db.select().from(s.roles).all().map((r) => r.key).sort()).toEqual(rolesBefore.map((r) => r.key).sort());
-    expect(ctx.db.select().from(s.rolePermissions).all().length).toBe(linksBefore);
+    expect((await ctx.db.select().from(s.roles)).map((r) => r.key).sort()).toEqual(rolesBefore.map((r) => r.key).sort());
+    expect((await ctx.db.select().from(s.rolePermissions)).length).toBe(linksBefore);
     expect(rolesBefore.filter((r) => r.isSystem).map((r) => r.key).sort()).toEqual(["org:admin", "org:member"]);
-    expect(permissionsForRole(ctx, "org:admin")).toEqual([
+    expect(await permissionsForRole(ctx, "org:admin")).toEqual([
       "org:sys_domains:manage", "org:sys_domains:read", "org:sys_memberships:manage", "org:sys_memberships:read",
       "org:sys_profile:delete", "org:sys_profile:manage",
     ]);
-    expect(permissionsForRole(ctx, "org:member")).toEqual(["org:sys_domains:read", "org:sys_memberships:read"]);
+    expect(await permissionsForRole(ctx, "org:member")).toEqual(["org:sys_domains:read", "org:sys_memberships:read"]);
   });
 
   it("lists the caller's memberships with the active organization first", async () => {
     const { ctx, app } = await setup();
-    const owner = seedUser(ctx, { email: "owner@acme.test" });
-    const first = seedAuth(ctx, owner.id);
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const first = await seedAuth(ctx, owner.id);
     const alpha = await createOrg(app, first.cookie, "Alpha");
     const beta = await createOrg(app, first.cookie, "Beta");
 
-    const active = seedAuth(ctx, owner.id, { activeOrganizationId: alpha.id });
+    const active = await seedAuth(ctx, owner.id, { activeOrganizationId: alpha.id });
     const list = await api<{ response: OrganizationMembershipJSON[] }>(app, "GET", "/v1/client/me/organization_memberships", { cookie: active.cookie });
     expect(list.status).toBe(200);
     expect(list.body.response).toHaveLength(2);
@@ -180,8 +180,8 @@ describe("organization RBAC", () => {
 
   it("authenticates Frontend API calls with a session JWT bearer token", async () => {
     const { ctx, app } = await setup();
-    const owner = seedUser(ctx, { email: "owner@acme.test" });
-    const auth = seedAuth(ctx, owner.id);
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const auth = await seedAuth(ctx, owner.id);
     const org = await createOrg(app, auth.cookie, "Acme");
 
     const jwt = await signSessionToken(ctx, auth.sessionId);
@@ -197,8 +197,8 @@ describe("organization RBAC", () => {
 
   it("returns 403 organizations_disabled when organizations are turned off", async () => {
     const { ctx, app } = await setup({ organizations: { enabled: false } });
-    const user = seedUser(ctx, { email: "user@acme.test" });
-    const auth = seedAuth(ctx, user.id);
+    const user = await seedUser(ctx, { email: "user@acme.test" });
+    const auth = await seedAuth(ctx, user.id);
     const res = await api(app, "POST", "/v1/client/organizations", { cookie: auth.cookie, body: { name: "Acme" } });
     expect(res.status).toBe(403);
     expect(errorCode(res.body)).toBe("organizations_disabled");
@@ -208,15 +208,15 @@ describe("organization RBAC", () => {
 
   it("enforces organization creation limits", async () => {
     const { ctx, app } = await setup({ organizations: { maxCreatedOrganizationsPerUser: 1 } });
-    const user = seedUser(ctx, { email: "creator@acme.test" });
-    const auth = seedAuth(ctx, user.id);
+    const user = await seedUser(ctx, { email: "creator@acme.test" });
+    const auth = await seedAuth(ctx, user.id);
     expect((await api<{ response: OrganizationJSON }>(app, "POST", "/v1/client/organizations", { cookie: auth.cookie, body: { name: "One" } })).status).toBe(200);
     const second = await api(app, "POST", "/v1/client/organizations", { cookie: auth.cookie, body: { name: "Two" } });
     expect(second.status).toBe(403);
     expect(errorCode(second.body)).toBe("organization_creation_not_allowed");
 
-    const blockedUser = seedUser(ctx, { email: "blocked@acme.test", createOrganizationEnabled: false });
-    const blockedAuth = seedAuth(ctx, blockedUser.id);
+    const blockedUser = await seedUser(ctx, { email: "blocked@acme.test", createOrganizationEnabled: false });
+    const blockedAuth = await seedAuth(ctx, blockedUser.id);
     const blocked = await api(app, "POST", "/v1/client/organizations", { cookie: blockedAuth.cookie, body: { name: "Nope" } });
     expect(blocked.status).toBe(403);
     expect(errorCode(blocked.body)).toBe("organization_creation_not_allowed");
@@ -224,8 +224,8 @@ describe("organization RBAC", () => {
 
   it("validates and de-duplicates slugs and enforces the membership quota", async () => {
     const { ctx, app } = await setup({ organizations: { maxAllowedMemberships: 2 } });
-    const owner = seedUser(ctx, { email: "owner@acme.test" });
-    const ownerAuth = seedAuth(ctx, owner.id);
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const ownerAuth = await seedAuth(ctx, owner.id);
     const org = await createOrg(app, ownerAuth.cookie, "Acme Inc", "acme-inc");
     expect(org.slug).toBe("acme-inc");
 
@@ -253,8 +253,8 @@ describe("organization RBAC", () => {
     const anonymous = await api(app, "GET", "/v1/client/me/organization_memberships");
     expect(anonymous.status).toBe(401);
 
-    const owner = seedUser(ctx, { email: "owner@acme.test" });
-    const ownerAuth = seedAuth(ctx, owner.id);
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const ownerAuth = await seedAuth(ctx, owner.id);
     // Metadata is written by the Backend API only; the Frontend API serves the public half and never the private one.
     const seeded = await backend<OrganizationJSON>(app, "POST", "/v1/organizations", {
       name: "Secret Org", created_by: owner.id, public_metadata: { plan: "free" }, private_metadata: { secret: "shh" },

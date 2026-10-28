@@ -39,7 +39,7 @@ export async function verifyPassword(hash: string | null | undefined, password: 
   if (hash.startsWith("$argon2")) return argonVerify(hash, password);
   if (/^\$2[abxy]\$/.test(hash)) {
     const bcrypt = optionalBcrypt();
-    return bcrypt?.compare ? bcrypt.compare(password, hash) : false;
+    return bcrypt?.compare ? await bcrypt.compare(password, hash) : false;
   }
   if (hash.startsWith("scrypt$")) return verifyScrypt(hash, password);
   return false;

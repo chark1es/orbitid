@@ -1,6 +1,6 @@
 // Backend API instance invitations (`/v1/invitations`).
 import { Hono } from "hono";
-import { and, eq, like, sql, type SQL } from "drizzle-orm";
+import { and, count, eq, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { ErrorCodes, ID_PREFIX, OrbitError } from "@orbitid/shared";
 import { parseBody } from "../../lib/http";
@@ -13,6 +13,7 @@ import { audit } from "../../services/audit";
 import { sendEmail, type EmailTemplate } from "../../services/mail";
 import type { AppContext } from "../../context";
 import { bool, listParams, metadataSchema, normalizeEmail, page, parseOrderBy, ticketUrl } from "./shared";
+import { first, containsText } from "../../lib/db";
 
 const INVITATION_TTL_DAYS = 30;
 
@@ -32,26 +33,25 @@ export interface CreatedInvitation { row: typeof s.invitations.$inferSelect; url
 /** Creates an instance invitation (also used by waitlist invites and allowlist notifications). */
 export async function createInvitation(ctx: AppContext, input: CreateInvitationInput): Promise<CreatedInvitation> {
   const email = normalizeEmail(input.email);
-  if (!input.ignoreExisting && pendingInvitationFor(ctx, email)) {
+  if (!input.ignoreExisting && await pendingInvitationFor(ctx, email)) {
     throw new OrbitError(422, ErrorCodes.duplicate_record, `There is already a pending invitation for ${email}.`, { param_name: "email_address" });
   }
   const ticket = randomToken(32);
   const now = Date.now();
-  const row = ctx.db
-    .insert(s.invitations)
-    .values({
-      id: newId(ID_PREFIX.appInvitation),
-      email,
-      status: "pending",
-      tokenHash: sha256(ticket),
-      redirectUrl: input.redirectUrl ?? null,
-      publicMetadata: input.publicMetadata ?? {},
-      expiresAt: now + (input.expiresInDays ?? INVITATION_TTL_DAYS) * 86_400_000,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .returning()
-    .get()!;
+  const row = first(await ctx.db
+      .insert(s.invitations)
+      .values({
+        id: newId(ID_PREFIX.appInvitation),
+        email,
+        status: "pending",
+        tokenHash: sha256(ticket),
+        redirectUrl: input.redirectUrl ?? null,
+        publicMetadata: input.publicMetadata ?? {},
+        expiresAt: now + (input.expiresInDays ?? INVITATION_TTL_DAYS) * 86_400_000,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning())!;
   const signUpUrl = ticketUrl(ctx, "/sign-up", ticket);
   const url = row.redirectUrl ? `${signUpUrl}&redirect_url=${encodeURIComponent(row.redirectUrl)}` : signUpUrl;
 
@@ -68,7 +68,7 @@ export async function createInvitation(ctx: AppContext, input: CreateInvitationI
       console.error("[invitations] failed to send invitation email", err);
     }
   }
-  audit(ctx, { actor: "secret_key", action: "invitation.created", targetType: "invitation", targetId: row.id, metadata: { email_address: email } });
+  await audit(ctx, { actor: "secret_key", action: "invitation.created", targetType: "invitation", targetId: row.id, metadata: { email_address: email } });
   return { row, url };
 }
 
@@ -95,28 +95,27 @@ const INVITATION_ORDER_COLUMNS = { created_at: s.invitations.createdAt, updated_
 export default function routes(ctx: AppContext) {
   const app = new Hono();
 
-  app.get("/invitations", (c) => {
+  app.get("/invitations", async (c) => {
     const { limit, offset, order_by } = listParams(c);
     const conds: SQL[] = [];
     const status = c.req.query("status") ?? c.req.query("status[]");
     if (status) conds.push(eq(s.invitations.status, status));
     const query = c.req.query("query")?.trim();
-    if (query) conds.push(like(s.invitations.email, `%${query}%`));
+    if (query) conds.push(containsText(s.invitations.email, query));
     const where = conds.length ? and(...conds) : undefined;
-    const rows = ctx.db
-      .select()
-      .from(s.invitations)
-      .where(where)
-      .orderBy(parseOrderBy(order_by, INVITATION_ORDER_COLUMNS, "-created_at"))
-      .limit(limit)
-      .offset(offset)
-      .all();
-    const total = Number(ctx.db.select({ n: sql<number>`count(*)` }).from(s.invitations).where(where).get()?.n ?? 0);
+    const rows = (await ctx.db
+          .select()
+          .from(s.invitations)
+          .where(where)
+          .orderBy(parseOrderBy(order_by, INVITATION_ORDER_COLUMNS, "-created_at"))
+          .limit(limit)
+          .offset(offset));
+    const total = Number(first(await ctx.db.select({ n: count() }).from(s.invitations).where(where))?.n ?? 0);
     return c.json(page(rows.map((row) => serializeInvitation(row)), total));
   });
 
-  app.get("/invitations/:id", (c) => {
-    const row = ctx.db.select().from(s.invitations).where(eq(s.invitations.id, c.req.param("id"))).get();
+  app.get("/invitations/:id", async (c) => {
+    const row = first(await ctx.db.select().from(s.invitations).where(eq(s.invitations.id, c.req.param("id"))));
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Invitation not found.");
     return c.json(serializeInvitation(row));
   });
@@ -139,7 +138,7 @@ export default function routes(ctx: AppContext) {
     const created = [];
     for (const email of body.email_addresses) {
       // Bulk invites are for people who have not been invited yet; skip the rest instead of minting duplicates.
-      if (body.ignore_existing && pendingInvitationFor(ctx, normalizeEmail(email))) continue;
+      if (body.ignore_existing && await pendingInvitationFor(ctx, normalizeEmail(email))) continue;
       try {
         const { row, url } = await createInvitation(ctx, {
           email,
@@ -158,12 +157,12 @@ export default function routes(ctx: AppContext) {
   });
 
   app.post("/invitations/:id/revoke", async (c) => {
-    const row = ctx.db.select().from(s.invitations).where(eq(s.invitations.id, c.req.param("id"))).get();
+    const row = first(await ctx.db.select().from(s.invitations).where(eq(s.invitations.id, c.req.param("id"))));
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Invitation not found.");
-    ctx.db.update(s.invitations).set({ status: "revoked", updatedAt: Date.now() }).where(eq(s.invitations.id, row.id)).run();
-    const updated = ctx.db.select().from(s.invitations).where(eq(s.invitations.id, row.id)).get()!;
+    await ctx.db.update(s.invitations).set({ status: "revoked", updatedAt: Date.now() }).where(eq(s.invitations.id, row.id));
+    const updated = first(await ctx.db.select().from(s.invitations).where(eq(s.invitations.id, row.id)))!;
     await emitEvent(ctx, "invitation.revoked", serializeInvitation(updated));
-    audit(ctx, { actor: "secret_key", action: "invitation.revoked", targetType: "invitation", targetId: row.id, metadata: { email_address: row.email } });
+    await audit(ctx, { actor: "secret_key", action: "invitation.revoked", targetType: "invitation", targetId: row.id, metadata: { email_address: row.email } });
     return c.json(serializeInvitation(updated));
   });
 

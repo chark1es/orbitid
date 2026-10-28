@@ -35,8 +35,8 @@ function ticketFromInvitationEmail(): string {
 describe("organization invitations", () => {
   it("creates, lists, revokes and protects invitations", async () => {
     const { ctx, app } = await setup();
-    const owner = seedUser(ctx, { email: "owner@acme.test" });
-    const ownerAuth = seedAuth(ctx, owner.id);
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const ownerAuth = await seedAuth(ctx, owner.id);
     const org = await createOrg(app, ownerAuth.cookie, "Acme");
 
     const invitation = await invite(app, ownerAuth.cookie, org.id, "Invitee@Acme.test", "org:member");
@@ -70,20 +70,20 @@ describe("organization invitations", () => {
     expect(revoked.body.response.status).toBe("revoked");
     expect(eventsOf("organizationInvitation.revoked")).toHaveLength(1);
 
-    const invitee = seedUser(ctx, { email: "invitee@acme.test", verified: true });
-    const inviteeAuth = seedAuth(ctx, invitee.id);
+    const invitee = await seedUser(ctx, { email: "invitee@acme.test", verified: true });
+    const inviteeAuth = await seedAuth(ctx, invitee.id);
     const acceptAfterRevoke = await api(app, "POST", `/v1/client/me/organization_invitations/${invitation.id}/accept`, { cookie: inviteeAuth.cookie });
     expect(acceptAfterRevoke.status).toBe(409);
   });
 
   it("accepts an invitation when the matching email becomes verified", async () => {
     const { ctx, app } = await setup();
-    const owner = seedUser(ctx, { email: "owner@acme.test" });
-    const ownerAuth = seedAuth(ctx, owner.id);
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const ownerAuth = await seedAuth(ctx, owner.id);
     const org = await createOrg(app, ownerAuth.cookie, "Acme");
     const invitation = await invite(app, ownerAuth.cookie, org.id, "newcomer@acme.test");
 
-    const newcomer = seedUser(ctx, { email: "newcomer@acme.test", verified: true });
+    const newcomer = await seedUser(ctx, { email: "newcomer@acme.test", verified: true });
     await onUserEmailVerified(ctx, newcomer.id, "newcomer@acme.test");
 
     const list = await memberships(app, ownerAuth.cookie, org.id);
@@ -98,7 +98,7 @@ describe("organization invitations", () => {
     // a revoked invitation is not accepted on verification
     const second = await invite(app, ownerAuth.cookie, org.id, "late@acme.test");
     await api(app, "POST", `/v1/client/organizations/${org.id}/invitations/${second.id}/revoke`, { cookie: ownerAuth.cookie });
-    const late = seedUser(ctx, { email: "late@acme.test", verified: true });
+    const late = await seedUser(ctx, { email: "late@acme.test", verified: true });
     await onUserEmailVerified(ctx, late.id, "late@acme.test");
     expect((await memberships(app, ownerAuth.cookie, org.id)).some((m) => m.public_user_data.user_id === late.id)).toBe(false);
     expect(invitation.id).toBeTruthy();
@@ -106,20 +106,20 @@ describe("organization invitations", () => {
 
   it("accepts invitations from the user's own endpoints and via the ticket link", async () => {
     const { ctx, app } = await setup();
-    const owner = seedUser(ctx, { email: "owner@acme.test" });
-    const ownerAuth = seedAuth(ctx, owner.id);
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const ownerAuth = await seedAuth(ctx, owner.id);
     const org = await createOrg(app, ownerAuth.cookie, "Acme");
 
-    const invitee = seedUser(ctx, { email: "invitee@acme.test", verified: true });
-    const inviteeAuth = seedAuth(ctx, invitee.id);
+    const invitee = await seedUser(ctx, { email: "invitee@acme.test", verified: true });
+    const inviteeAuth = await seedAuth(ctx, invitee.id);
     const invitation = await invite(app, ownerAuth.cookie, org.id, "invitee@acme.test");
 
     const mine = await api<{ response: OrganizationInvitationJSON[] }>(app, "GET", "/v1/client/me/organization_invitations", { cookie: inviteeAuth.cookie });
     expect(mine.body.response.map((i) => i.id)).toEqual([invitation.id]);
 
     // someone else's invitation cannot be accepted
-    const stranger = seedUser(ctx, { email: "stranger@acme.test", verified: true });
-    const strangerAuth = seedAuth(ctx, stranger.id);
+    const stranger = await seedUser(ctx, { email: "stranger@acme.test", verified: true });
+    const strangerAuth = await seedAuth(ctx, stranger.id);
     const stolen = await api(app, "POST", `/v1/client/me/organization_invitations/${invitation.id}/accept`, { cookie: strangerAuth.cookie });
     expect(stolen.status).toBe(403);
 
@@ -145,8 +145,8 @@ describe("organization invitations", () => {
     expect(hostile.headers.get("location")).toBeNull();
 
     // authenticated matching user is joined before the redirect
-    const linkUser = seedUser(ctx, { email: "link@acme.test", verified: true });
-    const linkAuth = seedAuth(ctx, linkUser.id);
+    const linkUser = await seedUser(ctx, { email: "link@acme.test", verified: true });
+    const linkAuth = await seedAuth(ctx, linkUser.id);
     const authenticated = await api(app, "GET", `/v1/client/organization_invitations/accept?ticket=${encodeURIComponent(ticket2)}`, { cookie: linkAuth.cookie });
     expect(authenticated.status).toBe(302);
     expect((await memberships(app, ownerAuth.cookie, org.id)).some((m) => m.public_user_data.user_id === linkUser.id)).toBe(true);
@@ -154,7 +154,7 @@ describe("organization invitations", () => {
     // service-level ticket acceptance
     const third = await invite(app, ownerAuth.cookie, org.id, "service@acme.test");
     const ticket3 = ticketFromInvitationEmail();
-    const serviceUser = seedUser(ctx, { email: "service@acme.test", verified: true });
+    const serviceUser = await seedUser(ctx, { email: "service@acme.test", verified: true });
     await acceptInvitationByTicket(ctx, ticket3, serviceUser.id);
     expect((await memberships(app, ownerAuth.cookie, org.id)).some((m) => m.public_user_data.user_id === serviceUser.id)).toBe(true);
     await expect(acceptInvitationByTicket(ctx, "not-a-ticket", serviceUser.id)).rejects.toThrow();
@@ -164,8 +164,8 @@ describe("organization invitations", () => {
 
   it("supports bulk invitations and skips duplicates", async () => {
     const { ctx, app } = await setup();
-    const owner = seedUser(ctx, { email: "owner@acme.test" });
-    const ownerAuth = seedAuth(ctx, owner.id);
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const ownerAuth = await seedAuth(ctx, owner.id);
     const org = await createOrg(app, ownerAuth.cookie, "Acme");
 
     const before = mailOutbox.length;
@@ -187,8 +187,8 @@ describe("organization invitations", () => {
 
   it("counts pending invitations against the organization membership limit", async () => {
     const { ctx, app } = await setup({ organizations: { maxAllowedMemberships: 2 } });
-    const owner = seedUser(ctx, { email: "owner@acme.test" });
-    const ownerAuth = seedAuth(ctx, owner.id);
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const ownerAuth = await seedAuth(ctx, owner.id);
     const org = await createOrg(app, ownerAuth.cookie, "Acme");
     await invite(app, ownerAuth.cookie, org.id, "one@acme.test");
     const blocked = await api(app, "POST", `/v1/client/organizations/${org.id}/invitations`, { cookie: ownerAuth.cookie, body: { email_address: "two@acme.test" } });

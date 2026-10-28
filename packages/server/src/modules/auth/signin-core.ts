@@ -16,6 +16,7 @@ import { listEnabledSocialProviders } from "../../services/oauth-providers";
 import type { ExternalProfile } from "../../services/external-identity";
 import { getVerificationById, verificationJSON } from "./verifications";
 import { redeemTicket } from "../../services/restrictions";
+import { first } from "../../lib/db";
 
 export type SignInRow = typeof s.signIns.$inferSelect;
 
@@ -52,15 +53,15 @@ export interface SignInState {
 const asRecord = (v: unknown): Record<string, unknown> => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
 export const asSignInState = (row: SignInRow): SignInState => asRecord(row.state) as SignInState;
 
-export function saveSignInState(ctx: AppContext, row: SignInRow, state: SignInState) {
-  ctx.db.update(s.signIns).set({ state: state as Record<string, unknown>, updatedAt: Date.now() }).where(eq(s.signIns.id, row.id)).run();
+export async function saveSignInState(ctx: AppContext, row: SignInRow, state: SignInState) {
+  await ctx.db.update(s.signIns).set({ state: state as Record<string, unknown>, updatedAt: Date.now() }).where(eq(s.signIns.id, row.id));
   return { ...row, state: state as Record<string, unknown> };
 }
 
-export function factorJSON(ctx: AppContext, state: FactorState | undefined): VerificationJSON | null {
+export async function factorJSON(ctx: AppContext, state: FactorState | undefined): Promise<VerificationJSON | null> {
   if (!state) return null;
   if (state.verificationId) {
-    const row = getVerificationById(ctx, state.verificationId);
+    const row = await getVerificationById(ctx, state.verificationId);
     const json = verificationJSON(row);
     if (json) return { ...json, strategy: state.strategy, nonce: state.nonce ?? json.nonce };
   }
@@ -82,18 +83,18 @@ export const maskEmail = (email: string) => {
 };
 export const maskPhone = (phone: string) => `${phone.slice(0, phone.length - 4).replace(/\d/g, "*")}${phone.slice(-4)}`;
 
-export function verifiedEmailOf(ctx: AppContext, user: UserRow) {
-  return listEmails(ctx, user.id).find((e) => e.verified);
+export async function verifiedEmailOf(ctx: AppContext, user: UserRow) {
+  return (await listEmails(ctx, user.id)).find((e) => e.verified);
 }
-export function verifiedPhoneOf(ctx: AppContext, user: UserRow) {
-  return listPhones(ctx, user.id).find((p) => p.verified);
+export async function verifiedPhoneOf(ctx: AppContext, user: UserRow) {
+  return (await listPhones(ctx, user.id)).find((p) => p.verified);
 }
 
 /** Active enterprise SSO connection whose domain matches the email, if any. */
-export function enterpriseConnectionForEmail(ctx: AppContext, email: string) {
+export async function enterpriseConnectionForEmail(ctx: AppContext, email: string) {
   const domain = email.split("@")[1]?.toLowerCase();
   if (!domain) return undefined;
-  return ctx.db.select().from(s.enterpriseConnections).where(eq(s.enterpriseConnections.active, true)).all()
+  return (await ctx.db.select().from(s.enterpriseConnections).where(eq(s.enterpriseConnections.active, true)))
     .find((conn) => {
       const domains = (conn.domains ?? []).map((d) => d.toLowerCase());
       return domains.includes(domain) || (conn.allowSubdomains && domains.some((d) => domain.endsWith(`.${d}`)));
@@ -103,11 +104,11 @@ export function enterpriseConnectionForEmail(ctx: AppContext, email: string) {
 export interface FirstFactorOptions { requestedReset?: boolean; requestedStrategy?: string }
 
 /** Factors this user may use to sign in (Clerk's `supported_first_factors`). */
-export function computeFirstFactors(ctx: AppContext, user: UserRow, opts: FirstFactorOptions = {}): SignInFactor[] {
+export async function computeFirstFactors(ctx: AppContext, user: UserRow, opts: FirstFactorOptions = {}): Promise<SignInFactor[]> {
   const st = ctx.settings.get();
   const factors: SignInFactor[] = [];
-  const email = verifiedEmailOf(ctx, user) ?? primaryEmail(ctx, user);
-  const phone = verifiedPhoneOf(ctx, user) ?? primaryPhone(ctx, user);
+  const email = await verifiedEmailOf(ctx, user) ?? await primaryEmail(ctx, user);
+  const phone = await verifiedPhoneOf(ctx, user) ?? await primaryPhone(ctx, user);
 
   if (st.attributes.emailAddress.enabled && st.attributes.emailAddress.usedForFirstFactor && email?.verified) {
     const strategies = st.attributes.emailAddress.verifications;
@@ -123,13 +124,13 @@ export function computeFirstFactors(ctx: AppContext, user: UserRow, opts: FirstF
   if (st.attributes.phoneNumber.enabled && st.attributes.phoneNumber.usedForFirstFactor && phone?.verified) {
     factors.push({ strategy: "phone_code", phone_number_id: phone.id, safe_identifier: maskPhone(phone.phone), primary: phone.id === user.primaryPhoneNumberId });
   }
-  if (st.attributes.passkey.enabled && listPasskeys(ctx, user.id).length > 0) {
+  if (st.attributes.passkey.enabled && (await listPasskeys(ctx, user.id)).length > 0) {
     factors.push({ strategy: "passkey" });
   }
   for (const provider of listEnabledSocialProviders(ctx)) {
     if (provider.authenticatable) factors.push({ strategy: `oauth_${provider.key}` });
   }
-  if (email?.verified && enterpriseConnectionForEmail(ctx, email.email)) factors.push({ strategy: "enterprise_sso" });
+  if (email?.verified && await enterpriseConnectionForEmail(ctx, email.email)) factors.push({ strategy: "enterprise_sso" });
   if (opts.requestedReset) {
     if (email?.verified) factors.push({ strategy: "reset_password_email_code", email_address_id: email.id, safe_identifier: maskEmail(email.email) });
     if (phone?.verified) factors.push({ strategy: "reset_password_phone_code", phone_number_id: phone.id, safe_identifier: maskPhone(phone.phone) });
@@ -146,20 +147,20 @@ export function supportedIdentifiers(ctx: AppContext) {
   return ids;
 }
 
-export function buildSignInJSON(ctx: AppContext, row: SignInRow): SignInJSON {
+export async function buildSignInJSON(ctx: AppContext, row: SignInRow): Promise<SignInJSON> {
   const state = asSignInState(row);
-  const user = row.userId ? ctx.db.select().from(s.users).where(eq(s.users.id, row.userId)).get() : undefined;
-  const json = user ? serializeUser(ctx, user) : null;
+  const user = row.userId ? first(await ctx.db.select().from(s.users).where(eq(s.users.id, row.userId))) : undefined;
+  const json = user ? await serializeUser(ctx, user) : null;
   const requestedReset = !!state.requestedReset || state.first?.strategy.startsWith("reset_password") === true;
   return {
     object: "sign_in",
     id: row.id,
     status: row.status as SignInStatus,
     supported_identifiers: supportedIdentifiers(ctx),
-    supported_first_factors: user ? computeFirstFactors(ctx, user, { requestedReset }) : null,
-    supported_second_factors: user ? supportedSecondFactors(ctx, user) : null,
-    first_factor_verification: factorJSON(ctx, state.first),
-    second_factor_verification: factorJSON(ctx, state.second),
+    supported_first_factors: user ? await computeFirstFactors(ctx, user, { requestedReset }) : null,
+    supported_second_factors: user ? await supportedSecondFactors(ctx, user) : null,
+    first_factor_verification: await factorJSON(ctx, state.first),
+    second_factor_verification: await factorJSON(ctx, state.second),
     identifier: row.identifier ?? null,
     user_data: json ? { first_name: json.first_name, last_name: json.last_name, image_url: json.image_url, has_image: json.has_image } : null,
     created_session_id: row.createdSessionId ?? null,
@@ -190,18 +191,18 @@ export async function completeSignIn(ctx: AppContext, row: SignInRow, opts: Comp
     secondFactor: opts.secondFactor ?? false,
   });
   const nextState: SignInState = { ...state, second: opts.secondFactor ? { ...(state.second ?? { strategy: "totp" }), status: "verified" } : state.second };
-  ctx.db.update(s.signIns).set({ status: "complete", createdSessionId: sessionId, state: nextState as Record<string, unknown>, updatedAt: Date.now() }).where(eq(s.signIns.id, row.id)).run();
+  await ctx.db.update(s.signIns).set({ status: "complete", createdSessionId: sessionId, state: nextState as Record<string, unknown>, updatedAt: Date.now() }).where(eq(s.signIns.id, row.id));
   return sessionId;
 }
 
 /** Decides between `needs_second_factor` and a completed session after a first factor succeeded. */
 export async function afterFirstFactor(ctx: AppContext, row: SignInRow, user: UserRow, opts: CompleteSignInOptions = {}): Promise<{ status: "needs_second_factor" | "complete"; sessionId?: string }> {
-  const factors = supportedSecondFactors(ctx, user);
+  const factors = await supportedSecondFactors(ctx, user);
   if (factors.length > 0) {
     const state = asSignInState(row);
     const preferred = factors.find((f) => f.default) ?? factors.find((f) => f.strategy === "totp") ?? factors[0]!;
-    saveSignInState(ctx, row, { ...state, second: { strategy: preferred.strategy, phoneId: preferred.phone_number_id, status: "unverified" } });
-    ctx.db.update(s.signIns).set({ status: "needs_second_factor", userId: user.id, updatedAt: Date.now() }).where(eq(s.signIns.id, row.id)).run();
+    await saveSignInState(ctx, row, { ...state, second: { strategy: preferred.strategy, phoneId: preferred.phone_number_id, status: "unverified" } });
+    await ctx.db.update(s.signIns).set({ status: "needs_second_factor", userId: user.id, updatedAt: Date.now() }).where(eq(s.signIns.id, row.id));
     return { status: "needs_second_factor" };
   }
   const sessionId = await completeSignIn(ctx, row, opts);
@@ -209,7 +210,7 @@ export async function afterFirstFactor(ctx: AppContext, row: SignInRow, user: Us
 }
 
 /** Stores an OAuth profile on the sign-in so the SDK can transfer it to a sign-up. */
-export function stashTransferProfile(ctx: AppContext, row: SignInRow, profile: ExternalProfile, strategy: string) {
+export async function stashTransferProfile(ctx: AppContext, row: SignInRow, profile: ExternalProfile, strategy: string) {
   const state = asSignInState(row);
   const stashed: StashedProfile = {
     provider: profile.provider,
@@ -224,12 +225,12 @@ export function stashTransferProfile(ctx: AppContext, row: SignInRow, profile: E
     accessTokenEnc: profile.accessToken ? encrypt(ctx.env.encryptionKey, profile.accessToken) : undefined,
     refreshTokenEnc: profile.refreshToken ? encrypt(ctx.env.encryptionKey, profile.refreshToken) : undefined,
   };
-  saveSignInState(ctx, row, {
-    ...state,
-    first: { strategy, status: "transferable" },
-    transferProfile: stashed,
-  });
-  ctx.db.update(s.signIns).set({ status: "needs_first_factor", updatedAt: Date.now() }).where(eq(s.signIns.id, row.id)).run();
+  await saveSignInState(ctx, row, {
+        ...state,
+        first: { strategy, status: "transferable" },
+        transferProfile: stashed,
+      });
+  await ctx.db.update(s.signIns).set({ status: "needs_first_factor", updatedAt: Date.now() }).where(eq(s.signIns.id, row.id));
 }
 
 /** Reads + decrypts a stashed OAuth profile. */
@@ -245,9 +246,9 @@ export function readTransferProfile(ctx: AppContext, row: SignInRow): ExternalPr
 }
 
 /** Clears the transferable state once the SDK moved it to a sign-up. */
-export function clearTransferProfile(ctx: AppContext, row: SignInRow) {
+export async function clearTransferProfile(ctx: AppContext, row: SignInRow) {
   const state = asSignInState(row);
-  saveSignInState(ctx, row, { ...state, transferProfile: undefined, first: undefined });
+  await saveSignInState(ctx, row, { ...state, transferProfile: undefined, first: undefined });
 }
 
 export type RedeemTicketResult =
@@ -275,11 +276,11 @@ export function assertSignInAllowed(user: UserRow) {
 }
 
 export const signInBelongsToClient = (row: SignInRow, clientId: string) => row.clientId === clientId && row.status !== "abandoned";
-export const latestSignInForClient = (ctx: AppContext, clientId: string) =>
-  ctx.db.select().from(s.signIns).where(eq(s.signIns.clientId, clientId)).orderBy(desc(s.signIns.createdAt)).get();
+export const latestSignInForClient = async (ctx: AppContext, clientId: string) =>
+  first(await ctx.db.select().from(s.signIns).where(eq(s.signIns.clientId, clientId)).orderBy(desc(s.signIns.createdAt)));
 
 /** Latest sign-in that carries a transferable OAuth profile. */
-export function latestTransferableSignIn(ctx: AppContext, clientId: string) {
-  return ctx.db.select().from(s.signIns).where(eq(s.signIns.clientId, clientId)).orderBy(desc(s.signIns.createdAt)).all()
+export async function latestTransferableSignIn(ctx: AppContext, clientId: string) {
+  return (await ctx.db.select().from(s.signIns).where(eq(s.signIns.clientId, clientId)).orderBy(desc(s.signIns.createdAt)))
     .find((row) => !!asSignInState(row).transferProfile);
 }

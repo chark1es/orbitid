@@ -12,6 +12,7 @@ import { audit } from "../services/audit";
 import type { AppContext } from "../context";
 import { normalizeEmail } from "./admin/shared";
 import { serializeWaitlistEntry } from "./admin/waitlist";
+import { first } from "../lib/db";
 
 export default function routes(ctx: AppContext) {
   const app = new Hono();
@@ -20,22 +21,21 @@ export default function routes(ctx: AppContext) {
     if (ctx.settings.get().signUp.mode !== "waitlist") {
       throw new OrbitError(422, ErrorCodes.sign_up_mode_restricted, "The waitlist is not enabled for this instance.");
     }
-    hit(ctx, `waitlist:${clientIp(c)}`, 5, 3_600_000);
+    await hit(ctx, `waitlist:${clientIp(c)}`, 5, 3_600_000);
     const body = await parseBody(c, z.object({ email_address: z.string().email() }));
     const email = normalizeEmail(body.email_address);
 
-    const existing = ctx.db.select().from(s.waitlistEntries).where(eq(s.waitlistEntries.email, email)).get();
-    if (existing) return c.json({ response: serializeWaitlistEntry(ctx, existing) });
+    const existing = first(await ctx.db.select().from(s.waitlistEntries).where(eq(s.waitlistEntries.email, email)));
+    if (existing) return c.json({ response: await serializeWaitlistEntry(ctx, existing) });
 
     const now = Date.now();
-    const row = ctx.db
-      .insert(s.waitlistEntries)
-      .values({ id: newId(ID_PREFIX.waitlist), email, status: "pending", createdAt: now, updatedAt: now })
-      .returning()
-      .get()!;
-    const json = serializeWaitlistEntry(ctx, row);
+    const row = first(await ctx.db
+          .insert(s.waitlistEntries)
+          .values({ id: newId(ID_PREFIX.waitlist), email, status: "pending", createdAt: now, updatedAt: now })
+          .returning())!;
+    const json = await serializeWaitlistEntry(ctx, row);
     await emitEvent(ctx, "waitlistEntry.created", json);
-    audit(ctx, { actor: "anonymous", action: "waitlist_entry.created", targetType: "waitlist_entry", targetId: row.id, metadata: { email_address: email } });
+    await audit(ctx, { actor: "anonymous", action: "waitlist_entry.created", targetType: "waitlist_entry", targetId: row.id, metadata: { email_address: email } });
     return c.json({ response: json });
   });
 

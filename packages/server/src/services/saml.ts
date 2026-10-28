@@ -6,12 +6,13 @@
 import { X509Certificate } from "node:crypto";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { SAML, ValidateInResponseTo, type CacheProvider, type Profile } from "@node-saml/node-saml";
-import { and, eq } from "drizzle-orm";
+import { and, eq, gt, sql } from "drizzle-orm";
 import { ErrorCodes, OrbitError, type EnterpriseConnectionJSON } from "@orbitid/shared";
 import type { AppContext } from "../context";
 import * as s from "../db/schema";
 import { decrypt, encrypt } from "../lib/crypto";
 import type { ExternalProfile } from "./external-identity";
+import { first } from "../lib/db";
 
 type ConnectionRow = typeof s.enterpriseConnections.$inferSelect;
 
@@ -100,47 +101,44 @@ const SAML_ASSERTION_MAX_AGE_MS = 24 * 60 * 60_000;
 
 /**
  * Remembers AuthnRequest IDs (so a response must answer a request we issued, once) and assertion IDs
- * (so a captured response cannot be replayed). Rows live in `oauth_states`; better-sqlite3 is synchronous,
- * so each check-then-write below is atomic.
+ * (so a captured response cannot be replayed). Rows live in `oauth_states`; every check-and-write is a
+ * single statement so parallel requests cannot both claim the same key.
  */
-function samlCache(ctx: AppContext): CacheProvider {
+export function samlCache(ctx: AppContext): CacheProvider {
   const rowKey = (key: string) => `saml:${key}`;
-  const live = (key: string) => {
-    const row = ctx.db.select().from(s.oauthStates).where(eq(s.oauthStates.state, rowKey(key))).get();
-    if (row && row.expiresAt <= Date.now()) {
-      ctx.db.delete(s.oauthStates).where(eq(s.oauthStates.state, rowKey(key))).run();
-      return undefined;
-    }
-    return row;
-  };
-  const write = (key: string, value: string, expiresAt: number) =>
-    ctx.db.insert(s.oauthStates).values({ state: rowKey(key), provider: "saml_cache", flow: { value }, expiresAt }).run();
   const valueOf = (row: { flow: Record<string, unknown> } | undefined) => (row ? String(row.flow.value) : null);
   return {
     async saveAsync(key, value) {
-      ctx.db.delete(s.oauthStates).where(eq(s.oauthStates.state, rowKey(key))).run();
-      write(key, value, Date.now() + SAML_CACHE_TTL_MS);
+      const expiresAt = Date.now() + SAML_CACHE_TTL_MS;
+      await ctx.db.insert(s.oauthStates).values({ state: rowKey(key), provider: "saml_cache", flow: { value }, expiresAt })
+        .onConflictDoUpdate({ target: s.oauthStates.state, set: { flow: { value }, expiresAt } });
       return { value, createdAt: Date.now() };
     },
     async getAsync(key) {
-      return valueOf(live(key));
+      return valueOf(first(await ctx.db.select().from(s.oauthStates)
+        .where(and(eq(s.oauthStates.state, rowKey(key)), gt(s.oauthStates.expiresAt, Date.now())))));
     },
     async removeAsync(key) {
       if (!key) return null;
-      const value = valueOf(live(key));
-      ctx.db.delete(s.oauthStates).where(eq(s.oauthStates.state, rowKey(key))).run();
-      return value;
+      const row = first(await ctx.db.delete(s.oauthStates).where(eq(s.oauthStates.state, rowKey(key))).returning());
+      return row && row.expiresAt > Date.now() ? valueOf(row) : null;
     },
     async consumeAsync(key) {
-      const value = valueOf(live(key));
-      ctx.db.delete(s.oauthStates).where(eq(s.oauthStates.state, rowKey(key))).run();
-      return value;
+      return valueOf(first(await ctx.db.delete(s.oauthStates)
+        .where(and(eq(s.oauthStates.state, rowKey(key)), gt(s.oauthStates.expiresAt, Date.now())))
+        .returning()));
     },
     async saveIfAbsentAsync(key, value, expiresAtMs) {
-      if (live(key)) return false;
       // node-saml passes the instant until which it would still accept this assertion.
-      write(key, value, expiresAtMs);
-      return true;
+      const now = Date.now();
+      const written = first(await ctx.db.insert(s.oauthStates).values({ state: rowKey(key), provider: "saml_cache", flow: { value }, expiresAt: expiresAtMs })
+        .onConflictDoUpdate({
+          target: s.oauthStates.state,
+          set: { flow: { value }, expiresAt: expiresAtMs },
+          setWhere: sql`${s.oauthStates.expiresAt} <= ${now}`,
+        })
+        .returning());
+      return !!written;
     },
   };
 }
@@ -221,11 +219,11 @@ export function profileToExternalProfile(conn: ConnectionRow, profile: Profile):
 }
 
 /** Active connection matching an email, a bare domain or an identifier (`user@sub.acme.com`). */
-export function findConnectionForIdentifier(ctx: AppContext, identifier: string): ConnectionRow | null {
+export async function findConnectionForIdentifier(ctx: AppContext, identifier: string): Promise<ConnectionRow | null> {
   const value = identifier.trim().toLowerCase();
   if (!value) return null;
   const domain = (value.includes("@") ? value.slice(value.lastIndexOf("@") + 1) : value).replace(/^https?:\/\//, "").replace(/[/:].*$/, "");
-  const rows = ctx.db.select().from(s.enterpriseConnections).where(eq(s.enterpriseConnections.active, true)).all();
+  const rows = (await ctx.db.select().from(s.enterpriseConnections).where(eq(s.enterpriseConnections.active, true)));
   for (const row of rows) {
     for (const candidate of normalizeDomains(row.domains)) {
       if (domain === candidate) return row;
@@ -235,10 +233,9 @@ export function findConnectionForIdentifier(ctx: AppContext, identifier: string)
   return null;
 }
 
-export function findActiveConnection(ctx: AppContext, id: string): ConnectionRow | null {
-  return ctx.db.select().from(s.enterpriseConnections)
-    .where(and(eq(s.enterpriseConnections.id, id), eq(s.enterpriseConnections.active, true)))
-    .get() ?? null;
+export async function findActiveConnection(ctx: AppContext, id: string): Promise<ConnectionRow | null> {
+  return first(await ctx.db.select().from(s.enterpriseConnections)
+      .where(and(eq(s.enterpriseConnections.id, id), eq(s.enterpriseConnections.active, true)))) ?? null;
 }
 
 // ───────────── enterprise OIDC connection (OrbitID acting as OIDC client) ─────────────
@@ -273,10 +270,9 @@ export async function getOidcDiscovery(ctx: AppContext, conn: ConnectionRow): Pr
   if (!discovery.issuer || !discovery.authorization_endpoint || !discovery.token_endpoint || !discovery.jwks_uri) {
     throw new OrbitError(400, ErrorCodes.oauth_callback_error, "OIDC discovery document is incomplete");
   }
-  ctx.db.update(s.enterpriseConnections)
-    .set({ config: { ...(conn.config ?? {}), discovery }, updatedAt: Date.now() })
-    .where(eq(s.enterpriseConnections.id, conn.id))
-    .run();
+  await ctx.db.update(s.enterpriseConnections)
+            .set({ config: { ...(conn.config ?? {}), discovery }, updatedAt: Date.now() })
+            .where(eq(s.enterpriseConnections.id, conn.id));
   return discovery;
 }
 

@@ -10,8 +10,8 @@ const pathOf = (url: string) => new URL(url).pathname;
 describe("organization logos", () => {
   it("uploads, serves, replaces and deletes logos through the Frontend API", async () => {
     const { ctx, app } = await setup();
-    const owner = seedUser(ctx, { email: "owner@acme.test" });
-    const ownerAuth = seedAuth(ctx, owner.id);
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const ownerAuth = await seedAuth(ctx, owner.id);
     const org = await createOrg(app, ownerAuth.cookie, "Acme");
 
     const uploaded = await api<{ response: OrganizationJSON }>(app, "PUT", `/v1/client/organizations/${org.id}/logo`, { cookie: ownerAuth.cookie, body: { file: dataUrl } });
@@ -45,11 +45,11 @@ describe("organization logos", () => {
 
   it("requires the profile:manage permission and supports the Backend API", async () => {
     const { ctx, app } = await setup();
-    const owner = seedUser(ctx, { email: "owner@acme.test" });
-    const ownerAuth = seedAuth(ctx, owner.id);
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const ownerAuth = await seedAuth(ctx, owner.id);
     const org = await createOrg(app, ownerAuth.cookie, "Acme");
-    const member = seedUser(ctx, { email: "member@acme.test" });
-    const memberAuth = seedAuth(ctx, member.id);
+    const member = await seedUser(ctx, { email: "member@acme.test" });
+    const memberAuth = await seedAuth(ctx, member.id);
     const invitation = await invite(app, ownerAuth.cookie, org.id, "member@acme.test");
     await api(app, "POST", `/v1/client/me/organization_invitations/${invitation.id}/accept`, { cookie: memberAuth.cookie });
 

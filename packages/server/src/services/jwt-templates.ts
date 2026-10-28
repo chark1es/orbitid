@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import * as s from "../db/schema";
 import { DEFAULT_AVATAR, permissionsForRole } from "../serializers";
 import type { AppContext } from "../context";
+import { first } from "../lib/db";
 
 export type ShortcodeContext = Record<string, unknown>;
 
@@ -117,23 +118,22 @@ export function renderClaimsWithContext(claims: Record<string, unknown>, context
 
 export interface TemplateRenderInput { userId: string; sessionId?: string; orgId?: string | null }
 
-export function buildShortcodeContext(ctx: AppContext, input: TemplateRenderInput): ShortcodeContext {
-  const user = ctx.db.select().from(s.users).where(eq(s.users.id, input.userId)).get();
-  const session = input.sessionId ? ctx.db.select().from(s.sessions).where(eq(s.sessions.id, input.sessionId)).get() : undefined;
+export async function buildShortcodeContext(ctx: AppContext, input: TemplateRenderInput): Promise<ShortcodeContext> {
+  const user = first(await ctx.db.select().from(s.users).where(eq(s.users.id, input.userId)));
+  const session = input.sessionId ? first(await ctx.db.select().from(s.sessions).where(eq(s.sessions.id, input.sessionId))) : undefined;
   const orgId = input.orgId ?? session?.lastActiveOrganizationId ?? null;
-  const org = orgId ? ctx.db.select().from(s.organizations).where(eq(s.organizations.id, orgId)).get() : undefined;
+  const org = orgId ? first(await ctx.db.select().from(s.organizations).where(eq(s.organizations.id, orgId))) : undefined;
   const membership = org
-    ? ctx.db
-        .select()
-        .from(s.organizationMemberships)
-        .where(eq(s.organizationMemberships.organizationId, org.id))
-        .all()
+    ? (await ctx.db
+              .select()
+              .from(s.organizationMemberships)
+              .where(eq(s.organizationMemberships.organizationId, org.id)))
         .find((m) => m.userId === input.userId)
     : undefined;
-  const email = user?.primaryEmailAddressId ? ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.id, user.primaryEmailAddressId)).get() : undefined;
-  const phone = user?.primaryPhoneNumberId ? ctx.db.select().from(s.phoneNumbers).where(eq(s.phoneNumbers.id, user.primaryPhoneNumberId)).get() : undefined;
+  const email = user?.primaryEmailAddressId ? first(await ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.id, user.primaryEmailAddressId))) : undefined;
+  const phone = user?.primaryPhoneNumberId ? first(await ctx.db.select().from(s.phoneNumbers).where(eq(s.phoneNumbers.id, user.primaryPhoneNumberId))) : undefined;
   const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(" ") || user?.username || email?.email || user?.id || "";
-  const permissions = membership ? permissionsForRole(ctx, membership.roleKey) : [];
+  const permissions = membership ? await permissionsForRole(ctx, membership.roleKey) : [];
 
   return {
     user: user
@@ -186,10 +186,10 @@ export async function renderTemplateClaims(
   templateName: string,
   input: TemplateRenderInput,
 ): Promise<null | { claims: Record<string, unknown>; lifetimeSeconds: number; allowedClockSkewSeconds: number; signingKeyEnc?: string | null; algorithm: string }> {
-  const template = ctx.db.select().from(s.jwtTemplates).where(eq(s.jwtTemplates.name, templateName)).get();
+  const template = first(await ctx.db.select().from(s.jwtTemplates).where(eq(s.jwtTemplates.name, templateName)));
   if (!template) return null;
   return {
-    claims: renderClaimsWithContext(template.claims ?? {}, buildShortcodeContext(ctx, input)),
+    claims: renderClaimsWithContext(template.claims ?? {}, await buildShortcodeContext(ctx, input)),
     lifetimeSeconds: template.lifetime,
     allowedClockSkewSeconds: template.allowedClockSkew,
     signingKeyEnc: template.customSigningKey ? template.signingKeyEnc : null,

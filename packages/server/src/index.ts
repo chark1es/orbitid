@@ -15,5 +15,5 @@ export async function startServer(overrides: Partial<Env> = {}) {
   const app = createApp(ctx);
   const stopWorker = startWebhookWorker(ctx);
   const server = serve({ fetch: app.fetch, port: ctx.env.port });
-  return { ctx, app, server, close: () => { stopWorker(); server.close(); } };
+  return { ctx, app, server, close: async () => { stopWorker(); server.close(); await ctx.close(); } };
 }

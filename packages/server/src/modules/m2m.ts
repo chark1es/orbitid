@@ -50,13 +50,13 @@ const bearerToken = (c: Context) => (c.req.header("authorization") ?? "").replac
 export async function resolveTokenMachine(ctx: AppContext, c: Context, body: { machine_id?: string; machine_secret?: string }) {
   const bearer = bearerToken(c);
   if (bearer.startsWith("mk_")) {
-    const machine = authenticateMachineSecret(ctx, bearer);
+    const machine = await authenticateMachineSecret(ctx, bearer);
     if (!machine) throw new OrbitError(401, ErrorCodes.authorization_invalid, "Invalid machine secret");
     if (body.machine_id && body.machine_id !== machine.id) throw new OrbitError(401, ErrorCodes.authorization_invalid, "Machine secret does not match machine_id");
     return machine;
   }
   if (body.machine_secret) {
-    const machine = authenticateMachineSecret(ctx, body.machine_secret);
+    const machine = await authenticateMachineSecret(ctx, body.machine_secret);
     if (!machine) throw new OrbitError(401, ErrorCodes.authorization_invalid, "Invalid machine secret");
     if (body.machine_id && body.machine_id !== machine.id) throw new OrbitError(401, ErrorCodes.authorization_invalid, "Machine secret does not match machine_id");
     return machine;
@@ -70,41 +70,41 @@ export default function routes(ctx: AppContext) {
 
   app.post("/machines", async (c) => {
     const body = await parseBody(c, createMachineSchema);
-    const { row, secret } = createMachine(ctx, { name: body.name, scopedMachines: body.scoped_machines, defaultTokenTtl: body.default_token_ttl });
+    const { row, secret } = await createMachine(ctx, { name: body.name, scopedMachines: body.scoped_machines, defaultTokenTtl: body.default_token_ttl });
     return c.json({ ...serializeMachine(row), secret }, 201);
   });
 
-  app.get("/machines", (c) => {
+  app.get("/machines", async (c) => {
     const page = parsePagination(c);
-    const { data, totalCount } = listMachines(ctx, { limit: page.limit, offset: page.offset });
+    const { data, totalCount } = await listMachines(ctx, { limit: page.limit, offset: page.offset });
     return c.json({ data: data.map(serializeMachine), total_count: totalCount });
   });
 
-  app.get("/machines/:id", (c) => c.json(serializeMachine(requireMachine(ctx, c.req.param("id")))));
+  app.get("/machines/:id", async (c) => c.json(serializeMachine(await requireMachine(ctx, c.req.param("id")))));
 
   app.patch("/machines/:id", async (c) => {
-    const row = requireMachine(ctx, c.req.param("id"));
+    const row = await requireMachine(ctx, c.req.param("id"));
     const body = await parseBody(c, patchMachineSchema);
-    return c.json(serializeMachine(updateMachine(ctx, row, { name: body.name, scopedMachines: body.scoped_machines, defaultTokenTtl: body.default_token_ttl })));
+    return c.json(serializeMachine(await updateMachine(ctx, row, { name: body.name, scopedMachines: body.scoped_machines, defaultTokenTtl: body.default_token_ttl })));
   });
 
-  app.delete("/machines/:id", (c) => {
-    const row = requireMachine(ctx, c.req.param("id"));
-    deleteMachine(ctx, row);
+  app.delete("/machines/:id", async (c) => {
+    const row = await requireMachine(ctx, c.req.param("id"));
+    await deleteMachine(ctx, row);
     return c.json({ object: "machine", id: row.id, deleted: true });
   });
 
-  app.post("/machines/:id/secret/rotate", (c) => {
-    const row = requireMachine(ctx, c.req.param("id"));
-    const { row: updated, secret } = rotateMachineSecret(ctx, row);
+  app.post("/machines/:id/secret/rotate", async (c) => {
+    const row = await requireMachine(ctx, c.req.param("id"));
+    const { row: updated, secret } = await rotateMachineSecret(ctx, row);
     return c.json({ ...serializeMachine(updated), secret });
   });
 
   app.post("/machines/:id/scopes", async (c) => {
-    const row = requireMachine(ctx, c.req.param("id"));
+    const row = await requireMachine(ctx, c.req.param("id"));
     const body = await parseBody(c, addScopeSchema);
     const scopedId = body.scoped_machine_id ?? body.machine_id!;
-    return c.json(serializeMachine(addMachineScope(ctx, row, scopedId)));
+    return c.json(serializeMachine(await addMachineScope(ctx, row, scopedId)));
   });
 
   app.post("/tokens", async (c) => {
@@ -124,20 +124,20 @@ export default function routes(ctx: AppContext) {
     return c.json({ valid: true, ...serializeMachineToken(row), machine: serializeMachine(machine) });
   });
 
-  app.get("/tokens", (c) => {
+  app.get("/tokens", async (c) => {
     const page = parsePagination(c);
-    const { data, totalCount } = listMachineTokens(ctx, {
-      machineId: c.req.query("machine_id") || undefined,
-      limit: page.limit,
-      offset: page.offset,
-      orderBy: page.order_by,
-    });
+    const { data, totalCount } = await listMachineTokens(ctx, {
+          machineId: c.req.query("machine_id") || undefined,
+          limit: page.limit,
+          offset: page.offset,
+          orderBy: page.order_by,
+        });
     return c.json({ data: data.map((r) => serializeMachineToken(r)), total_count: totalCount });
   });
 
-  app.post("/tokens/:id/revoke", (c) => {
-    const row = requireMachineToken(ctx, c.req.param("id"));
-    return c.json(serializeMachineToken(revokeMachineToken(ctx, row)));
+  app.post("/tokens/:id/revoke", async (c) => {
+    const row = await requireMachineToken(ctx, c.req.param("id"));
+    return c.json(serializeMachineToken(await revokeMachineToken(ctx, row)));
   });
 
   return app;

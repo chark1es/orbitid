@@ -44,7 +44,7 @@ export async function setup(opts: {
 } = {}): Promise<TestHarness> {
   resetRecorders();
   const ctx = await createContext({
-    databasePath: ":memory:",
+    databaseUrl: ":memory:",
     secretKey: SECRET_KEY,
     baseUrl: BASE_URL,
     dataDir: mkdtempSync(join(tmpdir(), "orbitid-orgs-")),
@@ -66,37 +66,37 @@ export interface SeedUserOptions {
   createOrganizationsLimit?: number | null;
 }
 
-export function seedUser(ctx: AppContext, opts: SeedUserOptions = {}) {
+export async function seedUser(ctx: AppContext, opts: SeedUserOptions = {}) {
   const now = Date.now();
   const id = newId(ID_PREFIX.user);
   const email = (opts.email ?? "user@example.com").toLowerCase();
-  ctx.db.insert(s.users).values({
-    id, firstName: opts.firstName ?? "Ada", lastName: opts.lastName ?? "Lovelace", username: opts.username ?? null,
-    createOrganizationEnabled: opts.createOrganizationEnabled ?? true,
-    createOrganizationsLimit: opts.createOrganizationsLimit ?? null,
-    createdAt: now, updatedAt: now,
-  }).run();
+  await ctx.db.insert(s.users).values({
+            id, firstName: opts.firstName ?? "Ada", lastName: opts.lastName ?? "Lovelace", username: opts.username ?? null,
+            createOrganizationEnabled: opts.createOrganizationEnabled ?? true,
+            createOrganizationsLimit: opts.createOrganizationsLimit ?? null,
+            createdAt: now, updatedAt: now,
+          });
   const emailId = newId(ID_PREFIX.email);
-  ctx.db.insert(s.emailAddresses).values({
-    id: emailId, userId: id, email, verified: opts.verified ?? true,
-    verifiedAt: opts.verified === false ? null : now, verifiedStrategy: opts.verified === false ? null : "email_code",
-    createdAt: now, updatedAt: now,
-  }).run();
-  ctx.db.update(s.users).set({ primaryEmailAddressId: emailId }).where(eq(s.users.id, id)).run();
+  await ctx.db.insert(s.emailAddresses).values({
+            id: emailId, userId: id, email, verified: opts.verified ?? true,
+            verifiedAt: opts.verified === false ? null : now, verifiedStrategy: opts.verified === false ? null : "email_code",
+            createdAt: now, updatedAt: now,
+          });
+  await ctx.db.update(s.users).set({ primaryEmailAddressId: emailId }).where(eq(s.users.id, id));
   return { id, email, emailId };
 }
 
-export function seedAuth(ctx: AppContext, userId: string, opts: { activeOrganizationId?: string } = {}) {
+export async function seedAuth(ctx: AppContext, userId: string, opts: { activeOrganizationId?: string } = {}) {
   const now = Date.now();
   const token = randomToken(24);
   const clientId = newId(ID_PREFIX.client);
   const sessionId = newId(ID_PREFIX.session);
-  ctx.db.insert(s.clients).values({ id: clientId, tokenHash: sha256(token), lastActiveSessionId: sessionId, createdAt: now, updatedAt: now }).run();
-  ctx.db.insert(s.sessions).values({
-    id: sessionId, clientId, userId, status: "active",
-    expireAt: now + 24 * 60 * 60 * 1000, abandonAt: now + 24 * 60 * 60 * 1000, lastActiveAt: now,
-    lastActiveOrganizationId: opts.activeOrganizationId ?? null, createdAt: now, updatedAt: now,
-  }).run();
+  await ctx.db.insert(s.clients).values({ id: clientId, tokenHash: sha256(token), lastActiveSessionId: sessionId, createdAt: now, updatedAt: now });
+  await ctx.db.insert(s.sessions).values({
+            id: sessionId, clientId, userId, status: "active",
+            expireAt: now + 24 * 60 * 60 * 1000, abandonAt: now + 24 * 60 * 60 * 1000, lastActiveAt: now,
+            lastActiveOrganizationId: opts.activeOrganizationId ?? null, createdAt: now, updatedAt: now,
+          });
   return { token, clientId, sessionId, cookie: `__client=${token}` };
 }
 

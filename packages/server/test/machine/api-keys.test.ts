@@ -2,20 +2,21 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import * as s from "../../src/db/schema";
 import { setup, authHeaders, insertUser, insertClientSession, insertOrganization, addMembership, grantPermissions } from "./helpers";
+import { first } from "../../src/lib/db";
 
 const emitEvent = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => {}));
 vi.mock("../../src/services/webhooks", () => ({ emitEvent, startWebhookWorker: () => () => {} }));
 
-type Harness = Awaited<ReturnType<typeof setup>>;
+type Harness = Awaited<Awaited<ReturnType<typeof setup>>>;
 
 const json = (body: unknown) => JSON.stringify(body);
 
 describe("api keys — backend API", () => {
   let h: Harness;
-  let user: ReturnType<typeof insertUser>;
+  let user: Awaited<ReturnType<typeof insertUser>>;
   beforeEach(async () => {
     h = await setup();
-    user = insertUser(h.ctx);
+    user = await insertUser(h.ctx);
     emitEvent.mockClear();
   });
 
@@ -36,7 +37,7 @@ describe("api keys — backend API", () => {
     expect(body.subject).toBe(user.userId);
     expect(body.expiration).toBeGreaterThan(Date.now());
 
-    const row = h.ctx.db.select().from(s.apiKeys).where(eq(s.apiKeys.id, body.id)).get()!;
+    const row = first(await h.ctx.db.select().from(s.apiKeys).where(eq(s.apiKeys.id, body.id)))!;
     expect(row.secretHash).not.toBe(body.secret);
     expect(row.secretHash).toMatch(/^[a-f0-9]{64}$/);
 
@@ -65,7 +66,7 @@ describe("api keys — backend API", () => {
   it("rejects expired and revoked keys, and filters them from lists unless include_invalid", async () => {
     const created = await h.app.request("/v1/api_keys", { method: "POST", headers: authHeaders(), body: json({ name: "short", subject: user.userId }) });
     const key = await created.json();
-    h.ctx.db.update(s.apiKeys).set({ expiresAt: Date.now() - 1000 }).where(eq(s.apiKeys.id, key.id)).run();
+    await h.ctx.db.update(s.apiKeys).set({ expiresAt: Date.now() - 1000 }).where(eq(s.apiKeys.id, key.id));
 
     const expired = await h.app.request("/v1/api_keys/verify", { method: "POST", headers: authHeaders(), body: json({ secret: key.secret }) });
     expect(expired.status).toBe(401);
@@ -83,7 +84,7 @@ describe("api keys — backend API", () => {
     expect(revoked.status).toBe(200);
     const revokedBody = await revoked.json();
     expect(revokedBody.revoked).toBe(true);
-    expect(h.ctx.db.select().from(s.apiKeys).where(eq(s.apiKeys.id, secondKey.id)).get()!.revocationReason).toBe("leaked");
+    expect(first(await h.ctx.db.select().from(s.apiKeys).where(eq(s.apiKeys.id, secondKey.id)))!.revocationReason).toBe("leaked");
     expect(emitEvent).toHaveBeenCalledWith(h.ctx, "apiKey.revoked", expect.objectContaining({ id: secondKey.id, revoked: true }));
 
     const afterRevoke = await h.app.request("/v1/api_keys/verify", { method: "POST", headers: authHeaders(), body: json({ secret: secondKey.secret }) });
@@ -116,12 +117,12 @@ describe("api keys — backend API", () => {
 
 describe("api keys — Frontend API self-service", () => {
   let h: Harness;
-  let user: ReturnType<typeof insertUser>;
-  let session: ReturnType<typeof insertClientSession>;
+  let user: Awaited<ReturnType<typeof insertUser>>;
+  let session: Awaited<ReturnType<typeof insertClientSession>>;
   beforeEach(async () => {
     h = await setup();
-    user = insertUser(h.ctx);
-    session = insertClientSession(h.ctx, user.userId);
+    user = await insertUser(h.ctx);
+    session = await insertClientSession(h.ctx, user.userId);
   });
 
   const fapi = (path: string, init: RequestInit = {}) => h.app.request(`/v1/client${path}`, {
@@ -154,8 +155,8 @@ describe("api keys — Frontend API self-service", () => {
   });
 
   it("does not expose another user's key", async () => {
-    const other = insertUser(h.ctx, { email: "other@example.com" });
-    const otherSession = insertClientSession(h.ctx, other.userId);
+    const other = await insertUser(h.ctx, { email: "other@example.com" });
+    const otherSession = await insertClientSession(h.ctx, other.userId);
     const created = await h.app.request("/v1/client/me/api_keys", {
       method: "POST", headers: { cookie: otherSession.cookie, "content-type": "application/json" }, body: json({ name: "theirs" }),
     });
@@ -172,20 +173,20 @@ describe("api keys — Frontend API self-service", () => {
   });
 
   it("gates organization keys on membership and the API-key permission", async () => {
-    const org = insertOrganization(h.ctx);
+    const org = await insertOrganization(h.ctx);
     const outsider = await fapi(`/organizations/${org.orgId}/api_keys`);
     expect(outsider.status).toBe(403);
     expect((await outsider.json()).errors[0].code).toBe("not_a_member_in_organization");
 
-    addMembership(h.ctx, org.orgId, user.userId, "org:member");
+    await addMembership(h.ctx, org.orgId, user.userId, "org:member");
     const plainMember = await fapi(`/organizations/${org.orgId}/api_keys`);
     expect(plainMember.status).toBe(403);
     expect((await plainMember.json()).errors[0].code).toBe("org_permission_required");
 
-    grantPermissions(h.ctx, "org:auditor", []);
-    const auditorUser = insertUser(h.ctx, { email: "auditor@example.com" });
-    const auditorSession = insertClientSession(h.ctx, auditorUser.userId);
-    addMembership(h.ctx, org.orgId, auditorUser.userId, "org:auditor");
+    await grantPermissions(h.ctx, "org:auditor", []);
+    const auditorUser = await insertUser(h.ctx, { email: "auditor@example.com" });
+    const auditorSession = await insertClientSession(h.ctx, auditorUser.userId);
+    await addMembership(h.ctx, org.orgId, auditorUser.userId, "org:auditor");
     const auditor = await h.app.request(`/v1/client/organizations/${org.orgId}/api_keys`, { headers: { cookie: auditorSession.cookie } });
     expect(auditor.status).toBe(403);
   });
@@ -194,12 +195,12 @@ describe("api keys — Frontend API self-service", () => {
     ["org:sys_profile:manage"],
     ["org:sys_api_keys:manage"],
   ])("allows a custom role holding %s to manage org keys", async (permission) => {
-    const org = insertOrganization(h.ctx);
+    const org = await insertOrganization(h.ctx);
     const roleKey = `org:keymanager:${permission.split(":").pop()}`;
-    grantPermissions(h.ctx, roleKey, [permission]);
-    const manager = insertUser(h.ctx, { email: `manager-${permission.split(":").pop()}@example.com` });
-    const managerSession = insertClientSession(h.ctx, manager.userId);
-    addMembership(h.ctx, org.orgId, manager.userId, roleKey);
+    await grantPermissions(h.ctx, roleKey, [permission]);
+    const manager = await insertUser(h.ctx, { email: `manager-${permission.split(":").pop()}@example.com` });
+    const managerSession = await insertClientSession(h.ctx, manager.userId);
+    await addMembership(h.ctx, org.orgId, manager.userId, roleKey);
     const cookie = { cookie: managerSession.cookie, "content-type": "application/json" };
 
     const created = await h.app.request(`/v1/client/organizations/${org.orgId}/api_keys`, { method: "POST", headers: cookie, body: json({ name: "Org key" }) });
@@ -213,8 +214,8 @@ describe("api keys — Frontend API self-service", () => {
   });
 
   it("allows org:admin members", async () => {
-    const org = insertOrganization(h.ctx);
-    addMembership(h.ctx, org.orgId, user.userId, "org:admin");
+    const org = await insertOrganization(h.ctx);
+    await addMembership(h.ctx, org.orgId, user.userId, "org:admin");
     const created = await fapi(`/organizations/${org.orgId}/api_keys`, { method: "POST", body: json({ name: "Admin key" }) });
     expect(created.status).toBe(201);
   });

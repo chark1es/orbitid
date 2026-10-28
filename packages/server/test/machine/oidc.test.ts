@@ -8,7 +8,7 @@ import * as schema from "../../src/db/schema";
 
 vi.mock("../../src/services/tokens", () => import("./fake-tokens"));
 
-type Harness = Awaited<ReturnType<typeof setup>>;
+type Harness = Awaited<Awaited<ReturnType<typeof setup>>>;
 const json = (body: unknown) => JSON.stringify(body);
 const REDIRECT_URI = "http://localhost:3000/callback";
 const verifier = () => randomBytes(32).toString("base64url");
@@ -56,12 +56,12 @@ async function codeFlow(h: Harness, app: { client_id: string; client_secret?: st
 
 describe("OIDC provider — discovery + authorize", () => {
   let h: Harness;
-  let user: ReturnType<typeof insertUser>;
-  let session: ReturnType<typeof insertClientSession>;
+  let user: Awaited<ReturnType<typeof insertUser>>;
+  let session: Awaited<ReturnType<typeof insertClientSession>>;
   beforeEach(async () => {
     h = await setup();
-    user = insertUser(h.ctx);
-    session = insertClientSession(h.ctx, user.userId);
+    user = await insertUser(h.ctx);
+    session = await insertClientSession(h.ctx, user.userId);
   });
 
   it("publishes a correct discovery document and JWKS", async () => {
@@ -127,13 +127,13 @@ describe("OIDC provider — discovery + authorize", () => {
 
 describe("OIDC provider — token lifecycle", () => {
   let h: Harness;
-  let user: ReturnType<typeof insertUser>;
-  let session: ReturnType<typeof insertClientSession>;
+  let user: Awaited<ReturnType<typeof insertUser>>;
+  let session: Awaited<ReturnType<typeof insertClientSession>>;
   let app: { id: string; client_id: string; client_secret: string };
   beforeEach(async () => {
     h = await setup();
-    user = insertUser(h.ctx);
-    session = insertClientSession(h.ctx, user.userId);
+    user = await insertUser(h.ctx);
+    session = await insertClientSession(h.ctx, user.userId);
     app = await createApp(h);
   });
 
@@ -197,7 +197,7 @@ describe("OIDC provider — token lifecycle", () => {
 
   it("stops issuing and honouring tokens once the user is banned", async () => {
     const { tokens } = await codeFlow(h, app, session.cookie);
-    h.ctx.db.update(schema.users).set({ banned: true }).where(eq(schema.users.id, user.userId)).run();
+    await h.ctx.db.update(schema.users).set({ banned: true }).where(eq(schema.users.id, user.userId));
 
     const refresh = await form(h, "/oauth/token", {
       grant_type: "refresh_token", refresh_token: tokens.refresh_token, client_id: app.client_id, client_secret: app.client_secret,
@@ -298,12 +298,12 @@ describe("OIDC provider — token lifecycle", () => {
 
 describe("OIDC provider — consent", () => {
   let h: Harness;
-  let user: ReturnType<typeof insertUser>;
-  let session: ReturnType<typeof insertClientSession>;
+  let user: Awaited<ReturnType<typeof insertUser>>;
+  let session: Awaited<ReturnType<typeof insertClientSession>>;
   beforeEach(async () => {
     h = await setup();
-    user = insertUser(h.ctx);
-    session = insertClientSession(h.ctx, user.userId);
+    user = await insertUser(h.ctx);
+    session = await insertClientSession(h.ctx, user.userId);
   });
 
   it("sends users to the consent screen, stores consent and returns a redirect URL", async () => {

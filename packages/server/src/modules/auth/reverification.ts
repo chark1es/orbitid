@@ -6,6 +6,7 @@ import type { AppContext } from "../../context";
 import * as s from "../../db/schema";
 import { findClient, type ClientRow } from "./client-auth";
 import { evaluateSessionStatus } from "../../services/sessions";
+import { first } from "../../lib/db";
 
 const ageMinutes = (t: number | null) => (t ? Math.floor((Date.now() - t) / 60_000) : null);
 
@@ -20,12 +21,12 @@ export function isReverified(session: typeof s.sessions.$inferSelect, level: Rev
 export interface SessionContext { client: ClientRow; session: typeof s.sessions.$inferSelect }
 
 /** The active session of the request's client, if any (expiry-aware). */
-export function requestSession(ctx: AppContext, c: Context): SessionContext | null {
-  const client = findClient(ctx, c);
+export async function requestSession(ctx: AppContext, c: Context): Promise<SessionContext | null> {
+  const client = await findClient(ctx, c);
   if (!client?.lastActiveSessionId) return null;
-  const row = ctx.db.select().from(s.sessions).where(and(eq(s.sessions.id, client.lastActiveSessionId), eq(s.sessions.clientId, client.id))).get();
+  const row = first(await ctx.db.select().from(s.sessions).where(and(eq(s.sessions.id, client.lastActiveSessionId), eq(s.sessions.clientId, client.id))));
   if (!row) return null;
-  const status = evaluateSessionStatus(ctx, row);
+  const status = await evaluateSessionStatus(ctx, row);
   if (status !== "active" && status !== "pending") return null;
   return { client, session: { ...row, status } };
 }
@@ -36,7 +37,7 @@ export function requestSession(ctx: AppContext, c: Context): SessionContext | nu
  */
 export function requireReverification(ctx: AppContext, level: ReverificationLevel = "first_factor", afterMinutes = 10): MiddlewareHandler {
   return async (c, next) => {
-    const found = requestSession(ctx, c);
+    const found = await requestSession(ctx, c);
     if (!found) throw new OrbitError(401, ErrorCodes.authentication_invalid, "Not signed in");
     if (!isReverified(found.session, level, afterMinutes)) {
       throw new OrbitError(403, ErrorCodes.reverification_required, "Session verification is required to perform this action", {

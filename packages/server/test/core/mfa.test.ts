@@ -5,6 +5,7 @@ import * as schema from "../../src/db/schema";
 import { getSmsOutbox } from "../../src/services/mail";
 import { endSessionsForUser } from "../../src/services/sessions";
 import { errorsOf, setup, signInWithPassword, signUpUser, testClient, type TestClient } from "./helpers";
+import { first } from "../../src/lib/db";
 
 interface TotpSetup { response: { verified: boolean; secret: string; uri: string; qr_code: string; backup_codes?: { code: string }[] } }
 
@@ -24,19 +25,19 @@ describe("MFA", () => {
     const { app, ctx } = await setup();
     await ctx.settings.update({ mfa: { required: true }, attributes: { authenticatorApp: { enabled: true } } });
     const user = await signUpUser(app);
-    const statusOf = () => ctx.db.select().from(schema.sessions).where(eq(schema.sessions.id, user.sessionId)).get()?.status;
-    expect(statusOf()).toBe("pending");
+    const statusOf = async () => first(await ctx.db.select().from(schema.sessions).where(eq(schema.sessions.id, user.sessionId)))?.status;
+    expect(await statusOf()).toBe("pending");
 
     const minted = await user.client.json<{ jwt: string }>(`/v1/client/sessions/${user.sessionId}/tokens`, { method: "POST", body: {} });
     expect(JSON.parse(Buffer.from(minted.jwt.split(".")[1]!, "base64url").toString()).sts).toBe("pending");
 
     await enableTotp(user.client);
-    expect(statusOf()).toBe("active");
+    expect(await statusOf()).toBe("active");
   });
 
   describe("pending sessions (required MFA, nothing enrolled yet)", () => {
-    const statusOf = (ctx: Awaited<ReturnType<typeof setup>>["ctx"], id: string) =>
-      ctx.db.select().from(schema.sessions).where(eq(schema.sessions.id, id)).get()?.status;
+    const statusOf = async (ctx: Awaited<ReturnType<typeof setup>>["ctx"], id: string) =>
+      first(await ctx.db.select().from(schema.sessions).where(eq(schema.sessions.id, id)))?.status;
     const pendingSetup = async () => {
       const harness = await setup();
       await harness.ctx.settings.update({ mfa: { required: true }, attributes: { authenticatorApp: { enabled: true } } });
@@ -72,19 +73,19 @@ describe("MFA", () => {
       const { app, ctx } = await pendingSetup();
       const owner = await signUpUser(app);
       const other = await signInWithPassword(app, owner.email, owner.password);
-      expect(statusOf(ctx, other.sessionId)).toBe("pending");
+      expect(await statusOf(ctx, other.sessionId)).toBe("pending");
 
       await enableTotp(owner.client);
-      expect(statusOf(ctx, owner.sessionId)).toBe("active");
-      expect(statusOf(ctx, other.sessionId)).toBe("revoked");
+      expect(await statusOf(ctx, owner.sessionId)).toBe("active");
+      expect(await statusOf(ctx, other.sessionId)).toBe("revoked");
     });
 
     it("is included when every session of a user is ended", async () => {
       const { app, ctx } = await pendingSetup();
       const user = await signUpUser(app);
-      expect(statusOf(ctx, user.sessionId)).toBe("pending");
+      expect(await statusOf(ctx, user.sessionId)).toBe("pending");
       await endSessionsForUser(ctx, user.userId, "revoked");
-      expect(statusOf(ctx, user.sessionId)).toBe("revoked");
+      expect(await statusOf(ctx, user.sessionId)).toBe("revoked");
     });
 
     it("is activated by enrolling a verified phone as the second factor", async () => {
@@ -92,10 +93,10 @@ describe("MFA", () => {
       await ctx.settings.update({ attributes: { phoneNumber: { enabled: true, usedForSecondFactor: true } } });
       const user = await signUpUser(app);
       const now = Date.now();
-      ctx.db.insert(schema.phoneNumbers).values({ id: "idn_p_test", userId: user.userId, phone: "+15551230000", verified: true, verifiedAt: now, createdAt: now, updatedAt: now }).run();
+      await ctx.db.insert(schema.phoneNumbers).values({ id: "idn_p_test", userId: user.userId, phone: "+15551230000", verified: true, verifiedAt: now, createdAt: now, updatedAt: now });
 
       await user.client.json("/v1/client/me/phone_numbers/idn_p_test", { method: "PATCH", body: { reserved_for_second_factor: true } });
-      expect(statusOf(ctx, user.sessionId)).toBe("active");
+      expect(await statusOf(ctx, user.sessionId)).toBe("active");
     });
   });
 
@@ -103,7 +104,7 @@ describe("MFA", () => {
     const { app, ctx } = await setup();
     await ctx.settings.update({ mfa: { required: true } });
     const user = await signUpUser(app);
-    expect(ctx.db.select().from(schema.sessions).where(eq(schema.sessions.id, user.sessionId)).get()?.status).toBe("active");
+    expect(first(await ctx.db.select().from(schema.sessions).where(eq(schema.sessions.id, user.sessionId)))?.status).toBe("active");
   });
 
   it("enrolls TOTP, keeps the secret encrypted and requires it at sign-in", async () => {
@@ -111,7 +112,7 @@ describe("MFA", () => {
     const user = await signUpUser(app);
     const { secret } = await enableTotp(user.client);
 
-    const stored = ctx.db.select().from(schema.users).where(eq(schema.users.id, user.userId)).get()!;
+    const stored = first(await ctx.db.select().from(schema.users).where(eq(schema.users.id, user.userId)))!;
     expect(stored.totpVerified).toBe(true);
     expect(stored.totpSecretEnc).not.toContain(secret);
     expect(stored.totpSecretEnc).toMatch(/^v1\./);

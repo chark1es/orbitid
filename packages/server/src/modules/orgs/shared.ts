@@ -7,6 +7,7 @@ import * as s from "../../db/schema";
 import { permissionsForRole } from "../../services/rbac";
 import type { Caller } from "./auth";
 import { resolveCaller } from "./auth";
+import { first } from "../../lib/db";
 
 export type OrganizationRow = typeof s.organizations.$inferSelect;
 export type MembershipRow = typeof s.organizationMemberships.$inferSelect;
@@ -34,28 +35,27 @@ export function requireMembershipRequestsEnabled(ctx: AppContext): void {
   }
 }
 
-export function findOrganization(ctx: AppContext, idOrSlug: string): OrganizationRow | undefined {
+export async function findOrganization(ctx: AppContext, idOrSlug: string): Promise<OrganizationRow | undefined> {
   if (!idOrSlug) return undefined;
-  return ctx.db.select().from(s.organizations).where(eq(s.organizations.id, idOrSlug)).get()
-    ?? ctx.db.select().from(s.organizations).where(eq(s.organizations.slug, idOrSlug.toLowerCase())).get();
+  return first(await ctx.db.select().from(s.organizations).where(eq(s.organizations.id, idOrSlug)))
+    ?? first(await ctx.db.select().from(s.organizations).where(eq(s.organizations.slug, idOrSlug.toLowerCase())));
 }
 
-export function requireOrganization(ctx: AppContext, idOrSlug: string): OrganizationRow {
-  const org = findOrganization(ctx, idOrSlug);
+export async function requireOrganization(ctx: AppContext, idOrSlug: string): Promise<OrganizationRow> {
+  const org = await findOrganization(ctx, idOrSlug);
   if (!org) throw new OrbitError(404, ErrorCodes.organization_not_found, "Organization not found");
   return org;
 }
 
-export function findMembership(ctx: AppContext, orgId: string, userId: string): MembershipRow | undefined {
-  return ctx.db
-    .select()
-    .from(s.organizationMemberships)
-    .where(and(eq(s.organizationMemberships.organizationId, orgId), eq(s.organizationMemberships.userId, userId)))
-    .get();
+export async function findMembership(ctx: AppContext, orgId: string, userId: string): Promise<MembershipRow | undefined> {
+  return first(await ctx.db
+      .select()
+      .from(s.organizationMemberships)
+      .where(and(eq(s.organizationMemberships.organizationId, orgId), eq(s.organizationMemberships.userId, userId))));
 }
 
-export function requireMembership(ctx: AppContext, org: OrganizationRow, userId: string, extra = ""): MembershipRow {
-  const membership = findMembership(ctx, org.id, userId);
+export async function requireMembership(ctx: AppContext, org: OrganizationRow, userId: string, extra = ""): Promise<MembershipRow> {
+  const membership = await findMembership(ctx, org.id, userId);
   if (!membership) throw new OrbitError(404, ErrorCodes.not_a_member_in_organization, `You are not a member of this organization${extra}`);
   return membership;
 }
@@ -71,9 +71,9 @@ export interface OrgAccess {
 export async function orgAccess(ctx: AppContext, c: Context, permission?: string): Promise<OrgAccess> {
   requireOrganizationsEnabled(ctx);
   const caller = await resolveCaller(ctx, c);
-  const org = requireOrganization(ctx, c.req.param("id") ?? "");
-  const membership = requireMembership(ctx, org, caller.userId);
-  const permissions = permissionsForRole(ctx, membership.roleKey);
+  const org = await requireOrganization(ctx, c.req.param("id") ?? "");
+  const membership = await requireMembership(ctx, org, caller.userId);
+  const permissions = await permissionsForRole(ctx, membership.roleKey);
   if (permission && !permissions.includes(permission)) {
     throw new OrbitError(403, ErrorCodes.org_permission_required, `You do not have permission to perform this action. Missing permission: ${permission}`, {
       permission, role: membership.roleKey,
@@ -101,18 +101,18 @@ export function normalizeSlug(raw: string): string {
 }
 
 /** Validates a requested slug (or derives one from the name) and makes it unique by suffixing `-2`, `-3`, … */
-export function resolveSlug(ctx: AppContext, requested: string | undefined, name: string, excludeOrgId?: string): string {
+export async function resolveSlug(ctx: AppContext, requested: string | undefined, name: string, excludeOrgId?: string): Promise<string> {
   const base = requested ? normalizeSlug(requested) : slugify(name);
-  const taken = (slug: string) => {
-    const row = ctx.db.select().from(s.organizations).where(eq(s.organizations.slug, slug)).get();
+  const taken = async (slug: string) => {
+    const row = first(await ctx.db.select().from(s.organizations).where(eq(s.organizations.slug, slug)));
     return !!row && row.id !== excludeOrgId;
   };
   if (requested) {
-    if (taken(base)) throw new OrbitError(409, ErrorCodes.organization_slug_taken, `Slug "${base}" is already taken`, { param_name: "slug" });
+    if (await taken(base)) throw new OrbitError(409, ErrorCodes.organization_slug_taken, `Slug "${base}" is already taken`, { param_name: "slug" });
     return base;
   }
   let slug = base;
-  for (let i = 2; taken(slug) && i < 1000; i++) slug = `${base.slice(0, 46)}-${i}`;
+  for (let i = 2; await taken(slug) && i < 1000; i++) slug = `${base.slice(0, 46)}-${i}`;
   return slug;
 }
 

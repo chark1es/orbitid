@@ -12,19 +12,21 @@ export function deepMerge<T>(base: T, patch: unknown): T {
   return out as T;
 }
 
-export function createSettingsStore(db: Db): SettingsStore {
+export async function createSettingsStore(db: Db, options: { production?: boolean } = {}): Promise<SettingsStore> {
   let cache: InstanceSettings;
-  const row = db.select().from(instance).where(eq(instance.id, "default")).get();
+  const row = (await db.select().from(instance).where(eq(instance.id, "default")))[0];
   if (row) cache = instanceSettingsSchema.parse(row.settings);
   else {
     cache = defaultInstanceSettings();
-    db.insert(instance).values({ id: "default", settings: cache as any }).run();
+    // A new production instance must not trust localhost origins until the operator adds real ones.
+    if (options.production) cache = instanceSettingsSchema.parse(deepMerge(cache, { application: { developmentMode: false, allowedOrigins: [] } }));
+    await db.insert(instance).values({ id: "default", settings: cache as any });
   }
   return {
     get: () => cache,
     async update(patch: DeepPartial<InstanceSettings>) {
       const next = instanceSettingsSchema.parse(deepMerge(cache, patch));
-      db.update(instance).set({ settings: next as any, updatedAt: Date.now() }).where(eq(instance.id, "default")).run();
+      await db.update(instance).set({ settings: next as any, updatedAt: Date.now() }).where(eq(instance.id, "default"));
       cache = next;
       return cache;
     },

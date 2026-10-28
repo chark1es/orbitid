@@ -1,5 +1,5 @@
 // machine-to-machine identities: machine secrets, opaque/JWT tokens, revocation.
-import { asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, sql } from "drizzle-orm";
 import { jwtVerify, importJWK, type JWK } from "jose";
 import { ErrorCodes, ID_PREFIX, OrbitError, type M2MMachineJSON, type M2MTokenJSON } from "@orbitid/shared";
 import type { AppContext } from "../context";
@@ -7,6 +7,7 @@ import * as s from "../db/schema";
 import { randomToken, sha256, safeEqual } from "../lib/crypto";
 import { newId } from "../lib/ids";
 import { getJwks, signJwt } from "./tokens";
+import { first } from "../lib/db";
 
 type MachineRow = typeof s.machines.$inferSelect;
 type TokenRow = typeof s.m2mTokens.$inferSelect;
@@ -48,23 +49,23 @@ export function generateMachineSecret(): string {
   return `${MACHINE_SECRET_PREFIX}${randomToken(24)}`;
 }
 
-export function getMachine(ctx: AppContext, id: string): MachineRow | null {
-  return ctx.db.select().from(s.machines).where(eq(s.machines.id, id)).get() ?? null;
+export async function getMachine(ctx: AppContext, id: string): Promise<MachineRow | null> {
+  return first(await ctx.db.select().from(s.machines).where(eq(s.machines.id, id))) ?? null;
 }
 
-export function listMachines(ctx: AppContext, opts: { limit?: number; offset?: number } = {}): { data: MachineRow[]; totalCount: number } {
-  const data = ctx.db.select().from(s.machines).orderBy(desc(s.machines.createdAt)).limit(opts.limit ?? 10).offset(opts.offset ?? 0).all();
-  const totalCount = ctx.db.select({ n: sql<number>`count(*)` }).from(s.machines).get()?.n ?? 0;
+export async function listMachines(ctx: AppContext, opts: { limit?: number; offset?: number } = {}): Promise<{ data: MachineRow[]; totalCount: number }> {
+  const data = (await ctx.db.select().from(s.machines).orderBy(desc(s.machines.createdAt)).limit(opts.limit ?? 10).offset(opts.offset ?? 0));
+  const totalCount = first(await ctx.db.select({ n: count() }).from(s.machines))?.n ?? 0;
   return { data, totalCount };
 }
 
-export function requireMachine(ctx: AppContext, id: string): MachineRow {
-  const row = getMachine(ctx, id);
+export async function requireMachine(ctx: AppContext, id: string): Promise<MachineRow> {
+  const row = await getMachine(ctx, id);
   if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Machine not found");
   return row;
 }
 
-export function createMachine(ctx: AppContext, input: { name: string; scopedMachines?: string[]; defaultTokenTtl?: number }): { row: MachineRow; secret: string } {
+export async function createMachine(ctx: AppContext, input: { name: string; scopedMachines?: string[]; defaultTokenTtl?: number }): Promise<{ row: MachineRow; secret: string }> {
   const secret = generateMachineSecret();
   const now = Date.now();
   const row: MachineRow = {
@@ -76,44 +77,44 @@ export function createMachine(ctx: AppContext, input: { name: string; scopedMach
     createdAt: now,
     updatedAt: now,
   };
-  ctx.db.insert(s.machines).values(row).run();
+  await ctx.db.insert(s.machines).values(row);
   return { row, secret };
 }
 
-export function updateMachine(ctx: AppContext, row: MachineRow, patch: { name?: string; scopedMachines?: string[]; defaultTokenTtl?: number }): MachineRow {
+export async function updateMachine(ctx: AppContext, row: MachineRow, patch: { name?: string; scopedMachines?: string[]; defaultTokenTtl?: number }): Promise<MachineRow> {
   const set: Partial<MachineRow> = { updatedAt: Date.now() };
   if (patch.name !== undefined) set.name = patch.name;
   if (patch.scopedMachines !== undefined) set.scopedMachines = patch.scopedMachines;
   if (patch.defaultTokenTtl !== undefined) set.defaultTokenTtl = patch.defaultTokenTtl;
-  ctx.db.update(s.machines).set(set).where(eq(s.machines.id, row.id)).run();
-  return getMachine(ctx, row.id)!;
+  await ctx.db.update(s.machines).set(set).where(eq(s.machines.id, row.id));
+  return (await getMachine(ctx, row.id))!;
 }
 
 /** Deleting a machine revokes it everywhere; its tokens cascade. */
-export function deleteMachine(ctx: AppContext, row: MachineRow): void {
-  ctx.db.delete(s.machines).where(eq(s.machines.id, row.id)).run();
+export async function deleteMachine(ctx: AppContext, row: MachineRow): Promise<void> {
+  await ctx.db.delete(s.machines).where(eq(s.machines.id, row.id));
 }
 
 /** Adds `scopedMachineId` to the machine's scopes. Idempotent. */
-export function addMachineScope(ctx: AppContext, row: MachineRow, scopedMachineId: string): MachineRow {
+export async function addMachineScope(ctx: AppContext, row: MachineRow, scopedMachineId: string): Promise<MachineRow> {
   if (scopedMachineId === row.id) throw new OrbitError(422, ErrorCodes.form_param_value_invalid, "A machine cannot scope itself", { param_name: "scoped_machine_id" });
-  const target = requireMachine(ctx, scopedMachineId);
+  const target = await requireMachine(ctx, scopedMachineId);
   const scopes = new Set(row.scopedMachines ?? []);
   scopes.add(target.id);
   return updateMachine(ctx, row, { scopedMachines: [...scopes] });
 }
 
 /** Rotates the machine secret; the previous secret stops working immediately. */
-export function rotateMachineSecret(ctx: AppContext, row: MachineRow): { row: MachineRow; secret: string } {
+export async function rotateMachineSecret(ctx: AppContext, row: MachineRow): Promise<{ row: MachineRow; secret: string }> {
   const secret = generateMachineSecret();
-  ctx.db.update(s.machines).set({ secretHash: sha256(secret), updatedAt: Date.now() }).where(eq(s.machines.id, row.id)).run();
-  return { row: getMachine(ctx, row.id)!, secret };
+  await ctx.db.update(s.machines).set({ secretHash: sha256(secret), updatedAt: Date.now() }).where(eq(s.machines.id, row.id));
+  return { row: (await getMachine(ctx, row.id))!, secret };
 }
 
-export function authenticateMachineSecret(ctx: AppContext, secret: string): MachineRow | null {
+export async function authenticateMachineSecret(ctx: AppContext, secret: string): Promise<MachineRow | null> {
   if (typeof secret !== "string" || !secret.startsWith(MACHINE_SECRET_PREFIX)) return null;
   const hash = sha256(secret);
-  const row = ctx.db.select().from(s.machines).where(eq(s.machines.secretHash, hash)).get();
+  const row = first(await ctx.db.select().from(s.machines).where(eq(s.machines.secretHash, hash)));
   return row && safeEqual(row.secretHash, hash) ? row : null;
 }
 
@@ -160,7 +161,7 @@ export async function issueMachineToken(ctx: AppContext, machine: MachineRow, in
     expiresAt,
     createdAt: Date.now(),
   };
-  ctx.db.insert(s.m2mTokens).values(row).run();
+  await ctx.db.insert(s.m2mTokens).values(row);
   return { row, token };
 }
 
@@ -179,11 +180,11 @@ async function instanceVerifyKey(ctx: AppContext, kid: string | undefined) {
 export async function verifyMachineToken(ctx: AppContext, token: string): Promise<{ row: TokenRow; machine: MachineRow }> {
   const invalid = (message = "Invalid machine token") => new OrbitError(401, ErrorCodes.authorization_invalid, message);
   if (typeof token !== "string" || token.length === 0) throw invalid();
-  const row = ctx.db.select().from(s.m2mTokens).where(eq(s.m2mTokens.tokenHash, sha256(token))).get();
+  const row = first(await ctx.db.select().from(s.m2mTokens).where(eq(s.m2mTokens.tokenHash, sha256(token))));
   if (!row) throw invalid();
   if (row.revoked) throw invalid("Machine token has been revoked");
   if (row.expiresAt != null && row.expiresAt <= Date.now()) throw invalid("Machine token has expired");
-  const machine = getMachine(ctx, row.machineId);
+  const machine = await getMachine(ctx, row.machineId);
   if (!machine) throw invalid("Machine no longer exists");
 
   if (!token.startsWith(MACHINE_TOKEN_PREFIX)) {
@@ -202,24 +203,26 @@ export async function verifyMachineToken(ctx: AppContext, token: string): Promis
   return { row, machine };
 }
 
-export function revokeMachineToken(ctx: AppContext, row: TokenRow): TokenRow {
-  if (!row.revoked) ctx.db.update(s.m2mTokens).set({ revoked: true }).where(eq(s.m2mTokens.id, row.id)).run();
-  return { ...row, revoked: true };
+export async function revokeMachineToken(ctx: AppContext, row: TokenRow): Promise<TokenRow> {
+  const revoked = first(await ctx.db.update(s.m2mTokens).set({ revoked: true })
+    .where(and(eq(s.m2mTokens.id, row.id), eq(s.m2mTokens.revoked, false)))
+    .returning());
+  return revoked ?? { ...row, revoked: true };
 }
 
-export function listMachineTokens(ctx: AppContext, opts: { machineId?: string; limit?: number; offset?: number; orderBy?: string } = {}): { data: TokenRow[]; totalCount: number } {
+export async function listMachineTokens(ctx: AppContext, opts: { machineId?: string; limit?: number; offset?: number; orderBy?: string } = {}): Promise<{ data: TokenRow[]; totalCount: number }> {
   const where = opts.machineId ? eq(s.m2mTokens.machineId, opts.machineId) : undefined;
   const raw = (opts.orderBy ?? "-created_at").trim();
   const desc_ = raw.startsWith("-");
   const col = raw.replace(/^-/, "") === "expires_at" ? s.m2mTokens.expiresAt : s.m2mTokens.createdAt;
-  const data = ctx.db.select().from(s.m2mTokens).where(where).orderBy(desc_ ? desc(col) : asc(col))
-    .limit(opts.limit ?? 10).offset(opts.offset ?? 0).all();
-  const totalCount = ctx.db.select({ n: sql<number>`count(*)` }).from(s.m2mTokens).where(where).get()?.n ?? 0;
+  const data = (await ctx.db.select().from(s.m2mTokens).where(where).orderBy(desc_ ? desc(col) : asc(col))
+      .limit(opts.limit ?? 10).offset(opts.offset ?? 0));
+  const totalCount = first(await ctx.db.select({ n: count() }).from(s.m2mTokens).where(where))?.n ?? 0;
   return { data, totalCount };
 }
 
-export function requireMachineToken(ctx: AppContext, id: string): TokenRow {
-  const row = ctx.db.select().from(s.m2mTokens).where(eq(s.m2mTokens.id, id)).get();
+export async function requireMachineToken(ctx: AppContext, id: string): Promise<TokenRow> {
+  const row = first(await ctx.db.select().from(s.m2mTokens).where(eq(s.m2mTokens.id, id)));
   if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Machine token not found");
   return row;
 }

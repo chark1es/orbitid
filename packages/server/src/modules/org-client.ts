@@ -9,6 +9,7 @@ import type { AppContext } from "../context";
 import * as s from "../db/schema";
 import { safeEqual, sha256 } from "../lib/crypto";
 import { newId } from "../lib/ids";
+import { filterAsync } from "../lib/async";
 import { parseBody } from "../lib/http";
 import { validateRedirectUrl } from "./auth/redirects";
 import { emitEvent } from "../services/webhooks";
@@ -33,25 +34,24 @@ import { deleteLogoFile, logoContentType, readLogoPayload, storeLogo, uploadDir 
 import {
   orgIdFromSuggestionId, serializeMembershipRequest, serializeOrganizationDomain, serializeOrganizationInvitation, serializeRole, serializeSuggestion,
 } from "./orgs/serializers";
+import { first } from "../lib/db";
 
 const emailList = z.array(z.string().min(3));
 
 /** Rejects addresses already members or already invited, so bulk sends stay idempotent. */
-function dedupeRecipients(ctx: AppContext, org: OrganizationRow, emails: string[]): string[] {
+async function dedupeRecipients(ctx: AppContext, org: OrganizationRow, emails: string[]): Promise<string[]> {
   const members = new Set<string>();
-  for (const row of ctx.db
-    .select({ email: s.emailAddresses.email })
-    .from(s.organizationMemberships)
-    .innerJoin(s.users, eq(s.users.id, s.organizationMemberships.userId))
-    .innerJoin(s.emailAddresses, eq(s.emailAddresses.userId, s.users.id))
-    .where(eq(s.organizationMemberships.organizationId, org.id))
-    .all()) members.add(row.email.toLowerCase());
+  for (const row of (await ctx.db
+      .select({ email: s.emailAddresses.email })
+      .from(s.organizationMemberships)
+      .innerJoin(s.users, eq(s.users.id, s.organizationMemberships.userId))
+      .innerJoin(s.emailAddresses, eq(s.emailAddresses.userId, s.users.id))
+      .where(eq(s.organizationMemberships.organizationId, org.id)))) members.add(row.email.toLowerCase());
   const pending = new Set(
-    ctx.db
-      .select()
-      .from(s.organizationInvitations)
-      .where(and(eq(s.organizationInvitations.organizationId, org.id), eq(s.organizationInvitations.status, "pending")))
-      .all()
+    (await ctx.db
+            .select()
+            .from(s.organizationInvitations)
+            .where(and(eq(s.organizationInvitations.organizationId, org.id), eq(s.organizationInvitations.status, "pending"))))
       .map((r) => r.email.toLowerCase()),
   );
   return [...new Set(emails.map((e) => e.trim().toLowerCase()))].filter((e) => !members.has(e) && !pending.has(e));
@@ -61,7 +61,7 @@ export default function routes(ctx: AppContext) {
   const app = new Hono();
 
   const emitOrg = async (type: "organization.created" | "organization.updated" | "organization.deleted", org: OrganizationRow) => {
-    await emitEvent(ctx, type, serializeOrganization(ctx, org, { backend: true }));
+    await emitEvent(ctx, type, await serializeOrganization(ctx, org, { backend: true }));
   };
 
   // ─────────── public: logo files ───────────
@@ -80,13 +80,13 @@ export default function routes(ctx: AppContext) {
   app.get("/organization_invitations/accept", async (c) => {
     const ticket = c.req.query("ticket");
     if (!ticket) throw new OrbitError(400, ErrorCodes.form_param_missing, "ticket is missing", { param_name: "ticket" });
-    const invitation = ctx.db.select().from(s.organizationInvitations).where(eq(s.organizationInvitations.tokenHash, sha256(ticket))).get();
+    const invitation = first(await ctx.db.select().from(s.organizationInvitations).where(eq(s.organizationInvitations.tokenHash, sha256(ticket))));
     if (!invitation) throw new OrbitError(422, ErrorCodes.ticket_invalid, "Organization invitation ticket is invalid");
     if (invitation.status === "revoked") throw new OrbitError(422, ErrorCodes.ticket_invalid, "Organization invitation has been revoked");
     if (invitation.status === "pending") {
       if (invitation.expiresAt && invitation.expiresAt <= Date.now()) throw new OrbitError(422, ErrorCodes.ticket_expired, "Organization invitation has expired");
       const caller = await tryResolveCaller(ctx, c);
-      if (caller && userVerifiedEmails(ctx, caller.userId).includes(invitation.email.toLowerCase())) {
+      if (caller && (await userVerifiedEmails(ctx, caller.userId)).includes(invitation.email.toLowerCase())) {
         await acceptInvitation(ctx, invitation, caller.userId);
       }
     }
@@ -100,14 +100,10 @@ export default function routes(ctx: AppContext) {
   app.get("/me/organization_memberships", async (c) => {
     requireOrganizationsEnabled(ctx);
     const caller = await resolveCaller(ctx, c);
-    const session = ctx.db.select().from(s.sessions).where(eq(s.sessions.id, caller.sessionId)).get();
+    const session = first(await ctx.db.select().from(s.sessions).where(eq(s.sessions.id, caller.sessionId)));
     const activeOrgId = session?.lastActiveOrganizationId ?? null;
-    const rows = ctx.db
-      .select()
-      .from(s.organizationMemberships)
-      .where(eq(s.organizationMemberships.userId, caller.userId))
-      .all()
-      .map((row) => serializeMembership(ctx, row))
+    const membershipRows = await ctx.db.select().from(s.organizationMemberships).where(eq(s.organizationMemberships.userId, caller.userId));
+    const rows = (await Promise.all(membershipRows.map((row) => serializeMembership(ctx, row))))
       .sort((a, b) => {
         if (a.organization.id === activeOrgId) return -1;
         if (b.organization.id === activeOrgId) return 1;
@@ -125,25 +121,25 @@ export default function routes(ctx: AppContext) {
     requireOrganizationsEnabled(ctx);
     const caller = await resolveCaller(ctx, c);
     const body = await parseBody(c, z.object({ organization_id: z.string().min(1) }));
-    const org = requireOrganization(ctx, body.organization_id);
-    if (ctx.db.select().from(s.organizationMemberships).where(and(eq(s.organizationMemberships.organizationId, org.id), eq(s.organizationMemberships.userId, caller.userId))).get()) {
+    const org = await requireOrganization(ctx, body.organization_id);
+    if (first(await ctx.db.select().from(s.organizationMemberships).where(and(eq(s.organizationMemberships.organizationId, org.id), eq(s.organizationMemberships.userId, caller.userId))))) {
       throw new OrbitError(409, ErrorCodes.duplicate_record, "You are already a member of this organization");
     }
-    if (!hasSuggestionForOrganization(ctx, caller.userId, org.id)) {
+    if (!await hasSuggestionForOrganization(ctx, caller.userId, org.id)) {
       throw new OrbitError(403, ErrorCodes.not_allowed_access, "This organization cannot be joined directly");
     }
-    const membership = await addMembership(ctx, { organizationId: org.id, userId: caller.userId, roleKey: defaultRoleKey(ctx) });
-    return c.json({ response: serializeMembership(ctx, membership) });
+    const membership = await addMembership(ctx, { organizationId: org.id, userId: caller.userId, roleKey: await defaultRoleKey(ctx) });
+    return c.json({ response: await serializeMembership(ctx, membership) });
   });
 
   app.delete("/me/organization_memberships/:orgId", async (c) => {
     requireOrganizationsEnabled(ctx);
     const caller = await resolveCaller(ctx, c);
-    const org = requireOrganization(ctx, c.req.param("orgId"));
-    const membership = requireMembership(ctx, org, caller.userId);
-    assertNotLastAdmin(ctx, membership, "You are the last admin of this organization and cannot leave it");
-    const payload = serializeMembership(ctx, membership, { backend: true });
-    ctx.db.delete(s.organizationMemberships).where(eq(s.organizationMemberships.id, membership.id)).run();
+    const org = await requireOrganization(ctx, c.req.param("orgId"));
+    const membership = await requireMembership(ctx, org, caller.userId);
+    await assertNotLastAdmin(ctx, membership, "You are the last admin of this organization and cannot leave it");
+    const payload = await serializeMembership(ctx, membership, { backend: true });
+    await ctx.db.delete(s.organizationMemberships).where(eq(s.organizationMemberships.id, membership.id));
     await emitEvent(ctx, "organizationMembership.deleted", payload);
     return c.json({ response: deletedObject("organization_membership", membership.id) });
   });
@@ -151,38 +147,37 @@ export default function routes(ctx: AppContext) {
   app.get("/me/organization_invitations", async (c) => {
     requireOrganizationsEnabled(ctx);
     const caller = await resolveCaller(ctx, c);
-    const emails = userVerifiedEmails(ctx, caller.userId);
+    const emails = await userVerifiedEmails(ctx, caller.userId);
     if (!emails.length) return c.json({ response: [] });
     const now = Date.now();
-    const rows = ctx.db
-      .select()
-      .from(s.organizationInvitations)
-      .all()
-      .filter((r) => r.status === "pending" && emails.includes(r.email.toLowerCase()) && (!r.expiresAt || r.expiresAt > now))
-      .sort((a, b) => b.createdAt - a.createdAt)
-      .map((row) => serializeOrganizationInvitation(ctx, row));
+    const rows = (await Promise.all((await ctx.db
+              .select()
+              .from(s.organizationInvitations))
+          .filter((r) => r.status === "pending" && emails.includes(r.email.toLowerCase()) && (!r.expiresAt || r.expiresAt > now))
+          .sort((a, b) => b.createdAt - a.createdAt)
+          .map((row) => serializeOrganizationInvitation(ctx, row))));
     return c.json({ response: rows });
   });
 
   app.post("/me/organization_invitations/:id/accept", async (c) => {
     requireOrganizationsEnabled(ctx);
     const caller = await resolveCaller(ctx, c);
-    const invitation = ctx.db.select().from(s.organizationInvitations).where(eq(s.organizationInvitations.id, c.req.param("id"))).get();
+    const invitation = first(await ctx.db.select().from(s.organizationInvitations).where(eq(s.organizationInvitations.id, c.req.param("id"))));
     if (!invitation) throw new OrbitError(404, ErrorCodes.resource_not_found, "Organization invitation not found");
-    if (!userVerifiedEmails(ctx, caller.userId).includes(invitation.email.toLowerCase())) {
+    if (!(await userVerifiedEmails(ctx, caller.userId)).includes(invitation.email.toLowerCase())) {
       throw new OrbitError(403, ErrorCodes.not_allowed_access, "This invitation is addressed to a different email address");
     }
     if (invitation.status !== "pending") throw new OrbitError(409, ErrorCodes.duplicate_record, `Invitation is ${invitation.status}`);
     if (invitation.expiresAt && invitation.expiresAt <= Date.now()) throw new OrbitError(422, ErrorCodes.ticket_expired, "Organization invitation has expired");
     const membership = await acceptInvitation(ctx, invitation, caller.userId);
     if (!membership) throw new OrbitError(404, ErrorCodes.organization_not_found, "Organization not found");
-    return c.json({ response: serializeMembership(ctx, membership) });
+    return c.json({ response: await serializeMembership(ctx, membership) });
   });
 
   app.get("/me/organization_suggestions", async (c) => {
     requireOrganizationsEnabled(ctx);
     const caller = await resolveCaller(ctx, c);
-    const rows = suggestedOrganizations(ctx, caller.userId).map(({ organization, domain }) => serializeSuggestion(ctx, organization, domain));
+    const rows = (await Promise.all((await suggestedOrganizations(ctx, caller.userId)).map(({ organization, domain }) => serializeSuggestion(ctx, organization, domain))));
     return c.json({ response: rows });
   });
 
@@ -191,19 +186,19 @@ export default function routes(ctx: AppContext) {
     const caller = await resolveCaller(ctx, c);
     const orgId = orgIdFromSuggestionId(c.req.param("id"));
     if (!orgId) throw new OrbitError(404, ErrorCodes.resource_not_found, "Organization suggestion not found");
-    const org = requireOrganization(ctx, orgId);
-    if (!hasSuggestionForOrganization(ctx, caller.userId, org.id)) {
+    const org = await requireOrganization(ctx, orgId);
+    if (!await hasSuggestionForOrganization(ctx, caller.userId, org.id)) {
       throw new OrbitError(404, ErrorCodes.resource_not_found, "Organization suggestion not found");
     }
-    const membership = await addMembership(ctx, { organizationId: org.id, userId: caller.userId, roleKey: defaultRoleKey(ctx) });
-    return c.json({ response: serializeMembership(ctx, membership) });
+    const membership = await addMembership(ctx, { organizationId: org.id, userId: caller.userId, roleKey: await defaultRoleKey(ctx) });
+    return c.json({ response: await serializeMembership(ctx, membership) });
   });
 
   // ─────────── organizations ───────────
   app.post("/organizations", async (c) => {
     requireOrganizationsEnabled(ctx);
     const caller = await resolveCaller(ctx, c);
-    assertCanCreateOrganization(ctx, caller.user);
+    await assertCanCreateOrganization(ctx, caller.user);
     const body = await parseBody(c, z.object({
       name: z.string().trim().min(1).max(256),
       slug: z.string().trim().min(1).max(50).optional(),
@@ -211,25 +206,25 @@ export default function routes(ctx: AppContext) {
     const settings = ctx.settings.get();
     const now = Date.now();
     const id = newId(ID_PREFIX.org);
-    ctx.db.insert(s.organizations).values({
-      id,
-      name: body.name,
-      slug: resolveSlug(ctx, settings.organizations.slugEnabled ? body.slug : undefined, body.name),
-      maxAllowedMemberships: settings.organizations.maxAllowedMemberships,
-      adminDeleteEnabled: settings.organizations.adminDeleteEnabled,
-      createdBy: caller.userId,
-      createdAt: now,
-      updatedAt: now,
-    }).run();
-    const org = ctx.db.select().from(s.organizations).where(eq(s.organizations.id, id)).get()!;
-    await addMembership(ctx, { organizationId: org.id, userId: caller.userId, roleKey: creatorRoleKey(ctx) });
+    await ctx.db.insert(s.organizations).values({
+                  id,
+                  name: body.name,
+                  slug: await resolveSlug(ctx, settings.organizations.slugEnabled ? body.slug : undefined, body.name),
+                  maxAllowedMemberships: settings.organizations.maxAllowedMemberships,
+                  adminDeleteEnabled: settings.organizations.adminDeleteEnabled,
+                  createdBy: caller.userId,
+                  createdAt: now,
+                  updatedAt: now,
+                });
+    const org = first(await ctx.db.select().from(s.organizations).where(eq(s.organizations.id, id)))!;
+    await addMembership(ctx, { organizationId: org.id, userId: caller.userId, roleKey: await creatorRoleKey(ctx) });
     await emitOrg("organization.created", org);
-    return c.json({ response: serializeOrganization(ctx, org) }, 200);
+    return c.json({ response: await serializeOrganization(ctx, org) }, 200);
   });
 
   app.get("/organizations/:id", async (c) => {
     const { org } = await orgAccess(ctx, c);
-    return c.json({ response: serializeOrganization(ctx, org) });
+    return c.json({ response: await serializeOrganization(ctx, org) });
   });
 
   app.patch("/organizations/:id", async (c) => {
@@ -241,19 +236,19 @@ export default function routes(ctx: AppContext) {
     const settings = ctx.settings.get();
     const patch: Partial<typeof s.organizations.$inferInsert> = { updatedAt: Date.now() };
     if (body.name !== undefined) patch.name = body.name;
-    if (body.slug !== undefined) patch.slug = settings.organizations.slugEnabled ? resolveSlug(ctx, body.slug, body.name ?? org.name, org.id) : org.slug;
-    ctx.db.update(s.organizations).set(patch).where(eq(s.organizations.id, org.id)).run();
-    const updated = ctx.db.select().from(s.organizations).where(eq(s.organizations.id, org.id)).get()!;
+    if (body.slug !== undefined) patch.slug = settings.organizations.slugEnabled ? await resolveSlug(ctx, body.slug, body.name ?? org.name, org.id) : org.slug;
+    await ctx.db.update(s.organizations).set(patch).where(eq(s.organizations.id, org.id));
+    const updated = first(await ctx.db.select().from(s.organizations).where(eq(s.organizations.id, org.id)))!;
     await emitOrg("organization.updated", updated);
-    return c.json({ response: serializeOrganization(ctx, updated) });
+    return c.json({ response: await serializeOrganization(ctx, updated) });
   });
 
   app.delete("/organizations/:id", async (c) => {
     const { org } = await orgAccess(ctx, c, PERMISSIONS.PROFILE_DELETE);
     if (!org.adminDeleteEnabled) throw new OrbitError(403, ErrorCodes.not_allowed_access, "Deleting this organization is disabled for admins");
-    const payload = serializeOrganization(ctx, org, { backend: true });
+    const payload = await serializeOrganization(ctx, org, { backend: true });
     deleteLogoFile(ctx, org.imageUrl);
-    ctx.db.delete(s.organizations).where(eq(s.organizations.id, org.id)).run();
+    await ctx.db.delete(s.organizations).where(eq(s.organizations.id, org.id));
     await emitEvent(ctx, "organization.deleted", payload);
     return c.json({ response: deletedObject("organization", org.id) });
   });
@@ -264,19 +259,19 @@ export default function routes(ctx: AppContext) {
     const file = storeLogo(ctx, org.id, data, mime);
     deleteLogoFile(ctx, org.imageUrl);
     const imageUrl = `${ctx.env.baseUrl}/v1/client/organization_logos/${file}`;
-    ctx.db.update(s.organizations).set({ imageUrl, hasImage: true, updatedAt: Date.now() }).where(eq(s.organizations.id, org.id)).run();
-    const updated = ctx.db.select().from(s.organizations).where(eq(s.organizations.id, org.id)).get()!;
+    await ctx.db.update(s.organizations).set({ imageUrl, hasImage: true, updatedAt: Date.now() }).where(eq(s.organizations.id, org.id));
+    const updated = first(await ctx.db.select().from(s.organizations).where(eq(s.organizations.id, org.id)))!;
     await emitOrg("organization.updated", updated);
-    return c.json({ response: serializeOrganization(ctx, updated) });
+    return c.json({ response: await serializeOrganization(ctx, updated) });
   });
 
   app.delete("/organizations/:id/logo", async (c) => {
     const { org } = await orgAccess(ctx, c, PERMISSIONS.PROFILE_MANAGE);
     deleteLogoFile(ctx, org.imageUrl);
-    ctx.db.update(s.organizations).set({ imageUrl: null, hasImage: false, updatedAt: Date.now() }).where(eq(s.organizations.id, org.id)).run();
-    const updated = ctx.db.select().from(s.organizations).where(eq(s.organizations.id, org.id)).get()!;
+    await ctx.db.update(s.organizations).set({ imageUrl: null, hasImage: false, updatedAt: Date.now() }).where(eq(s.organizations.id, org.id));
+    const updated = first(await ctx.db.select().from(s.organizations).where(eq(s.organizations.id, org.id)))!;
     await emitOrg("organization.updated", updated);
-    return c.json({ response: serializeOrganization(ctx, updated) });
+    return c.json({ response: await serializeOrganization(ctx, updated) });
   });
 
   // ─────────── memberships ───────────
@@ -284,9 +279,9 @@ export default function routes(ctx: AppContext) {
     const { org } = await orgAccess(ctx, c, PERMISSIONS.MEMBERSHIPS_READ);
     const params = listParams(c);
     const role = c.req.query("role");
-    let rows = ctx.db.select().from(s.organizationMemberships).where(eq(s.organizationMemberships.organizationId, org.id)).all();
-    if (role) rows = rows.filter((r) => r.roleKey === role || (roleByKey(ctx, r.roleKey)?.name ?? "").toLowerCase() === role.toLowerCase());
-    const serialized = rows.map((row) => serializeMembership(ctx, row));
+    let rows = (await ctx.db.select().from(s.organizationMemberships).where(eq(s.organizationMemberships.organizationId, org.id)));
+    if (role) rows = await filterAsync(rows, async (r) => r.roleKey === role || ((await roleByKey(ctx, r.roleKey))?.name ?? "").toLowerCase() === role.toLowerCase());
+    const serialized = await Promise.all(rows.map((row) => serializeMembership(ctx, row)));
     const filtered = params.query
       ? serialized.filter((m) =>
         [m.public_user_data.identifier, m.public_user_data.first_name, m.public_user_data.last_name, m.public_user_data.user_id]
@@ -306,24 +301,24 @@ export default function routes(ctx: AppContext) {
   app.patch("/organizations/:id/memberships/:userId", async (c) => {
     const { org } = await orgAccess(ctx, c, PERMISSIONS.MEMBERSHIPS_MANAGE);
     const body = await parseBody(c, z.object({ role: z.string().min(1) }));
-    const membership = requireMembership(ctx, org, c.req.param("userId"));
-    const role = assertAssignableRole(ctx, body.role);
-    if (role.key === membership.roleKey) return c.json({ response: serializeMembership(ctx, membership) });
-    if (isLastAdmin(ctx, membership) && !isAdminRole(ctx, role.key)) {
+    const membership = await requireMembership(ctx, org, c.req.param("userId"));
+    const role = await assertAssignableRole(ctx, body.role);
+    if (role.key === membership.roleKey) return c.json({ response: await serializeMembership(ctx, membership) });
+    if (await isLastAdmin(ctx, membership) && !await isAdminRole(ctx, role.key)) {
       throw new OrbitError(403, ErrorCodes.last_admin_cannot_leave, "The last admin of an organization cannot be demoted", { role: membership.roleKey });
     }
-    ctx.db.update(s.organizationMemberships).set({ roleKey: role.key, updatedAt: Date.now() }).where(eq(s.organizationMemberships.id, membership.id)).run();
-    const updated = ctx.db.select().from(s.organizationMemberships).where(eq(s.organizationMemberships.id, membership.id)).get()!;
-    await emitEvent(ctx, "organizationMembership.updated", serializeMembership(ctx, updated, { backend: true }));
-    return c.json({ response: serializeMembership(ctx, updated) });
+    await ctx.db.update(s.organizationMemberships).set({ roleKey: role.key, updatedAt: Date.now() }).where(eq(s.organizationMemberships.id, membership.id));
+    const updated = first(await ctx.db.select().from(s.organizationMemberships).where(eq(s.organizationMemberships.id, membership.id)))!;
+    await emitEvent(ctx, "organizationMembership.updated", await serializeMembership(ctx, updated, { backend: true }));
+    return c.json({ response: await serializeMembership(ctx, updated) });
   });
 
   app.delete("/organizations/:id/memberships/:userId", async (c) => {
     const { org } = await orgAccess(ctx, c, PERMISSIONS.MEMBERSHIPS_MANAGE);
-    const membership = requireMembership(ctx, org, c.req.param("userId"));
-    assertNotLastAdmin(ctx, membership);
-    const payload = serializeMembership(ctx, membership, { backend: true });
-    ctx.db.delete(s.organizationMemberships).where(eq(s.organizationMemberships.id, membership.id)).run();
+    const membership = await requireMembership(ctx, org, c.req.param("userId"));
+    await assertNotLastAdmin(ctx, membership);
+    const payload = await serializeMembership(ctx, membership, { backend: true });
+    await ctx.db.delete(s.organizationMemberships).where(eq(s.organizationMemberships.id, membership.id));
     await emitEvent(ctx, "organizationMembership.deleted", payload);
     return c.json({ response: deletedObject("organization_membership", membership.id) });
   });
@@ -333,8 +328,8 @@ export default function routes(ctx: AppContext) {
     const { org } = await orgAccess(ctx, c, PERMISSIONS.MEMBERSHIPS_READ);
     const params = listParams(c);
     const status = c.req.query("status");
-    const rows = ctx.db.select().from(s.organizationInvitations).where(eq(s.organizationInvitations.organizationId, org.id)).all();
-    let serialized = rows.map((row) => serializeOrganizationInvitation(ctx, row));
+    const rows = (await ctx.db.select().from(s.organizationInvitations).where(eq(s.organizationInvitations.organizationId, org.id)));
+    let serialized = await Promise.all(rows.map((row) => serializeOrganizationInvitation(ctx, row)));
     if (status) serialized = serialized.filter((r) => r.status === status);
     if (params.query) serialized = serialized.filter((r) => r.email_address.includes(params.query!));
     serialized = sortRows(serialized, params.orderBy ?? "-created_at", {
@@ -359,9 +354,9 @@ export default function routes(ctx: AppContext) {
     const bulk = body.email_addresses !== undefined;
     const emails = (body.email_addresses ?? (body.email_address ? [body.email_address] : [])).map(normalizeEmail);
     if (!emails.length) throw new OrbitError(422, ErrorCodes.form_param_missing, "email_address or email_addresses is required", { param_name: "email_address" });
-    if (body.role) assertAssignableRole(ctx, body.role);
+    if (body.role) await assertAssignableRole(ctx, body.role);
     // Members and already-invited mailboxes are skipped so bulk calls stay idempotent.
-    const recipients = dedupeRecipients(ctx, org, emails);
+    const recipients = await dedupeRecipients(ctx, org, emails);
     if (!bulk && !recipients.length) throw new OrbitError(409, ErrorCodes.duplicate_record, `${emails[0]} is already a member or has already been invited`);
     const inviter = [caller.user.firstName, caller.user.lastName].filter(Boolean).join(" ") || caller.user.username || caller.user.id;
     const created = [];
@@ -387,32 +382,33 @@ export default function routes(ctx: AppContext) {
           expires_in_days: body.expires_in_days ?? 30,
         },
       });
-      created.push(serializeOrganizationInvitation(ctx, invitation));
+      created.push(await serializeOrganizationInvitation(ctx, invitation));
     }
     return c.json({ response: bulk ? created : created[0] });
   });
 
   app.post("/organizations/:id/invitations/:invId/revoke", async (c) => {
     const { org } = await orgAccess(ctx, c, PERMISSIONS.MEMBERSHIPS_MANAGE);
-    const invitation = ctx.db
-      .select()
-      .from(s.organizationInvitations)
-      .where(and(eq(s.organizationInvitations.organizationId, org.id), eq(s.organizationInvitations.id, c.req.param("invId"))))
-      .get();
+    const invitation = first(await ctx.db
+          .select()
+          .from(s.organizationInvitations)
+          .where(and(eq(s.organizationInvitations.organizationId, org.id), eq(s.organizationInvitations.id, c.req.param("invId")))));
     if (!invitation) throw new OrbitError(404, ErrorCodes.resource_not_found, "Organization invitation not found");
-    if (invitation.status !== "pending") throw new OrbitError(409, ErrorCodes.duplicate_record, `Invitation is ${invitation.status}`);
-    ctx.db.update(s.organizationInvitations).set({ status: "revoked", updatedAt: Date.now() }).where(eq(s.organizationInvitations.id, invitation.id)).run();
-    const updated = ctx.db.select().from(s.organizationInvitations).where(eq(s.organizationInvitations.id, invitation.id)).get()!;
-    await emitEvent(ctx, "organizationInvitation.revoked", serializeOrganizationInvitation(ctx, updated, { backend: true }));
-    return c.json({ response: serializeOrganizationInvitation(ctx, updated) });
+    const now = Date.now();
+    const revoked = first(await ctx.db.update(s.organizationInvitations).set({ status: "revoked", updatedAt: now })
+      .where(and(eq(s.organizationInvitations.id, invitation.id), eq(s.organizationInvitations.status, "pending")))
+      .returning());
+    if (!revoked) throw new OrbitError(409, ErrorCodes.duplicate_record, `Invitation is ${invitation.status}`);
+    await emitEvent(ctx, "organizationInvitation.revoked", await serializeOrganizationInvitation(ctx, revoked, { backend: true }));
+    return c.json({ response: await serializeOrganizationInvitation(ctx, revoked) });
   });
 
   // ─────────── domains ───────────
   app.get("/organizations/:id/domains", async (c) => {
     const { org } = await orgAccess(ctx, c, PERMISSIONS.DOMAINS_READ);
     requireDomainsEnabled(ctx);
-    const rows = ctx.db.select().from(s.organizationDomains).where(eq(s.organizationDomains.organizationId, org.id)).all()
-      .map((row) => serializeOrganizationDomain(ctx, row));
+    const rows = (await Promise.all((await ctx.db.select().from(s.organizationDomains).where(eq(s.organizationDomains.organizationId, org.id)))
+          .map((row) => serializeOrganizationDomain(ctx, row))));
     return fapiList(c, rows);
   });
 
@@ -424,32 +420,32 @@ export default function routes(ctx: AppContext) {
       enrollment_mode: z.enum(["manual_invitation", "automatic_invitation", "automatic_suggestion"]).optional(),
     }));
     const name = normalizeDomain(body.name);
-    if (findDomainByName(ctx, org.id, name)) throw new OrbitError(409, ErrorCodes.duplicate_record, `${name} is already a domain of this organization`);
+    if (await findDomainByName(ctx, org.id, name)) throw new OrbitError(409, ErrorCodes.duplicate_record, `${name} is already a domain of this organization`);
     const now = Date.now();
     const id = newId(ID_PREFIX.domain);
-    ctx.db.insert(s.organizationDomains).values({
-      id, organizationId: org.id, name, enrollmentMode: body.enrollment_mode ?? "manual_invitation", verified: false, createdAt: now, updatedAt: now,
-    }).run();
-    const row = ctx.db.select().from(s.organizationDomains).where(eq(s.organizationDomains.id, id)).get()!;
+    await ctx.db.insert(s.organizationDomains).values({
+                  id, organizationId: org.id, name, enrollmentMode: body.enrollment_mode ?? "manual_invitation", verified: false, createdAt: now, updatedAt: now,
+                });
+    const row = first(await ctx.db.select().from(s.organizationDomains).where(eq(s.organizationDomains.id, id)))!;
     await emitDomainEvent(ctx, "organizationDomain.created", row);
-    return c.json({ response: serializeOrganizationDomain(ctx, row) });
+    return c.json({ response: await serializeOrganizationDomain(ctx, row) });
   });
 
   app.get("/organizations/:id/domains/:did", async (c) => {
     const { org } = await orgAccess(ctx, c, PERMISSIONS.DOMAINS_READ);
     requireDomainsEnabled(ctx);
-    const row = findDomain(ctx, org.id, c.req.param("did"));
+    const row = await findDomain(ctx, org.id, c.req.param("did"));
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Organization domain not found");
-    return c.json({ response: serializeOrganizationDomain(ctx, row) });
+    return c.json({ response: await serializeOrganizationDomain(ctx, row) });
   });
 
   app.delete("/organizations/:id/domains/:did", async (c) => {
     const { org } = await orgAccess(ctx, c, PERMISSIONS.DOMAINS_MANAGE);
     requireDomainsEnabled(ctx);
-    const row = findDomain(ctx, org.id, c.req.param("did"));
+    const row = await findDomain(ctx, org.id, c.req.param("did"));
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Organization domain not found");
-    const payload = serializeOrganizationDomain(ctx, row);
-    ctx.db.delete(s.organizationDomains).where(eq(s.organizationDomains.id, row.id)).run();
+    const payload = await serializeOrganizationDomain(ctx, row);
+    await ctx.db.delete(s.organizationDomains).where(eq(s.organizationDomains.id, row.id));
     await emitEvent(ctx, "organizationDomain.deleted", payload);
     return c.json({ response: deletedObject("organization_domain", row.id) });
   });
@@ -457,7 +453,7 @@ export default function routes(ctx: AppContext) {
   app.post("/organizations/:id/domains/:did/prepare_affiliation_verification", async (c) => {
     const { org } = await orgAccess(ctx, c, PERMISSIONS.DOMAINS_MANAGE);
     requireDomainsEnabled(ctx);
-    const domain = findDomain(ctx, org.id, c.req.param("did"));
+    const domain = await findDomain(ctx, org.id, c.req.param("did"));
     if (!domain) throw new OrbitError(404, ErrorCodes.resource_not_found, "Organization domain not found");
     const body = await parseBody(c, z.object({ affiliation_email_address: z.string().min(3) }));
     const email = normalizeEmail(body.affiliation_email_address);
@@ -467,69 +463,68 @@ export default function routes(ctx: AppContext) {
     const settings = ctx.settings.get();
     const now = Date.now();
     const code = Array.from({ length: settings.email.codeLength }, () => Math.floor(Math.random() * 10)).join("");
-    ctx.db.insert(s.verifications).values({
-      id: newId(ID_PREFIX.verification), purpose: "org_domain", strategy: "email_code", identifier: email, ownerId: domain.id,
-      codeHash: sha256(code), attempts: 0, maxAttempts: 5, expiresAt: now + settings.email.codeLifetimeSeconds * 1000, createdAt: now,
-    }).run();
-    ctx.db.update(s.organizationDomains).set({ affiliationEmailAddress: email, updatedAt: now }).where(eq(s.organizationDomains.id, domain.id)).run();
-    const updated = ctx.db.select().from(s.organizationDomains).where(eq(s.organizationDomains.id, domain.id)).get()!;
+    await ctx.db.insert(s.verifications).values({
+                  id: newId(ID_PREFIX.verification), purpose: "org_domain", strategy: "email_code", identifier: email, ownerId: domain.id,
+                  codeHash: sha256(code), attempts: 0, maxAttempts: 5, expiresAt: now + settings.email.codeLifetimeSeconds * 1000, createdAt: now,
+                });
+    await ctx.db.update(s.organizationDomains).set({ affiliationEmailAddress: email, updatedAt: now }).where(eq(s.organizationDomains.id, domain.id));
+    const updated = first(await ctx.db.select().from(s.organizationDomains).where(eq(s.organizationDomains.id, domain.id)))!;
     await sendEmail(ctx, {
       to: email,
       template: "domain_verification_code",
       vars: { code, domain: domain.name, organization_name: org.name, expires_in_minutes: Math.round(settings.email.codeLifetimeSeconds / 60) },
     });
-    return c.json({ response: serializeOrganizationDomain(ctx, updated) });
+    return c.json({ response: await serializeOrganizationDomain(ctx, updated) });
   });
 
   app.post("/organizations/:id/domains/:did/attempt_affiliation_verification", async (c) => {
     const { org } = await orgAccess(ctx, c, PERMISSIONS.DOMAINS_MANAGE);
     requireDomainsEnabled(ctx);
-    const domain = findDomain(ctx, org.id, c.req.param("did"));
+    const domain = await findDomain(ctx, org.id, c.req.param("did"));
     if (!domain) throw new OrbitError(404, ErrorCodes.resource_not_found, "Organization domain not found");
     const body = await parseBody(c, z.object({ code: z.string().min(1) }));
-    const verification = ctx.db
-      .select()
-      .from(s.verifications)
-      .where(and(eq(s.verifications.ownerId, domain.id), eq(s.verifications.purpose, "org_domain")))
-      .all()
+    const verification = (await ctx.db
+          .select()
+          .from(s.verifications)
+          .where(and(eq(s.verifications.ownerId, domain.id), eq(s.verifications.purpose, "org_domain"))))
       .sort((a, b) => b.createdAt - a.createdAt)[0];
     if (!verification || verification.verifiedAt) {
       throw new OrbitError(422, ErrorCodes.verification_failed, "Start domain verification first");
     }
     if (verification.expiresAt <= Date.now()) throw new OrbitError(422, ErrorCodes.verification_expired, "Verification code has expired");
     if (verification.attempts >= verification.maxAttempts) throw new OrbitError(429, ErrorCodes.too_many_attempts, "Too many attempts. Request a new code.");
-    ctx.db.update(s.verifications).set({ attempts: verification.attempts + 1 }).where(eq(s.verifications.id, verification.id)).run();
+    await ctx.db.update(s.verifications).set({ attempts: verification.attempts + 1 }).where(eq(s.verifications.id, verification.id));
     if (!verification.codeHash || !safeEqual(sha256(body.code.trim()), verification.codeHash)) {
       throw new OrbitError(422, ErrorCodes.form_code_incorrect, "Verification code is incorrect", { param_name: "code" });
     }
     const now = Date.now();
-    ctx.db.update(s.verifications).set({ verifiedAt: now, consumedAt: now }).where(eq(s.verifications.id, verification.id)).run();
-    ctx.db.update(s.organizationDomains).set({ verified: true, updatedAt: now }).where(eq(s.organizationDomains.id, domain.id)).run();
-    const updated = ctx.db.select().from(s.organizationDomains).where(eq(s.organizationDomains.id, domain.id)).get()!;
+    await ctx.db.update(s.verifications).set({ verifiedAt: now, consumedAt: now }).where(eq(s.verifications.id, verification.id));
+    await ctx.db.update(s.organizationDomains).set({ verified: true, updatedAt: now }).where(eq(s.organizationDomains.id, domain.id));
+    const updated = first(await ctx.db.select().from(s.organizationDomains).where(eq(s.organizationDomains.id, domain.id)))!;
     if (updated.enrollmentMode === "automatic_invitation") await applyDomainEnrollment(ctx, updated);
     await emitDomainEvent(ctx, "organizationDomain.updated", updated);
-    return c.json({ response: serializeOrganizationDomain(ctx, updated) });
+    return c.json({ response: await serializeOrganizationDomain(ctx, updated) });
   });
 
   app.post("/organizations/:id/domains/:did/update_enrollment_mode", async (c) => {
     const { org } = await orgAccess(ctx, c, PERMISSIONS.DOMAINS_MANAGE);
     requireDomainsEnabled(ctx);
-    const domain = findDomain(ctx, org.id, c.req.param("did"));
+    const domain = await findDomain(ctx, org.id, c.req.param("did"));
     if (!domain) throw new OrbitError(404, ErrorCodes.resource_not_found, "Organization domain not found");
     const body = await parseBody(c, z.object({
       enrollment_mode: z.enum(["manual_invitation", "automatic_invitation", "automatic_suggestion"]),
       delete_pending: z.boolean().optional(),
     }));
     if (body.delete_pending) {
-      for (const invitation of deletePendingForDomain(ctx, org.id, domain.name)) {
-        await emitEvent(ctx, "organizationInvitation.revoked", serializeOrganizationInvitation(ctx, invitation, { backend: true }));
+      for (const invitation of await deletePendingForDomain(ctx, org.id, domain.name)) {
+        await emitEvent(ctx, "organizationInvitation.revoked", await serializeOrganizationInvitation(ctx, invitation, { backend: true }));
       }
     }
-    ctx.db.update(s.organizationDomains).set({ enrollmentMode: body.enrollment_mode, updatedAt: Date.now() }).where(eq(s.organizationDomains.id, domain.id)).run();
-    const updated = ctx.db.select().from(s.organizationDomains).where(eq(s.organizationDomains.id, domain.id)).get()!;
+    await ctx.db.update(s.organizationDomains).set({ enrollmentMode: body.enrollment_mode, updatedAt: Date.now() }).where(eq(s.organizationDomains.id, domain.id));
+    const updated = first(await ctx.db.select().from(s.organizationDomains).where(eq(s.organizationDomains.id, domain.id)))!;
     if (updated.verified && updated.enrollmentMode === "automatic_invitation") await applyDomainEnrollment(ctx, updated);
     await emitDomainEvent(ctx, "organizationDomain.updated", updated);
-    return c.json({ response: serializeOrganizationDomain(ctx, updated) });
+    return c.json({ response: await serializeOrganizationDomain(ctx, updated) });
   });
 
   // ─────────── membership requests ───────────
@@ -537,71 +532,69 @@ export default function routes(ctx: AppContext) {
     requireOrganizationsEnabled(ctx);
     requireMembershipRequestsEnabled(ctx);
     const caller = await resolveCaller(ctx, c);
-    const org = requireOrganization(ctx, c.req.param("id"));
-    if (findMembership(ctx, org.id, caller.userId)) throw new OrbitError(409, ErrorCodes.duplicate_record, "You are already a member of this organization");
-    const existing = ctx.db
-      .select()
-      .from(s.organizationMembershipRequests)
-      .where(and(eq(s.organizationMembershipRequests.organizationId, org.id), eq(s.organizationMembershipRequests.userId, caller.userId), eq(s.organizationMembershipRequests.status, "pending")))
-      .get();
-    if (existing) return c.json({ response: serializeMembershipRequest(ctx, existing) });
-    if (!hasSuggestionForOrganization(ctx, caller.userId, org.id)) {
+    const org = await requireOrganization(ctx, c.req.param("id"));
+    if (await findMembership(ctx, org.id, caller.userId)) throw new OrbitError(409, ErrorCodes.duplicate_record, "You are already a member of this organization");
+    const existing = first(await ctx.db
+          .select()
+          .from(s.organizationMembershipRequests)
+          .where(and(eq(s.organizationMembershipRequests.organizationId, org.id), eq(s.organizationMembershipRequests.userId, caller.userId), eq(s.organizationMembershipRequests.status, "pending"))));
+    if (existing) return c.json({ response: await serializeMembershipRequest(ctx, existing) });
+    if (!await hasSuggestionForOrganization(ctx, caller.userId, org.id)) {
       throw new OrbitError(403, ErrorCodes.not_allowed_access, "Your verified email domain does not allow joining this organization");
     }
     const now = Date.now();
     const id = newId(ID_PREFIX.request);
-    ctx.db.insert(s.organizationMembershipRequests).values({ id, organizationId: org.id, userId: caller.userId, status: "pending", createdAt: now, updatedAt: now }).run();
-    const row = ctx.db.select().from(s.organizationMembershipRequests).where(eq(s.organizationMembershipRequests.id, id)).get()!;
-    return c.json({ response: serializeMembershipRequest(ctx, row) });
+    await ctx.db.insert(s.organizationMembershipRequests).values({ id, organizationId: org.id, userId: caller.userId, status: "pending", createdAt: now, updatedAt: now });
+    const row = first(await ctx.db.select().from(s.organizationMembershipRequests).where(eq(s.organizationMembershipRequests.id, id)))!;
+    return c.json({ response: await serializeMembershipRequest(ctx, row) });
   });
 
   app.get("/organizations/:id/membership_requests", async (c) => {
     const { org } = await orgAccess(ctx, c, PERMISSIONS.MEMBERSHIPS_READ);
     const status = c.req.query("status");
-    const rows = ctx.db.select().from(s.organizationMembershipRequests).where(eq(s.organizationMembershipRequests.organizationId, org.id)).all()
-      .filter((r) => !status || r.status === status)
-      .sort((a, b) => b.createdAt - a.createdAt)
-      .map((row) => serializeMembershipRequest(ctx, row));
+    const rows = (await Promise.all((await ctx.db.select().from(s.organizationMembershipRequests).where(eq(s.organizationMembershipRequests.organizationId, org.id)))
+          .filter((r) => !status || r.status === status)
+          .sort((a, b) => b.createdAt - a.createdAt)
+          .map((row) => serializeMembershipRequest(ctx, row))));
     return fapiList(c, rows);
   });
 
   app.post("/organizations/:id/membership_requests/:rid/accept", async (c) => {
     const { org } = await orgAccess(ctx, c, PERMISSIONS.MEMBERSHIPS_MANAGE);
-    const request = findMembershipRequest(ctx, org.id, c.req.param("rid"));
+    const request = await findMembershipRequest(ctx, org.id, c.req.param("rid"));
     if (request.status !== "pending") throw new OrbitError(409, ErrorCodes.duplicate_record, `Membership request is ${request.status}`);
-    assertOrganizationCapacity(ctx, org);
-    const membership = await addMembership(ctx, { organizationId: org.id, userId: request.userId, roleKey: defaultRoleKey(ctx) });
-    ctx.db.update(s.organizationMembershipRequests).set({ status: "accepted", updatedAt: Date.now() }).where(eq(s.organizationMembershipRequests.id, request.id)).run();
-    return c.json({ response: serializeMembership(ctx, membership) });
+    await assertOrganizationCapacity(ctx, org);
+    const membership = await addMembership(ctx, { organizationId: org.id, userId: request.userId, roleKey: await defaultRoleKey(ctx) });
+    await ctx.db.update(s.organizationMembershipRequests).set({ status: "accepted", updatedAt: Date.now() }).where(eq(s.organizationMembershipRequests.id, request.id));
+    return c.json({ response: await serializeMembership(ctx, membership) });
   });
 
   app.post("/organizations/:id/membership_requests/:rid/reject", async (c) => {
     const { org } = await orgAccess(ctx, c, PERMISSIONS.MEMBERSHIPS_MANAGE);
-    const request = findMembershipRequest(ctx, org.id, c.req.param("rid"));
+    const request = await findMembershipRequest(ctx, org.id, c.req.param("rid"));
     if (request.status !== "pending") throw new OrbitError(409, ErrorCodes.duplicate_record, `Membership request is ${request.status}`);
-    ctx.db.update(s.organizationMembershipRequests).set({ status: "rejected", updatedAt: Date.now() }).where(eq(s.organizationMembershipRequests.id, request.id)).run();
-    const updated = ctx.db.select().from(s.organizationMembershipRequests).where(eq(s.organizationMembershipRequests.id, request.id)).get()!;
-    return c.json({ response: serializeMembershipRequest(ctx, updated) });
+    await ctx.db.update(s.organizationMembershipRequests).set({ status: "rejected", updatedAt: Date.now() }).where(eq(s.organizationMembershipRequests.id, request.id));
+    const updated = first(await ctx.db.select().from(s.organizationMembershipRequests).where(eq(s.organizationMembershipRequests.id, request.id)))!;
+    return c.json({ response: await serializeMembershipRequest(ctx, updated) });
   });
 
   // ─────────── roles (role dropdown of the OrganizationProfile) ───────────
   app.get("/organizations/:id/roles", async (c) => {
     await orgAccess(ctx, c, PERMISSIONS.MEMBERSHIPS_READ);
-    const rows = ctx.db.select().from(s.roles).all()
-      .sort((a, b) => Number(b.isSystem) - Number(a.isSystem) || a.key.localeCompare(b.key))
-      .map((row) => serializeRole(ctx, row));
+    const rows = (await Promise.all((await ctx.db.select().from(s.roles))
+          .sort((a, b) => Number(b.isSystem) - Number(a.isSystem) || a.key.localeCompare(b.key))
+          .map((row) => serializeRole(ctx, row))));
     return c.json({ response: rows });
   });
 
   return app;
 }
 
-function findMembershipRequest(ctx: AppContext, orgId: string, id: string) {
-  const row = ctx.db
-    .select()
-    .from(s.organizationMembershipRequests)
-    .where(and(eq(s.organizationMembershipRequests.organizationId, orgId), eq(s.organizationMembershipRequests.id, id)))
-    .get();
+async function findMembershipRequest(ctx: AppContext, orgId: string, id: string) {
+  const row = first(await ctx.db
+      .select()
+      .from(s.organizationMembershipRequests)
+      .where(and(eq(s.organizationMembershipRequests.organizationId, orgId), eq(s.organizationMembershipRequests.id, id))));
   if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Membership request not found");
   return row;
 }

@@ -8,6 +8,7 @@ import { sendEmail } from "./mail";
 import { mfaEnrollmentRequired } from "./mfa";
 import { primaryEmail, touchUser, type UserRow } from "./users";
 import { emitEvent } from "./webhooks";
+import { first } from "../lib/db";
 
 export interface CreateSessionInput {
   clientId: string;
@@ -21,7 +22,7 @@ export interface CreateSessionInput {
 }
 
 const emitSessionEvent = async (ctx: AppContext, type: "session.created" | "session.ended" | "session.removed" | "session.revoked" | "session.pending", row: typeof s.sessions.$inferSelect) => {
-  await emitEvent(ctx, type === "session.pending" ? "session.created" : type, serializeSession(ctx, row, { withUser: true }));
+  await emitEvent(ctx, type === "session.pending" ? "session.created" : type, await serializeSession(ctx, row, { withUser: true }));
 };
 
 /** Creates an active session (single-session mode ends the client's other sessions), updates user timestamps, emits `session.created`. */
@@ -29,38 +30,37 @@ export async function createSession(ctx: AppContext, input: CreateSessionInput):
   const st = ctx.settings.get();
   const now = Date.now();
   if (!st.session.multiSession) {
-    const others = ctx.db.select().from(s.sessions)
-      .where(and(eq(s.sessions.clientId, input.clientId), eq(s.sessions.status, "active")))
-      .all();
+    const others = (await ctx.db.select().from(s.sessions)
+          .where(and(eq(s.sessions.clientId, input.clientId), eq(s.sessions.status, "active"))));
     for (const other of others) {
-      ctx.db.update(s.sessions).set({ status: "ended", updatedAt: now }).where(eq(s.sessions.id, other.id)).run();
+      await ctx.db.update(s.sessions).set({ status: "ended", updatedAt: now }).where(eq(s.sessions.id, other.id));
       await emitSessionEvent(ctx, "session.ended", { ...other, status: "ended", updatedAt: now });
     }
   }
   const lifetimeMs = Math.min(st.session.lifetimeSeconds, input.maxLifetimeSeconds ?? Number.POSITIVE_INFINITY) * 1000;
   const id = newId("sess");
   // Required MFA without an enrolled factor yields a "pending" session: it can enrol a factor, nothing else.
-  const owner = ctx.db.select().from(s.users).where(eq(s.users.id, input.userId)).get();
-  const pending = !input.actor && !!owner && mfaEnrollmentRequired(ctx, owner);
-  ctx.db.insert(s.sessions).values({
-    id,
-    clientId: input.clientId,
-    userId: input.userId,
-    status: pending ? "pending" : "active",
-    lastActiveAt: now,
-    expireAt: now + lifetimeMs,
-    abandonAt: now + lifetimeMs,
-    actor: input.actor ?? null,
-    firstFactorVerifiedAt: input.firstFactor === false ? null : now,
-    secondFactorVerifiedAt: input.secondFactor ? now : null,
-    ip: input.ip ?? null,
-    userAgent: input.userAgent ?? null,
-    createdAt: now,
-    updatedAt: now,
-  }).run();
-  ctx.db.update(s.clients).set({ lastActiveSessionId: id, updatedAt: now }).where(eq(s.clients.id, input.clientId)).run();
-  touchUser(ctx, input.userId, { lastSignInAt: now, lastActiveAt: now });
-  const row = ctx.db.select().from(s.sessions).where(eq(s.sessions.id, id)).get()!;
+  const owner = first(await ctx.db.select().from(s.users).where(eq(s.users.id, input.userId)));
+  const pending = !input.actor && !!owner && await mfaEnrollmentRequired(ctx, owner);
+  await ctx.db.insert(s.sessions).values({
+            id,
+            clientId: input.clientId,
+            userId: input.userId,
+            status: pending ? "pending" : "active",
+            lastActiveAt: now,
+            expireAt: now + lifetimeMs,
+            abandonAt: now + lifetimeMs,
+            actor: input.actor ?? null,
+            firstFactorVerifiedAt: input.firstFactor === false ? null : now,
+            secondFactorVerifiedAt: input.secondFactor ? now : null,
+            ip: input.ip ?? null,
+            userAgent: input.userAgent ?? null,
+            createdAt: now,
+            updatedAt: now,
+          });
+  await ctx.db.update(s.clients).set({ lastActiveSessionId: id, updatedAt: now }).where(eq(s.clients.id, input.clientId));
+  await touchUser(ctx, input.userId, { lastSignInAt: now, lastActiveAt: now });
+  const row = first(await ctx.db.select().from(s.sessions).where(eq(s.sessions.id, id)))!;
   await emitSessionEvent(ctx, "session.created", row);
   return id;
 }
@@ -71,25 +71,23 @@ export async function createSession(ctx: AppContext, input: CreateSessionInput):
  */
 export async function completeMfaEnrollment(ctx: AppContext, userId: string, sessionId: string) {
   const now = Date.now();
-  ctx.db.update(s.sessions)
-    .set({ status: "active", secondFactorVerifiedAt: now, updatedAt: now })
-    .where(and(eq(s.sessions.id, sessionId), eq(s.sessions.userId, userId), eq(s.sessions.status, "pending")))
-    .run();
-  const others = ctx.db.select().from(s.sessions).where(and(eq(s.sessions.userId, userId), eq(s.sessions.status, "pending"))).all();
+  await ctx.db.update(s.sessions)
+            .set({ status: "active", secondFactorVerifiedAt: now, updatedAt: now })
+            .where(and(eq(s.sessions.id, sessionId), eq(s.sessions.userId, userId), eq(s.sessions.status, "pending")));
+  const others = (await ctx.db.select().from(s.sessions).where(and(eq(s.sessions.userId, userId), eq(s.sessions.status, "pending"))));
   for (const row of others) {
-    ctx.db.update(s.sessions).set({ status: "revoked", updatedAt: now }).where(eq(s.sessions.id, row.id)).run();
+    await ctx.db.update(s.sessions).set({ status: "revoked", updatedAt: now }).where(eq(s.sessions.id, row.id));
     await emitSessionEvent(ctx, "session.revoked", { ...row, status: "revoked", updatedAt: now });
   }
 }
 
 /** Email notification for a new device/sign-in. Optional (called by sign-in flows when notifications are desired). */
 export async function sendNewSignInEmail(ctx: AppContext, user: UserRow, session: typeof s.sessions.$inferSelect, when = Date.now()) {
-  const email = primaryEmail(ctx, user);
+  const email = await primaryEmail(ctx, user);
   if (!email) return;
   // Only notify for genuinely new devices (Clerk's "new sign-in" notification).
-  const knownDevice = ctx.db.select().from(s.sessions)
-    .where(eq(s.sessions.userId, user.id))
-    .all()
+  const knownDevice = (await ctx.db.select().from(s.sessions)
+      .where(eq(s.sessions.userId, user.id)))
     .some((row) => row.id !== session.id && row.ip === session.ip && row.userAgent === session.userAgent);
   if (knownDevice) return;
   await sendEmail(ctx, {
@@ -105,17 +103,17 @@ export async function sendNewSignInEmail(ctx: AppContext, user: UserRow, session
 }
 
 export async function endSessionsForUser(ctx: AppContext, userId: string, status: "revoked" | "removed" | "ended", exceptSessionId?: string): Promise<void> {
-  const rows = ctx.db.select().from(s.sessions).where(and(eq(s.sessions.userId, userId), inArray(s.sessions.status, ["active", "pending"]))).all();
+  const rows = (await ctx.db.select().from(s.sessions).where(and(eq(s.sessions.userId, userId), inArray(s.sessions.status, ["active", "pending"]))));
   const now = Date.now();
   for (const row of rows) {
     if (exceptSessionId && row.id === exceptSessionId) continue;
-    ctx.db.update(s.sessions).set({ status, updatedAt: now }).where(eq(s.sessions.id, row.id)).run();
+    await ctx.db.update(s.sessions).set({ status, updatedAt: now }).where(eq(s.sessions.id, row.id));
     const type = status === "revoked" ? "session.revoked" : status === "removed" ? "session.removed" : "session.ended";
     await emitSessionEvent(ctx, type, { ...row, status, updatedAt: now });
   }
 }
 
-export const getSession = (ctx: AppContext, id: string) => ctx.db.select().from(s.sessions).where(eq(s.sessions.id, id)).get();
+export const getSession = async (ctx: AppContext, id: string) => first(await ctx.db.select().from(s.sessions).where(eq(s.sessions.id, id)));
 
 export function isSessionExpired(ctx: AppContext, row: typeof s.sessions.$inferSelect): boolean {
   if (row.status !== "active" && row.status !== "pending") return false;
@@ -126,10 +124,10 @@ export function isSessionExpired(ctx: AppContext, row: typeof s.sessions.$inferS
 }
 
 /** Applies expiry/inactivity to the DB row and returns the effective status. */
-export function evaluateSessionStatus(ctx: AppContext, row: typeof s.sessions.$inferSelect): SessionStatus {
+export async function evaluateSessionStatus(ctx: AppContext, row: typeof s.sessions.$inferSelect): Promise<SessionStatus> {
   if (isSessionExpired(ctx, row)) {
     if (row.status !== "expired") {
-      ctx.db.update(s.sessions).set({ status: "expired", updatedAt: Date.now() }).where(eq(s.sessions.id, row.id)).run();
+      await ctx.db.update(s.sessions).set({ status: "expired", updatedAt: Date.now() }).where(eq(s.sessions.id, row.id));
     }
     return "expired";
   }
@@ -137,10 +135,10 @@ export function evaluateSessionStatus(ctx: AppContext, row: typeof s.sessions.$i
 }
 
 /** Loads a session that belongs to `clientId` and is usable; throws otherwise. */
-export function requireSession(ctx: AppContext, clientId: string, sessionId: string) {
-  const row = getSession(ctx, sessionId);
+export async function requireSession(ctx: AppContext, clientId: string, sessionId: string) {
+  const row = await getSession(ctx, sessionId);
   if (!row || row.clientId !== clientId) throw new OrbitError(404, ErrorCodes.resource_not_found, "Session not found");
-  const status = evaluateSessionStatus(ctx, row);
+  const status = await evaluateSessionStatus(ctx, row);
   if (status !== "active" && status !== "pending") {
     throw new OrbitError(401, ErrorCodes.authentication_invalid, `This session is ${status}`, { session_id: row.id });
   }
@@ -148,17 +146,16 @@ export function requireSession(ctx: AppContext, clientId: string, sessionId: str
 }
 
 export async function endSession(ctx: AppContext, row: typeof s.sessions.$inferSelect, status: "ended" | "removed" | "revoked" = "ended") {
-  ctx.db.update(s.sessions).set({ status, updatedAt: Date.now() }).where(eq(s.sessions.id, row.id)).run();
-  const client = ctx.db.select().from(s.clients).where(eq(s.clients.id, row.clientId)).get();
+  await ctx.db.update(s.sessions).set({ status, updatedAt: Date.now() }).where(eq(s.sessions.id, row.id));
+  const client = first(await ctx.db.select().from(s.clients).where(eq(s.clients.id, row.clientId)));
   if (client?.lastActiveSessionId === row.id) {
-    const next = ctx.db.select().from(s.sessions)
-      .where(and(eq(s.sessions.clientId, row.clientId), eq(s.sessions.status, "active"), ne(s.sessions.id, row.id)))
-      .get();
-    ctx.db.update(s.clients).set({ lastActiveSessionId: next?.id ?? null, updatedAt: Date.now() }).where(eq(s.clients.id, row.clientId)).run();
+    const next = first(await ctx.db.select().from(s.sessions)
+          .where(and(eq(s.sessions.clientId, row.clientId), eq(s.sessions.status, "active"), ne(s.sessions.id, row.id))));
+    await ctx.db.update(s.clients).set({ lastActiveSessionId: next?.id ?? null, updatedAt: Date.now() }).where(eq(s.clients.id, row.clientId));
   }
   const type = status === "revoked" ? "session.revoked" : status === "removed" ? "session.removed" : "session.ended";
   await emitSessionEvent(ctx, type, { ...row, status });
-  return getSession(ctx, row.id)!;
+  return (await getSession(ctx, row.id))!;
 }
 
 /** Updates activity, and the active organization when the user is a member of it. */
@@ -170,24 +167,23 @@ export async function touchSession(ctx: AppContext, row: typeof s.sessions.$infe
   if (opts.organizationId !== undefined) {
     if (opts.organizationId === null) patch.lastActiveOrganizationId = null;
     else {
-      const membership = ctx.db.select().from(s.organizationMemberships)
-        .where(and(eq(s.organizationMemberships.organizationId, opts.organizationId), eq(s.organizationMemberships.userId, row.userId)))
-        .get();
+      const membership = first(await ctx.db.select().from(s.organizationMemberships)
+              .where(and(eq(s.organizationMemberships.organizationId, opts.organizationId), eq(s.organizationMemberships.userId, row.userId))));
       if (!membership) throw new OrbitError(403, ErrorCodes.not_a_member_in_organization, "You are not a member of this organization");
       patch.lastActiveOrganizationId = opts.organizationId;
     }
   }
-  ctx.db.update(s.sessions).set(patch).where(eq(s.sessions.id, row.id)).run();
-  touchUser(ctx, row.userId, { lastActiveAt: now });
-  return getSession(ctx, row.id)!;
+  await ctx.db.update(s.sessions).set(patch).where(eq(s.sessions.id, row.id));
+  await touchUser(ctx, row.userId, { lastActiveAt: now });
+  return (await getSession(ctx, row.id))!;
 }
 
 /** Marks a reverification as done on the session. Level `first_factor` also refreshes the second factor age (Clerk semantics). */
-export function markSessionReverified(ctx: AppContext, sessionId: string, level: "first_factor" | "second_factor" | "multi_factor") {
+export async function markSessionReverified(ctx: AppContext, sessionId: string, level: "first_factor" | "second_factor" | "multi_factor") {
   const now = Date.now();
   const patch: Partial<typeof s.sessions.$inferInsert> = { updatedAt: now };
   if (level === "first_factor" || level === "multi_factor") patch.firstFactorVerifiedAt = now;
   if (level === "second_factor" || level === "multi_factor") patch.secondFactorVerifiedAt = now;
-  ctx.db.update(s.sessions).set(patch).where(eq(s.sessions.id, sessionId)).run();
-  return getSession(ctx, sessionId)!;
+  await ctx.db.update(s.sessions).set(patch).where(eq(s.sessions.id, sessionId));
+  return (await getSession(ctx, sessionId))!;
 }

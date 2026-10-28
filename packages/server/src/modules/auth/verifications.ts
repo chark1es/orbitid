@@ -1,10 +1,11 @@
 // One-time codes, magic links and their delivery.
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import { ErrorCodes, OrbitError, type VerificationJSON } from "@orbitid/shared";
 import type { AppContext } from "../../context";
 import * as s from "../../db/schema";
 import { newId } from "../../lib/ids";
 import { randomCode, randomToken, safeEqual, sha256 } from "../../lib/crypto";
+import { first } from "../../lib/db";
 
 export type VerificationRow = typeof s.verifications.$inferSelect;
 export type VerificationPurpose =
@@ -34,50 +35,49 @@ export interface IssuedVerification {
 const isLinkStrategy = (strategy: string) => strategy === "email_link" || strategy === "reset_password_link";
 
 /** Creates a hashed one-time code or link token. Never stores plaintext. */
-export function issueVerification(ctx: AppContext, input: IssueVerificationInput): IssuedVerification {
+export async function issueVerification(ctx: AppContext, input: IssueVerificationInput): Promise<IssuedVerification> {
   const now = Date.now();
   const code = isLinkStrategy(input.strategy) ? undefined : randomCode(input.codeLength ?? ctx.settings.get().email.codeLength);
   const token = isLinkStrategy(input.strategy) ? randomToken(32) : undefined;
   const id = newId("ver");
   // Invalidate older pending verifications for the same purpose/owner/identifier.
-  const previous = ctx.db.select().from(s.verifications)
-    .where(and(eq(s.verifications.ownerId, input.ownerId), eq(s.verifications.purpose, input.purpose), eq(s.verifications.identifier, input.identifier)))
-    .all();
+  const previous = (await ctx.db.select().from(s.verifications)
+      .where(and(eq(s.verifications.ownerId, input.ownerId), eq(s.verifications.purpose, input.purpose), eq(s.verifications.identifier, input.identifier))));
   for (const row of previous) {
     if (!row.verifiedAt && !row.consumedAt) {
-      ctx.db.update(s.verifications).set({ expiresAt: now - 1, verifiedAt: row.verifiedAt }).where(eq(s.verifications.id, row.id)).run();
+      await ctx.db.update(s.verifications).set({ expiresAt: now - 1, verifiedAt: row.verifiedAt }).where(eq(s.verifications.id, row.id));
     }
   }
-  ctx.db.insert(s.verifications).values({
-    id,
-    purpose: input.purpose,
-    strategy: input.strategy,
-    identifier: input.identifier,
-    ownerId: input.ownerId,
-    codeHash: code ? sha256(code) : null,
-    tokenHash: token ? sha256(token) : null,
-    attempts: 0,
-    maxAttempts: input.maxAttempts ?? 5,
-    redirectUrl: input.redirectUrl ?? null,
-    data: input.data ?? null,
-    expiresAt: now + input.lifetimeSeconds * 1000,
-    createdAt: now,
-  }).run();
-  return { row: ctx.db.select().from(s.verifications).where(eq(s.verifications.id, id)).get()!, code, token };
+  await ctx.db.insert(s.verifications).values({
+            id,
+            purpose: input.purpose,
+            strategy: input.strategy,
+            identifier: input.identifier,
+            ownerId: input.ownerId,
+            codeHash: code ? sha256(code) : null,
+            tokenHash: token ? sha256(token) : null,
+            attempts: 0,
+            maxAttempts: input.maxAttempts ?? 5,
+            redirectUrl: input.redirectUrl ?? null,
+            data: input.data ?? null,
+            expiresAt: now + input.lifetimeSeconds * 1000,
+            createdAt: now,
+          });
+  return { row: first(await ctx.db.select().from(s.verifications).where(eq(s.verifications.id, id)))!, code, token };
 }
 
-export function getVerificationById(ctx: AppContext, id: string) {
-  return ctx.db.select().from(s.verifications).where(eq(s.verifications.id, id)).get();
+export async function getVerificationById(ctx: AppContext, id: string) {
+  return first(await ctx.db.select().from(s.verifications).where(eq(s.verifications.id, id)));
 }
 
 /** Most recent verification for a purpose/owner. */
-export function getVerification(ctx: AppContext, purpose: VerificationPurpose, ownerId: string, identifier?: string) {
-  const rows = ctx.db.select().from(s.verifications).where(and(eq(s.verifications.purpose, purpose), eq(s.verifications.ownerId, ownerId))).orderBy(desc(s.verifications.createdAt)).all();
+export async function getVerification(ctx: AppContext, purpose: VerificationPurpose, ownerId: string, identifier?: string) {
+  const rows = (await ctx.db.select().from(s.verifications).where(and(eq(s.verifications.purpose, purpose), eq(s.verifications.ownerId, ownerId))).orderBy(desc(s.verifications.createdAt)));
   return rows.find((r) => !identifier || r.identifier === identifier) ?? undefined;
 }
 
-export function getVerificationByToken(ctx: AppContext, token: string) {
-  return ctx.db.select().from(s.verifications).where(eq(s.verifications.tokenHash, sha256(token))).get();
+export async function getVerificationByToken(ctx: AppContext, token: string) {
+  return first(await ctx.db.select().from(s.verifications).where(eq(s.verifications.tokenHash, sha256(token))));
 }
 
 const isExpired = (row: VerificationRow) => row.expiresAt <= Date.now();
@@ -102,28 +102,48 @@ export function verificationJSON(row: VerificationRow | null | undefined, fallba
 }
 
 /** Verifies a numeric code, counting attempts and enforcing expiry/attempt limits. */
-export function checkCode(ctx: AppContext, row: VerificationRow | undefined, code: string | undefined): VerificationRow {
+export async function checkCode(ctx: AppContext, row: VerificationRow | undefined, code: string | undefined): Promise<VerificationRow> {
   if (!row) throw new OrbitError(422, ErrorCodes.form_code_incorrect, "There is no pending verification to check");
+  const now = Date.now();
   if (isExpired(row)) throw new OrbitError(422, ErrorCodes.verification_expired, "That verification code has expired. Request a new one.");
   if (row.attempts >= row.maxAttempts) throw new OrbitError(422, ErrorCodes.too_many_attempts, "Too many incorrect attempts. Request a new code.");
+  // The attempt is claimed before the code is compared: parallel guesses can never exceed max_attempts.
+  const claimed = first(await ctx.db.update(s.verifications)
+    .set({ attempts: sql`${s.verifications.attempts} + 1` })
+    .where(and(
+      eq(s.verifications.id, row.id),
+      sql`${s.verifications.attempts} < ${s.verifications.maxAttempts}`,
+      gt(s.verifications.expiresAt, now),
+    ))
+    .returning());
+  if (!claimed) {
+    const current = await getVerificationById(ctx, row.id);
+    if (!current || isExpired(current)) throw new OrbitError(422, ErrorCodes.verification_expired, "That verification code has expired. Request a new one.");
+    throw new OrbitError(422, ErrorCodes.too_many_attempts, "Too many incorrect attempts. Request a new code.");
+  }
   const trimmed = (code ?? "").trim();
-  const ok = !!row.codeHash && !!trimmed && safeEqual(sha256(trimmed), row.codeHash);
+  const ok = !!claimed.codeHash && !!trimmed && safeEqual(sha256(trimmed), claimed.codeHash);
   if (!ok) {
-    const attempts = row.attempts + 1;
-    ctx.db.update(s.verifications).set({ attempts }).where(eq(s.verifications.id, row.id)).run();
-    if (attempts >= row.maxAttempts) throw new OrbitError(422, ErrorCodes.too_many_attempts, "Too many incorrect attempts. Request a new code.");
+    if (claimed.attempts >= claimed.maxAttempts) throw new OrbitError(422, ErrorCodes.too_many_attempts, "Too many incorrect attempts. Request a new code.");
     throw new OrbitError(422, ErrorCodes.form_code_incorrect, "That verification code is incorrect", { param_name: "code" });
   }
-  ctx.db.update(s.verifications).set({ verifiedAt: Date.now(), attempts: row.attempts }).where(eq(s.verifications.id, row.id)).run();
-  return getVerificationById(ctx, row.id)!;
+  await ctx.db.update(s.verifications).set({ verifiedAt: now }).where(eq(s.verifications.id, claimed.id));
+  return (await getVerificationById(ctx, claimed.id))!;
 }
 
 /** Marks a magic link as clicked. Cross-device: the sign-in attempt poll then sees it. */
-export function consumeLink(ctx: AppContext, row: VerificationRow) {
+export async function consumeLink(ctx: AppContext, row: VerificationRow) {
   if (row.verifiedAt) return row;
-  if (isExpired(row)) throw new OrbitError(422, ErrorCodes.verification_expired, "That link has expired");
-  ctx.db.update(s.verifications).set({ consumedAt: Date.now(), verifiedAt: Date.now() }).where(eq(s.verifications.id, row.id)).run();
-  return getVerificationById(ctx, row.id)!;
+  const now = Date.now();
+  const claimed = first(await ctx.db.update(s.verifications)
+    .set({ consumedAt: now, verifiedAt: now })
+    .where(and(eq(s.verifications.id, row.id), isNull(s.verifications.consumedAt), gt(s.verifications.expiresAt, now)))
+    .returning());
+  if (claimed) return claimed;
+  // A parallel click won: the link is already consumed, which is what the caller wants.
+  const current = await getVerificationById(ctx, row.id);
+  if (current?.verifiedAt) return current;
+  throw new OrbitError(422, ErrorCodes.verification_expired, "That link has expired");
 }
 
 export function magicLinkUrl(ctx: AppContext, token: string, params: Record<string, string | undefined> = {}): string {

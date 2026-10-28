@@ -11,6 +11,7 @@ import * as s from "../../src/db/schema";
 import { findConnectionForIdentifier } from "../../src/services/saml";
 import type * as externalIdentity from "../../src/services/external-identity";
 import { setup, authHeaders, insertClient, insertClientSession, insertUser, BASE_URL } from "./helpers";
+import { first } from "../../src/lib/db";
 
 const handleExternalIdentity = vi.hoisted(() =>
   vi.fn(async (_ctx: unknown, flow: { kind: string; clientId: string; redirectUrl: string; connectionId?: string }, profile: { provider: string; email?: string }) => ({
@@ -22,7 +23,7 @@ vi.mock("../../src/services/external-identity", async (importOriginal) => {
   return { ...actual, handleExternalIdentity };
 });
 
-type Harness = Awaited<ReturnType<typeof setup>>;
+type Harness = Awaited<Awaited<ReturnType<typeof setup>>>;
 const json = (body: unknown) => JSON.stringify(body);
 const IDP_ENTITY_ID = "https://idp.acme.test/metadata";
 const IDP_SSO_URL = "https://idp.acme.test/sso";
@@ -130,7 +131,8 @@ const acs = (h: Harness, id: string, body: Record<string, string>, cookie?: stri
   });
 
 /** What a browser does: start the flow carrying its client cookie, keep the binding cookie the server sets. */
-async function startSaml(h: Harness, params: Record<string, string> = { identifier: "ada@acme.com" }, client = insertClient(h.ctx)) {
+async function startSaml(h: Harness, params: Record<string, string> = { identifier: "ada@acme.com" }, existing?: Awaited<ReturnType<typeof insertClient>>) {
+  const client = existing ?? await insertClient(h.ctx);
   const res = await h.app.request(`/v1/client/enterprise/start?${new URLSearchParams({
     client_id: client.clientId, redirect_url: "http://localhost:3000/after", ...params,
   })}`, { headers: { cookie: `__client=${client.token}` } });
@@ -206,15 +208,15 @@ describe("enterprise connections — backend CRUD", () => {
 
   it("matches connections by email domain, including subdomains when allowed", async () => {
     const conn = await createSamlConnection(h, { domains: ["acme.com"], allow_subdomains: false, active: true });
-    expect(findConnectionForIdentifier(h.ctx, "ada@acme.com")?.id).toBe(conn.id);
-    expect(findConnectionForIdentifier(h.ctx, "ada@sub.acme.com")).toBeNull();
-    expect(findConnectionForIdentifier(h.ctx, "ada@other.test")).toBeNull();
+    expect((await findConnectionForIdentifier(h.ctx, "ada@acme.com"))?.id).toBe(conn.id);
+    expect(await findConnectionForIdentifier(h.ctx, "ada@sub.acme.com")).toBeNull();
+    expect(await findConnectionForIdentifier(h.ctx, "ada@other.test")).toBeNull();
 
     await h.app.request(`/v1/enterprise_connections/${conn.id}`, { method: "PATCH", headers: authHeaders(), body: json({ allow_subdomains: true }) });
-    expect(findConnectionForIdentifier(h.ctx, "ada@sub.acme.com")?.id).toBe(conn.id);
+    expect((await findConnectionForIdentifier(h.ctx, "ada@sub.acme.com"))?.id).toBe(conn.id);
 
     await h.app.request(`/v1/enterprise_connections/${conn.id}`, { method: "PATCH", headers: authHeaders(), body: json({ active: false }) });
-    expect(findConnectionForIdentifier(h.ctx, "ada@acme.com")).toBeNull();
+    expect(await findConnectionForIdentifier(h.ctx, "ada@acme.com")).toBeNull();
   });
 });
 
@@ -346,26 +348,26 @@ describe("SAML service provider", () => {
     const longLived = response(conn, { inResponseTo: start.requestId, assertionId: "_long_lived", validForMs: 3 * 60 * 60_000 });
     expect((await acs(h, conn.id, { SAMLResponse: longLived, RelayState: start.relayState! }, start.cookie)).status).toBe(302);
 
-    const row = h.ctx.db.select().from(s.oauthStates).where(eq(s.oauthStates.provider, "saml_cache")).all().find((r) => r.state.includes("_long_lived"))!;
+    const row = (await h.ctx.db.select().from(s.oauthStates).where(eq(s.oauthStates.provider, "saml_cache"))).find((r) => r.state.includes("_long_lived"))!;
     expect(row.expiresAt - Date.now()).toBeGreaterThan(2 * 60 * 60_000);
 
     // The generic OAuth callback must not be able to consume replay-protection rows.
     await h.app.request(`/v1/oauth_callback/saml_cache?state=${encodeURIComponent(row.state)}`);
-    expect(h.ctx.db.select().from(s.oauthStates).where(eq(s.oauthStates.state, row.state)).get()).toBeTruthy();
+    expect(first(await h.ctx.db.select().from(s.oauthStates).where(eq(s.oauthStates.state, row.state)))).toBeTruthy();
   });
 
   it("will not complete a flow in a browser other than the one that started it", async () => {
     const conn = await createSamlConnection(h);
     const start = await startSaml(h);
-    const victim = await acs(h, conn.id, { SAMLResponse: response(conn, { inResponseTo: start.requestId }), RelayState: start.relayState! }, `__client=${insertClient(h.ctx).token}`);
+    const victim = await acs(h, conn.id, { SAMLResponse: response(conn, { inResponseTo: start.requestId }), RelayState: start.relayState! }, `__client=${(await insertClient(h.ctx)).token}`);
     expect(victim.status).toBe(400);
     expect(handleExternalIdentity).not.toHaveBeenCalled();
   });
 
   it("binds the flow to the browser's own client, whatever client_id the link carries", async () => {
     await createSamlConnection(h);
-    const victim = insertClient(h.ctx);
-    const attacker = insertClient(h.ctx);
+    const victim = await insertClient(h.ctx);
+    const attacker = await insertClient(h.ctx);
     const noCookie = await h.app.request(`/v1/client/enterprise/start?${new URLSearchParams({ client_id: victim.clientId, identifier: "ada@acme.com" })}`);
     expect(noCookie.status).toBe(422);
     const wrongClient = await h.app.request(`/v1/client/enterprise/start?${new URLSearchParams({ client_id: victim.clientId, identifier: "ada@acme.com" })}`, {
@@ -376,7 +378,7 @@ describe("SAML service provider", () => {
 
   it("supports IdP-initiated login only when the connection allows it, and hands the browser its client", async () => {
     const conn = await createSamlConnection(h, { allow_idp_initiated: false });
-    const clientsBefore = h.ctx.db.select().from(s.clients).all().length;
+    const clientsBefore = (await h.ctx.db.select().from(s.clients)).length;
     const rejected = await acs(h, conn.id, { SAMLResponse: response(conn) });
     expect(rejected.status).toBe(400);
     expect(handleExternalIdentity).not.toHaveBeenCalled();
@@ -384,7 +386,7 @@ describe("SAML service provider", () => {
     await h.app.request(`/v1/enterprise_connections/${conn.id}`, { method: "PATCH", headers: authHeaders(), body: json({ allow_idp_initiated: true }) });
     const accepted = await acs(h, conn.id, { SAMLResponse: response(conn) });
     expect(accepted.status).toBe(302);
-    expect(h.ctx.db.select().from(s.clients).all().length).toBe(clientsBefore + 1);
+    expect((await h.ctx.db.select().from(s.clients)).length).toBe(clientsBefore + 1);
     expect(accepted.headers.get("set-cookie")).toMatch(/__client=[^;]+/);
     const flow = handleExternalIdentity.mock.calls[0]![1];
     expect(flow.kind).toBe("sign_in");
@@ -393,7 +395,7 @@ describe("SAML service provider", () => {
 
   it("serves GET /:id/sso for an existing flow and for inline parameters", async () => {
     const conn = await createSamlConnection(h);
-    const client = insertClient(h.ctx);
+    const client = await insertClient(h.ctx);
     const inline = await h.app.request(`/v1/saml/${conn.id}/sso?${new URLSearchParams({
       client_id: client.clientId, redirect_url: "http://localhost:3000/after",
     })}`, { headers: { cookie: `__client=${client.token}` } });
