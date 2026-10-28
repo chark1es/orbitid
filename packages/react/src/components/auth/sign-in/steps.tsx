@@ -769,7 +769,7 @@ function inferFactors(environment: EnvironmentView) {
 
 export function SecondFactorStep({ flow }: StepProps) {
   const runtime = useAuthRuntime();
-  const { t } = runtime;
+  const { t, environment } = runtime;
   const { el } = useElementClasses();
   const factors = factorsOf(flow.signIn, "second");
   const available: Array<{ strategy: string; label: string }> =
@@ -782,19 +782,28 @@ export function SecondFactorStep({ flow }: StepProps) {
 
   const [strategy, setStrategy] = useState(() => available[0]?.strategy ?? "totp");
   const [code, setCode] = useState("");
+  const [trust, setTrust] = useState(true);
+  const trustEnabled = environment.trustedDevices.enabled;
 
   const changeStrategy = async (next: string) => {
     setStrategy(next);
     setCode("");
     flow.setError(null);
-    if (next === "phone_code") {
-      const factor = factors.find((candidate) => candidate.strategy === "phone_code");
-      await flow.prepareSecondFactor("phone_code", factor?.phone_number_id ? { phoneNumberId: factor.phone_number_id } : {});
+    if (next === "phone_code" || next === "email_code") {
+      const factor = factors.find((candidate) => candidate.strategy === next);
+      await flow.prepareSecondFactor(next, {
+        ...(factor?.phone_number_id ? { phoneNumberId: factor.phone_number_id } : {}),
+        ...(factor?.email_address_id ? { emailAddressId: factor.email_address_id } : {}),
+      });
     }
   };
 
   const submit = () => {
-    void flow.attemptSecondFactor({ strategy, code });
+    void flow.attemptSecondFactor({
+      strategy,
+      code,
+      ...(trustEnabled && trust ? { trustDevice: true } : {}),
+    });
   };
 
   return (
@@ -832,12 +841,33 @@ export function SecondFactorStep({ flow }: StepProps) {
         <OtpField
           value={code}
           onChange={setCode}
-          onComplete={(value) => void flow.attemptSecondFactor({ strategy, code: value })}
+          onComplete={(value) =>
+            void flow.attemptSecondFactor({
+              strategy,
+              code: value,
+              ...(trustEnabled && trust ? { trustDevice: true } : {}),
+            })
+          }
           label={t("formFieldLabel__code")}
           disabled={flow.busy}
           autoFocus
         />
       )}
+      {trustEnabled ? (
+        <div className="flex items-center justify-between gap-3 rounded-md border p-3">
+          <Label htmlFor="trust-this-browser" className="text-sm font-normal">
+            {t("signIn.secondFactor.trustDevice", { days: environment.trustedDevices.days })}
+          </Label>
+          <input
+            id="trust-this-browser"
+            type="checkbox"
+            className="size-4 accent-foreground"
+            checked={trust}
+            onChange={(event) => setTrust(event.target.checked)}
+            disabled={flow.busy}
+          />
+        </div>
+      ) : null}
       <Button
         type="button"
         disabled={flow.busy || code.length < (strategy === "backup_code" ? 8 : 6)}
@@ -856,6 +886,7 @@ export function SecondFactorStep({ flow }: StepProps) {
 
 function labelForSecondFactor(t: TranslateFn, strategy: string): string {
   if (strategy === "phone_code") return t("signIn.secondFactor.methodPhoneCode");
+  if (strategy === "email_code") return t("signIn.secondFactor.methodEmailCode");
   if (strategy === "backup_code") return t("signIn.secondFactor.methodBackupCode");
   return t("signIn.secondFactor.methodTotp");
 }

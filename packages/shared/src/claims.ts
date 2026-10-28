@@ -25,6 +25,8 @@ export interface SessionClaims {
   fva?: [number, number];
   /** session status: "active" | "pending" */
   sts?: "active" | "pending";
+  /** True for a guest (anonymous) account that has not attached an identifier yet. */
+  anonymous?: boolean;
   /** custom claims from instance session.customClaims or JWT template */
   [key: string]: unknown;
 }

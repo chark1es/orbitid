@@ -68,6 +68,10 @@ export interface EnvironmentView {
   passkey: { allowAutofill: boolean; showSignInButton: boolean };
   singleSessionMode: boolean;
   secondFactors: string[];
+  /** Trusted browsers may skip the second factor (from `auth_config.trusted_devices`). */
+  trustedDevices: { enabled: boolean; days: number };
+  /** Guest sign-up is available (from `auth_config.anonymous`). */
+  anonymous: { enabled: boolean };
   actions: { deleteSelf: boolean; createOrganization: boolean };
   captcha: CaptchaSettingsView;
 }
@@ -144,6 +148,8 @@ export function createDefaultEnvironment(): EnvironmentJSON {
       single_session_mode: false,
       sign_up_mode: "public",
       legal_consent_required: false,
+      trusted_devices: { enabled: false, days: 30 },
+      anonymous: { enabled: false },
     },
     user_settings: {
       attributes: {
@@ -365,6 +371,19 @@ export function environmentFromResource(raw: unknown): EnvironmentJSON | null {
       single_session_mode: booleanValue(auth, "single_session_mode", "singleSessionMode"),
       sign_up_mode: stringValue(auth, "sign_up_mode", "signUpMode", defaults.auth_config.sign_up_mode) as EnvironmentJSON["auth_config"]["sign_up_mode"],
       legal_consent_required: booleanValue(auth, "legal_consent_required", "legalConsentRequired"),
+      trusted_devices: (() => {
+        const rawTrusted = pick(auth, "trusted_devices", "trustedDevices");
+        const record = isRecord(rawTrusted) ? rawTrusted : {};
+        return {
+          enabled: booleanValue(record, "enabled", undefined, defaults.auth_config.trusted_devices.enabled),
+          days: numberValue(record, "days", undefined, defaults.auth_config.trusted_devices.days),
+        };
+      })(),
+      anonymous: (() => {
+        const rawAnonymous = auth.anonymous;
+        const record = isRecord(rawAnonymous) ? rawAnonymous : {};
+        return { enabled: booleanValue(record, "enabled", undefined, defaults.auth_config.anonymous.enabled) };
+      })(),
     },
     user_settings: {
       attributes,
@@ -527,6 +546,11 @@ export function normalizeEnvironment(
     },
     singleSessionMode: Boolean(env.auth_config?.single_session_mode),
     secondFactors: env.auth_config?.second_factors ?? [],
+    trustedDevices: {
+      enabled: Boolean(env.auth_config?.trusted_devices?.enabled),
+      days: Number(env.auth_config?.trusted_devices?.days ?? 30),
+    },
+    anonymous: { enabled: Boolean(env.auth_config?.anonymous?.enabled) },
     actions: {
       deleteSelf: userSettings?.actions?.delete_self !== false,
       createOrganization: userSettings?.actions?.create_organization !== false,

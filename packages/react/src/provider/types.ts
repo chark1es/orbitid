@@ -90,6 +90,25 @@ export interface BackupCodeResource {
   [key: string]: unknown;
 }
 
+/** A browser remembered for skipping the second factor (`GET /v1/client/me/trusted_devices`). */
+export interface TrustedDeviceResource {
+  id: string;
+  userId?: string;
+  user_id?: string;
+  label?: string | null;
+  userAgent?: string | null;
+  user_agent?: string | null;
+  ipAddress?: string | null;
+  ip_address?: string | null;
+  expiresAt?: number;
+  expires_at?: number;
+  lastUsedAt?: number | null;
+  last_used_at?: number | null;
+  createdAt?: number;
+  created_at?: number;
+  [key: string]: unknown;
+}
+
 /** Wire verification JSON (snake_case) as embedded in user identifiers. */
 export interface VerificationWire {
   status: string;
@@ -206,6 +225,8 @@ export interface UserResource {
   createPasskey(params?: { name?: string }): Promise<PasskeyResource>;
   getSessions(): Promise<SessionResource[]>;
   revokeSession(sessionId: string): Promise<void>;
+  getTrustedDevices?(): Promise<TrustedDeviceResource[]>;
+  revokeTrustedDevice?(deviceId: string): Promise<void>;
   leaveOrganization(organizationId: string): Promise<void>;
   getOrganizationMemberships(params?: PaginationQuery): Promise<PaginatedResult<OrganizationMembershipResource>>;
   getOrganizationInvitations(): Promise<UserOrganizationInvitationResource[]>;

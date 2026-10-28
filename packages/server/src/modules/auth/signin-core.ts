@@ -12,7 +12,8 @@ import { serializeUser } from "../../serializers";
 import { createSession } from "../../services/sessions";
 import { listPasskeys } from "../../services/passkeys";
 import { listEmails, listPhones, primaryEmail, primaryPhone, type UserRow } from "../../services/users";
-import { supportedSecondFactors } from "../../services/mfa";
+import { maskEmail, supportedSecondFactors } from "../../services/mfa";
+import { redeemTrustedDevice } from "../../services/trusted-devices";
 import { listEnabledSocialProviders } from "../../services/oauth-providers";
 import type { ExternalProfile } from "../../services/external-identity";
 import { getVerificationById, verificationJSON } from "./verifications";
@@ -30,6 +31,8 @@ export interface FactorState {
   nonce?: string;
   error?: { code: string; message: string } | null;
   externalVerificationRedirectUrl?: string;
+  /** Set when a remembered browser satisfied the second factor. */
+  trustedDeviceId?: string;
 }
 
 export interface StashedProfile extends Omit<ExternalProfile, "accessToken" | "refreshToken"> {
@@ -77,12 +80,10 @@ export async function factorJSON(ctx: AppContext, state: FactorState | undefined
   };
 }
 
-export const maskEmail = (email: string) => {
-  const [local, domain] = email.split("@");
-  if (!domain) return email;
-  return `${(local ?? "").slice(0, 1)}${"*".repeat(Math.max(3, (local ?? "").length - 1))}@${domain}`;
-};
 export const maskPhone = (phone: string) => `${phone.slice(0, phone.length - 4).replace(/\d/g, "*")}${phone.slice(-4)}`;
+
+/** Re-exported so callers keep one import for factor masking. */
+export { maskEmail };
 
 export async function verifiedEmailOf(ctx: AppContext, user: UserRow) {
   return (await listEmails(ctx, user.id)).find((e) => e.verified);
@@ -159,7 +160,8 @@ export async function buildSignInJSON(ctx: AppContext, row: SignInRow): Promise<
     status: row.status as SignInStatus,
     supported_identifiers: supportedIdentifiers(ctx),
     supported_first_factors: user ? await computeFirstFactors(ctx, user, { requestedReset }) : null,
-    supported_second_factors: user ? await supportedSecondFactors(ctx, user) : null,
+    // A second factor must be a different factor than the first one.
+    supported_second_factors: user ? await supportedSecondFactors(ctx, user, { firstFactorStrategy: state.first?.strategy }) : null,
     first_factor_verification: await factorJSON(ctx, state.first),
     second_factor_verification: await factorJSON(ctx, state.second),
     identifier: row.identifier ?? null,
@@ -177,6 +179,8 @@ export interface CompleteSignInOptions {
   secondFactor?: boolean;
   /** Rotates the browser's opaque client token when the session is created. */
   rotateClientToken?: () => Promise<void>;
+  /** Presented `__orbit_trusted` token; a valid one skips the second factor for this browser. */
+  trustedDeviceToken?: string;
 }
 
 /** Creates the session and marks the sign-in complete. */
@@ -200,19 +204,60 @@ export async function completeSignIn(ctx: AppContext, row: SignInRow, opts: Comp
   return sessionId;
 }
 
-/** Decides between `needs_second_factor` and a completed session after a first factor succeeded. */
-export async function afterFirstFactor(ctx: AppContext, row: SignInRow, user: UserRow, opts: CompleteSignInOptions = {}): Promise<{ status: "needs_second_factor" | "complete"; sessionId?: string }> {
-  const factors = await supportedSecondFactors(ctx, user);
+export interface AfterFirstFactorResult {
+  status: "needs_second_factor" | "complete";
+  sessionId?: string;
+  /** The rotated trusted-device token to put back into the cookie. */
+  trustedDeviceToken?: string;
+  /** Original (non-sliding) expiry of the rotated token. */
+  trustedDeviceExpiresAt?: number;
+  /** The presented token was invalid/expired/revoked: drop the cookie. */
+  clearTrustedDevice?: boolean;
+}
+
+/**
+ * Decides between `needs_second_factor` and a completed session after a first factor succeeded.
+ * A valid trusted-device token for this user skips the second factor (only when `session.trustedDevicesEnabled`,
+ * and — with `mfa.required` — only for users who already enrolled a factor).
+ */
+export async function afterFirstFactor(ctx: AppContext, row: SignInRow, user: UserRow, opts: CompleteSignInOptions = {}): Promise<AfterFirstFactorResult> {
+  const state = asSignInState(row);
+  // A second factor must be a different factor than the first one (never email after an email sign-in).
+  const factors = await supportedSecondFactors(ctx, user, { firstFactorStrategy: state.first?.strategy });
   if (factors.length > 0) {
-    const state = asSignInState(row);
-    const preferred = factors.find((f) => f.default) ?? factors.find((f) => f.strategy === "totp") ?? factors[0]!;
-    await saveSignInState(ctx, row, { ...state, second: { strategy: preferred.strategy, phoneId: preferred.phone_number_id, status: "unverified" } });
-    await ctx.db.update(s.signIns).set({ status: "needs_second_factor", userId: user.id, updatedAt: Date.now() }).where(eq(s.signIns.id, row.id));
+    const st = ctx.settings.get();
+    if (st.session.trustedDevicesEnabled && opts.trustedDeviceToken) {
+      const enrolled = !!user.totpVerified || (await supportedSecondFactors(ctx, user)).length > 0;
+      const honored = !st.mfa.required || enrolled;
+      const redeemed = honored ? await redeemTrustedDevice(ctx, opts.trustedDeviceToken, user.id) : null;
+      if (redeemed) {
+        await saveSignInState(ctx, row, { ...state, second: { strategy: "trusted_device", status: "verified", trustedDeviceId: redeemed.row.id } });
+        const sessionId = await completeSignIn(ctx, await reloadSignIn(ctx, row.id), { ...opts, secondFactor: true });
+        return { status: "complete", sessionId, trustedDeviceToken: redeemed.token, trustedDeviceExpiresAt: redeemed.row.expiresAt };
+      }
+      if (!honored) {
+        // `mfa.required` with no enrolled factor: the cookie is not a shortcut, but it is not invalid either.
+        await pendingSecondFactor(ctx, row, user, state, factors);
+        return { status: "needs_second_factor" };
+      }
+      await pendingSecondFactor(ctx, row, user, state, factors);
+      return { status: "needs_second_factor", clearTrustedDevice: true };
+    }
+    await pendingSecondFactor(ctx, row, user, state, factors);
     return { status: "needs_second_factor" };
   }
   const sessionId = await completeSignIn(ctx, row, opts);
   return { status: "complete", sessionId };
 }
+
+async function pendingSecondFactor(ctx: AppContext, row: SignInRow, user: UserRow, state: SignInState, factors: SignInFactor[]) {
+  const preferred = factors.find((f) => f.default) ?? factors.find((f) => f.strategy === "totp") ?? factors[0]!;
+  await saveSignInState(ctx, row, { ...state, second: { strategy: preferred.strategy, phoneId: preferred.phone_number_id, status: "unverified" } });
+  await ctx.db.update(s.signIns).set({ status: "needs_second_factor", userId: user.id, updatedAt: Date.now() }).where(eq(s.signIns.id, row.id));
+}
+
+const reloadSignIn = async (ctx: AppContext, id: string) =>
+  first(await ctx.db.select().from(s.signIns).where(eq(s.signIns.id, id)))!;
 
 /** Stores an OAuth profile on the sign-in so the SDK can transfer it to a sign-up. */
 export async function stashTransferProfile(ctx: AppContext, row: SignInRow, profile: ExternalProfile, strategy: string) {

@@ -12,12 +12,13 @@ import { clientIp, parseBody } from "../lib/http";
 import { hit } from "../lib/rate-limit";
 import { assertPasswordValid, hashPassword, verifyPassword } from "../services/passwords";
 import { endSessionsForUser, getSession, sendNewSignInEmail } from "../services/sessions";
+import { revokeAllTrustedDevices, applyTrustedDeviceCookie, issueTrustedDevice, readTrustedDeviceToken, setTrustedDeviceCookie } from "../services/trusted-devices";
 import { verifyCaptcha } from "../services/captcha";
-import { consumeBackupCode, supportedSecondFactors, verifyTotp, verifiedSecondFactorPhones } from "../services/mfa";
+import { consumeBackupCode, supportedSecondFactors, verifyTotp, verifiedSecondFactorPhones, emailSecondFactor } from "../services/mfa";
 import { finishPasskeyAuthentication, beginPasskeyAuthentication, relyingParty } from "../services/passkeys";
 import { sendEmail, sendSms } from "../services/mail";
 import {
-  detectIdentifierType, getUserByIdentifier, getUserById, normalizeEmail, normalizePhone,
+  detectIdentifierType, getUserByIdentifier, getUserById, listEmails, normalizeEmail, normalizePhone,
   primaryEmail, recordFailedAttempt, resetFailedAttempts, type UserRow,
 } from "../services/users";
 import { assertIdentifiersAllowed } from "../services/restrictions";
@@ -60,8 +61,13 @@ const attemptFirstSchema = z.object({
   signature: shortText(8192).optional(),
   public_key_credential: z.unknown().optional(),
 });
-const prepareSecondSchema = z.object({ strategy: shortText(64).optional(), phone_number_id: shortText(64).optional() });
-const attemptSecondSchema = z.object({ strategy: shortText(64).optional(), code: shortText(64).optional() });
+const prepareSecondSchema = z.object({ strategy: shortText(64).optional(), phone_number_id: shortText(64).optional(), email_address_id: shortText(64).optional() });
+const attemptSecondSchema = z.object({
+  strategy: shortText(64).optional(),
+  code: shortText(64).optional(),
+  /** Remember this browser so it skips the second factor until the trusted device expires. */
+  trust_device: z.boolean().optional(),
+});
 const resetPasswordSchema = z.object({
   password: shortText(256),
   sign_out_of_other_sessions: z.boolean().optional(),
@@ -146,6 +152,18 @@ export default function routes(ctx: AppContext) {
     if (session) await sendNewSignInEmail(ctx, user, session);
   }
 
+  /** Persist the trusted-device cookie outcome of a first-factor verification. */
+  function applyTrustedDevice(c: Context, result: { trustedDeviceToken?: string; trustedDeviceExpiresAt?: number; clearTrustedDevice?: boolean }) {
+    applyTrustedDeviceCookie(c, ctx, result);
+  }
+
+  /** Runs the post-first-factor step and keeps the trusted-device cookie in sync. */
+  async function afterFirst(c: Context, clientId: string, row: Awaited<ReturnType<typeof saveSignInState>>, user: UserRow) {
+    const result = await afterFirstFactor(ctx, row, user, { ...completionOpts(c, clientId), trustedDeviceToken: readTrustedDeviceToken(c) });
+    applyTrustedDevice(c, result);
+    return result;
+  }
+
   /** A first factor the instance has switched off (or the user cannot use) is refused at the API, not just hidden in the UI. */
   async function assertFirstFactorEnabled(user: UserRow | undefined, strategy: string) {
     if (strategy === "passkey" && !ctx.settings.get().attributes.passkey.enabled) {
@@ -175,7 +193,7 @@ export default function routes(ctx: AppContext) {
     const state = asSignInState(row);
     const saved = await saveSignInState(ctx, row, { ...state, first: { strategy: "password", status: "verified" } });
     await ctx.db.update(s.signIns).set({ userId: user.id, updatedAt: Date.now() }).where(eq(s.signIns.id, row.id));
-    const result = await afterFirstFactor(ctx, saved, user, completionOpts(c, clientId));
+    const result = await afterFirst(c, clientId, saved, user);
     if (result.sessionId) await notifySession(user, result.sessionId);
     return respond(c, clientId, await reload(row.id));
   }
@@ -493,7 +511,7 @@ export default function routes(ctx: AppContext) {
       await ctx.db.update(s.signIns).set({ userId: authed.id, identifier: row.identifier ?? authed.username ?? null, updatedAt: Date.now() }).where(eq(s.signIns.id, row.id));
       const current = await reload(row.id);
       const saved = await saveSignInState(ctx, current, { ...asSignInState(current), first: { strategy: "passkey", status: "verified" } });
-      const result = await afterFirstFactor(ctx, saved, authed, completionOpts(c, client.id));
+      const result = await afterFirst(c, client.id, saved, authed);
       if (result.sessionId) await notifySession(authed, result.sessionId);
       return respond(c, client.id, await reload(row.id));
     }
@@ -507,7 +525,7 @@ export default function routes(ctx: AppContext) {
         return respond(c, client.id, await reload(row.id));
       }
       const saved = await saveSignInState(ctx, row, { ...state, first: { ...(state.first ?? { strategy }), status: "verified" } });
-      const result = await afterFirstFactor(ctx, saved, user, completionOpts(c, client.id));
+      const result = await afterFirst(c, client.id, saved, user);
       if (result.sessionId) await notifySession(user, result.sessionId);
       return respond(c, client.id, await reload(row.id));
     }
@@ -529,7 +547,7 @@ export default function routes(ctx: AppContext) {
     await checkSignInCode(user, verification, body.code);
     await resetFailedAttempts(ctx, user.id);
     const saved = await saveSignInState(ctx, row, { ...state, first: { ...(state.first ?? { strategy }), status: "verified" } });
-    const result = await afterFirstFactor(ctx, saved, user, completionOpts(c, client.id));
+    const result = await afterFirst(c, client.id, saved, user);
     if (result.sessionId) await notifySession(user, result.sessionId);
     return respond(c, client.id, await reload(row.id));
   });
@@ -560,9 +578,11 @@ export default function routes(ctx: AppContext) {
     }
     const signOut = body.sign_out_of_other_sessions ?? ctx.settings.get().password.signOutOfOtherSessionsOnChange;
     if (signOut) await endSessionsForUser(ctx, user.id, "revoked");
+    // A reset password invalidates every remembered browser.
+    await revokeAllTrustedDevices(ctx, user.id);
     const { resetPassword, ...rest } = state;
     const saved = await saveSignInState(ctx, row, { ...rest, first: { strategy: resetPassword.strategy, status: "verified" } });
-    const result = await afterFirstFactor(ctx, saved, user, completionOpts(c, client.id));
+    const result = await afterFirst(c, client.id, saved, user);
     if (result.sessionId) await notifySession(user, result.sessionId);
     return respond(c, client.id, await reload(row.id));
   });
@@ -577,7 +597,7 @@ export default function routes(ctx: AppContext) {
     assertSignInAllowed(user);
     const state = asSignInState(row);
     if (state.first?.status !== "verified") throw new OrbitError(400, ErrorCodes.client_state_invalid, "The first factor has not been verified");
-    const available = await supportedSecondFactors(ctx, user);
+    const available = await supportedSecondFactors(ctx, user, { firstFactorStrategy: state.first?.strategy });
     if (!available.length) throw new OrbitError(400, ErrorCodes.needs_second_factor, "This account has no second factor");
     const strategy = body.strategy ?? state.second?.strategy ?? available[0]!.strategy;
     if (!available.some((f) => f.strategy === strategy)) {
@@ -589,6 +609,23 @@ export default function routes(ctx: AppContext) {
     } else if (strategy === "backup_code") {
       if (!user.backupCodes?.length) throw new OrbitError(400, ErrorCodes.mfa_not_enabled, "No backup codes available");
       await saveSignInState(ctx, row, { ...state, second: { strategy, status: "unverified" } });
+    } else if (strategy === "email_code") {
+      const emails = await listEmails(ctx, user.id);
+      const chosen = body.email_address_id ? emails.find((e) => e.id === body.email_address_id) : undefined;
+      if (body.email_address_id && !chosen) throw new OrbitError(404, ErrorCodes.resource_not_found, "Email address not found");
+      const email = chosen ?? await emailSecondFactor(ctx, user);
+      if (!email || !email.verified) throw new OrbitError(400, ErrorCodes.strategy_for_user_invalid, "This account has no verified email address", { param_name: "strategy" });
+      const settings = ctx.settings.get();
+      const issued = await issueVerification(ctx, {
+              purpose: "sign_in_second_factor", strategy: "email_code", identifier: email.email, ownerId: row.id,
+              lifetimeSeconds: settings.email.codeLifetimeSeconds,
+            });
+      await sendEmail(ctx, {
+        to: email.email,
+        template: "verification_code",
+        vars: { code: issued.code, expires_in_minutes: Math.round(settings.email.codeLifetimeSeconds / 60), user_name: user.firstName ?? undefined },
+      });
+      await saveSignInState(ctx, row, { ...state, second: { strategy, verificationId: issued.row.id, emailId: email.id, status: "unverified" } });
     } else {
       const phones = await verifiedSecondFactorPhones(ctx, user);
       const phone = body.phone_number_id ? phones.find((p) => p.id === body.phone_number_id) : phones.find((p) => p.defaultSecondFactor) ?? phones[0];
@@ -618,11 +655,23 @@ export default function routes(ctx: AppContext) {
     }
     const strategy = body.strategy ?? state.second?.strategy;
     if (!strategy) throw new OrbitError(400, ErrorCodes.client_state_invalid, "No second factor in progress", { param_name: "strategy" });
+    const available = await supportedSecondFactors(ctx, user, { firstFactorStrategy: state.first?.strategy });
+    if (!available.some((f) => f.strategy === strategy)) {
+      throw new OrbitError(400, ErrorCodes.strategy_for_user_invalid, `Second factor "${strategy}" is not available`, { param_name: "strategy" });
+    }
     let ok = false;
     if (strategy === "totp") ok = verifyTotp(ctx, user, body.code ?? "");
     else if (strategy === "backup_code") ok = await consumeBackupCode(ctx, user, body.code ?? "");
     else if (strategy === "phone_code") {
       await checkSignInCode(user, await getVerification(ctx, "sign_in_second_factor", row.id), body.code);
+      ok = true;
+    } else if (strategy === "email_code") {
+      const email = await emailSecondFactor(ctx, user);
+      const verification = await getVerification(ctx, "sign_in_second_factor", row.id);
+      if (!email || !verification || verification.strategy !== "email_code" || verification.identifier !== email.email) {
+        throw new OrbitError(422, ErrorCodes.form_code_incorrect, "There is no pending verification to check", { param_name: "code" });
+      }
+      await checkSignInCode(user, verification, body.code);
       ok = true;
     } else {
       throw new OrbitError(400, ErrorCodes.strategy_for_user_invalid, `Second factor "${strategy}" is not valid`, { param_name: "strategy" });
@@ -637,6 +686,12 @@ export default function routes(ctx: AppContext) {
       ...completionOpts(c, client.id),
       secondFactor: true,
     });
+    // A successful second factor may remember this browser; the original (non-sliding) expiry is kept on rotation.
+    const setting = ctx.settings.get().session;
+    if (body.trust_device && setting.trustedDevicesEnabled) {
+      const issued = await issueTrustedDevice(ctx, { userId: user.id, userAgent: c.req.header("user-agent") ?? undefined, ip: clientIp(c) });
+      setTrustedDeviceCookie(c, ctx, issued.token, issued.row.expiresAt);
+    }
     await notifySession(user, sessionId);
     return respond(c, client.id, await reload(row.id));
   });

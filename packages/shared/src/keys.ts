@@ -13,11 +13,16 @@ export const isPublishableKey = (k: string) => /^pk_(test|live)_/.test(k);
 export const isSecretKey = (k: string) => /^sk_(test|live)_/.test(k);
 
 /** Cookie names. */
-export const COOKIES = { session: "__session", client: "__client", clientUat: "__client_uat", handshake: "__orbit_handshake", devBrowser: "__orbit_db_jwt" } as const;
+export const COOKIES = {
+  session: "__session", client: "__client", clientUat: "__client_uat", handshake: "__orbit_handshake", devBrowser: "__orbit_db_jwt",
+  /** Remembers a browser that may skip the second factor (`settings.session.trustedDevicesEnabled`). */
+  trustedDevice: "__orbit_trusted",
+} as const;
 /** ID prefixes. */
 export const ID_PREFIX = {
   user: "user", session: "sess", client: "client", signIn: "sia", signUp: "sua", email: "idn_e", phone: "idn_p", external: "eac", passkey: "pkey",
   org: "org", membership: "orgmem", invitation: "orginv", domain: "orgdmn", request: "orgmreq", role: "role", permission: "perm",
   appInvitation: "inv", waitlist: "wle", allow: "alid", block: "blid", jwtTemplate: "jtmpl", actorToken: "act", signInToken: "sit",
   webhook: "we", webhookEvent: "evt", delivery: "whd", apiKey: "ak", machine: "mch", m2mToken: "mt", oauthApp: "oa", oauthGrant: "oag", enterprise: "ent", audit: "aud", verification: "ver",
+  trustedDevice: "tdev",
 } as const;

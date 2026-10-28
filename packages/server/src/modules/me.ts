@@ -13,9 +13,9 @@ import { decrypt } from "../lib/crypto";
 import { MAX_UPLOAD_BYTES, parseBody } from "../lib/http";
 import { assertImageBytes, randomImageName } from "../lib/images";
 import { hit } from "../lib/rate-limit";
-import { serializeEmail, serializeExternalAccount, serializePasskey, serializePhone, serializeSession, serializeUser } from "../serializers";
+import { serializeEmail, serializeExternalAccount, serializePasskey, serializePhone, serializeSession, serializeTrustedDevice, serializeUser } from "../serializers";
 import { assertPasswordValid, hashPassword, verifyPassword } from "../services/passwords";
-import { disableTotp, finishTotpSetup, generateBackupCodes, startTotpSetup, userHasMfa } from "../services/mfa";
+import { disableTotp, finishTotpSetup, generateBackupCodes, startTotpSetup, userHasMfa, verifiedSecondFactorPhones } from "../services/mfa";
 import { beginPasskeyRegistration, finishPasskeyRegistration, listPasskeys } from "../services/passkeys";
 import { completeMfaEnrollment, endSession, endSessionsForUser } from "../services/sessions";
 import { sendEmail, sendSms } from "../services/mail";
@@ -23,12 +23,14 @@ import { onUserEmailVerified } from "../services/orgs";
 import {
   assertNotLastIdentification, assertUsernameAvailable, countIdentifications, deleteEmailAddress, deletePhoneNumber,
   findEmail, getUserById, isValidEmail, listEmails, listPhones, normalizeEmail, normalizePhone,
-  primaryEmail, recordFailedAttempt, resetFailedAttempts, setPrimaryEmail, setPrimaryPhone, type UserRow,
+  primaryEmail, recordFailedAttempt, resetFailedAttempts, setPrimaryEmail, setPrimaryPhone,
+  upgradeAnonymousUser, type UserRow,
 } from "../services/users";
 import { deleteUser } from "../services/users";
 import { emitEvent } from "../services/webhooks";
 import { getOAuthAdapter, isProviderEnabled, providerKeyFromStrategy } from "../services/oauth-providers";
 import { relyingParty } from "../services/passkeys";
+import { listTrustedDevices, revokeAllTrustedDevices, revokeTrustedDevice } from "../services/trusted-devices";
 import { getOrCreateClient, clearClientCookie, requireActiveUser } from "./auth/client-auth";
 import { requireReverification } from "./auth/reverification";
 import { zBool, zMetadata } from "./auth/forms";
@@ -47,7 +49,7 @@ const updateSchema = z.object({
   primary_phone_number_id: z.string().max(64).nullish(),
   legal_accepted: zBool.optional(),
 });
-const passwordChangeSchema = z.object({ current_password: z.string().max(256), new_password: z.string().max(256), sign_out_of_other_sessions: z.boolean().optional() });
+const passwordChangeSchema = z.object({ current_password: z.string().max(256).optional(), new_password: z.string().max(256), sign_out_of_other_sessions: z.boolean().optional() });
 const passwordRemoveSchema = z.object({ current_password: z.string().max(256) });
 const emailCreateSchema = z.object({ email_address: z.string().max(320) });
 const phoneCreateSchema = z.object({ phone_number: z.string().max(32) });
@@ -197,15 +199,22 @@ export default function routes(ctx: AppContext) {
   app.post("/change_password", requireReverification(ctx, "first_factor", 10), async (c) => {
     const { session, user } = await auth(c);
     const body = await parseBody(c, passwordChangeSchema);
-    if (!user.passwordHash) throw new OrbitError(400, ErrorCodes.strategy_for_user_invalid, "This account does not have a password");
-    if (!(await verifyPassword(user.passwordHash, body.current_password))) {
-      await recordFailedAttempt(ctx, user.id);
-      throw new OrbitError(422, ErrorCodes.form_password_incorrect, "Current password is incorrect", { param_name: "current_password" });
+    // An account without a password (a guest upgrading, or a passwordless account) sets one directly.
+    if (user.passwordHash) {
+      if (!body.current_password) throw new OrbitError(422, ErrorCodes.form_param_missing, "current_password is missing", { param_name: "current_password" });
+      if (!(await verifyPassword(user.passwordHash, body.current_password))) {
+        await recordFailedAttempt(ctx, user.id);
+        throw new OrbitError(422, ErrorCodes.form_password_incorrect, "Current password is incorrect", { param_name: "current_password" });
+      }
+      await resetFailedAttempts(ctx, user.id);
     }
-    await resetFailedAttempts(ctx, user.id);
     await assertPasswordValid(ctx, body.new_password);
     const passwordHash = await hashPassword(body.new_password);
     await ctx.db.update(s.users).set({ passwordHash, passwordUpdatedAt: Date.now(), updatedAt: Date.now() }).where(eq(s.users.id, user.id));
+    // A changed password invalidates every remembered browser.
+    await revokeAllTrustedDevices(ctx, user.id);
+    // Setting a password is one of the ways a guest account upgrades in place.
+    await upgradeAnonymousUser(ctx, user.id);
     const email = await primaryEmail(ctx, user);
     if (email) await sendEmail(ctx, { to: email.email, template: "password_changed", vars: { user_name: user.firstName ?? undefined } });
     const signOut = body.sign_out_of_other_sessions ?? ctx.settings.get().password.signOutOfOtherSessionsOnChange;
@@ -227,6 +236,7 @@ export default function routes(ctx: AppContext) {
     }
     await resetFailedAttempts(ctx, user.id);
     await ctx.db.update(s.users).set({ passwordHash: null, passwordUpdatedAt: null, updatedAt: Date.now() }).where(eq(s.users.id, user.id));
+    await revokeAllTrustedDevices(ctx, user.id);
     await emitUserUpdated(user.id);
     return c.json(await userResponse(await reloadUser(user.id)));
   });
@@ -304,6 +314,8 @@ export default function routes(ctx: AppContext) {
     }
     await ctx.db.update(s.emailAddresses).set({ verified: true, verifiedAt: Date.now(), verifiedStrategy: "email_code", updatedAt: Date.now() }).where(eq(s.emailAddresses.id, row.id));
     await onUserEmailVerified(ctx, user.id, row.email);
+    // A verified email address turns a guest account into a regular one.
+    await upgradeAnonymousUser(ctx, user.id);
     await emitUserUpdated(user.id);
     return c.json({ response: serializeEmail(first(await ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.id, row.id)))!) });
   });
@@ -358,6 +370,13 @@ export default function routes(ctx: AppContext) {
     }
     if (patch.reservedForSecondFactor && !row.verified) throw new OrbitError(422, ErrorCodes.verification_failed, "Only verified phone numbers can be a second factor");
     await ctx.db.update(s.phoneNumbers).set(patch).where(eq(s.phoneNumbers.id, id));
+    // Turning off the last second factor invalidates remembered browsers.
+    if (patch.reservedForSecondFactor === false || (body.default_second_factor === false && row.reservedForSecondFactor)) {
+      const remaining = (await reloadUser(user.id));
+      if (!remaining.totpVerified && !(await verifiedSecondFactorPhones(ctx, remaining)).length) {
+        await revokeAllTrustedDevices(ctx, user.id);
+      }
+    }
     await settleEnrollment(user.id, session.id);
     await emitUserUpdated(user.id);
     return c.json({ response: serializePhone(first(await ctx.db.select().from(s.phoneNumbers).where(eq(s.phoneNumbers.id, id)))!) });
@@ -369,6 +388,10 @@ export default function routes(ctx: AppContext) {
     const row = first(await ctx.db.select().from(s.phoneNumbers).where(and(eq(s.phoneNumbers.id, id), eq(s.phoneNumbers.userId, user.id))));
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Phone number not found");
     await deletePhoneNumber(ctx, user.id, id);
+    // Removing a second factor also forgets every browser that was allowed to skip it.
+    if (row.reservedForSecondFactor && !user.totpVerified && !(await verifiedSecondFactorPhones(ctx, await reloadUser(user.id))).length) {
+      await revokeAllTrustedDevices(ctx, user.id);
+    }
     await emitUserUpdated(user.id);
     return c.json({ response: { object: "phone_number", id, deleted: true } });
   });
@@ -403,6 +426,7 @@ export default function routes(ctx: AppContext) {
       throw new OrbitError(409, ErrorCodes.duplicate_record, "That phone number is already verified by another account");
     }
     await ctx.db.update(s.phoneNumbers).set({ verified: true, verifiedAt: Date.now(), updatedAt: Date.now() }).where(eq(s.phoneNumbers.id, row.id));
+    await upgradeAnonymousUser(ctx, user.id);
     await emitUserUpdated(user.id);
     return c.json({ response: serializePhone(first(await ctx.db.select().from(s.phoneNumbers).where(eq(s.phoneNumbers.id, row.id)))!) });
   });
@@ -513,6 +537,8 @@ export default function routes(ctx: AppContext) {
   app.delete("/totp", requireReverification(ctx, "first_factor", 10), async (c) => {
     const { user } = await auth(c);
     await disableTotp(ctx, user);
+    // Removing a second factor also forgets every browser that was allowed to skip it.
+    await revokeAllTrustedDevices(ctx, user.id);
     await emitUserUpdated(user.id);
     return c.json({ response: { object: "totp", id: user.id, verified: false, secret: null, uri: null, qr_code: null, backup_code_enabled: false } });
   });
@@ -608,6 +634,21 @@ export default function routes(ctx: AppContext) {
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Session not found");
     const updated = await endSession(ctx, row, "revoked");
     return c.json({ response: await serializeSession(ctx, updated, { withUser: true }) });
+  });
+
+  // ───────────── trusted devices ─────────────
+  app.get("/trusted_devices", async (c) => {
+    const { user } = await auth(c);
+    return c.json({ response: (await listTrustedDevices(ctx, user.id)).map(serializeTrustedDevice) });
+  });
+
+  app.delete("/trusted_devices/:id", requireReverification(ctx, "first_factor", 10), async (c) => {
+    const { user } = await auth(c);
+    const id = c.req.param("id")!;
+    // Scoped to the owner: another user's device id is indistinguishable from an unknown one.
+    const row = await revokeTrustedDevice(ctx, user.id, id);
+    if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Trusted device not found");
+    return c.json({ response: { object: "trusted_device", id, deleted: true } });
   });
 
   return app;

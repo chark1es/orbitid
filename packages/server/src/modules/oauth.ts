@@ -7,6 +7,7 @@ import * as s from "../db/schema";
 import { appleProfileName, getOAuthAdapter } from "../services/oauth-providers";
 import { handleExternalIdentity, type ExternalProfile } from "../services/external-identity";
 import { regenerateClientToken } from "./auth/client-auth";
+import { applyTrustedDeviceCookie, readTrustedDeviceToken } from "../services/trusted-devices";
 import { browserMatches, browserMismatchMessage } from "./auth/browser-binding";
 import { takeOAuthState, type StoredOAuthFlow } from "./auth/oauth-flow";
 import { withQuery } from "./auth/redirects";
@@ -103,7 +104,9 @@ export default function routes(ctx: AppContext) {
       userId: flow.userId,
       redirectUrl: flow.redirectUrl,
       actionCompleteRedirectUrl: flow.actionCompleteRedirectUrl,
+      trustedDeviceToken: readTrustedDeviceToken(c),
     }, profile);
+    applyTrustedDeviceCookie(c, ctx, result);
     return c.redirect(result.redirectTo, 302);
   };
 

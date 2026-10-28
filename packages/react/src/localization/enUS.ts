@@ -832,6 +832,8 @@ const baseStrings = {
     bot_detected: "We could not verify you are human. Please try again.",
     network_error: "Network error. Please check your connection and try again.",
     unknown_error: "Something went wrong. Please try again.",
+    // delivery
+    email_delivery_failed: "We couldn't send the email. Please try again.",
 
     // identifiers / credentials
     form_identifier_not_found: "Couldn't find your account.",

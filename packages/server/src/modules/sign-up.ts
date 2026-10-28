@@ -18,7 +18,7 @@ import { clientAzp, getOrCreateClient, rotateClientTokenOnSignIn, serializeClien
 import { clearTransferProfile, latestTransferableSignIn, readTransferProfile } from "./auth/signin-core";
 import {
   applyExternalProfile, asSignUpFields, asSignUpVerifications, assertSignUpIdentifiers, buildSignUpJSON,
-  maybeCompleteSignUp, saveSignUp,
+  completeSignUp, maybeCompleteSignUp, saveSignUp,
   type SignUpFields, type SignUpRow, type SignUpVerifications, type VerificationSnapshot,
 } from "./auth/signup-core";
 import { checkCode, getVerification, issueVerification, magicLinkUrl } from "./auth/verifications";
@@ -140,6 +140,23 @@ export default function routes(ctx: AppContext) {
                   abandonAt: now + 86_400_000, createdAt: now, updatedAt: now,
                 });
     let row = await reload(id);
+
+    if (body.strategy === "anonymous") {
+      const st = ctx.settings.get();
+      if (!st.anonymous.enabled) {
+        throw new OrbitError(403, ErrorCodes.sign_up_restricted, "Anonymous accounts are disabled on this instance", { param_name: "strategy" });
+      }
+      // A waitlist or an allowlist only makes sense when a new account has an identifier to judge.
+      if (st.signUp.mode !== "public") {
+        throw new OrbitError(422, ErrorCodes.sign_up_restricted, "Anonymous accounts are only available when sign-ups are public", { param_name: "strategy" });
+      }
+      validateLegal(body);
+      // Tight budget: guest accounts are cheap to mint, so one address cannot flood the instance.
+      await hit(ctx, `sign_up:anonymous:${clientIp(c)}`, 10, 60 * 60_000);
+      row = await saveSignUp(ctx, row, { fields: { anonymous: true, legalAcceptedAt: body.legal_accepted ? now : null } });
+      await completeSignUp(ctx, row, { ip: clientIp(c), userAgent: c.req.header("user-agent") ?? undefined });
+      return respond(c, client.id, await reload(row.id));
+    }
 
     if (body.strategy?.startsWith("oauth_")) {
       validateLegal(body);

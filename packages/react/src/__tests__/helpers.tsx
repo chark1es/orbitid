@@ -207,6 +207,8 @@ export const fakeEnvironment = (): EnvironmentResource => ({
     singleSessionMode: true,
     signUpMode: "public",
     legalConsentRequired: false,
+    trustedDevices: { enabled: false, days: 30 },
+    anonymous: { enabled: false },
   },
   userSettings: {
     attributes: {

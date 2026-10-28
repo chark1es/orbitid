@@ -333,6 +333,52 @@ function parseBackupCodes(value: TOTPJSON["backup_codes"]): string[] | undefined
   });
 }
 
+export interface TrustedDeviceJSON {
+  object: "trusted_device";
+  id: string;
+  user_id: string;
+  label: string | null;
+  user_agent: string | null;
+  ip_address: string | null;
+  expires_at: number;
+  last_used_at: number | null;
+  revoked_at: number | null;
+  created_at: number;
+  updated_at: number;
+}
+
+/** A browser remembered for skipping the second factor. The token itself is an HttpOnly cookie. */
+export class TrustedDevice {
+  readonly object = "trusted_device" as const;
+  id: string;
+  userId: string;
+  label: string | null;
+  userAgent: string | null;
+  ipAddress: string | null;
+  expiresAt: number;
+  lastUsedAt: number | null;
+  createdAt: number;
+
+  constructor(private readonly fapi: FapiClient, json: TrustedDeviceJSON) {
+    this.id = json.id;
+    this.userId = json.user_id;
+    this.label = json.label;
+    this.userAgent = json.user_agent;
+    this.ipAddress = json.ip_address;
+    this.expiresAt = json.expires_at;
+    this.lastUsedAt = json.last_used_at;
+    this.createdAt = json.created_at;
+  }
+
+  static fromJSON(fapi: FapiClient, json: TrustedDeviceJSON): TrustedDevice {
+    return new TrustedDevice(fapi, json);
+  }
+
+  async revoke(): Promise<void> {
+    await this.fapi.del(`/v1/client/me/trusted_devices/${this.id}`);
+  }
+}
+
 export class BackupCodeResource {
   readonly object = "backup_code" as const;
   /** Plaintext codes — only returned once, on creation/regeneration. */
@@ -407,6 +453,8 @@ export class User {
   externalAccounts: ExternalAccount[];
   publicMetadata: Metadata;
   unsafeMetadata: Metadata;
+  /** Guest account: no identifiers yet, upgrades in place once one is added. */
+  isAnonymous: boolean;
   banned: boolean;
   locked: boolean;
   lastSignInAt: number | null;
@@ -438,6 +486,7 @@ export class User {
     this.externalAccounts = (json.external_accounts ?? []).map((account) => ExternalAccount.fromJSON(fapi, account));
     this.publicMetadata = json.public_metadata ?? {};
     this.unsafeMetadata = json.unsafe_metadata ?? {};
+    this.isAnonymous = json.is_anonymous ?? false;
     this.banned = json.banned ?? false;
     this.locked = json.locked ?? false;
     this.lastSignInAt = json.last_sign_in_at ?? null;
@@ -490,6 +539,7 @@ export class User {
     this.externalAccounts = (json.external_accounts ?? []).map((account) => ExternalAccount.fromJSON(this.fapi, account));
     this.publicMetadata = json.public_metadata ?? {};
     this.unsafeMetadata = json.unsafe_metadata ?? {};
+    this.isAnonymous = json.is_anonymous ?? this.isAnonymous;
     this.updatedAt = json.updated_at;
     return this;
   }
@@ -640,6 +690,17 @@ export class User {
 
   async revokeSession(sessionId: string): Promise<void> {
     await this.fapi.post(`/v1/client/me/sessions/${sessionId}/revoke`);
+  }
+
+  /** Browsers remembered for skipping the second factor. */
+  async getTrustedDevices(): Promise<TrustedDevice[]> {
+    const data = await fetchData<unknown>(this.fapi, "GET", "/v1/client/me/trusted_devices");
+    return toList(data, (item) => TrustedDevice.fromJSON(this.fapi, item as TrustedDeviceJSON));
+  }
+
+  /** Revokes one remembered browser; its cookie stops working for the second factor. */
+  async revokeTrustedDevice(deviceId: string): Promise<void> {
+    await this.fapi.del(`/v1/client/me/trusted_devices/${deviceId}`);
   }
 
   async leaveOrganization(organizationId: string): Promise<void> {

@@ -9,6 +9,7 @@ import * as s from "../db/schema";
 import { clientIp, parseBody, parsePagination } from "../lib/http";
 import { randomToken, sha256 } from "../lib/crypto";
 import { handleExternalIdentity } from "../services/external-identity";
+import { applyTrustedDeviceCookie, readTrustedDeviceToken } from "../services/trusted-devices";
 import { pkceChallengeFor } from "../services/oidc";
 import {
   enterpriseOidcAuthorizeUrl, enterpriseOidcProfile, exchangeEnterpriseOidcCode, fetchEnterpriseUserInfo,
@@ -168,8 +169,9 @@ function frontendRoutes(ctx: AppContext): Hono {
     const profile = enterpriseOidcProfile(connection, merged, tokens);
     // The browser proved it owns this flow (binding cookie above): hand it a fresh client token before signing in.
     await regenerateClientToken(ctx, c, state.flow.clientId);
-    const { redirectTo } = await handleExternalIdentity(ctx, state.flow, profile);
-    return c.redirect(redirectTo);
+    const result = await handleExternalIdentity(ctx, { ...state.flow, trustedDeviceToken: readTrustedDeviceToken(c) }, profile);
+    applyTrustedDeviceCookie(c, ctx, result);
+    return c.redirect(result.redirectTo);
   });
 
   return app;
@@ -231,8 +233,9 @@ function samlRoutes(ctx: AppContext): Hono {
     }
 
     const external = profileToExternalProfile(connection, profile);
-    const { redirectTo } = await handleExternalIdentity(ctx, flow, external);
-    return c.redirect(redirectTo);
+    const result = await handleExternalIdentity(ctx, { ...flow, trustedDeviceToken: readTrustedDeviceToken(c) }, external);
+    applyTrustedDeviceCookie(c, ctx, result);
+    return c.redirect(result.redirectTo);
   });
 
   return app;

@@ -60,6 +60,7 @@ function whereOf(session: SessionJSON): string | undefined {
 /** Maps a session to a board row. The line code is the method the session was created with. */
 export function sessionActivityRow(session: SessionJSON): ActivityRow {
   const impersonated = session.actor !== null && session.actor !== undefined;
+  const trustedSkip = session.second_factor_skipped_by_trusted_device === true;
   return {
     id: session.id,
     at: session.created_at,
@@ -68,7 +69,7 @@ export function sessionActivityRow(session: SessionJSON): ActivityRow {
     whoSub: session.public_user_data?.identifier ?? session.public_user_data?.user_id,
     where: whereOf(session),
     outcome: session.status === "pending" ? "pending" : "success",
-    detail: impersonated ? "Impersonation" : STATUS_DETAIL[session.status],
+    detail: impersonated ? "Impersonation" : trustedSkip ? "Second factor skipped: trusted device" : STATUS_DETAIL[session.status],
   };
 }
 

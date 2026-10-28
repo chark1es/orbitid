@@ -3,6 +3,7 @@ import { createApp } from "./app";
 import { createContext } from "./bootstrap";
 import type { Env } from "./env";
 import { startWebhookWorker } from "./services/webhooks";
+import { startAnonymousCleanupWorker } from "./services/anonymous";
 
 export { createApp } from "./app";
 export { createContext } from "./bootstrap";
@@ -14,6 +15,7 @@ export async function startServer(overrides: Partial<Env> = {}) {
   const ctx = await createContext(overrides);
   const app = createApp(ctx);
   const stopWorker = startWebhookWorker(ctx);
+  const stopAnonymousCleanup = startAnonymousCleanupWorker(ctx);
   const server = serve({
     fetch: app.fetch,
     port: ctx.env.port,
@@ -26,5 +28,5 @@ export async function startServer(overrides: Partial<Env> = {}) {
       connectionsCheckingInterval: 5_000,
     },
   });
-  return { ctx, app, server, close: async () => { stopWorker(); server.close(); await ctx.close(); } };
+  return { ctx, app, server, close: async () => { stopWorker(); stopAnonymousCleanup(); server.close(); await ctx.close(); } };
 }
