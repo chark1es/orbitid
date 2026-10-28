@@ -16,6 +16,11 @@ let respondWith: number[] = [];
 
 beforeAll(async () => {
   server = createServer((req, res) => {
+    // Ports are reused across test processes; ignore anything that is not a signed webhook request.
+    if (!req.headers["svix-id"]) {
+      res.writeHead(404).end();
+      return;
+    }
     let body = "";
     req.on("data", (chunk) => {
       body += chunk;
