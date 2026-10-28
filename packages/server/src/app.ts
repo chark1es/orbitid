@@ -9,6 +9,7 @@ import { dashboardHandler } from "./modules/dashboard";
 import jwks from "./modules/jwks";
 import environment from "./modules/environment";
 import client from "./modules/client";
+import handshake from "./modules/handshake";
 import signIn from "./modules/sign-in";
 import signUp from "./modules/sign-up";
 import oauth from "./modules/oauth";
@@ -72,6 +73,7 @@ export function createApp(ctx: AppContext) {
   app.route("/v1/client/sign_ups", signUp(ctx));
   app.route("/v1/client/me", me(ctx));
   app.route("/v1/client", client(ctx));
+  app.route("/v1/client/handshake", handshake(ctx));
   app.route("/v1/client", orgClient(ctx));
   app.route("/v1/client", waitlistClient(ctx));
   const keysApp = apiKeys(ctx);

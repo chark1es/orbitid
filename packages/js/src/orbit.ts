@@ -289,12 +289,14 @@ export class OrbitID {
       clearAuthCookies(this.cookieOptions);
       return;
     }
+    // `__client_uat` first: middleware uses it to decide whether a handshake can refresh a missing
+    // `__session`, so a token request that fails must not leave the browser looking signed out.
+    this.writeClientUat();
     try {
       const token = await this._session.getToken();
       setSessionCookie(token, this.cookieOptions);
-      this.writeClientUat();
     } catch {
-      /* leave existing cookies untouched: the server is authoritative */
+      /* leave the existing `__session` untouched: the next refresh retries */
     }
   }
 

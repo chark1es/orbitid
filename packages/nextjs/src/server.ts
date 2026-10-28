@@ -36,6 +36,15 @@ export type {
   OrbitIdMiddlewareOptions,
 } from "./middleware";
 
+export {
+  HANDSHAKE_MARKER_COOKIE,
+  buildHandshakeUrl,
+  completeHandshake,
+  isNavigationRequest,
+  redirectToHandshake,
+} from "./handshake";
+export type { HandshakeOptions, HandshakeOutcome } from "./handshake";
+
 export { compileRoutePattern, createRouteMatcher } from "./route-matcher";
 export type {
   RouteMatcher,
