@@ -13,7 +13,7 @@ import type { AppContext } from "../../context";
 import { bool, deleted, listParams, metadataSchema, page } from "./shared";
 
 /** Claims owned by the session token machinery; templates must not be able to override them. */
-const RESERVED_CLAIMS = ["iss", "sub", "exp", "iat", "nbf", "jti", "azp", "sid", "act"];
+const RESERVED_CLAIMS = ["iss", "sub", "exp", "iat", "nbf", "jti", "azp", "sid", "act", "sts", "fva"];
 const SIGNING_ALGORITHMS = ["RS256", "ES256", "HS256"] as const;
 
 function assertAllowedClaims(claims: Record<string, unknown>): void {

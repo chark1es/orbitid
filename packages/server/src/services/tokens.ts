@@ -244,15 +244,10 @@ export async function signSessionToken(ctx: AppContext, sessionId: string, opts:
   }
   if (actor) base.act = actor;
 
-  const claims = { ...base, ...extraClaims };
-  // Never let caller-supplied claims impersonate another user/session.
-  claims.iss = ctx.env.baseUrl;
-  claims.sub = user.id;
-  claims.sid = session.id;
-  claims.iat = nowSeconds;
-  claims.nbf = nowSeconds;
-  claims.exp = nowSeconds + lifetime;
-  if (base.azp === undefined) delete claims.azp;
+  // Configured or templated claims may add to the token, never redefine who or what the session is.
+  const extra = { ...extraClaims };
+  for (const key of Object.keys(extra)) if (PROTECTED_CLAIMS.has(key) || key.startsWith("org_")) delete extra[key];
+  const claims = { ...extra, ...base };
 
   if (template?.signingKeyEnc) {
     const key = await importTemplateKey(ctx, template.signingKeyEnc, template.algorithm);
@@ -263,6 +258,8 @@ export async function signSessionToken(ctx: AppContext, sessionId: string, opts:
     .setProtectedHeader({ alg: row.alg, kid: row.kid, typ: "JWT" })
     .sign(privateKey);
 }
+
+const PROTECTED_CLAIMS = new Set(["iss", "sub", "sid", "iat", "nbf", "exp", "jti", "azp", "act", "sts", "fva"]);
 
 /** Template keys are stored encrypted: an HMAC secret (HS256) or a private JWK (RS256/ES256). */
 async function importTemplateKey(ctx: AppContext, encrypted: string, algorithm: string): Promise<KeyLike | Uint8Array> {

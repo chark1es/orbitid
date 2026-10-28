@@ -55,6 +55,18 @@ describe("MFA", () => {
       expect((await user.client.json<TotpSetup>("/v1/client/me/totp", { body: {} })).response.uri).toMatch(/^otpauth:\/\//);
     });
 
+    it("keeps sts pending even when custom session claims try to say otherwise", async () => {
+      const { app, ctx } = await pendingSetup();
+      await ctx.settings.update({ session: { customClaims: { sts: "active", org_role: "org:admin", plan: "pro" } } });
+      const user = await signUpUser(app);
+
+      const minted = await user.client.json<{ jwt: string }>(`/v1/client/sessions/${user.sessionId}/tokens`, { method: "POST", body: {} });
+      const claims = JSON.parse(Buffer.from(minted.jwt.split(".")[1]!, "base64url").toString());
+      expect(claims.sts).toBe("pending");
+      expect(claims.org_role).toBeUndefined();
+      expect(claims.plan).toBe("pro");
+    });
+
     it("activates only the session that enrolled; other pending sessions are revoked", async () => {
       const { app, ctx } = await pendingSetup();
       const owner = await signUpUser(app);

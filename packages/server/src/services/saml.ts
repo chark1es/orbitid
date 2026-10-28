@@ -95,7 +95,7 @@ export function oidcConfig(conn: ConnectionRow): OidcConfig {
 }
 
 const SAML_CACHE_TTL_MS = 10 * 60_000;
-/** An assertion older than this is refused, and its ID is remembered for at least this long, so a replay is never accepted. */
+/** An assertion issued longer ago than this is refused (node-saml also bounds how long its ID must be remembered). */
 const SAML_ASSERTION_MAX_AGE_MS = 24 * 60 * 60_000;
 
 /**
@@ -138,7 +138,8 @@ function samlCache(ctx: AppContext): CacheProvider {
     },
     async saveIfAbsentAsync(key, value, expiresAtMs) {
       if (live(key)) return false;
-      write(key, value, Math.min(expiresAtMs, Date.now() + SAML_ASSERTION_MAX_AGE_MS + SAML_CACHE_TTL_MS));
+      // node-saml passes the instant until which it would still accept this assertion.
+      write(key, value, expiresAtMs);
       return true;
     },
   };
