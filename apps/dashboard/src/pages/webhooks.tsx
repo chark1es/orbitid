@@ -329,7 +329,7 @@ export default function Page() {
         onOpenChange={setSheetOpen}
         size="lg"
         title={form.id ? "Edit webhook endpoint" : "Add webhook endpoint"}
-        description="Events are signed with the endpoint secret in Svix-compatible headers."
+        description="Events are signed with the endpoint secret. Verify the signature header with the backend SDK."
         footer={
           <>
             <Button variant="outline" onClick={() => setSheetOpen(false)} disabled={saving}>
@@ -426,7 +426,7 @@ export default function Page() {
         open={secretEndpoint !== null}
         onOpenChange={(open) => !open && setSecretEndpoint(null)}
         title="Signing secret"
-        description="Verify the svix-signature header with this secret. Rotate it if it leaks."
+        description="Verify the signature header with this secret. Rotate it if it leaks."
         footer={
           <>
             <Button variant="outline" onClick={() => setSecretEndpoint(null)}>

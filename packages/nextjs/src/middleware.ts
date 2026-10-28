@@ -182,7 +182,7 @@ function applyCsp(response: Response, csp: ContentSecurityPolicy | undefined): R
  *   if (isAdminRoute(req)) await auth.protect({ permission: 'org:sys_memberships:manage' });
  * });
  *
- * export const config = { matcher: ['/((?!_next|.*\\..*).*)'] };
+ * export const config = { matcher: ['/((?!_next|.*\\.(?:svg|png|jpe?g|gif|ico|webp|woff2?|css|js|map|txt|xml)$).*)'] };
  * ```
  */
 export function orbitIdMiddleware(options?: OrbitIdMiddlewareOptions): MiddlewareResult;

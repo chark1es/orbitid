@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { screen } from "@testing-library/react";
-import { cssVariablesFrom, contrastForeground, dark, resolveAppearance, resolveElementClass } from "../appearance";
+import { cssVariablesFrom, contrastForeground, LIGHT_FOREGROUND, dark, resolveAppearance, resolveElementClass } from "../appearance";
 import { useAppearance, useElementClasses } from "../appearance/useAppearance";
 import { renderWithProvider } from "./helpers";
 
@@ -37,6 +37,9 @@ describe("appearance", () => {
     expect(cssVariablesFrom({ colorDanger: "red" })["--destructive"]).toBe("red");
     expect(cssVariablesFrom({ colorDanger: "red" })["--primary-foreground"]).toBeUndefined();
     expect(contrastForeground("not-a-color")).toBeUndefined();
+    // Mid greys and saturated red read better with dark text than with white.
+    for (const mid of ["#999999", "#b0b0b0", "#ff0000"]) expect(contrastForeground(mid)).toBe("oklch(0.145 0 0)");
+    expect(contrastForeground("#2b2522")).toBe(LIGHT_FOREGROUND);
     expect(cssVariablesFrom({ spacingUnit: "" })).toEqual({});
   });
 

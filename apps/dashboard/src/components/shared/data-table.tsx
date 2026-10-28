@@ -58,7 +58,7 @@ export function DataTable<T>({
   const columnCount = columns.length;
 
   return (
-    <div className={cn("overflow-hidden rounded-[4px] border border-border bg-card", className)}>
+    <div className={cn("overflow-hidden rounded-[4px] border border-border", className)}>
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent">

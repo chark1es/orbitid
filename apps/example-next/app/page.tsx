@@ -20,7 +20,7 @@ export default function HomePage() {
           components with path routing.
         </li>
         <li>
-          <code>/api/me</code> — protected route handler; <code>/api/webhooks</code> — Svix-verified
+          <code>/api/me</code> — protected route handler; <code>/api/webhooks</code> — signature-verified
           webhook endpoint.
         </li>
       </ul>

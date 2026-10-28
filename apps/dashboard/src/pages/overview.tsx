@@ -80,7 +80,7 @@ export default function OverviewPage() {
         className="border-t-0 pt-0"
       >
         {recentSessions.isLoading || activity.length > 0 ? (
-          <div className="overflow-hidden rounded-[4px] border border-border bg-card">
+          <div className="overflow-hidden rounded-[4px] border border-border">
             <ActivityBoard
               rows={activity}
               loading={recentSessions.isLoading}

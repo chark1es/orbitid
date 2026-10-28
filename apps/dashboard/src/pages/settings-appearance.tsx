@@ -28,7 +28,7 @@ function readableInk(hex: string): string {
   const full = digits.length === 3 ? digits.split("").map((d) => d + d).join("") : digits;
   const [r = 0, g = 0, b = 0] = [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16) / 255);
   const lin = (c: number) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
-  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b) > 0.45 ? "#111111" : "#ffffff";
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b) > 0.18 ? "#111111" : "#ffffff";
 }
 
 export default function Page() {

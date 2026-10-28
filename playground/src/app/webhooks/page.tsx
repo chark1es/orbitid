@@ -39,7 +39,7 @@ export default async function WebhooksPage() {
               <h2 id="receiver-title" className="text-base">
                 Receiver
               </h2>
-              <p className="text-xs text-muted-foreground">The URL the instance posts to. It verifies the Svix signature.</p>
+              <p className="text-xs text-muted-foreground">The URL the instance posts to. It verifies the signature.</p>
             </div>
             <dl className="divide-y">
               <div className="px-4 py-3">

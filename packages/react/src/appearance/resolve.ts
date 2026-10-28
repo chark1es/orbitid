@@ -62,7 +62,8 @@ export const LIGHT_FOREGROUND = "oklch(0.985 0 0)";
 export function contrastForeground(color: string): string | undefined {
   const l = luminance(color);
   if (l === null) return undefined;
-  return l > 0.45 ? "oklch(0.145 0 0)" : LIGHT_FOREGROUND;
+  // Equal contrast against the dark and light foregrounds sits near a relative luminance of 0.18.
+  return l > 0.18 ? "oklch(0.145 0 0)" : LIGHT_FOREGROUND;
 }
 
 /** Tokens → CSS custom properties. Unknown tokens become `--orbitid-<kebab-key>`. */
