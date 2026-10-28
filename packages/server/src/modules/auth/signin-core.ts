@@ -1,4 +1,5 @@
 // Sign-in state machine helpers shared by the FAPI and OAuth callbacks.
+import { authMethodOf } from "../../lib/auth-method";
 import { desc, eq } from "drizzle-orm";
 import {
   ErrorCodes, OrbitError,
@@ -189,6 +190,7 @@ export async function completeSignIn(ctx: AppContext, row: SignInRow, opts: Comp
     maxLifetimeSeconds: opts.maxLifetimeSeconds ?? state.sessionMaxDurationSeconds,
     firstFactor: true,
     secondFactor: opts.secondFactor ?? false,
+    method: state.actor ? "ticket" : authMethodOf(state.first?.strategy),
   });
   const nextState: SignInState = { ...state, second: opts.secondFactor ? { ...(state.second ?? { strategy: "totp" }), status: "verified" } : state.second };
   await ctx.db.update(s.signIns).set({ status: "complete", createdSessionId: sessionId, state: nextState as Record<string, unknown>, updatedAt: Date.now() }).where(eq(s.signIns.id, row.id));

@@ -1,4 +1,5 @@
 // Sign-up requirement computation, serialization and completion.
+import { authMethodOf } from "../../lib/auth-method";
 import { and, eq } from "drizzle-orm";
 import {
   ErrorCodes, OrbitError,
@@ -295,6 +296,7 @@ export async function completeSignUp(ctx: AppContext, row: SignUpRow, opts: Comp
     ip: opts.ip,
     userAgent: opts.userAgent,
     firstFactor: true,
+    method: fields.externalAccount ? "oauth" : authMethodOf(verifications.email_address?.strategy ?? verifications.phone_number?.strategy) ?? "password",
   });
   await ctx.db.update(s.signUps).set({ status: "complete", createdUserId: user.id, createdSessionId: sessionId, updatedAt: Date.now() }).where(eq(s.signUps.id, row.id));
   // The client is signed in: hide any other in-flight attempts.

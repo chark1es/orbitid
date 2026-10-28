@@ -153,6 +153,7 @@ export function sessionJSON(
     object: "session",
     id: "sess_1",
     status: "active",
+    sign_in_method: null,
     expire_at: now + 86_400_000,
     abandon_at: now + 86_400_000,
     last_active_at: now,

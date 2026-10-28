@@ -631,21 +631,26 @@ function createWebhooksApi(http: BackendHttp) {
     deleteWebhookEndpoint(endpointId: string) {
       return http.delete<DeletedObject>(`/v1/webhooks/endpoints/${endpointId}`);
     },
-    getWebhookDeliveryList(params: { endpointId?: string } & ListParams = {}) {
-      return list<WebhookDelivery>(http, "/v1/webhooks/deliveries", {
-        endpoint_id: params.endpointId,
+    /** The signing secret of an endpoint (`whsec_…`), for verifying deliveries. */
+    getWebhookEndpointSecret(endpointId: string) {
+      return http.get<{ object: "webhook_endpoint_secret"; id: string; secret: string }>(`/v1/webhooks/endpoints/${endpointId}/secret`);
+    },
+    rotateWebhookEndpointSecret(endpointId: string) {
+      return http.patch<WebhookEndpoint>(`/v1/webhooks/endpoints/${endpointId}`, { body: { rotate_secret: true } });
+    },
+    getWebhookDeliveryList(params: { endpointId: string; status?: "pending" | "success" | "failed" } & ListParams) {
+      return list<WebhookDelivery>(http, `/v1/webhooks/endpoints/${params.endpointId}/deliveries`, {
+        status: params.status,
         limit: params.limit,
         offset: params.offset,
       });
     },
-    getWebhookDelivery(deliveryId: string) {
-      return http.get<WebhookDelivery>(`/v1/webhooks/deliveries/${deliveryId}`);
-    },
     retryWebhookDelivery(deliveryId: string) {
       return http.post<WebhookDelivery>(`/v1/webhooks/deliveries/${deliveryId}/retry`);
     },
-    sendTestWebhook(params: { endpointId: string; eventType?: string }) {
-      return http.post<WebhookDelivery>("/v1/webhooks/test", { body: params });
+    /** Sends a sample event to one endpoint right away and returns the delivery record. */
+    sendTestWebhook(endpointId: string) {
+      return http.post<WebhookDelivery>(`/v1/webhooks/endpoints/${endpointId}/test`);
     },
   };
 }

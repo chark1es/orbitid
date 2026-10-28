@@ -55,6 +55,7 @@ const SESSION: SessionJSON = {
   object: "session",
   id: "sess_1",
   status: "active",
+  sign_in_method: null,
   expire_at: 1_700_100_000_000,
   abandon_at: 1_700_100_000_000,
   last_active_at: 1_700_000_500_000,

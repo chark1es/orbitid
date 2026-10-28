@@ -149,6 +149,8 @@ export function defineSchema(kit: Kit) {
     userAgent: text("user_agent"),
     city: text("city"),
     country: text("country"),
+    /** One of AuthMethod from @orbitid/shared. */
+    authMethod: text("auth_method"),
     ...created(),
   }, (t) => [index("sess_user_idx").on(t.userId), index("sess_client_idx").on(t.clientId)]);
 

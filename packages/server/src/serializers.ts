@@ -76,6 +76,7 @@ export async function serializeSession(ctx: AppContext, r: typeof s.sessions.$in
     last_active_organization_id: r.lastActiveOrganizationId, actor: (r.actor as SessionJSON["actor"]) ?? null,
     user: opts.withUser && u ? await serializeUser(ctx, u) : null, public_user_data: u ? await publicUserData(ctx, u) : null,
     factor_verification_age: [mins(r.firstFactorVerifiedAt), mins(r.secondFactorVerifiedAt)],
+    sign_in_method: (r.authMethod as SessionJSON["sign_in_method"]) ?? null,
     last_active_token: opts.lastToken ? { object: "token", jwt: opts.lastToken } : null,
     latest_activity: { id: r.id, is_mobile: /mobile/i.test(r.userAgent ?? ""), ip_address: r.ip ?? "", city: r.city, country: r.country, browser_name: r.userAgent?.split(" ").pop()?.split("/")[0] ?? "", browser_version: r.userAgent?.split("/").pop() ?? "", device_type: "" },
     created_at: r.createdAt, updated_at: r.updatedAt,

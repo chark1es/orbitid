@@ -102,8 +102,7 @@ export default function OverviewPage() {
           </p>
         ) : null}
         <p className="mt-2 max-w-[90ch] text-xs leading-5 text-muted-foreground">
-          A session does not record which method created it, so the line code is <span className="font-data">?</span> for
-          every session row. Sessions started by impersonation carry <span className="font-data">I</span>.
+          The line code is the method each session was created with. Sessions created before this was recorded show <span className="font-data">?</span>.
         </p>
       </Section>
 

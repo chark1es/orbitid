@@ -1,5 +1,5 @@
 import { and, eq, inArray, ne } from "drizzle-orm";
-import { ErrorCodes, OrbitError, type SessionStatus } from "@orbitid/shared";
+import { ErrorCodes, OrbitError, type AuthMethod, type SessionStatus } from "@orbitid/shared";
 import type { AppContext } from "../context";
 import * as s from "../db/schema";
 import { newId } from "../lib/ids";
@@ -19,6 +19,7 @@ export interface CreateSessionInput {
   maxLifetimeSeconds?: number;
   firstFactor?: boolean;
   secondFactor?: boolean;
+  method?: AuthMethod | null;
 }
 
 const emitSessionEvent = async (ctx: AppContext, type: "session.created" | "session.ended" | "session.removed" | "session.revoked" | "session.pending", row: typeof s.sessions.$inferSelect) => {
@@ -47,6 +48,7 @@ export async function createSession(ctx: AppContext, input: CreateSessionInput):
             clientId: input.clientId,
             userId: input.userId,
             status: pending ? "pending" : "active",
+    authMethod: input.method ?? null,
             lastActiveAt: now,
             expireAt: now + lifetimeMs,
             abandonAt: now + lifetimeMs,

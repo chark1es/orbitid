@@ -101,6 +101,9 @@ export interface UserJSON {
   updated_at: number;
 }
 
+/** How the user proved who they are when the session was created. */
+export type AuthMethod = "password" | "email_code" | "email_link" | "sms" | "passkey" | "oauth" | "sso" | "ticket";
+
 export type SessionStatus = "active" | "ended" | "expired" | "removed" | "abandoned" | "replaced" | "revoked" | "pending";
 export interface SessionJSON {
   object: "session";
@@ -114,6 +117,7 @@ export interface SessionJSON {
   user: UserJSON | null; // included in client responses
   public_user_data: { first_name: string | null; last_name: string | null; image_url: string; has_image: boolean; identifier: string; user_id: string } | null;
   factor_verification_age: [number, number] | null; // minutes since first / second factor
+  sign_in_method: AuthMethod | null;
   last_active_token: { object: "token"; jwt: string } | null;
   latest_activity?: { id: string; is_mobile: boolean; ip_address: string; city: string | null; country: string | null; browser_name: string; browser_version: string; device_type: string } | null;
   created_at: number;

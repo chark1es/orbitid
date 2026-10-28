@@ -57,17 +57,13 @@ function whereOf(session: SessionJSON): string | undefined {
   return [...parts, client].filter(Boolean).join(" · ") || undefined;
 }
 
-/**
- * Maps a session to a board row. The API does not store which method created a session, so the
- * method is `unknown` except where the session itself proves the path: an actor token means the
- * session was minted by impersonation, which the ticket row reports in its detail.
- */
+/** Maps a session to a board row. The line code is the method the session was created with. */
 export function sessionActivityRow(session: SessionJSON): ActivityRow {
   const impersonated = session.actor !== null && session.actor !== undefined;
   return {
     id: session.id,
     at: session.created_at,
-    method: impersonated ? "ticket" : "unknown",
+    method: impersonated ? "ticket" : session.sign_in_method ?? "unknown",
     who: nameOf(session),
     whoSub: session.public_user_data?.identifier ?? session.public_user_data?.user_id,
     where: whereOf(session),

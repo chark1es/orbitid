@@ -58,8 +58,7 @@ export function UserActivityTab({ user }: { user: UserJSON }) {
         </div>
       )}
       <p className="mt-2 max-w-[90ch] text-xs leading-5 text-muted-foreground">
-        Sign-in method is not stored on a session, so the line code is <span className="font-data">?</span> for session
-        rows. Change rows name the action under the outcome.
+        The line code is the method each session was created with. Change rows name the action under the outcome.
       </p>
     </Section>
   );

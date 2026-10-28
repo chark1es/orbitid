@@ -7,6 +7,7 @@ function session(overrides: Partial<SessionJSON> = {}): SessionJSON {
     object: "session",
     id: "sess_1",
     status: "active",
+    sign_in_method: null,
     expire_at: 1_700_100_000_000,
     abandon_at: 1_700_100_000_000,
     last_active_at: 1_700_000_500_000,
@@ -92,8 +93,9 @@ describe("sessionActivityRow", () => {
     expect(row.detail).toBe("Impersonation");
   });
 
-  it("keeps the method unknown because the API does not record it", () => {
-    expect(sessionActivityRow(session()).method).toBe("unknown");
+  it("uses the sign-in method the API recorded, and unknown for older sessions", () => {
+    expect(sessionActivityRow({ ...session(), sign_in_method: "passkey" }).method).toBe("passkey");
+    expect(sessionActivityRow({ ...session(), sign_in_method: null }).method).toBe("unknown");
   });
 
   it("maps a list", () => {

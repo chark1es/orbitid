@@ -182,6 +182,23 @@ describe("createOrbitIdClient", () => {
     expect(endpoints.data[0]?.eventTypes).toEqual(["user.created"]);
   });
 
+  it("calls the webhook routes the server actually serves", async () => {
+    const { orbit, backend } = client((call) => {
+      const key = `${call.method} ${call.path}`;
+      if (key === "GET /v1/webhooks/endpoints/we_1/deliveries") return { body: { data: [{ id: "whd_1", endpoint_id: "we_1", status: "failed", attempt: 3 }], total_count: 1 } };
+      if (key === "POST /v1/webhooks/endpoints/we_1/test") return { body: { id: "whd_2", status: "success" } };
+      if (key === "POST /v1/webhooks/deliveries/whd_1/retry") return { body: { id: "whd_1", status: "pending" } };
+      if (key === "GET /v1/webhooks/endpoints/we_1/secret") return { body: { object: "webhook_endpoint_secret", id: "we_1", secret: "whsec_abc" } };
+      return { status: 404, body: { errors: [{ code: "resource_not_found", message: key }] } };
+    });
+    const deliveries = await orbit.webhooks.getWebhookDeliveryList({ endpointId: "we_1", status: "failed" });
+    expect(deliveries.data[0]?.endpointId).toBe("we_1");
+    expect(backend.calls.find((c) => c.path.endsWith("/deliveries"))?.query).toBe("?status=failed");
+    expect((await orbit.webhooks.sendTestWebhook("we_1")).status).toBe("success");
+    expect((await orbit.webhooks.retryWebhookDelivery("whd_1")).status).toBe("pending");
+    expect((await orbit.webhooks.getWebhookEndpointSecret("we_1")).secret).toBe("whsec_abc");
+  });
+
   it("throws OrbitIdAPIError with status, codes and trace id", async () => {
     const { orbit } = client(() => ({
       status: 422,
