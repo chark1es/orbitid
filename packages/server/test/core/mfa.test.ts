@@ -57,7 +57,7 @@ describe("MFA", () => {
 
     it("keeps sts pending even when custom session claims try to say otherwise", async () => {
       const { app, ctx } = await pendingSetup();
-      await ctx.settings.update({ session: { customClaims: { sts: "active", org_role: "org:admin", plan: "pro" } } });
+      await ctx.settings.update({ session: { customClaims: { sts: "active", org_role: "org:admin", org_name: "Acme", plan: "pro" } } });
       const user = await signUpUser(app);
 
       const minted = await user.client.json<{ jwt: string }>(`/v1/client/sessions/${user.sessionId}/tokens`, { method: "POST", body: {} });
@@ -65,6 +65,7 @@ describe("MFA", () => {
       expect(claims.sts).toBe("pending");
       expect(claims.org_role).toBeUndefined();
       expect(claims.plan).toBe("pro");
+      expect(claims.org_name).toBe("Acme");
     });
 
     it("activates only the session that enrolled; other pending sessions are revoked", async () => {

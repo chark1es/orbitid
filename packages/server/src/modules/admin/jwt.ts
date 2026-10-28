@@ -13,12 +13,12 @@ import type { AppContext } from "../../context";
 import { bool, deleted, listParams, metadataSchema, page } from "./shared";
 
 /** Claims owned by the session token machinery; templates must not be able to override them. */
-const RESERVED_CLAIMS = ["iss", "sub", "exp", "iat", "nbf", "jti", "azp", "sid", "act", "sts", "fva"];
+const RESERVED_CLAIMS = ["iss", "sub", "exp", "iat", "nbf", "jti", "azp", "sid", "act", "sts", "fva", "org_id", "org_slug", "org_role", "org_permissions"];
 const SIGNING_ALGORITHMS = ["RS256", "ES256", "HS256"] as const;
 
 function assertAllowedClaims(claims: Record<string, unknown>): void {
   for (const key of Object.keys(claims)) {
-    if (RESERVED_CLAIMS.includes(key) || key.startsWith("org_")) {
+    if (RESERVED_CLAIMS.includes(key)) {
       throw new OrbitError(422, ErrorCodes.form_param_value_invalid, `"${key}" is a reserved claim and cannot be set in a template.`, { param_name: `claims.${key}` });
     }
   }
