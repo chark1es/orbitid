@@ -24,8 +24,7 @@ export type OrbitIdErrorReason =
   | "role-required"
   | "network-error"
   | "request-timeout"
-  | "webhook-verification-failed"
-  | "unknown";
+  | "webhook-verification-failed";
 
 export interface OrbitIdErrorOptions {
   /** HTTP status of the failing call, or `null` when the failure never reached the server. */

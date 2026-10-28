@@ -131,7 +131,9 @@ export class JwksCache {
     try {
       response = await this.fetchImpl(this.url, { headers: { Accept: "application/json" } });
     } catch (error) {
-      throw this.fail(error instanceof OrbitIdError ? error : new OrbitIdError({
+      // The transport reports timeouts and refused connections; from a verifier's point of view
+      // both mean "the key set is unavailable", so the caller sees one reason.
+      throw this.fail(new OrbitIdError({
         code: "jwks_fetch_failed",
         reason: "jwks-fetch-failed",
         message: "Could not reach the instance JWKS endpoint",

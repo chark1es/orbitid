@@ -88,7 +88,7 @@ describe("authenticate()", () => {
     const orbit = createOrbitId({ secretKey: "sk_test_abc12345", apiUrl: "http://127.0.0.1:1", retries: 0, timeoutMs: 300 });
     const header = Buffer.from(JSON.stringify({ alg: "RS256", kid: "k1", typ: "JWT" })).toString("base64url");
     const payload = Buffer.from(JSON.stringify({ iss: "http://127.0.0.1:1", sub: "u", sid: "s", exp: Math.floor(Date.now() / 1000) + 60 })).toString("base64url");
-    await expect(orbit.authenticate({ headers: { authorization: `Bearer ${header}.${payload}.sig` } })).rejects.toMatchObject({ reason: "network-error" });
+    await expect(orbit.authenticate({ headers: { authorization: `Bearer ${header}.${payload}.sig` } })).rejects.toMatchObject({ code: "jwks_fetch_failed", reason: "jwks-fetch-failed" });
   });
 });
 
