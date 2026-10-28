@@ -129,6 +129,7 @@ export function userJSON(overrides: Partial<UserJSON> = {}): UserJSON {
     external_accounts: [],
     public_metadata: {},
     unsafe_metadata: {},
+    is_anonymous: false,
     banned: false,
     locked: false,
     lockout_expires_in_seconds: null,
@@ -283,6 +284,8 @@ export function environmentJSON(overrides: Partial<EnvironmentJSON> = {}): Envir
       single_session_mode: false,
       sign_up_mode: "public",
       legal_consent_required: false,
+      trusted_devices: { enabled: false, days: 30 },
+      anonymous: { enabled: false },
     },
     user_settings: {
       attributes: {

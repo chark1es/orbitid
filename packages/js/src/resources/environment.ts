@@ -53,6 +53,15 @@ export interface PasskeySettings {
   showSignInButton: boolean;
 }
 
+export interface TrustedDevicesSettings {
+  enabled: boolean;
+  days: number;
+}
+
+export interface AnonymousSettings {
+  enabled: boolean;
+}
+
 export class AuthConfig {
   identificationRequirements: string[][];
   firstFactors: string[];
@@ -60,6 +69,10 @@ export class AuthConfig {
   singleSessionMode: boolean;
   signUpMode: "public" | "restricted" | "waitlist";
   legalConsentRequired: boolean;
+  /** Remembered browsers may skip the second factor. */
+  trustedDevices: TrustedDevicesSettings;
+  /** Guest sign-up (`signUp.createAnonymous()`) is available. */
+  anonymous: AnonymousSettings;
 
   constructor(json: EnvironmentJSON["auth_config"]) {
     this.identificationRequirements = json.identification_requirements ?? [];
@@ -68,6 +81,11 @@ export class AuthConfig {
     this.singleSessionMode = json.single_session_mode ?? false;
     this.signUpMode = json.sign_up_mode ?? "public";
     this.legalConsentRequired = json.legal_consent_required ?? false;
+    this.trustedDevices = {
+      enabled: json.trusted_devices?.enabled ?? false,
+      days: json.trusted_devices?.days ?? 30,
+    };
+    this.anonymous = { enabled: json.anonymous?.enabled ?? false };
   }
 }
 

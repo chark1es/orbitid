@@ -112,8 +112,9 @@ function frontendRoutes(ctx: AppContext): Hono {
   const app = new Hono();
 
   const userSubject = async (c: Context) => {
-    const userId = (await requireUserCaller(ctx, c)).userId;
-    return { subject: userId, actorId: userId };
+    const caller = await requireUserCaller(ctx, c);
+    const user = first(await ctx.db.select().from(s.users).where(eq(s.users.id, caller.userId)));
+    return { subject: caller.userId, actorId: caller.userId, anonymous: !!user?.isAnonymous };
   };
   const orgSubject = async (c: Context) => {
     const caller = await requireUserCaller(ctx, c);
@@ -121,10 +122,10 @@ function frontendRoutes(ctx: AppContext): Hono {
     const org = first(await ctx.db.select().from(s.organizations).where(eq(s.organizations.id, orgId)));
     if (!org) throw new OrbitError(404, ErrorCodes.organization_not_found, "Organization not found");
     await assertOrgApiKeysPermission(ctx, caller.userId, orgId);
-    return { subject: orgId, actorId: caller.userId };
+    return { subject: orgId, actorId: caller.userId, anonymous: false };
   };
 
-  const register = (base: string, subjectOf: (c: Context) => Promise<{ subject: string; actorId: string }>) => {
+  const register = (base: string, subjectOf: (c: Context) => Promise<{ subject: string; actorId: string; anonymous: boolean }>) => {
     app.get(base, async (c) => {
       const { subject } = await subjectOf(c);
       const page = parsePagination(c);
@@ -134,7 +135,9 @@ function frontendRoutes(ctx: AppContext): Hono {
     });
 
     app.post(base, async (c) => {
-      const { subject, actorId } = await subjectOf(c);
+      const { subject, actorId, anonymous } = await subjectOf(c);
+      // A guest account must attach an identifier before it can own machine credentials.
+      if (anonymous) throw new OrbitError(403, ErrorCodes.not_allowed_access, "Anonymous accounts cannot create API keys. Add an email address or password first.");
       const body = await parseBody(c, fapiCreateSchema);
       const { row, secret } = await createApiKey(ctx, {
               name: body.name,

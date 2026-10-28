@@ -196,11 +196,12 @@ export function useSignInFlow(props: SignInProps, step: SignInStep, go: (step: S
         factors.find((factor) => factor.default) ??
         factors.find((factor) => factor.strategy === "totp") ??
         factors[0];
-      if (preferred?.strategy === "phone_code") {
+      if (preferred?.strategy === "phone_code" || preferred?.strategy === "email_code") {
         await run(() =>
           signInPrepareSecondFactor(orbit, {
-            strategy: "phone_code",
+            strategy: preferred.strategy,
             ...(preferred.phone_number_id ? { phoneNumberId: preferred.phone_number_id } : {}),
+            ...(preferred.email_address_id ? { emailAddressId: preferred.email_address_id } : {}),
           }),
         );
       }

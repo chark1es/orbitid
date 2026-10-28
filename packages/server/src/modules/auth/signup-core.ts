@@ -42,6 +42,8 @@ export interface SignUpFields {
   externalId?: string | null;
   legalAcceptedAt?: number | null;
   externalAccount?: StashedExternalAccount;
+  /** Guest sign-up: creates a user with no identifiers at all. */
+  anonymous?: boolean;
 }
 
 export interface VerificationSnapshot {
@@ -267,6 +269,7 @@ export async function completeSignUp(ctx: AppContext, row: SignUpRow, opts: Comp
       legalAcceptedAt: fields.legalAcceptedAt ?? null,
       emailVerified,
       phoneVerified,
+      isAnonymous: !!fields.anonymous,
     emailVerifiedStrategy: verifications.email_address?.strategy ?? verifications.external_account?.strategy ?? "email_code",
   });
 

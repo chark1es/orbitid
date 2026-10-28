@@ -193,6 +193,10 @@ export interface EnvironmentJSON {
     single_session_mode: boolean;
     sign_up_mode: "public" | "restricted" | "waitlist";
     legal_consent_required: boolean;
+    /** Trusted browsers may skip the second factor (`settings.session.trustedDevicesEnabled`). */
+    trusted_devices: { enabled: boolean; days: number };
+    /** Guest sign-up (`strategy: "anonymous"`) is available. */
+    anonymous: { enabled: boolean };
   };
   user_settings: {
     attributes: Record<string, { enabled: boolean; required: boolean; used_for_first_factor: boolean; used_for_second_factor: boolean; verifications: string[]; verify_at_sign_up: boolean }>;

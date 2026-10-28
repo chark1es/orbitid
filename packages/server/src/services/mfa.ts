@@ -16,6 +16,13 @@ authenticator.options = { window: 1, step: 30 };
 
 export const generateTotpSecret = () => authenticator.generateSecret(20);
 
+/** `ada@example.com` → `a***@example.com` (shown in factor pickers instead of the full address). */
+export const maskEmail = (email: string) => {
+  const [local, domain] = email.split("@");
+  if (!domain) return email;
+  return `${(local ?? "").slice(0, 1)}${"*".repeat(Math.max(3, (local ?? "").length - 1))}@${domain}`;
+};
+
 export function totpUri(secret: string, accountName: string, issuer: string): string {
   return authenticator.keyuri(accountName, issuer, secret);
 }
@@ -74,12 +81,38 @@ export async function verifiedSecondFactorPhones(ctx: AppContext, user: UserRow)
     .filter((p) => p.verified && p.reservedForSecondFactor);
 }
 
-/** Second factors the user can actually perform, in priority order. */
-export async function supportedSecondFactors(ctx: AppContext, user: UserRow): Promise<SignInFactor[]> {
+/** True when a verified email address may be used as a second factor (`attributes.emailAddress.usedForSecondFactor`). */
+export async function emailSecondFactor(ctx: AppContext, user: UserRow) {
+  const st = ctx.settings.get();
+  if (!st.attributes.emailAddress.enabled || !st.attributes.emailAddress.usedForSecondFactor) return undefined;
+  return (await ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.userId, user.id)))
+    .find((e) => e.verified);
+}
+
+export interface SecondFactorOptions {
+  /** Strategy already used as the first factor: a second factor must be a *different* factor. */
+  firstFactorStrategy?: string;
+}
+
+const isEmailFactor = (strategy: string | undefined) => strategy === "email_code" || strategy === "email_link";
+
+/**
+ * Second factors the user can actually perform, in priority order.
+ * Email is never offered when the first factor was the email itself.
+ */
+export async function supportedSecondFactors(
+  ctx: AppContext,
+  user: UserRow,
+  opts: SecondFactorOptions = {},
+): Promise<SignInFactor[]> {
   const factors: SignInFactor[] = [];
   if (user.totpVerified) factors.push({ strategy: "totp" });
   for (const phone of await verifiedSecondFactorPhones(ctx, user)) {
     factors.push({ strategy: "phone_code", phone_number_id: phone.id, default: phone.defaultSecondFactor });
+  }
+  if (!isEmailFactor(opts.firstFactorStrategy)) {
+    const email = await emailSecondFactor(ctx, user);
+    if (email) factors.push({ strategy: "email_code", email_address_id: email.id, safe_identifier: maskEmail(email.email), primary: email.id === user.primaryEmailAddressId });
   }
   if ((user.backupCodes?.length ?? 0) > 0) factors.push({ strategy: "backup_code" });
   return factors;

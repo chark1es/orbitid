@@ -1,6 +1,6 @@
 import { and, count, eq, inArray, sql } from "drizzle-orm";
 import type {
-  EmailAddressJSON, ExternalAccountJSON, OrganizationJSON, OrganizationMembershipJSON, PasskeyJSON, PhoneNumberJSON, SessionJSON, UserJSON, VerificationJSON,
+  EmailAddressJSON, ExternalAccountJSON, OrganizationJSON, OrganizationMembershipJSON, PasskeyJSON, PhoneNumberJSON, SessionJSON, TrustedDeviceJSON, UserJSON, VerificationJSON,
 } from "@orbitid/shared";
 import type { AppContext } from "./context";
 import * as s from "./db/schema";
@@ -51,6 +51,14 @@ export function serializePasskey(p: typeof s.passkeys.$inferSelect): PasskeyJSON
   return { object: "passkey", id: p.id, name: p.name, verification: verifiedVerification("passkey", p.createdAt), last_used_at: p.lastUsedAt, created_at: p.createdAt, updated_at: p.updatedAt };
 }
 
+/** A remembered browser. The token hash is never exposed, and neither is the token itself. */
+export function serializeTrustedDevice(d: typeof s.trustedDevices.$inferSelect): TrustedDeviceJSON {
+  return {
+    object: "trusted_device", id: d.id, user_id: d.userId, label: d.label, user_agent: d.userAgent, ip_address: d.ipAddress,
+    expires_at: d.expiresAt, last_used_at: d.lastUsedAt, revoked_at: d.revokedAt, created_at: d.createdAt, updated_at: d.updatedAt,
+  };
+}
+
 /** `backend: true` includes private_metadata. */
 export async function serializeUser(ctx: AppContext, u: UserRow, opts: { backend?: boolean } = {}): Promise<UserJSON> {
   const emails = (await ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.userId, u.id)));
@@ -68,6 +76,7 @@ export async function serializeUser(ctx: AppContext, u: UserRow, opts: { backend
     two_factor_enabled: u.totpVerified || phones.some((p) => p.reservedForSecondFactor && p.verified),
     passkeys: pks.map(serializePasskey), email_addresses: emails.map(serializeEmail), phone_numbers: phones.map(serializePhone), external_accounts: externals.map(serializeExternalAccount),
     public_metadata: u.publicMetadata, unsafe_metadata: u.unsafeMetadata,
+    is_anonymous: u.isAnonymous,
     banned: u.banned, locked: lockedNow, lockout_expires_in_seconds: lockedNow && u.lockoutExpiresAt ? Math.ceil((u.lockoutExpiresAt - Date.now()) / 1000) : null,
     verification_attempts_remaining: Math.max(0, st.mfa.maxAttempts - u.failedAttempts),
     delete_self_enabled: u.deleteSelfEnabled, create_organization_enabled: u.createOrganizationEnabled, create_organizations_limit: u.createOrganizationsLimit,
@@ -86,7 +95,7 @@ export async function publicUserData(ctx: AppContext, u: UserRow) {
 export async function serializeSession(ctx: AppContext, r: typeof s.sessions.$inferSelect, opts: { withUser?: boolean; lastToken?: string | null } = {}): Promise<SessionJSON> {
   const u = first(await ctx.db.select().from(s.users).where(eq(s.users.id, r.userId)));
   const mins = (t: number | null) => (t ? Math.floor((Date.now() - t) / 60000) : -1);
-  return {
+  const json: SessionJSON = {
     object: "session", id: r.id, status: r.status as SessionJSON["status"], expire_at: r.expireAt, abandon_at: r.abandonAt, last_active_at: r.lastActiveAt,
     last_active_organization_id: r.lastActiveOrganizationId, actor: (r.actor as SessionJSON["actor"]) ?? null,
     user: opts.withUser && u ? await serializeUser(ctx, u) : null, public_user_data: u ? await publicUserData(ctx, u) : null,
@@ -96,6 +105,12 @@ export async function serializeSession(ctx: AppContext, r: typeof s.sessions.$in
     latest_activity: { id: r.id, is_mobile: /mobile/i.test(r.userAgent ?? ""), ip_address: r.ip ?? "", city: r.city, country: r.country, browser_name: r.userAgent?.split(" ").pop()?.split("/")[0] ?? "", browser_version: r.userAgent?.split("/").pop() ?? "", device_type: "" },
     created_at: r.createdAt, updated_at: r.updatedAt,
   };
+  // A session created through a remembered browser shows that the second factor was skipped, not absent.
+  const signIn = first(await ctx.db.select({ state: s.signIns.state }).from(s.signIns).where(eq(s.signIns.createdSessionId, r.id)));
+  if (signIn && (signIn.state as { second?: { strategy?: string } } | null)?.second?.strategy === "trusted_device") {
+    json.second_factor_skipped_by_trusted_device = true;
+  }
+  return json;
 }
 
 export async function serializeOrganization(ctx: AppContext, o: typeof s.organizations.$inferSelect, opts: { backend?: boolean; counts?: boolean } = {}): Promise<OrganizationJSON> {

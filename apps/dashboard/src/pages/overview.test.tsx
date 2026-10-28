@@ -37,6 +37,7 @@ const USER: UserJSON = {
   external_accounts: [],
   public_metadata: {},
   unsafe_metadata: {},
+  is_anonymous: false,
   banned: false,
   locked: false,
   lockout_expires_in_seconds: null,

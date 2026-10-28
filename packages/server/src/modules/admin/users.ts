@@ -8,10 +8,11 @@ import { parseBody } from "../../lib/http";
 import { decrypt, encrypt, sha256 } from "../../lib/crypto";
 import { newId } from "../../lib/ids";
 import * as s from "../../db/schema";
-import { serializeUser, serializeMembership } from "../../serializers";
+import { serializeUser, serializeMembership, serializeTrustedDevice } from "../../serializers";
 import { emitEvent } from "../../services/webhooks";
 import { audit } from "../../services/audit";
 import { onUserDeleted } from "../../services/orgs";
+import { listTrustedDevices, revokeAllTrustedDevices, revokeTrustedDevice } from "../../services/trusted-devices";
 import type { AppContext } from "../../context";
 import { assertPasswordHasher, assertPasswordPolicy, hashPassword, verifyPassword } from "./passwords";
 import {
@@ -133,6 +134,8 @@ async function userWhere(ctx: AppContext, c: Context): Promise<SQL | undefined> 
   if (banned === "true" || banned === "false") conds.push(eq(s.users.banned, banned === "true"));
   const locked = c.req.query("locked");
   if (locked === "true" || locked === "false") conds.push(eq(s.users.locked, locked === "true"));
+  const anonymous = c.req.query("is_anonymous");
+  if (anonymous === "true" || anonymous === "false") conds.push(eq(s.users.isAnonymous, anonymous === "true"));
   const mfa = c.req.query("mfa");
   if (mfa === "true" || mfa === "false") conds.push(eq(s.users.totpVerified, mfa === "true"));
   const activeSince = c.req.query("last_active_at_since");
@@ -337,6 +340,10 @@ export default function routes(ctx: AppContext) {
 
     await ctx.db.update(s.users).set(patch).where(eq(s.users.id, existing.id));
     if (body.sign_out_of_other_sessions) await revokeSessions(ctx, existing.id);
+    // Changing or removing a credential forgets every browser that could skip the second factor.
+    if (body.password !== undefined || body.password_digest !== undefined || body.totp_secret !== undefined) {
+      await revokeAllTrustedDevices(ctx, existing.id);
+    }
 
     const json = await serializeUser(ctx, await getUserOrThrow(ctx, existing.id), { backend: true });
     await emitEvent(ctx, "user.updated", json);
@@ -377,6 +384,7 @@ export default function routes(ctx: AppContext) {
     const existing = await getUserOrThrow(ctx, c.req.param("id"));
     await ctx.db.update(s.users).set({ banned: true, updatedAt: Date.now() }).where(eq(s.users.id, existing.id));
     await revokeSessions(ctx, existing.id);
+    await revokeAllTrustedDevices(ctx, existing.id);
     const json = await serializeUser(ctx, await getUserOrThrow(ctx, existing.id), { backend: true });
     await emitEvent(ctx, "user.updated", json);
     await audit(ctx, { actor: AUDIT_ACTOR, action: "user.banned", targetType: "user", targetId: existing.id });
@@ -395,6 +403,7 @@ export default function routes(ctx: AppContext) {
   app.post("/users/:id/lock", async (c) => {
     const existing = await getUserOrThrow(ctx, c.req.param("id"));
     await ctx.db.update(s.users).set({ locked: true, lockoutExpiresAt: null, updatedAt: Date.now() }).where(eq(s.users.id, existing.id));
+    await revokeAllTrustedDevices(ctx, existing.id);
     const json = await serializeUser(ctx, await getUserOrThrow(ctx, existing.id), { backend: true });
     await emitEvent(ctx, "user.updated", json);
     await audit(ctx, { actor: AUDIT_ACTOR, action: "user.locked", targetType: "user", targetId: existing.id });
@@ -434,6 +443,7 @@ export default function routes(ctx: AppContext) {
     const existing = await getUserOrThrow(ctx, c.req.param("id"));
     await ctx.db.update(s.users).set({ totpSecretEnc: null, totpVerified: false, backupCodes: null, updatedAt: Date.now() }).where(eq(s.users.id, existing.id));
     await ctx.db.update(s.phoneNumbers).set({ reservedForSecondFactor: false, defaultSecondFactor: false }).where(eq(s.phoneNumbers.userId, existing.id));
+    await revokeAllTrustedDevices(ctx, existing.id);
     const json = await serializeUser(ctx, await getUserOrThrow(ctx, existing.id), { backend: true });
     await emitEvent(ctx, "user.updated", json);
     await audit(ctx, { actor: AUDIT_ACTOR, action: "user.mfa.reset", targetType: "user", targetId: existing.id });
@@ -443,6 +453,7 @@ export default function routes(ctx: AppContext) {
   app.delete("/users/:id/password", async (c) => {
     const existing = await getUserOrThrow(ctx, c.req.param("id"));
     await ctx.db.update(s.users).set({ passwordHash: null, passwordUpdatedAt: null, updatedAt: Date.now() }).where(eq(s.users.id, existing.id));
+    await revokeAllTrustedDevices(ctx, existing.id);
     const json = await serializeUser(ctx, await getUserOrThrow(ctx, existing.id), { backend: true });
     await emitEvent(ctx, "user.updated", json);
     await audit(ctx, { actor: AUDIT_ACTOR, action: "user.password.removed", targetType: "user", targetId: existing.id });
@@ -508,6 +519,19 @@ export default function routes(ctx: AppContext) {
     const rows = (await ctx.db.select().from(s.organizationMemberships).where(where).limit(limit).offset(offset));
     const total = Number(first(await ctx.db.select({ n: count() }).from(s.organizationMemberships).where(where))?.n ?? 0);
     return c.json(page((await Promise.all(rows.map((row) => serializeMembership(ctx, row, { backend: true })))), total));
+  });
+
+  app.get("/users/:id/trusted_devices", async (c) => {
+    const existing = await getUserOrThrow(ctx, c.req.param("id"));
+    return c.json((await listTrustedDevices(ctx, existing.id)).map(serializeTrustedDevice));
+  });
+
+  app.delete("/users/:id/trusted_devices/:device_id", async (c) => {
+    const existing = await getUserOrThrow(ctx, c.req.param("id"));
+    const row = await revokeTrustedDevice(ctx, existing.id, c.req.param("device_id") ?? "");
+    if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Trusted device not found.");
+    await audit(ctx, { actor: AUDIT_ACTOR, action: "user.trusted_device.revoked", targetType: "user", targetId: existing.id, metadata: { trusted_device_id: row.id } });
+    return c.json(deleted("trusted_device", row.id));
   });
 
   return app;

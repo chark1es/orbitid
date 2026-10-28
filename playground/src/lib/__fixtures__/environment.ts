@@ -10,6 +10,8 @@ export const environmentFixture: EnvironmentJSON = {
     single_session_mode: false,
     sign_up_mode: "waitlist",
     legal_consent_required: true,
+    trusted_devices: { enabled: true, days: 30 },
+    anonymous: { enabled: true },
   },
   user_settings: {
     attributes: {

@@ -144,9 +144,13 @@ export async function defaultRoleKey(ctx: AppContext): Promise<string> {
   return await roleByKey(ctx, key) ? key : MEMBER_ROLE_KEY;
 }
 
-export async function assertCanCreateOrganization(ctx: AppContext, user: { id: string; createOrganizationEnabled: boolean; createOrganizationsLimit: number | null }): Promise<void> {
+export async function assertCanCreateOrganization(ctx: AppContext, user: { id: string; createOrganizationEnabled: boolean; createOrganizationsLimit: number | null; isAnonymous?: boolean }): Promise<void> {
   const orgs = ctx.settings.get().organizations;
   if (!orgs.enabled) throw new OrbitError(403, ErrorCodes.organizations_disabled, "Organizations are not enabled for this instance");
+  // Guest accounts have no verified identity to own an organization with.
+  if (user.isAnonymous) {
+    throw new OrbitError(403, ErrorCodes.organization_creation_not_allowed, "Anonymous accounts cannot create organizations. Add an email address or password first.");
+  }
   if (!orgs.creationEnabled || !user.createOrganizationEnabled) {
     throw new OrbitError(403, ErrorCodes.organization_creation_not_allowed, "You are not allowed to create organizations");
   }

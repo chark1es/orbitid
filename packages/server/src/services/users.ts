@@ -7,6 +7,7 @@ import { newId } from "../lib/ids";
 import { serializeUser } from "../serializers";
 import { emitEvent } from "./webhooks";
 import { onUserDeleted, onUserEmailVerified } from "./orgs";
+import { revokeAllTrustedDevices } from "./trusted-devices";
 import { first } from "../lib/db";
 
 export type UserRow = typeof s.users.$inferSelect;
@@ -135,6 +136,8 @@ export interface CreateUserInput {
   unsafeMetadata?: Record<string, unknown>;
   privateMetadata?: Record<string, unknown>;
   legalAcceptedAt?: number | null;
+  /** Guest account without any identifier (`POST /v1/client/sign_ups` with `strategy: "anonymous"`). */
+  isAnonymous?: boolean;
   /** skip the `user.created` webhook (bulk imports) */
   silent?: boolean;
 }
@@ -147,7 +150,8 @@ export async function createUser(ctx: AppContext, input: CreateUserInput): Promi
   if (
     !email &&
     !phone &&
-    !input.username
+    !input.username &&
+    !input.isAnonymous
   ) {
     throw new OrbitError(422, ErrorCodes.form_param_missing, "At least one identifier is required");
   }
@@ -181,6 +185,7 @@ export async function createUser(ctx: AppContext, input: CreateUserInput): Promi
             privateMetadata: input.privateMetadata ?? {},
             unsafeMetadata: input.unsafeMetadata ?? {},
             legalAcceptedAt: input.legalAcceptedAt ?? null,
+            isAnonymous: !!input.isAnonymous,
             lastSignInAt: null,
             lastActiveAt: now,
             createdAt: now,
@@ -282,6 +287,8 @@ export async function recordFailedAttempt(ctx: AppContext, userId: string) {
             lockoutExpiresAt: now + st.mfa.lockoutDurationSeconds * 1000,
             updatedAt: now,
           }).where(eq(s.users.id, userId));
+  // A locked account must not keep a browser that can walk past the second factor.
+  await revokeAllTrustedDevices(ctx, userId);
 }
 
 export async function resetFailedAttempts(ctx: AppContext, userId: string) {
@@ -310,4 +317,20 @@ export async function findUserByVerifiedEmail(ctx: AppContext, email: string): P
   const row = first(await ctx.db.select().from(s.emailAddresses)
       .where(and(eq(s.emailAddresses.email, normalizeEmail(email)), eq(s.emailAddresses.verified, true))));
   return row?.userId ? await getUserById(ctx, row.userId) : undefined;
+}
+
+/**
+ * A guest account becomes a regular one as soon as it gains a way to sign in: a verified email address,
+ * a verified phone number, a password or a connected external account. Every `/me` mutation that can do
+ * that funnels through here, so the flag can never get out of sync.
+ */
+export async function upgradeAnonymousUser(ctx: AppContext, userId: string): Promise<UserRow | undefined> {
+  const user = await getUserById(ctx, userId);
+  if (!user || !user.isAnonymous) return user;
+  const verifiedIdentifiers = (await listEmails(ctx, userId)).some((e) => e.verified)
+    || (await listPhones(ctx, userId)).some((p) => p.verified)
+    || (await ctx.db.select({ id: s.externalAccounts.id }).from(s.externalAccounts).where(eq(s.externalAccounts.userId, userId))).length > 0;
+  if (!verifiedIdentifiers && !user.passwordHash) return user;
+  await ctx.db.update(s.users).set({ isAnonymous: false, updatedAt: Date.now() }).where(eq(s.users.id, userId));
+  return getUserById(ctx, userId);
 }

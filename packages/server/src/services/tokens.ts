@@ -236,6 +236,7 @@ export async function signSessionToken(ctx: AppContext, sessionId: string, opts:
     sts: session.status === "pending" ? "pending" : "active",
     fva: [minutesSince(session.firstFactorVerifiedAt), minutesSince(session.secondFactorVerifiedAt)],
   };
+  if (user.isAnonymous) base.anonymous = true;
   if (opts.azp) base.azp = opts.azp;
   if (org) {
     base.org_id = org.id;
@@ -260,7 +261,7 @@ export async function signSessionToken(ctx: AppContext, sessionId: string, opts:
     .sign(privateKey);
 }
 
-const PROTECTED_CLAIMS = new Set(["iss", "sub", "sid", "iat", "nbf", "exp", "jti", "azp", "act", "sts", "fva", "org_id", "org_slug", "org_role", "org_permissions"]);
+const PROTECTED_CLAIMS = new Set(["iss", "sub", "sid", "iat", "nbf", "exp", "jti", "azp", "act", "sts", "fva", "anonymous", "org_id", "org_slug", "org_role", "org_permissions"]);
 
 /** Template keys are stored encrypted: an HMAC secret (HS256) or a private JWK (RS256/ES256). */
 async function importTemplateKey(ctx: AppContext, encrypted: string, algorithm: string): Promise<KeyLike | Uint8Array> {

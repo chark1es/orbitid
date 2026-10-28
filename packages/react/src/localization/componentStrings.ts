@@ -129,11 +129,15 @@ export const componentStrings = {
       subtitle: "We need to verify your identity before you can continue.",
       totp: "Enter the code from your authenticator app.",
       phoneCode: "Enter the code we sent to your phone.",
+      emailCode: "Enter the code we sent to your email address.",
       backupCode: "Enter one of your backup codes.",
       action: "Verify",
       useAnotherMethod: "Use another method",
+      /** Checkbox label; `{{days}}` is `settings.session.trustedDeviceDays`. */
+      trustDevice: "Trust this browser for {{days}} days",
       methodTotp: "Authenticator app",
       methodPhoneCode: "Text message code",
+      methodEmailCode: "Email code",
       methodBackupCode: "Backup code",
     },
     enterpriseSso: {
@@ -402,6 +406,16 @@ export const componentStrings = {
       setDefault: "Set as default",
       add: "Add phone number",
       none: "No phone numbers configured for two-factor authentication.",
+    },
+    trustedDevices: {
+      title: "Trusted devices",
+      description: "Browsers that can skip the second factor until they expire.",
+      none: "No trusted devices.",
+      revoke: "Revoke",
+      revoked: "Trusted device revoked.",
+      expires: "Expires {{date}}",
+      lastUsed: "Last used {{date}}",
+      neverUsed: "Never used",
     },
     deleteAccount: {
       title: "Delete account",

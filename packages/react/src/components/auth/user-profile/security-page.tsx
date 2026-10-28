@@ -25,6 +25,7 @@ import { PhoneNumberDialog, messageFor } from "./profile-page";
 import { useReverification } from "../../../hooks";
 import { useAuthRuntime } from "../_shared/w6";
 import type { NormalizedSession, OrbitUser } from "../_shared/w6";
+import type { TrustedDeviceResource } from "../../../provider/types";
 import { isRecord } from "../_shared/guards";
 
 interface SectionProps {
@@ -77,6 +78,8 @@ export function SecurityPage({ onNavigate }: { onNavigate: (page: string) => voi
       <BackupCodesSection {...sectionProps} />
       <Separator />
       <MfaPhonesSection {...sectionProps} />
+      <Separator />
+      <TrustedDevicesSection {...sectionProps} />
       <Separator />
       <DevicesSection {...sectionProps} />
       <Separator />
@@ -651,6 +654,79 @@ function MfaPhonesSection({ user, refresh, onError, onNotice }: SectionProps) {
         }}
         onError={onError}
       />
+    </section>
+  );
+}
+
+function TrustedDevicesSection({ user, refresh, onError, onNotice }: SectionProps) {
+  const runtime = useAuthRuntime();
+  const { t, environment } = runtime;
+  const [devices, setDevices] = useState<TrustedDeviceResource[]>([]);
+  const [busy, setBusy] = useState(false);
+  const enabled = environment.trustedDevices.enabled;
+
+  const load = async () => {
+    try {
+      const listDevices = user.getTrustedDevices as (() => Promise<TrustedDeviceResource[]>) | undefined;
+      if (typeof listDevices !== "function") return setDevices([]);
+      const list = await listDevices.call(user);
+      setDevices(Array.isArray(list) ? list : []);
+    } catch (caught) {
+      onError(caught);
+    }
+  };
+
+  useEffect(() => {
+    if (enabled) void load();
+  }, [user, enabled]);
+
+  const revoke = async (deviceId: string) => {
+    setBusy(true);
+    try {
+      const revokeDevice = user.revokeTrustedDevice as ((id: string) => Promise<void>) | undefined;
+      if (typeof revokeDevice !== "function") throw new Error(t("common.internalError"));
+      await revokeDevice.call(user, deviceId);
+      await load();
+      await refresh();
+      onNotice(t("userProfile.trustedDevices.revoked"));
+    } catch (caught) {
+      onError(caught);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!enabled) return null;
+
+  return (
+    <section className="flex flex-col gap-3" data-orbit-section="trusted-devices">
+      <SectionHeader title={t("userProfile.trustedDevices.title")} description={t("userProfile.trustedDevices.description")} />
+      {devices.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{t("userProfile.trustedDevices.none")}</p>
+      ) : (
+        <ul className="flex flex-col divide-y rounded-md border">
+          {devices.map((device) => {
+            const expiresAt = device.expiresAt ?? device.expires_at ?? null;
+            const lastUsedAt = device.lastUsedAt ?? device.last_used_at ?? null;
+            return (
+              <li key={device.id} className="flex flex-wrap items-center gap-2 px-3 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm">{device.label ?? t("userProfile.devices.unknownDevice")}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {lastUsedAt
+                      ? t("userProfile.trustedDevices.lastUsed", { date: formatDate(lastUsedAt) })
+                      : t("userProfile.trustedDevices.neverUsed")}
+                    {expiresAt ? ` · ${t("userProfile.trustedDevices.expires", { date: formatDate(expiresAt) })}` : ""}
+                  </p>
+                </div>
+                <Button type="button" variant="link" size="sm" className="h-auto p-0" disabled={busy} onClick={() => void revoke(device.id)}>
+                  {t("userProfile.trustedDevices.revoke")}
+                </Button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </section>
   );
 }

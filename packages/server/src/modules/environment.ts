@@ -39,6 +39,7 @@ export function buildEnvironment(ctx: AppContext): EnvironmentJSON {
   const secondFactors: string[] = [];
   if (st.attributes.authenticatorApp.enabled) secondFactors.push("totp");
   if (st.attributes.phoneNumber.enabled && st.attributes.phoneNumber.usedForSecondFactor) secondFactors.push("phone_code");
+  if (st.attributes.emailAddress.enabled && st.attributes.emailAddress.usedForSecondFactor) secondFactors.push("email_code");
   if (st.attributes.backupCode.enabled) secondFactors.push("backup_code");
 
   const identification: string[] = [];
@@ -58,6 +59,8 @@ export function buildEnvironment(ctx: AppContext): EnvironmentJSON {
       single_session_mode: !st.session.multiSession,
       sign_up_mode: st.signUp.mode,
       legal_consent_required: st.signUp.legalConsentRequired,
+      trusted_devices: { enabled: st.session.trustedDevicesEnabled, days: st.session.trustedDeviceDays },
+      anonymous: { enabled: st.anonymous.enabled },
     },
     user_settings: {
       attributes: {

@@ -245,6 +245,7 @@ export async function signInAttemptSecondFactor(
   orbit: OrbitInstance,
   params: Record<string, unknown>,
 ): Promise<SignInResource | null> {
+  // `@orbitid/js` maps `trustDevice` to the `trust_device` wire field.
   const raw = await invokeMethod(signInTarget(orbit), ["attemptSecondFactor", "attempt_second_factor"], params);
   return pickSignIn(orbit, raw);
 }

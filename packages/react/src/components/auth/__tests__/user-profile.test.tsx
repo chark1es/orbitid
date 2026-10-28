@@ -92,6 +92,33 @@ describe("UserProfile", () => {
     await waitFor(() => expect(user.verifyTOTP).toHaveBeenCalledWith({ code: "123456" }));
   });
 
+  it("lists trusted devices and revokes one", async () => {
+    const harness = setupAuth();
+    const user = harness.instance.user as UserResource;
+    const environment = harness.instance.environment!;
+    environment.authConfig.trustedDevices = { enabled: true, days: 30 };
+    user.getTrustedDevices = vi.fn(async () => [
+      { id: "tdev_1", label: "Trusted browser", expiresAt: Date.now() + 86400_000, lastUsedAt: null },
+    ]) as never;
+    user.revokeTrustedDevice = vi.fn(async () => undefined) as never;
+
+    renderAuth(<UserProfile routing="virtual" />, harness);
+    await goToSecurity();
+
+    expect(await screen.findByText("Trusted devices")).toBeTruthy();
+    expect(await screen.findByText("Trusted browser")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Revoke" }));
+    await waitFor(() => expect(user.revokeTrustedDevice).toHaveBeenCalledWith("tdev_1"));
+  });
+
+  it("hides the trusted devices section when the instance disables it", async () => {
+    const harness = setupAuth();
+    renderAuth(<UserProfile routing="virtual" />, harness);
+    await goToSecurity();
+    expect(screen.queryByText("Trusted devices")).toBeNull();
+  });
+
   it("requires typing the confirmation phrase before deleting the account", async () => {
     const harness = setupAuth();
     const user = harness.instance.user as UserResource;
