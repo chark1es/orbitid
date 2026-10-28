@@ -92,7 +92,14 @@ export async function signInCookie(server: RealServer, email: string, password: 
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ identifier: email, password }),
   });
-  const cookie = response.headers.getSetCookie().map((line) => line.split(";")[0]).join("; ");
+  // The server rotates the client token when a session is created, so the same cookie can be set twice: keep the last value.
+  const jar = new Map<string, string>();
+  for (const line of response.headers.getSetCookie()) {
+    const pair = line.split(";")[0] ?? "";
+    const at = pair.indexOf("=");
+    if (at > 0) jar.set(pair.slice(0, at), pair.slice(at + 1));
+  }
+  const cookie = [...jar].map(([name, value]) => `${name}=${value}`).join("; ");
   if (!cookie) throw new Error(`sign-in returned no cookie (status ${response.status})`);
   return cookie;
 }

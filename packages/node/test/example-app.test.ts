@@ -55,7 +55,14 @@ beforeAll(async () => {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ identifier: "example@example.com", password: "Sup3rSecret!" }),
   });
-  const cookie = signIn.headers.getSetCookie().map((line) => line.split(";")[0]).join("; ");
+  // The server rotates the client token on sign-in, so the cookie can be set twice: keep the last value.
+  const jar = new Map<string, string>();
+  for (const line of signIn.headers.getSetCookie()) {
+    const pair = line.split(";")[0] ?? "";
+    const at = pair.indexOf("=");
+    if (at > 0) jar.set(pair.slice(0, at), pair.slice(at + 1));
+  }
+  const cookie = [...jar].map(([name, value]) => `${name}=${value}`).join("; ");
   const clientState = await jsonFetch(`${apiUrl}/v1/client`, { headers: { cookie } });
   const sessionId = (clientState.body.response.sessions as { id: string }[])[0]!.id;
   const minted = await jsonFetch(`${apiUrl}/v1/sessions/${sessionId}/tokens`, { method: "POST", headers: auth });
