@@ -10,18 +10,27 @@ Next.js 14+ integration for OrbitID.
 
 ## Environment
 
-| Variable | Where | Purpose |
+**WEBSITE · BROWSER (public)** — inlined into client code, visible to everyone. No secrets.
+
+| Variable | Used by | Meaning |
 |---|---|---|
-| `NEXT_PUBLIC_ORBITID_PUBLISHABLE_KEY` | client + server | `pk_test_…`; encodes the Frontend API URL |
+| `NEXT_PUBLIC_ORBITID_PUBLISHABLE_KEY` | client + server | `pk_test_…`; encodes the Frontend API URL. Required |
 | `NEXT_PUBLIC_ORBITID_API_URL` | server | Backend API URL override (falls back to the key's URL) |
 | `NEXT_PUBLIC_ORBITID_SIGN_IN_URL` | client + server | default `/sign-in` |
 | `NEXT_PUBLIC_ORBITID_SIGN_UP_URL` | client + server | default `/sign-up` |
 | `NEXT_PUBLIC_ORBITID_AFTER_SIGN_IN_URL` | client | default fallback redirect `/` |
 | `NEXT_PUBLIC_ORBITID_AFTER_SIGN_UP_URL` | client | default fallback redirect `/` |
-| `ORBITID_SECRET_KEY` | server | `sk_test_…` for `currentUser()` / `orbitIdClient()` |
-| `ORBITID_JWT_KEY` | server/middleware | PEM public key for offline `__session` verification |
-| `ORBITID_AUTHORIZED_PARTIES` | server/middleware | comma-separated origins checked against `azp` |
-| `ORBITID_WEBHOOK_SECRET` | server | default `whsec_…` for `verifyWebhook()` |
+
+**WEBSITE · BACKEND (secret)** — Next.js server only. Never prefix these with `NEXT_PUBLIC_`.
+
+| Variable | Used by | Meaning |
+|---|---|---|
+| `ORBITID_SECRET_KEY` | server | `sk_test_…` for `currentUser()` / `orbitIdClient()`. Required |
+| `ORBITID_JWT_KEY` | server/middleware | PEM public key for offline `__session` verification. Optional |
+| `ORBITID_AUTHORIZED_PARTIES` | server/middleware | comma-separated origins checked against `azp`. Optional |
+| `ORBITID_WEBHOOK_SECRET` | server | default `whsec_…` for `verifyWebhook()`. Only to receive webhooks |
+
+Every variable in the repo, including the ones for the OrbitID server itself, is listed by label in [docs/ENVIRONMENT.md](../../docs/ENVIRONMENT.md).
 
 Without `ORBITID_JWT_KEY`, middleware verifies tokens through `${apiUrl}/.well-known/jwks.json`.
 
