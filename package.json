@@ -15,7 +15,8 @@
     "dev:example": "bun run --filter example-next dev",
     "typecheck": "bun run --filter \"*\" typecheck",
     "test": "bun run --filter \"*\" test",
-    "db:generate": "bun run --filter @orbitid/server db:generate"
+    "db:generate": "bun run --filter @orbitid/server db:generate",
+    "dev:example-node": "bun run --filter example-node dev"
   },
   "engines": {
     "node": ">=20"

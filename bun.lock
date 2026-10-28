@@ -58,6 +58,18 @@
         "typescript": "^5.6.0",
       },
     },
+    "apps/example-node": {
+      "name": "example-node",
+      "version": "0.1.0",
+      "dependencies": {
+        "@orbitid/node": "*",
+      },
+      "devDependencies": {
+        "@types/node": "^20",
+        "tsx": "^4.19.0",
+        "typescript": "^5.6.0",
+      },
+    },
     "packages/backend": {
       "name": "@orbitid/backend",
       "version": "0.1.0",
@@ -83,6 +95,24 @@
       },
       "devDependencies": {
         "jsdom": "^25.0.0",
+        "typescript": "^5.6.0",
+        "vitest": "^2.1.0",
+      },
+    },
+    "packages/node": {
+      "name": "@orbitid/node",
+      "version": "0.1.0",
+      "dependencies": {
+        "@orbitid/backend": "*",
+        "@orbitid/shared": "*",
+        "jose": "^5.9.0",
+        "zod": "^3.23.8",
+      },
+      "devDependencies": {
+        "@hono/node-server": "^1.13.0",
+        "@orbitid/server": "*",
+        "@types/node": "^20",
+        "hono": "^4.6.0",
         "typescript": "^5.6.0",
         "vitest": "^2.1.0",
       },
@@ -514,6 +544,8 @@
     "@orbitid/js": ["@orbitid/js@workspace:packages/js"],
 
     "@orbitid/nextjs": ["@orbitid/nextjs@workspace:packages/nextjs"],
+
+    "@orbitid/node": ["@orbitid/node@workspace:packages/node"],
 
     "@orbitid/react": ["@orbitid/react@workspace:packages/react"],
 
@@ -1024,6 +1056,8 @@
     "eventemitter3": ["eventemitter3@4.0.7", "", {}, "sha512-8guHBZCwKnFhYdHr2ysuRWErTwhoN2X8XELRlrRwpmfeY2jjuUN4taQMsULKUVo1K4DvZl+0pgfyoysHxvmvEw=="],
 
     "example-next": ["example-next@workspace:apps/example-next"],
+
+    "example-node": ["example-node@workspace:apps/example-node"],
 
     "expand-template": ["expand-template@2.0.3", "", {}, "sha512-XYfuKMvj4O35f/pOXLObndIRvyQ+/+6AhODh+OKWj9S9498pHHn/IMszH+gt0fBCRWMNfk1ZSp5x3AifmnI2vg=="],
 
