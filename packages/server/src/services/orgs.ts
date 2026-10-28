@@ -171,7 +171,7 @@ export async function assertOrganizationCapacity(ctx: AppContext, org: OrgRow, o
   }
 }
 
-/** Inserts a membership (idempotent). Emits `organizationMembership.created` when a row is created. */
+/** Inserts a membership (idempotent). Emits `organizationMembership.created` only when this call created the row. */
 export async function addMembership(ctx: AppContext, input: {
   organizationId: string;
   userId: string;
@@ -179,13 +179,32 @@ export async function addMembership(ctx: AppContext, input: {
   publicMetadata?: Record<string, unknown>;
   privateMetadata?: Record<string, unknown>;
 }): Promise<MembershipRow> {
+  const { membership, created } = await insertMembership(ctx, input);
+  if (created) {
+    await emitEvent(ctx, "organizationMembership.created", await serializeMembership(ctx, membership, { backend: true }));
+  }
+  return membership;
+}
+
+/**
+ * Inserts the membership row, reporting whether this call created it. A crash before the caller's
+ * compensation can run leaves the membership in place, which is harmless: the unique index makes a
+ * retry reuse it instead of creating a second one.
+ */
+async function insertMembership(ctx: AppContext, input: {
+  organizationId: string;
+  userId: string;
+  roleKey: string;
+  publicMetadata?: Record<string, unknown>;
+  privateMetadata?: Record<string, unknown>;
+}): Promise<{ membership: MembershipRow; created: boolean }> {
   const org = first(await ctx.db.select().from(s.organizations).where(eq(s.organizations.id, input.organizationId)));
   if (!org) throw new OrbitError(404, ErrorCodes.organization_not_found, "Organization not found");
   const existing = first(await ctx.db
       .select()
       .from(s.organizationMemberships)
       .where(and(eq(s.organizationMemberships.organizationId, input.organizationId), eq(s.organizationMemberships.userId, input.userId))));
-  if (existing) return existing;
+  if (existing) return { membership: existing, created: false };
   await assertOrganizationCapacity(ctx, org);
   const now = Date.now();
   // The unique index is the arbiter: parallel callers cannot create the membership twice.
@@ -196,22 +215,36 @@ export async function addMembership(ctx: AppContext, input: {
     .onConflictDoNothing({ target: [s.organizationMemberships.organizationId, s.organizationMemberships.userId] })
     .returning());
   if (!row) {
-    return first(await ctx.db
+    const raced = first(await ctx.db
       .select()
       .from(s.organizationMemberships)
       .where(and(eq(s.organizationMemberships.organizationId, input.organizationId), eq(s.organizationMemberships.userId, input.userId))))!;
+    return { membership: raced, created: false };
   }
-  await emitEvent(ctx, "organizationMembership.created", await serializeMembership(ctx, row, { backend: true }));
-  return row;
+  return { membership: row, created: true };
 }
 
-/** Accepts a pending invitation: flips the status, then creates the membership and emits webhooks. */
+/**
+ * Accepts a pending invitation.
+ *
+ * The membership is inserted first and the conditional status flip is the gate. That order matters: a
+ * process kill between the two writes leaves a harmless extra membership next to a still-pending
+ * invitation, which a retry reuses (inserting is idempotent) and completes. The reverse order would
+ * leave an accepted invitation without a membership, which no retry could repair.
+ */
 export async function acceptInvitation(ctx: AppContext, invitation: InvitationRow, userId: string): Promise<MembershipRow | null> {
   const org = first(await ctx.db.select().from(s.organizations).where(eq(s.organizations.id, invitation.organizationId)));
   if (!org) return null;
+
+  // Insert first, without a webhook: nothing is announced until the invitation is actually consumed.
+  const { membership, created } = await insertMembership(ctx, {
+    organizationId: invitation.organizationId,
+    userId,
+    roleKey: invitation.roleKey,
+    publicMetadata: invitation.publicMetadata,
+  });
+
   const now = Date.now();
-  // Flipping the status is the gate: a revoked, expired or already accepted invitation never creates a membership,
-  // and only one of several parallel accepts goes on to add it and emit the accepted event.
   const accepted = first(await ctx.db.update(s.organizationInvitations).set({ status: "accepted", updatedAt: now })
     .where(and(
       eq(s.organizationInvitations.id, invitation.id),
@@ -220,18 +253,25 @@ export async function acceptInvitation(ctx: AppContext, invitation: InvitationRo
     ))
     .returning());
   if (!accepted) {
-    return first(await ctx.db.select().from(s.organizationMemberships)
-      .where(and(eq(s.organizationMemberships.organizationId, invitation.organizationId), eq(s.organizationMemberships.userId, userId)))) ?? null;
+    // The conditional update lost, so this call did not consume the invitation. A parallel accept by the
+    // same user may have won instead: then its membership is the result, and this call still announces the
+    // creation it made (the winner saw a pre-existing row and stays silent).
+    const current = first(await ctx.db.select().from(s.organizationInvitations).where(eq(s.organizationInvitations.id, invitation.id)));
+    if (current?.status === "accepted") {
+      if (created) await emitEvent(ctx, "organizationMembership.created", await serializeMembership(ctx, membership, { backend: true }));
+      return first(await ctx.db.select().from(s.organizationMemberships)
+        .where(and(eq(s.organizationMemberships.organizationId, invitation.organizationId), eq(s.organizationMemberships.userId, userId)))) ?? null;
+    }
+    // Revoked or expired: take back exactly the row this call created, and only that row, so a dead
+    // invitation never leaves a membership behind and a concurrent winner is never disturbed.
+    if (created) {
+      await ctx.db.delete(s.organizationMemberships)
+        .where(and(eq(s.organizationMemberships.id, membership.id), eq(s.organizationMemberships.userId, userId)));
+    }
+    return null;
   }
-  let membership: MembershipRow;
-  try {
-    membership = await addMembership(ctx, { organizationId: invitation.organizationId, userId, roleKey: invitation.roleKey, publicMetadata: invitation.publicMetadata });
-  } catch (err) {
-    // The invitation was not used up: put it back so the invitee can retry once the cause (for example capacity) is fixed.
-    await ctx.db.update(s.organizationInvitations).set({ status: "pending", updatedAt: Date.now() })
-      .where(and(eq(s.organizationInvitations.id, invitation.id), eq(s.organizationInvitations.status, "accepted")));
-    throw err;
-  }
+
+  if (created) await emitEvent(ctx, "organizationMembership.created", await serializeMembership(ctx, membership, { backend: true }));
   await emitEvent(ctx, "organizationInvitation.accepted", await serializeOrganizationInvitation(ctx, accepted, { backend: true }));
   return membership;
 }
