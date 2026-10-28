@@ -211,6 +211,145 @@ describe("organization invitations", () => {
 
     expect(await acceptInvitation(ctx, stale, invitee.id)).toBeNull();
     expect((await ctx.db.select().from(schema.organizationMemberships).where(eq(schema.organizationMemberships.userId, invitee.id))).length).toBe(0);
+    expect(eventsOf("organizationMembership.created")).toHaveLength(1); // the owner only
+    expect(eventsOf("organizationInvitation.accepted")).toHaveLength(0);
+  });
+
+  it("keeps the invitation pending when the organization is full", async () => {
+    const { ctx, app } = await setup();
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const ownerAuth = await seedAuth(ctx, owner.id);
+    const org = await createOrg(app, ownerAuth.cookie, "Acme");
+    const created = await invite(app, ownerAuth.cookie, org.id, "full@acme.test");
+    const invitee = await seedUser(ctx, { email: "full@acme.test", verified: true });
+
+    // The invitation was issued while there was room; the organization filled up since.
+    await ctx.db.update(schema.organizations).set({ maxAllowedMemberships: 1 }).where(eq(schema.organizations.id, org.id));
+    const stale = (await ctx.db.select().from(schema.organizationInvitations).where(eq(schema.organizationInvitations.id, created.id)))[0]!;
+    await expect(acceptInvitation(ctx, stale, invitee.id)).rejects.toMatchObject({ code: "organization_membership_quota_exceeded" });
+
+    const invitation = (await ctx.db.select().from(schema.organizationInvitations).where(eq(schema.organizationInvitations.id, created.id)))[0]!;
+    expect(invitation.status).toBe("pending");
+    expect(await ctx.db.select().from(schema.organizationMemberships).where(eq(schema.organizationMemberships.userId, invitee.id))).toHaveLength(0);
+    expect(eventsOf("organizationInvitation.accepted")).toHaveLength(0);
+
+    // Once there is room again the same invitation can be accepted.
+    await ctx.db.update(schema.organizations).set({ maxAllowedMemberships: 5 }).where(eq(schema.organizations.id, org.id));
+    const retry = await acceptInvitation(ctx, invitation, invitee.id);
+    expect(retry?.userId).toBe(invitee.id);
+    expect(eventsOf("organizationInvitation.accepted")).toHaveLength(1);
+  });
+
+  it("is idempotent when the same invitation is accepted twice", async () => {
+    const { ctx, app } = await setup();
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const ownerAuth = await seedAuth(ctx, owner.id);
+    const org = await createOrg(app, ownerAuth.cookie, "Acme");
+    const created = await invite(app, ownerAuth.cookie, org.id, "twice@acme.test");
+    const invitee = await seedUser(ctx, { email: "twice@acme.test", verified: true });
+
+    const fresh = (await ctx.db.select().from(schema.organizationInvitations).where(eq(schema.organizationInvitations.id, created.id)))[0]!;
+    const firstResult = await acceptInvitation(ctx, fresh, invitee.id);
+    // A second caller that read the invitation before the first one finished holds the same stale row.
+    const secondResult = await acceptInvitation(ctx, fresh, invitee.id);
+
+    expect(firstResult?.id).toBe(secondResult?.id);
+    expect(await ctx.db.select().from(schema.organizationMemberships).where(eq(schema.organizationMemberships.userId, invitee.id))).toHaveLength(1);
+    expect(eventsOf("organizationMembership.created")).toHaveLength(2); // owner + invitee, once each
+    expect(eventsOf("organizationInvitation.accepted")).toHaveLength(1);
+    const invitation = (await ctx.db.select().from(schema.organizationInvitations).where(eq(schema.organizationInvitations.id, created.id)))[0]!;
+    expect(invitation.status).toBe("accepted");
+  });
+
+  it("recovers from a crash between the membership insert and the status flip", async () => {
+    const { ctx, app } = await setup();
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const ownerAuth = await seedAuth(ctx, owner.id);
+    const org = await createOrg(app, ownerAuth.cookie, "Acme");
+    const created = await invite(app, ownerAuth.cookie, org.id, "crash@acme.test");
+    const invitee = await seedUser(ctx, { email: "crash@acme.test", verified: true });
+    const invitation = (await ctx.db.select().from(schema.organizationInvitations).where(eq(schema.organizationInvitations.id, created.id)))[0]!;
+
+    // Simulate a process killed right after the membership INSERT: the flip never runs.
+    const real = ctx.db;
+    let armed = true;
+    const crashy = new Proxy(real as never, {
+      get(target, prop, receiver) {
+        if (prop === "update" && armed) {
+          return (table: unknown) => {
+            if (table === schema.organizationInvitations) {
+              armed = false;
+              throw new Error("simulated process death");
+            }
+            return (target as unknown as { update(table: unknown): unknown }).update(table);
+          };
+        }
+        const value = Reflect.get(target as object, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    Object.defineProperty(ctx, "db", { value: crashy, configurable: true });
+    await expect(acceptInvitation(ctx, invitation, invitee.id)).rejects.toThrow("simulated process death");
+    Object.defineProperty(ctx, "db", { value: real, configurable: true });
+
+    // The damaged state: a membership exists, the invitation is still pending, nothing was announced.
+    const membershipsAfterCrash = await ctx.db.select().from(schema.organizationMemberships).where(eq(schema.organizationMemberships.userId, invitee.id));
+    expect(membershipsAfterCrash).toHaveLength(1);
+    expect((await ctx.db.select().from(schema.organizationInvitations).where(eq(schema.organizationInvitations.id, created.id)))[0]!.status).toBe("pending");
+    expect(eventsOf("organizationInvitation.accepted")).toHaveLength(0);
+    expect(eventsOf("organizationMembership.created")).toHaveLength(1); // the owner only
+
+    // A retry reuses the orphaned membership and completes the acceptance.
+    const pending = (await ctx.db.select().from(schema.organizationInvitations).where(eq(schema.organizationInvitations.id, created.id)))[0]!;
+    const retried = await acceptInvitation(ctx, pending, invitee.id);
+    expect(retried?.id).toBe(membershipsAfterCrash[0]!.id);
+    expect((await ctx.db.select().from(schema.organizationInvitations).where(eq(schema.organizationInvitations.id, created.id)))[0]!.status).toBe("accepted");
+    expect(await ctx.db.select().from(schema.organizationMemberships).where(eq(schema.organizationMemberships.userId, invitee.id))).toHaveLength(1);
+    expect(eventsOf("organizationInvitation.accepted")).toHaveLength(1);
+    // The retry reused the membership instead of creating it, so it does not announce creation again; the
+    // alternative (announcing on reuse) would double up for parallel accepts.
+    expect(eventsOf("organizationMembership.created")).toHaveLength(1);
+  });
+
+  it("creates the membership before it consumes the invitation", async () => {
+    const { ctx, app } = await setup();
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const ownerAuth = await seedAuth(ctx, owner.id);
+    const org = await createOrg(app, ownerAuth.cookie, "Acme");
+    const created = await invite(app, ownerAuth.cookie, org.id, "order@acme.test");
+    const invitee = await seedUser(ctx, { email: "order@acme.test", verified: true });
+    const invitation = (await ctx.db.select().from(schema.organizationInvitations).where(eq(schema.organizationInvitations.id, created.id)))[0]!;
+
+    // Observe the order of writes: the membership INSERT must precede the invitation UPDATE, so a crash
+    // in between can never leave an accepted invitation without a membership.
+    const order: string[] = [];
+    const real = ctx.db;
+    const observed = new Proxy(real as never, {
+      get(target, prop, receiver) {
+        if (prop === "insert") {
+          return (table: unknown) => {
+            if (table === schema.organizationMemberships) order.push("membership");
+            return (target as unknown as { insert(table: unknown): unknown }).insert(table);
+          };
+        }
+        if (prop === "update") {
+          return (table: unknown) => {
+            if (table === schema.organizationInvitations) order.push("invitation");
+            return (target as unknown as { update(table: unknown): unknown }).update(table);
+          };
+        }
+        const value = Reflect.get(target as object, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    Object.defineProperty(ctx, "db", { value: observed, configurable: true });
+    await acceptInvitation(ctx, invitation, invitee.id);
+    Object.defineProperty(ctx, "db", { value: real, configurable: true });
+
+    expect(order).toEqual(["membership", "invitation"]);
+    // The membership webhook is emitted only after the gate passed.
+    expect(eventsOf("organizationInvitation.accepted")).toHaveLength(1);
+    expect(eventsOf("organizationMembership.created")).toHaveLength(2);
   });
 
   it("treats an idle session as signed out on organization routes", async () => {

@@ -197,7 +197,10 @@ describe("atomic single-use and counted operations", () => {
     // One request wins; the rest either see the finished membership (200) or a no longer pending invitation (409).
     expect(results.filter((r) => r.status === 200).length).toBeGreaterThanOrEqual(1);
     expect(results.every((r) => r.status === 200 || r.status === 409)).toBe(true);
+    // Exactly one acceptance: one `organizationInvitation.accepted`, one membership, and (besides the
+    // creator) exactly one `organizationMembership.created`, even though every request tried.
     expect(eventsOf("organizationInvitation.accepted")).toHaveLength(1);
+    expect(eventsOf("organizationMembership.created")).toHaveLength(2);
     const memberships = await ctx.db.select().from(s.organizationMemberships)
       .where(and(eq(s.organizationMemberships.organizationId, org.id), eq(s.organizationMemberships.userId, invitee.id)));
     expect(memberships).toHaveLength(1);
