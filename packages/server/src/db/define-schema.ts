@@ -58,6 +58,8 @@ export function defineSchema(kit: Kit) {
     totpVerified: bool("totp_verified").notNull().default(false),
     /** sha256 hashes of unused backup codes */
     backupCodes: json<string[]>("backup_codes"),
+    /** Guest account created without credentials; becomes a regular user once an identifier is attached. */
+    isAnonymous: bool("is_anonymous").notNull().default(false),
     deleteSelfEnabled: bool("delete_self_enabled").notNull().default(true),
     createOrganizationEnabled: bool("create_organization_enabled").notNull().default(true),
     createOrganizationsLimit: int("create_organizations_limit"),
@@ -369,6 +371,37 @@ export function defineSchema(kit: Kit) {
     ...created(),
   });
 
+  /** Remembered browsers that may skip the second factor until `expiresAt`. Only the token hash is stored. */
+  const trustedDevices = table("trusted_devices", {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull().unique(),
+    label: text("label"),
+    userAgent: text("user_agent"),
+    ipAddress: text("ip_address"),
+    expiresAt: int("expires_at").notNull(),
+    lastUsedAt: int("last_used_at"),
+    revokedAt: int("revoked_at"),
+    ...created(),
+  }, (t) => [index("trusted_devices_user_idx").on(t.userId)]);
+
+  /** OAuth 2.0 device authorization grant (RFC 8628): a CLI or TV polls with `deviceCodeHash` while the user approves `userCode` in a browser. */
+  const deviceCodes = table("device_codes", {
+    id: text("id").primaryKey(),
+    applicationId: text("application_id").notNull().references(() => oauthApplications.id, { onDelete: "cascade" }),
+    deviceCodeHash: text("device_code_hash").notNull().unique(),
+    /** Short code the user types, stored upper-case without separators. */
+    userCode: text("user_code").notNull().unique(),
+    scopes: text("scopes").notNull(),
+    /** pending | approved | denied | consumed */
+    status: text("status").notNull().default("pending"),
+    userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
+    intervalSeconds: int("interval_seconds").notNull().default(5),
+    lastPolledAt: int("last_polled_at"),
+    expiresAt: int("expires_at").notNull(),
+    createdAt: ts("created_at"),
+  });
+
   // ───────────── webhooks ─────────────
   const webhookEndpoints = table("webhook_endpoints", {
     id: text("id").primaryKey(),
@@ -533,9 +566,11 @@ export function defineSchema(kit: Kit) {
     oauthGrants,
     oauthConsents,
     enterpriseConnections,
+    trustedDevices,
+    deviceCodes,
     auditLogs,
   };
 }
 
 export type Schema = ReturnType<typeof defineSchema>;
-export const TABLE_NAMES = ["instance", "signingKeys", "users", "emailAddresses", "phoneNumbers", "externalAccounts", "passkeys", "clients", "sessions", "signIns", "signUps", "verifications", "oauthStates", "rateLimits", "organizations", "roles", "permissions", "rolePermissions", "organizationMemberships", "organizationInvitations", "organizationDomains", "organizationMembershipRequests", "invitations", "waitlistEntries", "allowlistIdentifiers", "blocklistIdentifiers", "jwtTemplates", "actorTokens", "signInTokens", "webhookEndpoints", "webhookEvents", "webhookDeliveries", "apiKeys", "machines", "m2mTokens", "oauthApplications", "oauthGrants", "oauthConsents", "enterpriseConnections", "auditLogs"] as const;
+export const TABLE_NAMES = ["instance", "signingKeys", "users", "emailAddresses", "phoneNumbers", "externalAccounts", "passkeys", "clients", "sessions", "signIns", "signUps", "verifications", "oauthStates", "rateLimits", "organizations", "roles", "permissions", "rolePermissions", "organizationMemberships", "organizationInvitations", "organizationDomains", "organizationMembershipRequests", "invitations", "waitlistEntries", "allowlistIdentifiers", "blocklistIdentifiers", "jwtTemplates", "actorTokens", "signInTokens", "webhookEndpoints", "webhookEvents", "webhookDeliveries", "apiKeys", "machines", "m2mTokens", "oauthApplications", "oauthGrants", "oauthConsents", "enterpriseConnections", "trustedDevices", "deviceCodes", "auditLogs"] as const;
