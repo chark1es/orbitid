@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../context";
 import * as s from "../db/schema";
-import { getOAuthAdapter } from "../services/oauth-providers";
+import { appleProfileName, getOAuthAdapter } from "../services/oauth-providers";
 import { handleExternalIdentity, type ExternalProfile } from "../services/external-identity";
 import { regenerateClientToken } from "./auth/client-auth";
 import { browserMatches, browserMismatchMessage } from "./auth/browser-binding";
@@ -38,17 +38,6 @@ async function readCallback(c: Context): Promise<{ state: string; code?: string;
     code: c.req.query("code"),
     error: c.req.query("error"),
   };
-}
-
-/** Apple only sends the user's name on the very first authorization (as form JSON). */
-function appleName(userJson?: string): { firstName?: string; lastName?: string } {
-  if (!userJson) return {};
-  try {
-    const parsed = JSON.parse(userJson) as { name?: { firstName?: string; lastName?: string } };
-    return { firstName: parsed.name?.firstName, lastName: parsed.name?.lastName };
-  } catch {
-    return {};
-  }
 }
 
 export default function routes(ctx: AppContext) {
@@ -88,8 +77,11 @@ export default function routes(ctx: AppContext) {
       const tokens = await adapter.exchangeCode({ code: params.code, codeVerifier: flow.codeVerifier });
       profile = await adapter.fetchProfile({ tokens });
       if (provider === "apple") {
-        const name = appleName(params.userJson);
-        profile = { ...profile, firstName: profile.firstName ?? name.firstName, lastName: profile.lastName ?? name.lastName };
+        // Apple sends the name only on the very first authorization; later ones carry no `user` field.
+        const name = appleProfileName(params.userJson);
+        if (name.firstName || name.lastName) {
+          profile = { ...profile, firstName: profile.firstName ?? name.firstName, lastName: profile.lastName ?? name.lastName };
+        }
       }
     } catch (err) {
       const code = err instanceof OrbitError ? err.code : ErrorCodes.oauth_callback_error;
