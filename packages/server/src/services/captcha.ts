@@ -1,4 +1,4 @@
-// OWNER: worker "core" (W1). Server-side CAPTCHA verification (Cloudflare Turnstile / hCaptcha).
+// Server-side CAPTCHA verification (Cloudflare Turnstile / hCaptcha).
 import { ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../context";
 

@@ -1,4 +1,4 @@
-// OWNER: worker "admin" (W3). Password hashing for the Backend API (argon2id at rest, verification of imported digests).
+// Password hashing for the Backend API (argon2id at rest, verification of imported digests).
 import { createRequire } from "node:module";
 import { scryptSync, timingSafeEqual } from "node:crypto";
 import { hash as argonHash, verify as argonVerify } from "@node-rs/argon2";

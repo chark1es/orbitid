@@ -1,4 +1,4 @@
-// OWNER: worker "core" (W1) — GET /.well-known/jwks.json (+ /v1/jwks)
+// GET /.well-known/jwks.json (+ /v1/jwks)
 import { Hono, type Context } from "hono";
 import type { AppContext } from "../context";
 import { getJwks } from "../services/tokens";

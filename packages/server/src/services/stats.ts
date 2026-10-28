@@ -1,4 +1,4 @@
-// OWNER: worker "admin" (W3). Aggregate instance statistics for the dashboard overview (`GET /v1/stats`).
+// Aggregate instance statistics for the dashboard overview (`GET /v1/stats`).
 import type { AppContext } from "../context";
 
 export interface DailyCount { date: string; count: number }

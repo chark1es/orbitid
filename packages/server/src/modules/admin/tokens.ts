@@ -1,4 +1,4 @@
-// OWNER: worker "admin" (W3). Backend API one-time sign-in tokens and actor (impersonation) tokens.
+// Backend API one-time sign-in tokens and actor (impersonation) tokens.
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 import { z } from "zod";

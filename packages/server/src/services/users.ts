@@ -1,4 +1,4 @@
-// OWNER: worker "core" (W1). Reusable user/identifier helpers (also used by the Backend API).
+// Reusable user/identifier helpers (also used by the Backend API).
 import { and, eq } from "drizzle-orm";
 import { ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../context";

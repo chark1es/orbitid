@@ -1,4 +1,4 @@
-// OWNER: worker "core" (W1). nodemailer via settings.email.smtpUrl, falls back to console logging; HTML templates; SMS via settings.sms.
+// nodemailer via settings.email.smtpUrl, falls back to console logging; HTML templates; SMS via settings.sms.
 import nodemailer, { type Transporter } from "nodemailer";
 import type { AppContext } from "../context";
 import { ErrorCodes, OrbitError } from "@orbitid/shared";

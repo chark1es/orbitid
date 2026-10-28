@@ -1,4 +1,4 @@
-// OWNER: worker "core" (W1). Session reverification enforcement + helpers.
+// Session reverification enforcement + helpers.
 import type { Context, MiddlewareHandler } from "hono";
 import { and, eq } from "drizzle-orm";
 import { ErrorCodes, OrbitError, type ReverificationLevel } from "@orbitid/shared";

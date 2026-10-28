@@ -1,4 +1,4 @@
-// OWNER: worker "admin" (W3). Backend API waitlist management (`/v1/waitlist_entries`).
+// Backend API waitlist management (`/v1/waitlist_entries`).
 import { Hono } from "hono";
 import { and, eq, like, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";

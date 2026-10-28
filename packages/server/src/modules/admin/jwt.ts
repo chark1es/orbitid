@@ -1,11 +1,11 @@
-// OWNER: worker "admin" (W3). Backend API JWT templates (`/v1/jwt_templates`).
+// Backend API JWT templates (`/v1/jwt_templates`).
 import { Hono } from "hono";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { generateKeyPair, exportJWK } from "jose";
 import { ErrorCodes, ID_PREFIX, OrbitError, type JwtTemplateJSON } from "@orbitid/shared";
 import { parseBody } from "../../lib/http";
-import { encrypt, randomToken } from "../../lib/crypto";
+import { decrypt, encrypt, randomToken } from "../../lib/crypto";
 import { newId } from "../../lib/ids";
 import * as s from "../../db/schema";
 import { audit } from "../../services/audit";
@@ -31,7 +31,16 @@ async function generateSigningKey(ctx: AppContext, algorithm: (typeof SIGNING_AL
   return encrypt(ctx.env.encryptionKey, JSON.stringify(await exportJWK(privateKey)));
 }
 
-function serializeTemplate(row: typeof s.jwtTemplates.$inferSelect): JwtTemplateJSON {
+/** What a verifier needs: the HMAC secret (HS256) or the public half of the JWK (RS256/ES256). Backend API only. */
+function verificationKey(ctx: AppContext, row: typeof s.jwtTemplates.$inferSelect): JwtTemplateJSON["signing_key"] {
+  if (!row.customSigningKey || !row.signingKeyEnc) return undefined;
+  const plain = decrypt(ctx.env.encryptionKey, row.signingKeyEnc);
+  if (row.signingAlgorithm === "HS256") return plain;
+  const { d: _d, p: _p, q: _q, dp: _dp, dq: _dq, qi: _qi, ...publicJwk } = JSON.parse(plain);
+  return publicJwk;
+}
+
+function serializeTemplate(ctx: AppContext, row: typeof s.jwtTemplates.$inferSelect): JwtTemplateJSON {
   return {
     object: "jwt_template",
     id: row.id,
@@ -41,6 +50,7 @@ function serializeTemplate(row: typeof s.jwtTemplates.$inferSelect): JwtTemplate
     allowed_clock_skew: row.allowedClockSkew,
     custom_signing_key: row.customSigningKey,
     signing_algorithm: row.signingAlgorithm,
+    signing_key: verificationKey(ctx, row),
     created_at: row.createdAt,
     updated_at: row.updatedAt,
   };
@@ -64,13 +74,13 @@ export default function routes(ctx: AppContext) {
     const { limit, offset } = listParams(c);
     const rows = ctx.db.select().from(s.jwtTemplates).orderBy(s.jwtTemplates.createdAt).limit(limit).offset(offset).all();
     const total = Number(ctx.db.select({ n: sql<number>`count(*)` }).from(s.jwtTemplates).get()?.n ?? 0);
-    return c.json(page(rows.map(serializeTemplate), total));
+    return c.json(page(rows.map((row) => serializeTemplate(ctx, row)), total));
   });
 
   app.get("/jwt_templates/:id", (c) => {
     const row = ctx.db.select().from(s.jwtTemplates).where(eq(s.jwtTemplates.id, c.req.param("id"))).get();
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "JWT template not found.");
-    return c.json(serializeTemplate(row));
+    return c.json(serializeTemplate(ctx, row));
   });
 
   app.post("/jwt_templates", async (c) => {
@@ -97,7 +107,7 @@ export default function routes(ctx: AppContext) {
       .returning()
       .get()!;
     audit(ctx, { actor: "secret_key", action: "jwt_template.created", targetType: "jwt_template", targetId: row.id, metadata: { name: row.name } });
-    return c.json(serializeTemplate(row));
+    return c.json(serializeTemplate(ctx, row));
   });
 
   app.patch("/jwt_templates/:id", async (c) => {
@@ -127,7 +137,7 @@ export default function routes(ctx: AppContext) {
     ctx.db.update(s.jwtTemplates).set(patch).where(eq(s.jwtTemplates.id, existing.id)).run();
     const updated = ctx.db.select().from(s.jwtTemplates).where(eq(s.jwtTemplates.id, existing.id)).get()!;
     audit(ctx, { actor: "secret_key", action: "jwt_template.updated", targetType: "jwt_template", targetId: updated.id, metadata: { name: updated.name } });
-    return c.json(serializeTemplate(updated));
+    return c.json(serializeTemplate(ctx, updated));
   });
 
   app.delete("/jwt_templates/:id", (c) => {

@@ -1,4 +1,4 @@
-import { useCallback, useContext, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   errorMessage,
   finishAuth,
@@ -398,6 +398,16 @@ export function useSignInFlow(props: SignInProps, step: SignInStep, go: (step: S
       }
     }
   }, [orbit, runtime, redirectTarget, complete, go, t]);
+
+  // Sign-in tokens and impersonation links from the Backend API arrive as `?__orbit_ticket=`.
+  const ticketStarted = useRef(false);
+  useEffect(() => {
+    if (!runtime.loaded || ticketStarted.current || typeof window === "undefined") return;
+    const ticket = new URLSearchParams(window.location.search).get("__orbit_ticket");
+    if (!ticket) return;
+    ticketStarted.current = true;
+    void create({ strategy: "ticket", ticket });
+  }, [runtime.loaded, create]);
 
   return {
     signIn,

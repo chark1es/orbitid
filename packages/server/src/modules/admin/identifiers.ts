@@ -1,4 +1,4 @@
-// OWNER: worker "admin" (W3). Backend API identifiers: email addresses, phone numbers, allowlist & blocklist.
+// Backend API identifiers: email addresses, phone numbers, allowlist & blocklist.
 import { Hono } from "hono";
 import { and, eq, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";

@@ -1,5 +1,5 @@
-// OWNER: worker "orgs" (W2). Minimal caller resolution for Frontend API organization routes.
-// W1 owns the full client/session surface; this helper only answers "which user is calling?".
+// Minimal caller resolution for Frontend API organization routes.
+// The auth modules own the full client/session surface; this helper only answers "which user is calling?".
 import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
 import { and, desc, eq } from "drizzle-orm";

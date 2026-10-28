@@ -1,4 +1,4 @@
-// OWNER: worker "orgs" (W2). Organization logo storage (upload dir under ctx.env.dataDir).
+// Organization logo storage (upload dir under ctx.env.dataDir).
 import type { Context } from "hono";
 import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";

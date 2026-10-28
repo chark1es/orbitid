@@ -1,4 +1,4 @@
-// OWNER: W4 machine — Enterprise SSO: SAML 2.0 service provider + enterprise OIDC connections.
+// Enterprise SSO: SAML 2.0 service provider + enterprise OIDC connections.
 //
 // SAML responses are validated by @node-saml/node-saml (signature, audience, timestamps). Request/flow
 // state (including IdP-initiated decisions) travels in RelayState via `oauth_states`, because the SAML

@@ -11,6 +11,24 @@ function renderSignIn(
 }
 
 describe("SignIn", () => {
+  it("signs in automatically from a backend ticket link (?__orbit_ticket=)", async () => {
+    window.history.pushState({}, "", "/sign-in?__orbit_ticket=tok_123");
+    try {
+      const harness = setupAuth({ signedIn: false });
+      const signIn = makeSignIn(harness.instance, {
+        create: { status: "complete", createdSessionId: SESSION_ID },
+      });
+      renderSignIn(harness, { forceRedirectUrl: "/dashboard" });
+
+      await waitFor(() => expect(harness.instance.setActiveCalls.length).toBe(1));
+      expect(signIn.create).toHaveBeenCalledTimes(1);
+      expect(signIn.create).toHaveBeenCalledWith({ strategy: "ticket", ticket: "tok_123" });
+      expect(harness.instance.setActiveCalls[0]?.session).toBe(SESSION_ID);
+    } finally {
+      window.history.pushState({}, "", "/");
+    }
+  });
+
   it("signs in with a password and redirects", async () => {
     const harness = setupAuth({ signedIn: false });
     const signIn = makeSignIn(harness.instance, {

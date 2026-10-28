@@ -1,4 +1,4 @@
-// OWNER: worker "core" (W1) — /v1/client/sign_ins
+// /v1/client/sign_ins
 import { Hono, type Context } from "hono";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/types";
 import { and, eq } from "drizzle-orm";
@@ -30,7 +30,7 @@ import type { FactorState, SignInState } from "./auth/signin-core";
 import { createOAuthAuthorization } from "./auth/oauth-flow";
 import { checkCode, getVerification, issueVerification, magicLinkUrl, type VerificationRow } from "./auth/verifications";
 import { validateRedirectUrl } from "./auth/redirects";
-import { attachErrorItems, tolerateNotImplemented } from "./auth/errors";
+import { attachErrorItems } from "./auth/errors";
 
 const createSchema = z.object({
   identifier: z.string().optional(),
@@ -244,13 +244,10 @@ export default function routes(ctx: AppContext) {
 
     const identifier = body.identifier.trim();
     const type = detectIdentifierType(identifier);
-    await tolerateNotImplemented(async () => {
-      await assertIdentifiersAllowed(ctx, {
-        emails: type === "email_address" ? [normalizeEmail(identifier)] : [],
-        phones: type === "phone_number" ? [normalizePhone(identifier)] : [],
-      }, { signIn: true });
-      return true;
-    }, true);
+    await assertIdentifiersAllowed(ctx, {
+      emails: type === "email_address" ? [normalizeEmail(identifier)] : [],
+      phones: type === "phone_number" ? [normalizePhone(identifier)] : [],
+    }, { signIn: true });
 
     if (type === "email_address") {
       const conn = enterpriseConnectionForEmail(ctx, normalizeEmail(identifier));

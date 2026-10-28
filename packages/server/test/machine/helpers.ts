@@ -1,4 +1,4 @@
-// Shared fixtures for the W4 (machine) test suite: real app on an in-memory DB, rows inserted directly.
+// Shared fixtures for the machine-auth test suite: real app on an in-memory DB, rows inserted directly.
 import { eq } from "drizzle-orm";
 import { COOKIES, ID_PREFIX } from "@orbitid/shared";
 import { createApp } from "../../src/app";

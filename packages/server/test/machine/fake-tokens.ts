@@ -1,4 +1,4 @@
-// Test double for `services/tokens` (W1). A fixed in-process RS256 key proves minting + offline verification
+// Test double for `services/tokens`. A fixed in-process RS256 key proves minting + offline verification
 // without depending on another worker's signing-key storage.
 import { exportJWK, generateKeyPair, jwtVerify, SignJWT, type JWK } from "jose";
 

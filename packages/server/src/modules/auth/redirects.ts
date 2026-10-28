@@ -1,4 +1,4 @@
-// OWNER: worker "core" (W1). Safe redirect validation for post-auth navigation.
+// Safe redirect validation for post-auth navigation.
 import { ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../../context";
 

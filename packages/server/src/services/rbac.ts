@@ -1,4 +1,4 @@
-// OWNER: worker "orgs" (W2). Role/permission resolution used by both APIs.
+// Role/permission resolution used by both APIs.
 import { and, eq } from "drizzle-orm";
 import { ErrorCodes, OrbitError, type PermissionJSON, type RoleJSON } from "@orbitid/shared";
 import type { AppContext } from "../context";

@@ -1,4 +1,4 @@
-// OWNER: worker "core" (W1). One-time codes, magic links and their delivery.
+// One-time codes, magic links and their delivery.
 import { and, desc, eq } from "drizzle-orm";
 import { ErrorCodes, OrbitError, type VerificationJSON } from "@orbitid/shared";
 import type { AppContext } from "../../context";

@@ -1,4 +1,4 @@
-// OWNER: worker "core" (W1). WebAuthn / passkey ceremonies (@simplewebauthn/server v10).
+// WebAuthn / passkey ceremonies (@simplewebauthn/server v10).
 import type { VerifiedRegistrationResponse } from "@simplewebauthn/server";
 import {
   generateAuthenticationOptions,

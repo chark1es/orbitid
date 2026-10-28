@@ -1,4 +1,4 @@
-// OWNER: worker "admin" (W3) — Frontend API: POST /v1/client/waitlist
+// Frontend API: POST /v1/client/waitlist
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 import { z } from "zod";

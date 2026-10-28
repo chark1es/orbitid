@@ -1,4 +1,4 @@
-// OWNER: W4 machine — `/v1/m2m/*` (backend secret-key guarded) plus machine-secret token minting.
+// `/v1/m2m/*` (backend secret-key guarded) plus machine-secret token minting.
 //
 // `app.ts` guards `/v1/m2m` with `requireSecretKey`, so a bare machine secret cannot mint tokens here.
 // The client_credentials-style entry point for machine secrets lives at `POST /oauth/m2m/token`

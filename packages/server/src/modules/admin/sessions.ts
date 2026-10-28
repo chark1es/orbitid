@@ -1,4 +1,4 @@
-// OWNER: worker "admin" (W3). Backend API sessions & clients.
+// Backend API sessions & clients.
 import { Hono, type Context } from "hono";
 import { and, eq, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";

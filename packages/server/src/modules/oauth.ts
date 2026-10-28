@@ -1,4 +1,4 @@
-// OWNER: worker "core" (W1) — social OAuth: /v1/oauth_callback/:provider (+ start helpers)
+// social OAuth: /v1/oauth_callback/:provider (+ start helpers)
 import { Hono, type Context } from "hono";
 import { eq } from "drizzle-orm";
 import { ErrorCodes, OrbitError } from "@orbitid/shared";

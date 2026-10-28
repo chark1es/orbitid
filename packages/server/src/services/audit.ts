@@ -1,4 +1,4 @@
-// OWNER: worker "admin" (W3). Audit log persistence for Backend API mutations (`GET /v1/audit_logs`).
+// Audit log persistence for Backend API mutations (`GET /v1/audit_logs`).
 import { and, asc, desc, eq, gte, like, lte, sql, type SQL } from "drizzle-orm";
 import { ID_PREFIX, type AuditLogJSON } from "@orbitid/shared";
 import { newId } from "../lib/ids";

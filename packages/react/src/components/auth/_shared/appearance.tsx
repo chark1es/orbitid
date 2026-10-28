@@ -76,7 +76,7 @@ export type ElementName =
 
 /**
  * Merge a component's `appearance` prop over the provider appearance and publish it to the same
- * context W6's `useAppearance()` reads.
+ * context `useAppearance()` reads.
  */
 export function AuthAppearanceScope({ appearance, children }: { appearance?: Appearance; children: ReactNode }) {
   const parent = useAppearance();

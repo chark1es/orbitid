@@ -1,4 +1,4 @@
-// OWNER: W4 machine — enterprise connection validation/serialization (shared by the backend CRUD routes).
+// enterprise connection validation/serialization (shared by the backend CRUD routes).
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { ErrorCodes, ID_PREFIX, OrbitError } from "@orbitid/shared";

@@ -1,4 +1,4 @@
-// OWNER: worker "admin" (W3). Backend API users: CRUD, filters, metadata, ban/lock, MFA, identifiers, impersonation.
+// Backend API users: CRUD, filters, metadata, ban/lock, MFA, identifiers, impersonation.
 import { Hono, type Context } from "hono";
 import { and, eq, gte, inArray, like, lt, or, sql, type SQL } from "drizzle-orm";
 import { authenticator } from "otplib";

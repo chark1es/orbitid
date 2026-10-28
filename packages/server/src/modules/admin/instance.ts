@@ -1,4 +1,4 @@
-// OWNER: worker "admin" (W3). Backend API instance settings, testing tokens, audit logs, stats.
+// Backend API instance settings, testing tokens, audit logs, stats.
 import { Hono, type Context } from "hono";
 import { z, ZodError } from "zod";
 import { eq } from "drizzle-orm";

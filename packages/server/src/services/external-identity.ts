@@ -1,4 +1,4 @@
-// OWNER: worker "core" (W1). Shared by social OAuth (W1) and enterprise SAML/OIDC (W4).
+// Shared by social OAuth and enterprise SAML/OIDC.
 import { and, eq } from "drizzle-orm";
 import { ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../context";
@@ -37,12 +37,7 @@ const successStatus = (status: string) => ({ __orbit_status: status });
 /** Sign-in must honour the instance blocklist (OAuth flows have no identifier at create time). */
 async function assertSignInIdentityAllowed(ctx: AppContext, email: string | undefined) {
   if (!email) return;
-  try {
-    await assertIdentifiersAllowed(ctx, { emails: [email] }, { signIn: true });
-  } catch (err) {
-    if (err instanceof Error && err.message.startsWith("not implemented")) return;
-    throw err;
-  }
+  await assertIdentifiersAllowed(ctx, { emails: [email] }, { signIn: true });
 }
 
 /** Hides stale, still-in-flight attempts once a flow finished (they belong to another sign-in/up). */

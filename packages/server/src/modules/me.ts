@@ -1,4 +1,4 @@
-// OWNER: worker "core" (W1) — /v1/client/me (profile, password, emails, phones, external accounts, totp, backup codes, passkeys, sessions, image, delete)
+// /v1/client/me (profile, password, emails, phones, external accounts, totp, backup codes, passkeys, sessions, image, delete)
 import { Hono, type Context } from "hono";
 import type { RegistrationResponseJSON } from "@simplewebauthn/types";
 import { mkdirSync, writeFileSync } from "node:fs";

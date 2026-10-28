@@ -1,11 +1,6 @@
 /**
- * Fallback English dictionary for the prebuilt auth components.
- *
- * W6 owns `packages/react/src/localization/enUS.ts`. Keys used here are appended there when that file
- * exists; this dictionary is the always-available baseline so the components work even when the
- * provider does not carry a localization table (or the consumer overrides only some keys).
- *
- * Interpolation uses `{{name}}` placeholders.
+ * Baseline English dictionary for the prebuilt auth components, used when the provider's
+ * localization table has no entry for a key. Interpolation uses `{{name}}` placeholders.
  */
 export const enUS = {
   // generic

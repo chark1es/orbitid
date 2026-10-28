@@ -1,4 +1,4 @@
-// OWNER: worker "core" (W1). Sign-up requirement computation, serialization and completion.
+// Sign-up requirement computation, serialization and completion.
 import { and, eq } from "drizzle-orm";
 import {
   ErrorCodes, OrbitError,
@@ -13,7 +13,6 @@ import { createUser, findEmail, normalizeEmail, type UserRow } from "../../servi
 import { markInvitationAccepted, assertIdentifiersAllowed } from "../../services/restrictions";
 import type { ExternalProfile } from "../../services/external-identity";
 import { getVerificationById, verificationJSON } from "./verifications";
-import { tolerateNotImplemented } from "./errors";
 
 export type SignUpRow = typeof s.signUps.$inferSelect;
 
@@ -232,14 +231,11 @@ export async function assertSignUpIdentifiers(ctx: AppContext, fields: SignUpFie
       }
     }
   }
-  await tolerateNotImplemented(async () => {
-    await assertIdentifiersAllowed(
-      ctx,
-      { emails: email ? [email] : [], phones: fields.phoneNumber ? [fields.phoneNumber] : [], invitationTicket: opts.invitationTicket ?? null },
-      {},
-    );
-    return true;
-  }, true);
+  await assertIdentifiersAllowed(
+    ctx,
+    { emails: email ? [email] : [], phones: fields.phoneNumber ? [fields.phoneNumber] : [], invitationTicket: opts.invitationTicket ?? null },
+    {},
+  );
 }
 
 export interface CompleteSignUpOptions { ip?: string; userAgent?: string }
@@ -284,10 +280,7 @@ export async function completeSignUp(ctx: AppContext, row: SignUpRow, opts: Comp
   }
 
   if (row.invitationId) {
-    await tolerateNotImplemented(async () => {
-      await markInvitationAccepted(ctx, row.invitationId!, user.id);
-      return true;
-    }, true);
+    await markInvitationAccepted(ctx, row.invitationId, user.id);
   }
 
   const sessionId = await createSession(ctx, {

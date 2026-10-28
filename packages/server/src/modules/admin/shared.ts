@@ -1,4 +1,4 @@
-// OWNER: worker "admin" (W3). Shared request/response helpers for the Backend API modules.
+// Shared request/response helpers for the Backend API modules.
 import type { Context } from "hono";
 import { asc, desc, eq, type AnyColumn, type SQL } from "drizzle-orm";
 import { z } from "zod";

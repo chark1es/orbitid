@@ -1,4 +1,4 @@
-// OWNER: worker "core" (W1). Starts an OAuth authorization and persists its state.
+// Starts an OAuth authorization and persists its state.
 import { generateCodeVerifier, generateState } from "arctic";
 import { eq } from "drizzle-orm";
 import { ErrorCodes, OrbitError } from "@orbitid/shared";

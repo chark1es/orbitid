@@ -1,4 +1,4 @@
-// OWNER: W4 machine — resolves the signed-in caller for Frontend-API routes owned by this worker.
+// resolves the signed-in caller for Frontend-API routes owned by this worker.
 //
 // The Frontend API is authenticated by the opaque `__client` cookie (or `Authorization: Bearer <client token>`),
 // exactly like every other `/v1/client` route. `clients`/`sessions` rows are read directly instead of going through

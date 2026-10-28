@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Native sqlite binding loads on Node
+        run: node -e "require('better-sqlite3')"
+      - run: bun run typecheck
+      - run: bun run test
+      - name: Dashboard build
+        run: bun run --filter @orbitid/dashboard build
+      - name: Example app build
+        run: bun run --filter example-next build
+        env:
+          NEXT_PUBLIC_ORBITID_PUBLISHABLE_KEY: pk_test_aHR0cDovL2xvY2FsaG9zdDo0MDAw
+          ORBITID_SECRET_KEY: sk_test_ci

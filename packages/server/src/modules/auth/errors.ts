@@ -1,4 +1,4 @@
-// OWNER: worker "core" (W1). Error helpers shared by the auth modules.
+// Error helpers shared by the auth modules.
 import type { ApiErrorItem } from "@orbitid/shared";
 import { OrbitError } from "@orbitid/shared";
 
@@ -11,13 +11,3 @@ export function attachErrorItems(err: OrbitError, items: ApiErrorItem[]): OrbitE
 }
 
 export const orbitErrorItems = (err: OrbitError): ApiErrorItem[] | undefined => (err as OrbitErrorWithItems).items;
-
-/** Runs a service owned by another worker, treating a "not implemented" throw as the fallback (only in-progress stubs). */
-export async function tolerateNotImplemented<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
-  try {
-    return await fn();
-  } catch (err) {
-    if (err instanceof Error && err.message.startsWith("not implemented")) return fallback;
-    throw err;
-  }
-}

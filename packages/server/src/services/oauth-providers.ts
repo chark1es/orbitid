@@ -1,4 +1,4 @@
-// OWNER: worker "core" (W1). Social OAuth / OIDC provider adapters (arctic under the hood) + profile normalization.
+// Social OAuth / OIDC provider adapters (arctic under the hood) + profile normalization.
 import {
   Atlassian, Bitbucket, Box, Coinbase, Discord, Dropbox, Facebook, GitHub, GitLab, Google, Line, Linear,
   MicrosoftEntraId, Notion, OAuth2Client, CodeChallengeMethod, Slack, Spotify, Twitch, Twitter,

@@ -1,4 +1,4 @@
-// OWNER: W4 machine — machine-to-machine identities: machine secrets, opaque/JWT tokens, revocation.
+// machine-to-machine identities: machine secrets, opaque/JWT tokens, revocation.
 import { asc, desc, eq, sql } from "drizzle-orm";
 import { jwtVerify, importJWK, type JWK } from "jose";
 import { ErrorCodes, ID_PREFIX, OrbitError, type M2MMachineJSON, type M2MTokenJSON } from "@orbitid/shared";

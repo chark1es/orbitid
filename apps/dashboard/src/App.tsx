@@ -14,7 +14,6 @@ const SessionsPage = lazy(() => import("./pages/sessions"));
 const InvitationsPage = lazy(() => import("./pages/invitations"));
 const WaitlistPage = lazy(() => import("./pages/waitlist"));
 
-// W11 ("dash-config") owns these pages; the router wires them so navigation never 404s.
 const SettingsAuthPage = lazy(() => import("./pages/settings-auth"));
 const SettingsSocialPage = lazy(() => import("./pages/settings-social"));
 const SettingsSessionsPage = lazy(() => import("./pages/settings-sessions"));

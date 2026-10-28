@@ -1,4 +1,4 @@
-// OWNER: worker "core" (W1). Password policy + argon2id hashing + optional HIBP check.
+// Password policy + argon2id hashing + optional HIBP check.
 import { createHash } from "node:crypto";
 import { hash, verify } from "@node-rs/argon2";
 import { ErrorCodes, OrbitError } from "@orbitid/shared";

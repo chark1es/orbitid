@@ -1,4 +1,4 @@
-// OWNER: worker "admin" (W3). JWT template shortcode engine + lookup.
+// JWT template shortcode engine + lookup.
 import { eq } from "drizzle-orm";
 import * as s from "../db/schema";
 import { DEFAULT_AVATAR, permissionsForRole } from "../serializers";

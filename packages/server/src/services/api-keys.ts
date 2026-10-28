@@ -1,4 +1,4 @@
-// OWNER: W4 machine — API keys (`ak_live_...`), one-time secret display, hash-at-rest, scopes/claims/expiry/revocation.
+// API keys (`ak_live_...`), one-time secret display, hash-at-rest, scopes/claims/expiry/revocation.
 import { and, asc, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { ErrorCodes, ID_PREFIX, OrbitError, type ApiKeyJSON } from "@orbitid/shared";
 import type { AppContext } from "../context";

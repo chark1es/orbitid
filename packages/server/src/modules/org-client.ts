@@ -1,4 +1,4 @@
-// OWNER: W2 orgs — Frontend API organizations (mounted at /v1/client)
+// Frontend API organizations (mounted at /v1/client)
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Hono } from "hono";

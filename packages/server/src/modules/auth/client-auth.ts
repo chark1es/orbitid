@@ -1,4 +1,4 @@
-// OWNER: worker "core" (W1). Client (browser/device) authentication + ClientJSON serialization.
+// Client (browser/device) authentication + ClientJSON serialization.
 import type { Context } from "hono";
 import { deleteCookie, setCookie } from "hono/cookie";
 import { and, desc, eq } from "drizzle-orm";

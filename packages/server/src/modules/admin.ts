@@ -1,4 +1,4 @@
-// OWNER: worker "admin" (W3) — Backend API: users, sessions, clients, actor/sign-in tokens, invitations, allow/blocklist, waitlist, jwt templates, instance, testing tokens, audit logs (mounted at /v1)
+// Backend API: users, sessions, clients, actor/sign-in tokens, invitations, allow/blocklist, waitlist, jwt templates, instance, testing tokens, audit logs (mounted at /v1)
 import { Hono } from "hono";
 import type { AppContext } from "../context";
 import users from "./admin/users";

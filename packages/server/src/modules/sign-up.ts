@@ -1,4 +1,4 @@
-// OWNER: worker "core" (W1) — /v1/client/sign_ups
+// /v1/client/sign_ups
 import { Hono, type Context } from "hono";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -24,7 +24,6 @@ import {
 import { checkCode, getVerification, issueVerification, magicLinkUrl } from "./auth/verifications";
 import { createOAuthAuthorization } from "./auth/oauth-flow";
 import { validateRedirectUrl } from "./auth/redirects";
-import { tolerateNotImplemented } from "./auth/errors";
 import { zBool, zMetadata } from "./auth/forms";
 
 const createSchema = z.object({
@@ -178,7 +177,7 @@ export default function routes(ctx: AppContext) {
 
     let invitationEmail: string | undefined;
     if (body.ticket) {
-      const ticket = await tolerateNotImplemented(async () => redeemTicket(ctx, body.ticket!), null);
+      const ticket = await redeemTicket(ctx, body.ticket);
       if (!ticket) throw new OrbitError(422, ErrorCodes.ticket_invalid, "That ticket is not valid");
       if (ticket.kind !== "invitation") throw new OrbitError(422, ErrorCodes.ticket_invalid, "This ticket can only be used to sign in");
       invitationEmail = normalizeEmail(ticket.email);

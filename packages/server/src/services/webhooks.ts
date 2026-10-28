@@ -1,4 +1,4 @@
-// OWNER: worker "admin" (W3). Persist events, fan out deliveries, deliver with retries (Svix-compatible signatures).
+// Persist events, fan out deliveries, deliver with retries (Svix-compatible signatures).
 import { createHmac, randomBytes } from "node:crypto";
 import { and, eq, lte } from "drizzle-orm";
 import {

@@ -1,4 +1,4 @@
-// OWNER: worker "admin" (W3) — Backend API: /v1/webhooks/*
+// Backend API: /v1/webhooks/*
 import { Hono } from "hono";
 import { and, eq, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";

@@ -1,4 +1,3 @@
-// OWNER: worker "orgs" (W2).
 import { and, eq, inArray } from "drizzle-orm";
 import { ErrorCodes, OrbitError, ID_PREFIX } from "@orbitid/shared";
 import type { AppContext } from "../context";

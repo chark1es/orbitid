@@ -1,4 +1,4 @@
-// OWNER: W4 machine — API keys: Backend API `/v1/api_keys` + Frontend API self-service for users and organizations.
+// API keys: Backend API `/v1/api_keys` + Frontend API self-service for users and organizations.
 import { Hono, type Context } from "hono";
 import { eq } from "drizzle-orm";
 import { ErrorCodes, OrbitError, type ApiKeyJSON } from "@orbitid/shared";

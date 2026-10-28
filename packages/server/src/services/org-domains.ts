@@ -1,4 +1,4 @@
-// OWNER: worker "orgs" (W2). Organization domain helpers: validation, suggestions, enrollment side effects.
+// Organization domain helpers: validation, suggestions, enrollment side effects.
 import { and, eq, inArray } from "drizzle-orm";
 import { ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../context";

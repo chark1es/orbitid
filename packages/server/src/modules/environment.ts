@@ -1,4 +1,4 @@
-// OWNER: worker "core" (W1) — GET /v1/client/environment
+// GET /v1/client/environment
 import { Hono } from "hono";
 import type { EnvironmentJSON, InstanceSettings } from "@orbitid/shared";
 import type { AppContext } from "../context";

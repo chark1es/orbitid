@@ -1,4 +1,4 @@
-// OWNER: worker "core" (W1) — /v1/verify (magic-link landing)
+// /v1/verify (magic-link landing)
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 import { ErrorCodes, OrbitError } from "@orbitid/shared";

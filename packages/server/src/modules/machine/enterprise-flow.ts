@@ -1,4 +1,4 @@
-// OWNER: W4 machine — RelayState / `state` storage for enterprise SSO flows (SAML and enterprise OIDC).
+// RelayState / `state` storage for enterprise SSO flows (SAML and enterprise OIDC).
 import { eq } from "drizzle-orm";
 import { ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../../context";

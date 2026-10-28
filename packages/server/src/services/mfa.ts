@@ -1,4 +1,4 @@
-// OWNER: worker "core" (W1). TOTP, backup codes, second-factor discovery.
+// TOTP, backup codes, second-factor discovery.
 import { randomInt } from "node:crypto";
 import { authenticator } from "otplib";
 import { toDataURL } from "qrcode";

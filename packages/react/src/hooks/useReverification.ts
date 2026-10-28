@@ -20,7 +20,7 @@ export interface UseReverificationOptions {
  * await updatePassword({ currentPassword, newPassword });
  * ```
  *
- * `<UserVerificationModal/>` (W7) registers the modal through `useRegisterReverificationUI`.
+ * `<UserVerificationModal/>` registers the modal through `useRegisterReverificationUI`.
  */
 export function useReverification<Args extends unknown[], Result>(
   fetcher: (...args: Args) => Promise<Result>,

@@ -1,17 +1,12 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "baseUrl": ".",
-    "types": ["vite/client", "vitest/globals"],
-    "paths": {
-      "cn": ["../../packages/ui/src/lib/utils.ts"],
-      "@orbitid/ui": ["../../packages/ui/src/index.ts"],
-      "@orbitid/ui/*": ["../../packages/ui/src/*"],
-      "@orbitid/shared": ["../../packages/shared/src/index.ts"],
-      "@/components/ui/*": ["../../packages/ui/src/components/ui/*"],
-      "@/hooks/*": ["../../packages/ui/src/hooks/*"],
-      "@/*": ["./src/*"]
-    }
+    "types": [
+      "vite/client",
+      "vitest/globals"
+    ]
   },
-  "include": ["src"]
+  "include": [
+    "src"
+  ]
 }

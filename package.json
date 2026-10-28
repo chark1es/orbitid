@@ -9,12 +9,12 @@
     "apps/*"
   ],
   "scripts": {
-    "dev:server": "bun run dev -w @orbitid/server",
-    "dev:dashboard": "bun run dev -w @orbitid/dashboard",
-    "dev:example": "bun run dev -w example-next",
+    "dev:server": "bun run --filter @orbitid/server dev",
+    "dev:dashboard": "bun run --filter @orbitid/dashboard dev",
+    "dev:example": "bun run --filter example-next dev",
     "typecheck": "bun run --filter \"*\" typecheck",
     "test": "bun run --filter \"*\" test",
-    "db:generate": "bun run db:generate -w @orbitid/server"
+    "db:generate": "bun run --filter @orbitid/server db:generate"
   },
   "engines": {
     "node": ">=20"

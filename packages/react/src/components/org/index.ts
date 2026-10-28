@@ -1,4 +1,4 @@
-// W8: organization components (shadcn/ui, Clerk-compatible props).
+// Organization components (shadcn/ui, Clerk-compatible props).
 export {
   OrganizationSwitcher,
   type OrganizationSwitcherProps,

@@ -1,4 +1,4 @@
-// OWNER: W4 machine — OIDC/OAuth2 provider service: applications, authorization codes, tokens, consent.
+// OIDC/OAuth2 provider service: applications, authorization codes, tokens, consent.
 //
 // Storage notes (no schema changes; the schema is lead-owned):
 //  - codes/access/refresh tokens are random opaque strings; only sha256 hashes are stored in `oauth_grants`.

@@ -105,7 +105,7 @@ describe("organization webhooks", () => {
     await backend(app, "POST", `/v1/organizations/${promoteOrg.body.id}/memberships`, { user_id: member.id, role: "org:member" });
     const orphanOrg = await backend<OrganizationJSON>(app, "POST", "/v1/organizations", { name: "Gone Inc", created_by: admin.id });
 
-    // W1's users.deleteUser removes the row first; memberships cascade away before the hook runs.
+    // users.deleteUser removes the row first; memberships cascade away before the hook runs.
     ctx.db.delete(s.users).where(eq(s.users.id, admin.id)).run();
     await onUserDeleted(ctx, admin.id);
 

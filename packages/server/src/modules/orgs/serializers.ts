@@ -1,4 +1,4 @@
-// OWNER: worker "orgs" (W2). Wire serializers for organization resources not covered by src/serializers.ts.
+// Wire serializers for organization resources not covered by src/serializers.ts.
 import { and, desc, eq } from "drizzle-orm";
 import type {
   OrganizationDomainJSON, OrganizationInvitationJSON, OrganizationMembershipRequestJSON, OrganizationSuggestionJSON, VerificationJSON,

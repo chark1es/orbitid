@@ -1,4 +1,3 @@
-// OWNER: worker "core" (W1).
 import { and, eq, ne } from "drizzle-orm";
 import { ErrorCodes, OrbitError, type SessionStatus } from "@orbitid/shared";
 import type { AppContext } from "../context";

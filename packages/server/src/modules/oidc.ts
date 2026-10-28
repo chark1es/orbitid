@@ -1,4 +1,4 @@
-// OWNER: W4 machine — OrbitID as OIDC/OAuth2 identity provider.
+// OrbitID as OIDC/OAuth2 identity provider.
 //   Discovery: /.well-known/openid-configuration
 //   Protocol:  /oauth/{authorize,token,userinfo,revoke,introspect,jwks,consent_info,consent}
 //              /oauth/m2m/token (machine-secret client_credentials; app.ts guards /v1/m2m with the secret key)

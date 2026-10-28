@@ -1,4 +1,4 @@
-// OWNER: worker "core" (W1). Signing keys (RS256, generated on first boot), JWKS, session JWTs.
+// Signing keys (RS256, generated on first boot), JWKS, session JWTs.
 import { exportJWK, generateKeyPair, importJWK, jwtVerify, SignJWT, createLocalJWKSet, type JWK, type KeyLike } from "jose";
 import { desc, eq } from "drizzle-orm";
 import type { SessionClaims, UserJSON } from "@orbitid/shared";
@@ -140,12 +140,7 @@ interface OrgMembershipContext { orgId: string; slug: string | null; role: strin
 
 async function membershipFor(ctx: AppContext, userId: string, orgId: string | null) {
   if (!orgId) return null;
-  let membership: OrgMembershipContext | null = null;
-  try {
-    membership = await getMembershipContext(ctx, userId, orgId);
-  } catch (err) {
-    if (!(err instanceof Error && err.message.startsWith("not implemented"))) throw err;
-  }
+  const membership: OrgMembershipContext | null = await getMembershipContext(ctx, userId, orgId);
   if (!membership) return null;
   const org = ctx.db.select().from(s.organizations).where(eq(s.organizations.id, orgId)).get();
   return {
@@ -219,14 +214,10 @@ export async function signSessionToken(ctx: AppContext, sessionId: string, opts:
   const nowSeconds = Math.floor(Date.now() / 1000);
   let lifetime = st.session.tokenLifetimeSeconds;
   let extraClaims: Record<string, unknown> = {};
+  let template: Awaited<ReturnType<typeof renderTemplateClaims>> = null;
 
   if (opts.template) {
-    let template: null | { claims: Record<string, unknown>; lifetimeSeconds: number; allowedClockSkewSeconds: number; signingKeyEnc?: string | null; algorithm: string } = null;
-    try {
-      template = await renderTemplateClaims(ctx, opts.template, { userId: user.id, sessionId, orgId: session.lastActiveOrganizationId });
-    } catch (err) {
-      if (!(err instanceof Error && err.message.startsWith("not implemented"))) throw err;
-    }
+    template = await renderTemplateClaims(ctx, opts.template, { userId: user.id, sessionId, orgId: session.lastActiveOrganizationId });
     if (!template) throw new OrbitError(404, ErrorCodes.resource_not_found, `JWT template "${opts.template}" not found`);
     lifetime = template.lifetimeSeconds;
     extraClaims = template.claims;
@@ -263,10 +254,21 @@ export async function signSessionToken(ctx: AppContext, sessionId: string, opts:
   claims.exp = nowSeconds + lifetime;
   if (base.azp === undefined) delete claims.azp;
 
+  if (template?.signingKeyEnc) {
+    const key = await importTemplateKey(ctx, template.signingKeyEnc, template.algorithm);
+    return new SignJWT(asRecord(claims)).setProtectedHeader({ alg: template.algorithm, typ: "JWT" }).sign(key);
+  }
   const { row, privateKey } = await getActiveSigningKey(ctx);
   return new SignJWT(asRecord(claims))
     .setProtectedHeader({ alg: row.alg, kid: row.kid, typ: "JWT" })
     .sign(privateKey);
+}
+
+/** Template keys are stored encrypted: an HMAC secret (HS256) or a private JWK (RS256/ES256). */
+async function importTemplateKey(ctx: AppContext, encrypted: string, algorithm: string): Promise<KeyLike | Uint8Array> {
+  const plain = decrypt(ctx.env.encryptionKey, encrypted);
+  if (algorithm === "HS256") return new TextEncoder().encode(plain);
+  return importJWK(JSON.parse(plain), algorithm) as Promise<KeyLike>;
 }
 
 export async function verifySessionToken(ctx: AppContext, jwt: string): Promise<SessionClaims> {

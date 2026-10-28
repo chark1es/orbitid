@@ -1,4 +1,4 @@
-// OWNER: worker "admin" (W3). Sign-up gating (mode/allowlist/blocklist/waitlist/invitations) + one-time tickets.
+// Sign-up gating (mode/allowlist/blocklist/waitlist/invitations) + one-time tickets.
 import { and, eq, inArray } from "drizzle-orm";
 import { ErrorCodes, OrbitError, type InvitationJSON } from "@orbitid/shared";
 import { sha256 } from "../lib/crypto";

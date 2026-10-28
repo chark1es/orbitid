@@ -1,4 +1,4 @@
-// OWNER: W4 machine — Enterprise SSO: backend CRUD `/v1/enterprise_connections`, Frontend API
+// Enterprise SSO: backend CRUD `/v1/enterprise_connections`, Frontend API
 // `/v1/client/enterprise/*` (start + OIDC callback) and the SAML service provider at `/v1/saml/:id/*`.
 import { Hono, type Context } from "hono";
 import { and, desc, eq, sql } from "drizzle-orm";

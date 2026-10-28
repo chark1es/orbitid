@@ -1,4 +1,4 @@
-// OWNER: worker "admin" (W3). Backend API instance invitations (`/v1/invitations`).
+// Backend API instance invitations (`/v1/invitations`).
 import { Hono } from "hono";
 import { and, eq, like, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";

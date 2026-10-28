@@ -1,4 +1,4 @@
-// OWNER: worker "orgs" (W2). Shared request helpers for the organization Frontend/Backend APIs.
+// Shared request helpers for the organization Frontend/Backend APIs.
 import type { Context } from "hono";
 import { and, eq } from "drizzle-orm";
 import { ErrorCodes, OrbitError } from "@orbitid/shared";

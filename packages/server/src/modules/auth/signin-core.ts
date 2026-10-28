@@ -1,4 +1,4 @@
-// OWNER: worker "core" (W1). Sign-in state machine helpers shared by the FAPI and OAuth callbacks.
+// Sign-in state machine helpers shared by the FAPI and OAuth callbacks.
 import { desc, eq } from "drizzle-orm";
 import {
   ErrorCodes, OrbitError,
@@ -15,7 +15,6 @@ import { supportedSecondFactors } from "../../services/mfa";
 import { listEnabledSocialProviders } from "../../services/oauth-providers";
 import type { ExternalProfile } from "../../services/external-identity";
 import { getVerificationById, verificationJSON } from "./verifications";
-import { tolerateNotImplemented } from "./errors";
 import { redeemTicket } from "../../services/restrictions";
 
 export type SignInRow = typeof s.signIns.$inferSelect;
@@ -257,7 +256,7 @@ export type RedeemTicketResult =
 
 /** Validates a `ticket` (sign-in token / actor token) and returns the user + impersonation actor. */
 export async function resolveTicket(ctx: AppContext, ticket: string): Promise<{ userId: string; actor?: Record<string, unknown>; sessionMaxDurationSeconds?: number }> {
-  const result = await tolerateNotImplemented<RedeemTicketResult | null>(() => redeemTicket(ctx, ticket), null);
+  const result = await redeemTicket(ctx, ticket);
   if (!result) throw new OrbitError(422, ErrorCodes.ticket_invalid, "That ticket is not valid");
   if (result.kind === "invitation") {
     throw new OrbitError(422, ErrorCodes.ticket_invalid, "This ticket can only be used to sign up");

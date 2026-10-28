@@ -1,4 +1,4 @@
-// OWNER: worker "core" (W1) — /v1/client (client, sessions, tokens, touch/end/remove)
+// /v1/client (client, sessions, tokens, touch/end/remove)
 import { Hono, type Context } from "hono";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";

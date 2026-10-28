@@ -63,12 +63,13 @@ describe("login guard", () => {
     expect(await screen.findByText("Sign in to your instance")).toBeTruthy();
   });
 
-  it("renders the shell when a secret key is already stored", async () => {
+  it("renders the shell when a secret key is already stored", { timeout: 20_000 }, async () => {
     sessionStorage.setItem("orbitid.secretKey", "sk_test_existing");
     mockApi();
     renderApp("/");
     expect(await screen.findAllByText("Overview")).not.toHaveLength(0);
     expect(screen.queryByText("Sign in to your instance")).toBeNull();
-    expect(await screen.findByText("Instance keys")).toBeTruthy();
+    // The overview chunk is lazy and pulls in recharts; give it room when the machine is busy.
+    expect(await screen.findByText("Instance keys", {}, { timeout: 10_000 })).toBeTruthy();
   });
 });

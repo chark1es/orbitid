@@ -1,4 +1,4 @@
-// OWNER: worker "core" (W1). Body coercion so the same schemas accept JSON and urlencoded forms.
+// Body coercion so the same schemas accept JSON and urlencoded forms.
 import { z } from "zod";
 
 /** Accepts JSON booleans and form values `true/false/1/0`. */
