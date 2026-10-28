@@ -147,7 +147,6 @@ export const instanceSettingsSchema = z.object({
     showPoweredBy: z.boolean().default(true),
     theme: z.enum(["light", "dark", "system"]).default("system"),
   }).default({}),
-  billing: z.object({ enabled: z.boolean().default(false) }).default({}),
 });
 export type InstanceSettings = z.infer<typeof instanceSettingsSchema>;
 export const defaultInstanceSettings = (): InstanceSettings => instanceSettingsSchema.parse({});

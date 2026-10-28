@@ -39,7 +39,7 @@ If you know Clerk, you already know OrbitID: `useUser`, `useAuth`, `<SignIn />`,
 | OIDC / OAuth 2 provider (OrbitID as the identity provider) | ✅ |
 | Enterprise SSO: SAML 2.0 and OIDC connections | ✅ |
 | Admin dashboard, audit logs, stats | ✅ |
-| Billing / subscriptions, Web3 wallets, Google One Tap, native mobile SDKs, hosted account portal | ❌ not implemented |
+| Web3 wallets, Google One Tap, native mobile SDKs | not planned |
 
 ## Quick start
 
