@@ -1,25 +1,55 @@
 // OrbitID as OIDC/OAuth2 identity provider.
 //   Discovery: /.well-known/openid-configuration
-//   Protocol:  /oauth/{authorize,token,userinfo,revoke,introspect,jwks,consent_info,consent}
+//   Protocol:  /oauth/{authorize,token,userinfo,revoke,introspect,jwks,device_authorization,device,consent_info,consent}
+//              /oauth/device (server-rendered verification page) + /oauth/device.js (its script)
 //              /oauth/m2m/token (machine-secret client_credentials; app.ts guards /v1/m2m with the secret key)
+//   Frontend API for the device grant: /v1/client/oauth/device[/approve]
 //   Management (secret key, guarded here because this module is mounted at "/"): /v1/oauth_applications
 import { Hono, type Context } from "hono";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
 import { ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../context";
-import { parseBody, parsePagination } from "../lib/http";
+import { clientIp, parseBody, parsePagination } from "../lib/http";
+import { hit } from "../lib/rate-limit";
 import { requireSecretKey } from "../middleware";
+import { validateRedirectUrl } from "./auth/redirects";
 import {
-  assertRedirectUri, assertScopesAllowed, authenticateClient, createApplication, deleteApplication,
-  discoveryDocument, exchangeAuthorizationCode, exchangeRefreshToken, getApplicationByClientId, hasConsent, introspectToken,
-  issueAuthorizationCode, listApplications, OAuthError, parseBasicAuthorization, parseScopes,
-  recordConsent, requireApplication, revokeToken, rotateClientSecret, SCOPE_DESCRIPTIONS, serializeApplication,
-  storedConsent, updateApplication, accessGrantFromToken, userInfoClaims,
+  accessGrantFromToken, assertRedirectUri, assertScopesAllowed, authenticateClient, burnDeviceCode,
+  createApplication, createDeviceAuthorization, decideDeviceCode, deleteApplication, DEVICE_CODE_GRANT_TYPE,
+  deviceApplication, discoveryDocument, exchangeAuthorizationCode, exchangeRefreshToken, findDeviceByUserCode,
+  formatUserCode, getApplicationByClientId, hasConsent, introspectToken, issueAuthorizationCode, listApplications,
+  normalizeUserCode, OAuthError, parseBasicAuthorization, parseScopes, pollDeviceCode, recordConsent, requireApplication,
+  revokeToken, rotateClientSecret, SCOPE_DESCRIPTIONS, serializeApplication, storedConsent, updateApplication,
+  userInfoClaims,
 } from "../services/oidc";
 import { authenticateMachineSecret, issueMachineToken, serializeMachineToken } from "../services/m2m";
 import { getJwks } from "../services/tokens";
 import { resolveCaller } from "./machine/auth";
+import { devicePageHtml, deviceResultHtml, DEVICE_PAGE_CSP } from "./oidc-device-page";
+
+/**
+ * Attempts a single user code gets (per IP and per code) before the code is burned. Small on purpose: a
+ * person needs a handful of tries, an attacker guessing an 8-character code needs billions.
+ */
+const DEVICE_CODE_ATTEMPTS = 10;
+const DEVICE_CODE_WINDOW_MS = 10 * 60 * 1000;
+/** Limits for the unauthenticated device endpoints. */
+const DEVICE_LOOKUP_PER_IP = 20;
+
+/** Static files next to this module (the device page's script and stylesheet). */
+function serveAsset(name: string, contentType: string, maxAgeSeconds: number): Response {
+  const path = fileURLToPath(new URL(`./${name}`, import.meta.url));
+  return new Response(readFileSync(path, "utf8"), {
+    headers: {
+      "content-type": contentType,
+      "cache-control": `public, max-age=${maxAgeSeconds}`,
+      "x-content-type-options": "nosniff",
+    },
+  });
+}
 
 const urlWith = (base: string, params: Record<string, string | null | undefined>) => {
   const url = new URL(base);
@@ -48,6 +78,13 @@ const tokenRequestSchema = z.object({
   client_id: z.string().optional(),
   client_secret: z.string().optional(),
   scope: z.string().optional(),
+  device_code: z.string().optional(),
+});
+
+const deviceAuthorizationSchema = z.object({
+  client_id: z.string().optional(),
+  scope: z.string().optional(),
+  client_secret: z.string().optional(),
 });
 
 const applicationSchema = z.object({
@@ -72,19 +109,38 @@ const currentUrl = (c: Context) => {
   return url.toString();
 };
 
-const signInUrl = (ctx: AppContext, authorizeUrl: string) =>
-  urlWith(`${ctx.settings.get().application.homeUrl.replace(/\/$/, "")}/sign-in`, { redirect_url: authorizeUrl });
+const appBase = (ctx: AppContext) => ctx.settings.get().application.homeUrl.replace(/\/$/, "");
+
+const signInUrl = (ctx: AppContext, redirectUrl: string) =>
+  urlWith(`${appBase(ctx)}/sign-in`, { redirect_url: redirectUrl });
 
 const consentUrl = (ctx: AppContext, appName: string, clientId: string, scope: string, authorizeUrl: string) =>
-  urlWith(`${ctx.settings.get().application.homeUrl.replace(/\/$/, "")}/oauth-consent`, {
+  urlWith(`${appBase(ctx)}/oauth-consent`, {
     client_id: clientId,
     client_name: appName,
     scope,
     redirect_url: authorizeUrl,
   });
 
+/** Device verification URL; `verification_uri_complete` carries the code so the user only confirms. */
+const deviceVerificationUrl = (ctx: AppContext) => `${ctx.env.baseUrl}/oauth/device`;
+
+/**
+ * Link to the app's sign-in screen that comes back to `target`. The instance origin is not necessarily one of
+ * the app's allowed redirect origins, so an unusable `redirect_url` is dropped instead of breaking sign-in.
+ */
+function signInLink(ctx: AppContext, target: string): string {
+  try {
+    const redirectUrl = validateRedirectUrl(ctx, target) ?? target;
+    return signInUrl(ctx, redirectUrl);
+  } catch {
+    return signInUrl(ctx, appBase(ctx));
+  }
+}
+
 export default function routes(ctx: AppContext) {
   const app = new Hono();
+  const deviceEnabled = () => ctx.settings.get().oidcProvider.deviceAuthorizationEnabled;
 
   // ─────────── discovery + JWKS ───────────
   app.get("/.well-known/openid-configuration", (c) => c.json(discoveryDocument(ctx)));
@@ -141,6 +197,7 @@ export default function routes(ctx: AppContext) {
           codeChallenge,
           codeChallengeMethod,
           nonce: q.nonce ?? null,
+          sessionId: caller.sessionId,
         });
     return c.redirect(urlWith(redirectUri, { code, state }));
   }));
@@ -206,6 +263,7 @@ export default function routes(ctx: AppContext) {
           codeChallenge: body.code_challenge ?? null,
           codeChallengeMethod: body.code_challenge_method ?? null,
           nonce: body.nonce ?? null,
+          sessionId: caller.sessionId,
         });
     return c.json({ redirect_url: urlWith(redirectUri, { code, state }) });
   }));
@@ -233,28 +291,31 @@ export default function routes(ctx: AppContext) {
       const tokens = await exchangeRefreshToken(ctx, appRow, body.refresh_token);
       return c.json(tokens);
     }
+    if (body.grant_type === DEVICE_CODE_GRANT_TYPE) {
+      if (!deviceEnabled()) throw new OAuthError(400, "unsupported_grant_type", `Unsupported grant_type: ${body.grant_type}`);
+      if (!body.device_code) throw new OAuthError(400, "invalid_request", "device_code is required");
+      const result = await pollDeviceCode(ctx, appRow, body.device_code);
+      if (!result.ok) {
+        if (result.intervalSeconds) c.header("Retry-After", String(result.intervalSeconds));
+        throw new OAuthError(400, result.error, result.description);
+      }
+      return c.json(result.tokens);
+    }
     throw new OAuthError(400, "unsupported_grant_type", `Unsupported grant_type: ${body.grant_type}`);
   }));
 
   // ─────────── userinfo ───────────
-  app.get("/oauth/userinfo", handle(async (c) => {
-    const bearer = (c.req.header("authorization") ?? "").replace(/^Bearer\s+/i, "").trim() || (c.req.query("access_token") ?? "");
+  const userinfo = handle(async (c) => {
+    const bearer = (c.req.header("authorization") ?? "").replace(/^Bearer\s+/i, "").trim() || (c.req.method === "GET" ? c.req.query("access_token") ?? "" : "");
     if (!bearer) {
       c.header("WWW-Authenticate", 'Bearer realm="orbitid"');
       throw new OAuthError(401, "invalid_token", "An access token is required");
     }
     const { row, user } = await accessGrantFromToken(ctx, bearer);
     return c.json(await userInfoClaims(ctx, row, user));
-  }));
-  app.post("/oauth/userinfo", handle(async (c) => {
-    const bearer = (c.req.header("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
-    if (!bearer) {
-      c.header("WWW-Authenticate", 'Bearer realm="orbitid"');
-      throw new OAuthError(401, "invalid_token", "An access token is required");
-    }
-    const { row, user } = await accessGrantFromToken(ctx, bearer);
-    return c.json(await userInfoClaims(ctx, row, user));
-  }));
+  });
+  app.get("/oauth/userinfo", userinfo);
+  app.post("/oauth/userinfo", userinfo);
 
   // ─────────── revocation (RFC 7009) ───────────
   app.post("/oauth/revoke", handle(async (c) => {
@@ -286,7 +347,190 @@ export default function routes(ctx: AppContext) {
           clientId: body.client_id,
           clientSecret: body.client_secret,
         });
+    // Public clients cannot introspect: RFC 7662 requires confidential client authentication.
+    if (appRow.isPublic) throw new OAuthError(401, "invalid_client", "Public clients cannot introspect tokens");
     return c.json(await introspectToken(ctx, appRow, body.token));
+  }));
+
+  // ─────────── device authorization grant (RFC 8628) ───────────
+  app.post("/oauth/device_authorization", handle(async (c) => {
+    if (!deviceEnabled()) throw new OrbitError(404, ErrorCodes.resource_not_found, "Route not found");
+    await hit(ctx, `oauth-device-authorization:${clientIp(c)}`, 30, 60 * 60 * 1000);
+    const body = await parseBody(c, deviceAuthorizationSchema);
+    const appRow = await authenticateClient(ctx, {
+          authorization: c.req.header("authorization"),
+          clientId: body.client_id,
+          clientSecret: body.client_secret,
+        });
+    const scopes = assertScopesAllowed(appRow, parseScopes(body.scope || "openid"));
+    const created = await createDeviceAuthorization(ctx, { application: appRow, scopes });
+    const verificationUri = deviceVerificationUrl(ctx);
+    return c.json({
+      device_code: created.deviceCode,
+      user_code: formatUserCode(created.row.userCode),
+      verification_uri: verificationUri,
+      verification_uri_complete: urlWith(verificationUri, { user_code: formatUserCode(created.row.userCode) }),
+      expires_in: created.expiresInSeconds,
+      interval: created.intervalSeconds,
+    });
+  }));
+
+  // ─────────── device verification page (verification_uri) ───────────
+  /** Counts one user-code attempt per IP and per submitted code; burning the code once its own budget runs out. */
+  const countDeviceAttempt = async (c: Context, rawUserCode: string) => {
+    await hit(ctx, `oauth-device:ip:${clientIp(c)}`, DEVICE_LOOKUP_PER_IP, DEVICE_CODE_WINDOW_MS);
+    // Only a well-formed code gets a per-code counter: an arbitrary string must not become a rate-limit key.
+    const userCode = normalizeUserCode(rawUserCode);
+    if (!userCode) return;
+    try {
+      await hit(ctx, `oauth-device:code:${userCode}`, DEVICE_CODE_ATTEMPTS, DEVICE_CODE_WINDOW_MS);
+    } catch (err) {
+      // Only the per-code budget burns the code: a noisy IP must not be able to cancel someone's approval.
+      const row = await findDeviceByUserCode(ctx, userCode);
+      if (row) await burnDeviceCode(ctx, row);
+      throw err;
+    }
+  };
+
+  const productName = () => ctx.settings.get().application.name;
+  const renderPage = (c: Context, input: Parameters<typeof devicePageHtml>[0]) => {
+    const html = devicePageHtml(input, productName());
+    return c.html(html, 200, {
+      "content-security-policy": DEVICE_PAGE_CSP,
+      "cache-control": "no-store",
+      "referrer-policy": "no-referrer",
+    });
+  };
+
+  const deviceState = async (c: Context, rawCode: string | undefined) => {
+    const caller = await resolveCaller(ctx, c);
+    const code = rawCode ? normalizeUserCode(rawCode) : null;
+    const signedIn = !!caller?.userId;
+    // Back to this page (on the instance origin) after signing in, so the code survives the round trip.
+    const pageUrl = urlWith(deviceVerificationUrl(ctx), { user_code: code ? formatUserCode(code) : null });
+    const signInHref = signInLink(ctx, pageUrl);
+    if (!code) return { signedIn, signInHref, code: null as string | null, appName: null as string | null, scopes: [] as string[], state: "enter_code" as const };
+    const row = await findDeviceByUserCode(ctx, code);
+    if (!row) return { signedIn, signInHref, code, appName: null, scopes: [], state: "not_found" as const };
+    if (row.expiresAt <= Date.now()) return { signedIn, signInHref, code, appName: null, scopes: [], state: "expired" as const };
+    const application = await deviceApplication(ctx, row);
+    const scopes = parseScopes(row.scopes);
+    if (row.status !== "pending") {
+      return { signedIn, signInHref, code, appName: application?.name ?? null, scopes, state: "already_decided" as const };
+    }
+    if (!signedIn) {
+      return { signedIn, signInHref, code, appName: application?.name ?? null, scopes, state: "sign_in_required" as const };
+    }
+    return { signedIn, signInHref, code, appName: application?.name ?? null, scopes, scopesWithDescriptions: scopes.map((s) => ({ scope: s, description: SCOPE_DESCRIPTIONS[s] ?? `Access to ${s}` })), state: "consent" as const };
+  };
+
+  const devicePage = async (c: Context) => {
+    if (!deviceEnabled()) return c.notFound();
+    const raw = c.req.query("user_code");
+    if (raw) {
+      try {
+        await countDeviceAttempt(c, raw);
+      } catch (err) {
+        if (err instanceof OrbitError && err.status === 429) {
+          return c.html(deviceResultHtml("too_many_attempts", undefined, productName()), 429, { "content-security-policy": DEVICE_PAGE_CSP, "cache-control": "no-store" });
+        }
+        throw err;
+      }
+    }
+    return renderPage(c, await deviceState(c, raw));
+  };
+
+  app.get("/oauth/device", handle(devicePage));
+
+  app.post("/oauth/device", handle(async (c) => {
+    if (!deviceEnabled()) return c.notFound();
+    // Same-origin only: a cross-site form post must not be able to approve a code its author created.
+    const origin = c.req.header("origin");
+    const fetchSite = c.req.header("sec-fetch-site");
+    if (fetchSite === "cross-site" || (origin && origin !== new URL(ctx.env.baseUrl).origin)) {
+      return c.html(deviceResultHtml("cross_site", undefined, productName()), 403, {
+        "content-security-policy": DEVICE_PAGE_CSP, "cache-control": "no-store", "referrer-policy": "no-referrer",
+      });
+    }
+    const form = await c.req.parseBody();
+    const rawCode = typeof form.user_code === "string" ? form.user_code : "";
+    const action = form.action === "deny" ? "deny" : form.action === "approve" ? "approve" : null;
+    const caller = await resolveCaller(ctx, c);
+    const code = normalizeUserCode(rawCode);
+    if (!action || !code) return renderPage(c, await deviceState(c, rawCode));
+    if (!caller?.userId) return renderPage(c, await deviceState(c, rawCode));
+    try {
+      await countDeviceAttempt(c, code);
+    } catch (err) {
+      if (err instanceof OrbitError && err.status === 429) {
+        return c.html(deviceResultHtml("too_many_attempts", undefined, productName()), 429, { "content-security-policy": DEVICE_PAGE_CSP, "cache-control": "no-store" });
+      }
+      throw err;
+    }
+    const decision = await decideDeviceCode(ctx, { userCode: code, userId: caller.userId, approve: action === "approve" });
+    if (!decision.ok) return renderPage(c, await deviceState(c, rawCode));
+    return c.html(deviceResultHtml(action === "approve" ? "approved" : "denied", decision.application.name, productName()), 200, {
+      "content-security-policy": DEVICE_PAGE_CSP,
+      "cache-control": "no-store",
+      "referrer-policy": "no-referrer",
+    });
+  }));
+
+  app.get("/oauth/device.js", (c) => {
+    if (!deviceEnabled()) return c.notFound();
+    return serveAsset("oidc-device.js", "text/javascript; charset=utf-8", 3600);
+  });
+
+  app.get("/oauth/device.css", (c) => {
+    if (!deviceEnabled()) return c.notFound();
+    return serveAsset("oidc-device.css", "text/css; charset=utf-8", 3600);
+  });
+
+  // ─────────── Frontend API for the device grant ───────────
+  app.get("/v1/client/oauth/device", handle(async (c) => {
+    if (!deviceEnabled()) throw new OrbitError(404, ErrorCodes.resource_not_found, "Route not found");
+    const caller = await resolveCaller(ctx, c);
+    if (!caller?.userId) throw new OrbitError(401, ErrorCodes.authentication_invalid, "Authentication invalid. Please sign in again.");
+    const raw = c.req.query("user_code") ?? "";
+    const code = normalizeUserCode(raw);
+    if (!code) throw new OrbitError(422, ErrorCodes.form_param_format_invalid, "user_code must look like ABCD-EFGH", { param_name: "user_code" });
+    await countDeviceAttempt(c, code);
+    const row = await findDeviceByUserCode(ctx, code);
+    if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "That code is not valid");
+    if (row.expiresAt <= Date.now()) throw new OrbitError(410, ErrorCodes.verification_expired, "That code has expired");
+    const application = await deviceApplication(ctx, row);
+    if (!application) throw new OrbitError(404, ErrorCodes.resource_not_found, "OAuth application not found");
+    const scopes = parseScopes(row.scopes);
+    return c.json({
+      user_code: formatUserCode(row.userCode),
+      status: row.status,
+      expires_at: row.expiresAt,
+      client: { id: application.id, client_id: application.clientId, name: application.name, public: application.isPublic },
+      scopes: scopes.map((scope) => ({ scope, description: SCOPE_DESCRIPTIONS[scope] ?? `Access to ${scope}` })),
+    });
+  }));
+
+  app.post("/v1/client/oauth/device/approve", handle(async (c) => {
+    if (!deviceEnabled()) throw new OrbitError(404, ErrorCodes.resource_not_found, "Route not found");
+    const caller = await resolveCaller(ctx, c);
+    if (!caller?.userId) throw new OrbitError(401, ErrorCodes.authentication_invalid, "Authentication invalid. Please sign in again.");
+    const body = await parseBody(c, z.object({ user_code: z.string().min(1), action: z.enum(["approve", "deny"]) }));
+    const code = normalizeUserCode(body.user_code);
+    if (!code) throw new OrbitError(422, ErrorCodes.form_param_format_invalid, "user_code must look like ABCD-EFGH", { param_name: "user_code" });
+    await countDeviceAttempt(c, code);
+    const decision = await decideDeviceCode(ctx, { userCode: code, userId: caller.userId, approve: body.action === "approve" });
+    if (!decision.ok) {
+      if (decision.reason === "not_found") throw new OrbitError(404, ErrorCodes.resource_not_found, "That code is not valid");
+      if (decision.reason === "expired") throw new OrbitError(410, ErrorCodes.verification_expired, "That code has expired");
+      throw new OrbitError(409, ErrorCodes.verification_failed, "That code has already been used");
+    }
+    return c.json({
+      object: "oauth_device_authorization",
+      user_code: formatUserCode(code),
+      status: body.action === "approve" ? "approved" : "denied",
+      client: { id: decision.application.id, client_id: decision.application.clientId, name: decision.application.name },
+      scopes: decision.scopes,
+    });
   }));
 
   // ─────────── machine tokens (client_credentials, machine secret) ───────────

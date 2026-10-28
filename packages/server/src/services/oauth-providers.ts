@@ -4,9 +4,10 @@ import {
   MicrosoftEntraId, Notion, OAuth2Client, CodeChallengeMethod, Slack, Spotify, Twitch, Twitter,
 } from "arctic";
 import type { OAuth2Tokens } from "arctic";
-import { createRemoteJWKSet, decodeJwt, jwtVerify } from "jose";
+import { createRemoteJWKSet, decodeJwt, importPKCS8, jwtVerify, SignJWT } from "jose";
 import { ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../context";
+import { sha256 } from "../lib/crypto";
 import type { ExternalProfile } from "./external-identity";
 
 export interface OAuthProviderConfig {
@@ -16,6 +17,10 @@ export interface OAuthProviderConfig {
   clientSecret: string;
   scopes: string[];
   discoveryUrl?: string;
+  /** Apple only: the `.p8` key material the server uses to mint the client secret. */
+  appleTeamId?: string;
+  appleKeyId?: string;
+  applePrivateKey?: string;
 }
 
 export interface OAuthTokenSet {
@@ -24,6 +29,8 @@ export interface OAuthTokenSet {
   expiresAt?: number;
   scopes?: string;
   idToken?: string;
+  /** Claims of an ID token already verified against the provider's JWKS during the code exchange. */
+  idTokenClaims?: Record<string, unknown>;
   raw: Record<string, unknown>;
 }
 
@@ -106,7 +113,118 @@ export function providerConfig(ctx: AppContext, key: string): OAuthProviderConfi
     clientSecret: cfg.clientSecret,
     scopes: cfg.scopes.length ? cfg.scopes : DEFAULT_SCOPES[key] ?? (key.startsWith("custom_") ? ["openid", "profile", "email"] : []),
     discoveryUrl: cfg.discoveryUrl,
+    appleTeamId: cfg.appleTeamId,
+    appleKeyId: cfg.appleKeyId,
+    applePrivateKey: cfg.applePrivateKey,
   };
+}
+
+/** Apple's issuer and JWKS; the ID token signature is checked against the published keys. */
+export const APPLE_ISSUER = "https://appleid.apple.com";
+export const APPLE_JWKS_URL = "https://appleid.apple.com/auth/keys";
+const APPLE_TOKEN_URL = "https://appleid.apple.com/auth/token";
+/** Apple caps the client secret's lifetime at six months; renew a day early so a long request never straddles it. */
+export const APPLE_CLIENT_SECRET_LIFETIME_SECONDS = 180 * 24 * 60 * 60;
+const APPLE_CLIENT_SECRET_RENEW_BEFORE_SECONDS = 24 * 60 * 60;
+
+interface CachedAppleSecret { jwt: string; expiresAt: number }
+const appleSecretCache = new Map<string, CachedAppleSecret>();
+
+/** Test seam: forget cached Apple client secrets (the cache is process-wide, keyed by client + key id). */
+export function resetAppleClientSecretCache() {
+  appleSecretCache.clear();
+}
+
+const appleCacheKey = (cfg: OAuthProviderConfig) =>
+  sha256([cfg.clientId, cfg.appleTeamId ?? "", cfg.appleKeyId ?? "", cfg.applePrivateKey ?? ""].join("\u0000"));
+
+/** True when the server can mint the Apple client secret from a `.p8` key. */
+export const hasAppleKey = (cfg: OAuthProviderConfig) => !!(cfg.appleTeamId && cfg.appleKeyId && cfg.applePrivateKey);
+
+/**
+ * Apple requires `client_secret` to be an ES256 JWT: `iss` = team id, `sub` = client id,
+ * `aud` = https://appleid.apple.com, max six months, `kid` in the header. Minted on demand and cached
+ * until shortly before it expires. A configured `clientSecret` is used instead when no key is present.
+ */
+export async function appleClientSecret(cfg: OAuthProviderConfig, now = Date.now()): Promise<string> {
+  if (!hasAppleKey(cfg)) {
+    if (cfg.clientSecret) return cfg.clientSecret;
+    throw new OrbitError(400, ErrorCodes.oauth_provider_not_enabled, "Apple needs a client secret or a team id, key id and private key");
+  }
+  const cacheKey = appleCacheKey(cfg);
+  const cached = appleSecretCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) return cached.jwt;
+
+  let key: CryptoKey;
+  try {
+    key = await importPKCS8(normalizeP8(cfg.applePrivateKey!), "ES256");
+  } catch {
+    throw new OrbitError(400, ErrorCodes.oauth_provider_not_enabled, "The Apple private key is not a valid ES256 (.p8) key");
+  }
+  const issuedAt = Math.floor(now / 1000);
+  const expiresAt = issuedAt + APPLE_CLIENT_SECRET_LIFETIME_SECONDS;
+  const jwt = await new SignJWT({})
+    .setProtectedHeader({ alg: "ES256", kid: cfg.appleKeyId })
+    .setIssuer(cfg.appleTeamId!)
+    .setSubject(cfg.clientId)
+    .setAudience(APPLE_ISSUER)
+    .setIssuedAt(issuedAt)
+    .setExpirationTime(expiresAt)
+    .sign(key);
+  appleSecretCache.set(cacheKey, { jwt, expiresAt: (expiresAt - APPLE_CLIENT_SECRET_RENEW_BEFORE_SECONDS) * 1000 });
+  return jwt;
+}
+
+/** Accepts the key with or without the PEM header/footer and with the line breaks a dashboard paste usually loses. */
+function normalizeP8(raw: string): string {
+  const trimmed = raw.trim().replace(/\\n/g, "\n");
+  if (trimmed.includes("-----BEGIN")) return trimmed;
+  const body = trimmed.replace(/\s+/g, "");
+  const lines = body.match(/.{1,64}/g)?.join("\n") ?? body;
+  return `-----BEGIN PRIVATE KEY-----\n${lines}\n-----END PRIVATE KEY-----\n`;
+}
+
+const appleJwks = createRemoteJWKSet(new URL(APPLE_JWKS_URL));
+
+/** Test seam: replaces Apple's published JWKS (a local key set that never leaves the process). */
+let appleJwksOverride: ((protectedHeader?: { kid?: string }) => Promise<CryptoKey>) | null = null;
+export function registerAppleJwks(resolver: ((protectedHeader?: { kid?: string }) => Promise<CryptoKey>) | null) {
+  appleJwksOverride = resolver;
+}
+
+/**
+ * Verifies an Apple ID token: signature against Apple's JWKS, `iss` = https://appleid.apple.com,
+ * `aud` = the configured client id, and expiry. Returns the verified claims.
+ */
+export async function verifyAppleIdToken(idToken: string, clientId: string): Promise<Record<string, unknown>> {
+  try {
+    const key = appleJwksOverride ?? appleJwks;
+    const { payload } = await jwtVerify(idToken, key as Parameters<typeof jwtVerify>[1], { issuer: APPLE_ISSUER, audience: clientId });
+    return payload as Record<string, unknown>;
+  } catch {
+    throw new OrbitError(502, ErrorCodes.oauth_callback_error, "Apple returned an ID token that could not be verified");
+  }
+}
+
+/** Apple's first-authorization `user` form field carries the name; it is absent on every later authorization. */
+export function appleProfileName(userJson: string | undefined): { firstName?: string; lastName?: string } {
+  const name = firstAuthorizationName(userJson);
+  return name ?? {};
+}
+
+/** Returns the parsed name only for a first authorization (the field is absent afterwards). */
+function firstAuthorizationName(userJson: string | undefined): { firstName?: string; lastName?: string } | null {
+  if (!userJson) return null;
+  try {
+    const parsed = JSON.parse(userJson) as { name?: { firstName?: string; lastName?: string } };
+    if (!parsed.name) return null;
+    return {
+      firstName: typeof parsed.name.firstName === "string" ? parsed.name.firstName : undefined,
+      lastName: typeof parsed.name.lastName === "string" ? parsed.name.lastName : undefined,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function isProviderEnabled(ctx: AppContext, key: string): boolean {
@@ -555,6 +673,7 @@ async function fetchProfileFor(cfg: OAuthProviderConfig, tokens: OAuthTokenSet):
       return normalizeProfile(key, data, tokens);
     }
     case "apple":
+      return appleProfile(cfg, tokens);
     case "xero":
       return idTokenProfile(key, tokens);
     case "custom": {
@@ -634,20 +753,47 @@ function manualAppleAdapter(cfg: OAuthProviderConfig, redirectUri: string): OAut
       return url;
     },
     async exchangeCode({ code }) {
-      // `clientSecret` for Apple is a pre-generated ES256 JWT (see Apple docs / dashboard).
+      // A configured secret wins; otherwise the server mints the ES256 JWT Apple expects from the .p8 key.
       const body = new URLSearchParams({
-        client_id: cfg.clientId, client_secret: cfg.clientSecret, code, grant_type: "authorization_code", redirect_uri: redirectUri,
+        client_id: cfg.clientId, client_secret: await appleClientSecret(cfg), code, grant_type: "authorization_code", redirect_uri: redirectUri,
       });
-      const data = rec(await requestJson("https://appleid.apple.com/auth/token", { method: "POST", body, headers: { "Content-Type": "application/x-www-form-urlencoded" } }));
+      const data = rec(await requestJson(APPLE_TOKEN_URL, { method: "POST", body, headers: { "Content-Type": "application/x-www-form-urlencoded" } }));
       const accessToken = str(data.access_token);
       const idToken = str(data.id_token);
       if (!accessToken || !idToken) throw new OrbitError(502, ErrorCodes.oauth_callback_error, "Apple did not return tokens");
-      return { accessToken, refreshToken: str(data.refresh_token), idToken, expiresAt: typeof data.expires_in === "number" ? Date.now() + data.expires_in * 1000 : undefined, raw: data };
+      // Verify before anything reads the claims: signature, issuer, audience and expiry.
+      const idTokenClaims = await verifyAppleIdToken(idToken, cfg.clientId);
+      return {
+        accessToken,
+        refreshToken: str(data.refresh_token),
+        idToken,
+        idTokenClaims,
+        expiresAt: typeof data.expires_in === "number" ? Date.now() + data.expires_in * 1000 : undefined,
+        raw: data,
+      };
     },
     async fetchProfile({ tokens }) {
-      return idTokenProfile("apple", tokens);
+      return appleProfile(cfg, tokens);
     },
   };
+}
+
+/**
+ * Apple has no userinfo endpoint: everything comes from the ID token. Claims verified during the code
+ * exchange are used as-is; a token that reaches us unverified is verified here rather than trusted.
+ */
+async function appleProfile(cfg: OAuthProviderConfig, tokens: OAuthTokenSet): Promise<ExternalProfile> {
+  const claims = tokens.idTokenClaims
+    ?? (tokens.idToken ? await verifyAppleIdToken(tokens.idToken, cfg.clientId) : null);
+  if (!claims) throw new OrbitError(502, ErrorCodes.oauth_callback_error, "Apple did not return an ID token");
+  const sub = str(claims.sub);
+  if (!sub) throw new OrbitError(502, ErrorCodes.oauth_callback_error, "Apple returned an ID token without a subject");
+  return profile("apple", {
+    providerUserId: sub,
+    email: str(claims.email),
+    emailVerified: boolOrUndefined(claims.email_verified) ?? !!claims.email,
+    raw: claims as Record<string, unknown>,
+  }, tokens);
 }
 
 const GENERIC_ENDPOINTS: Record<string, { authUrl: string; tokenUrl: string }> = {
