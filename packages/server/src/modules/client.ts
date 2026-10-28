@@ -252,6 +252,7 @@ export default function routes(ctx: AppContext) {
     }
     c.header("Content-Type", type);
     c.header("X-Content-Type-Options", "nosniff");
+    c.header("Content-Security-Policy", "sandbox");
     c.header("Cache-Control", "public, max-age=31536000, immutable");
     return c.body(new Uint8Array(data).buffer);
   });

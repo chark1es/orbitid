@@ -88,6 +88,7 @@ export async function getJwks(ctx: AppContext): Promise<{ keys: JWK[] }> {
 // ───────────── claim helpers ─────────────
 
 const asRecord = (v: unknown): Record<string, unknown> => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
+const PROTOTYPE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 function lookupPath(source: Record<string, unknown>, path: string): unknown {
   let cur: unknown = source;
@@ -98,6 +99,8 @@ function lookupPath(source: Record<string, unknown>, path: string): unknown {
       cur = Number.isInteger(idx) ? cur[idx] : undefined;
       continue;
     }
+    if (PROTOTYPE_KEYS.has(part)) return undefined;
+    if (!Object.prototype.hasOwnProperty.call(cur, part)) return undefined;
     cur = asRecord(cur)[part];
   }
   return cur;
@@ -272,7 +275,12 @@ async function importTemplateKey(ctx: AppContext, encrypted: string, algorithm: 
 export async function verifySessionToken(ctx: AppContext, jwt: string): Promise<SessionClaims> {
   const jwks = await getJwks(ctx);
   try {
-    const { payload } = await jwtVerify(jwt, createLocalJWKSet(jwks), { issuer: ctx.env.baseUrl });
+    const { payload } = await jwtVerify(jwt, createLocalJWKSet(jwks), {
+      issuer: ctx.env.baseUrl,
+      // Instance keys are asymmetric only. Pinning the algorithms rejects `none` and HS256 confusion,
+      // where a public key would otherwise be tried as an HMAC secret.
+      algorithms: ["RS256"],
+    });
     // Session tokens never carry an audience; machine and OIDC tokens signed by the same key do.
     if (typeof payload.sid !== "string" || typeof payload.sub !== "string" || payload.aud !== undefined) {
       throw new OrbitError(401, ErrorCodes.authentication_invalid, "Not a session token");

@@ -7,6 +7,7 @@ import {
   type WebhookDeliveryJSON, type WebhookEvent,
 } from "@orbitid/shared";
 import { parseBody } from "../lib/http";
+import { assertPublicUrl } from "../lib/safe-fetch";
 import { newId } from "../lib/ids";
 import * as s from "../db/schema";
 import { deliverDue, generateWebhookSecret, serializeWebhookDelivery, serializeWebhookEndpoint } from "../services/webhooks";
@@ -54,6 +55,7 @@ export default function routes(ctx: AppContext) {
         event_types: z.array(eventTypeSchema).default([]),
       }),
     );
+    await assertPublicUrl(ctx, body.url, "url");
     const now = Date.now();
     const row = first(await ctx.db
           .insert(s.webhookEndpoints)
@@ -92,7 +94,10 @@ export default function routes(ctx: AppContext) {
       }),
     );
     const patch: Partial<typeof s.webhookEndpoints.$inferInsert> = { updatedAt: Date.now() };
-    if (body.url !== undefined) patch.url = body.url;
+    if (body.url !== undefined) {
+      await assertPublicUrl(ctx, body.url, "url");
+      patch.url = body.url;
+    }
     if (body.description !== undefined) patch.description = body.description;
     if (body.event_types !== undefined) patch.eventTypes = body.event_types;
     if (body.disabled !== undefined) patch.disabled = body.disabled;

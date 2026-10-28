@@ -246,7 +246,7 @@ export async function assertSignUpIdentifiers(ctx: AppContext, fields: SignUpFie
   );
 }
 
-export interface CompleteSignUpOptions { ip?: string; userAgent?: string }
+export interface CompleteSignUpOptions { ip?: string; userAgent?: string; rotateClientToken?: () => Promise<void> }
 
 /** Creates the user (and session) and marks the sign-up complete. */
 export async function completeSignUp(ctx: AppContext, row: SignUpRow, opts: CompleteSignUpOptions = {}): Promise<{ userId: string; sessionId: string; user: UserRow }> {
@@ -297,6 +297,7 @@ export async function completeSignUp(ctx: AppContext, row: SignUpRow, opts: Comp
     userAgent: opts.userAgent,
     firstFactor: true,
     method: fields.externalAccount ? "oauth" : authMethodOf(verifications.email_address?.strategy ?? verifications.phone_number?.strategy) ?? "password",
+    rotateClientToken: opts.rotateClientToken,
   });
   await ctx.db.update(s.signUps).set({ status: "complete", createdUserId: user.id, createdSessionId: sessionId, updatedAt: Date.now() }).where(eq(s.signUps.id, row.id));
   // The client is signed in: hide any other in-flight attempts.

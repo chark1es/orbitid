@@ -89,6 +89,14 @@ export async function regenerateClientToken(ctx: AppContext, c: Context, clientI
   return token;
 }
 
+/**
+ * Rotates the client token when a session is created from it, so a token captured before sign-in cannot
+ * be replayed against the now-authenticated client (session fixation).
+ */
+export async function rotateClientTokenOnSignIn(ctx: AppContext, c: Context, clientId: string): Promise<void> {
+  await regenerateClientToken(ctx, c, clientId);
+}
+
 export const clientAzp = (c: Context): string | undefined => {
   const origin = c.req.header("origin");
   if (origin) return origin;

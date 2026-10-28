@@ -2,6 +2,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { extname, join, normalize, sep } from "node:path";
 import type { Context } from "hono";
 import type { AppContext } from "../context";
+import { cspNonce, dashboardCsp } from "../lib/security";
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8",
@@ -11,6 +12,14 @@ const MIME: Record<string, string> = {
 
 /** Paths that belong to the API, never to the dashboard. */
 const API_PREFIXES = ["/v1", "/oauth", "/.well-known", "/health"];
+
+/** Adds the nonce to every inline `<script>` of the built page (external `src` scripts stay as they are). */
+function withNonce(html: string, nonce: string): string {
+  return html.replace(/<script(?![^>]*\bsrc=)([^>]*)>/gi, (match, rest: string) => {
+    if (/\bnonce=/i.test(rest)) return match;
+    return `<script nonce="${nonce}"${rest}>`;
+  });
+}
 
 /**
  * Serves the built dashboard (a single-page app) from `env.dashboardDir`. `index.html` gets the instance's
@@ -22,8 +31,13 @@ export function dashboardHandler(ctx: AppContext): ((c: Context) => Response | P
   const indexPath = join(root, "index.html");
   if (!existsSync(indexPath)) return undefined;
 
-  const bootstrap = `<script>window.__ORBITID__=${JSON.stringify({ apiUrl: ctx.env.baseUrl, publishableKey: ctx.publishableKey, database: ctx.database.dialect })}</script>`;
-  const indexHtml = () => readFileSync(indexPath, "utf8").replace("</head>", `${bootstrap}</head>`);
+  const bootstrap = (nonce: string) =>
+    `<script nonce="${nonce}">window.__ORBITID__=${JSON.stringify({ apiUrl: ctx.env.baseUrl, publishableKey: ctx.publishableKey, database: ctx.database.dialect })}</script>`;
+  const indexHtml = () => {
+    const nonce = cspNonce();
+    const html = withNonce(readFileSync(indexPath, "utf8"), nonce).replace("</head>", `${bootstrap(nonce)}</head>`);
+    return { html, nonce };
+  };
 
   return (c) => {
     let path: string;
@@ -40,6 +54,11 @@ export function dashboardHandler(ctx: AppContext): ((c: Context) => Response | P
         headers: { "content-type": MIME[extname(candidate)] ?? "application/octet-stream", "cache-control": immutable ? "public, max-age=31536000, immutable" : "public, max-age=300" },
       });
     }
-    return c.html(indexHtml(), 200, { "cache-control": "no-cache" });
+    const { html, nonce } = indexHtml();
+    return c.html(html, 200, {
+      "cache-control": "no-cache",
+      "content-security-policy": dashboardCsp(ctx, nonce),
+      "x-frame-options": "DENY",
+    });
   };
 }

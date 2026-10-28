@@ -4,10 +4,11 @@ import {
   MicrosoftEntraId, Notion, OAuth2Client, CodeChallengeMethod, Slack, Spotify, Twitch, Twitter,
 } from "arctic";
 import type { OAuth2Tokens } from "arctic";
-import { createRemoteJWKSet, decodeJwt, importPKCS8, jwtVerify, SignJWT } from "jose";
+import { decodeJwt, importPKCS8, jwtVerify, SignJWT } from "jose";
 import { ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../context";
 import { sha256 } from "../lib/crypto";
+import { remoteJwks, safeFetch } from "../lib/safe-fetch";
 import type { ExternalProfile } from "./external-identity";
 
 export interface OAuthProviderConfig {
@@ -184,8 +185,6 @@ function normalizeP8(raw: string): string {
   return `-----BEGIN PRIVATE KEY-----\n${lines}\n-----END PRIVATE KEY-----\n`;
 }
 
-const appleJwks = createRemoteJWKSet(new URL(APPLE_JWKS_URL));
-
 /** Test seam: replaces Apple's published JWKS (a local key set that never leaves the process). */
 let appleJwksOverride: ((protectedHeader?: { kid?: string }) => Promise<CryptoKey>) | null = null;
 export function registerAppleJwks(resolver: ((protectedHeader?: { kid?: string }) => Promise<CryptoKey>) | null) {
@@ -198,7 +197,7 @@ export function registerAppleJwks(resolver: ((protectedHeader?: { kid?: string }
  */
 export async function verifyAppleIdToken(idToken: string, clientId: string): Promise<Record<string, unknown>> {
   try {
-    const key = appleJwksOverride ?? appleJwks;
+    const key = appleJwksOverride ?? (await remoteJwks(null, APPLE_JWKS_URL));
     const { payload } = await jwtVerify(idToken, key as Parameters<typeof jwtVerify>[1], { issuer: APPLE_ISSUER, audience: clientId });
     return payload as Record<string, unknown>;
   } catch {
@@ -254,13 +253,19 @@ const boolOrUndefined = (v: unknown): boolean | undefined => (typeof v === "bool
 const at = (obj: unknown, path: string): unknown => path.split(".").reduce<unknown>((acc, part) => rec(acc)[part], obj);
 
 async function requestJson(url: string, init: RequestInit = {}): Promise<unknown> {
-  let res: Response;
+  let res;
   try {
-    res = await fetch(url, { ...init, signal: AbortSignal.timeout(10_000) });
+    res = await safeFetch(null, url, {
+      method: init.method,
+      headers: init.headers as Record<string, string> | undefined,
+      body: init.body as string | URLSearchParams | undefined,
+      timeoutMs: 10_000,
+      maxBytes: 512 * 1024,
+    });
   } catch {
     throw new OrbitError(502, ErrorCodes.oauth_callback_error, "Could not reach the identity provider");
   }
-  const text = await res.text();
+  const text = res.body;
   if (!res.ok) {
     throw new OrbitError(502, ErrorCodes.oauth_callback_error, `Identity provider request failed (${res.status})`);
   }
@@ -696,7 +701,7 @@ async function customOidcProfile(cfg: OAuthProviderConfig, tokens: OAuthTokenSet
   const disco = await loadDiscovery(cfg.discoveryUrl);
   if (tokens.idToken && disco.jwks_uri) {
     try {
-      const jwks = createRemoteJWKSet(new URL(disco.jwks_uri));
+      const jwks = await remoteJwks(null, disco.jwks_uri);
       const { payload } = await jwtVerify(tokens.idToken, jwks, {
         issuer: disco.issuer,
         audience: cfg.clientId,

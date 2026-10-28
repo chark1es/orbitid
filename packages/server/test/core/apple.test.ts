@@ -1,4 +1,5 @@
 // Apple sign-in: the ES256 client secret minted from a .p8 key, its cache, and Apple ID token verification.
+import { setSafeFetchTransportForTests } from "../../src/lib/safe-fetch";
 import { afterEach, describe, expect, it } from "vitest";
 import { createPublicKey } from "node:crypto";
 import { decodeProtectedHeader, exportJWK, exportPKCS8, generateKeyPair, importJWK, importPKCS8, jwtVerify, SignJWT, type KeyLike } from "jose";
@@ -187,13 +188,14 @@ describe("Apple code exchange", () => {
       .sign(idKey.privateKey);
 
     const seen: { url: string; body: string }[] = [];
-    const original = globalThis.fetch;
-    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-      seen.push({ url: String(input), body: String(init?.body ?? "") });
-      return new Response(JSON.stringify({ access_token: "apple-access", refresh_token: "apple-refresh", id_token: idToken, expires_in: 3600 }), {
-        headers: { "content-type": "application/json" },
-      });
-    }) as typeof fetch;
+    setSafeFetchTransportForTests(async (url, options) => {
+      seen.push({ url: url.toString(), body: String(options.body ?? "") });
+      return {
+        status: 200,
+        headers: new Headers({ "content-type": "application/json" }),
+        body: JSON.stringify({ access_token: "apple-access", refresh_token: "apple-refresh", id_token: idToken, expires_in: 3600 }),
+      };
+    });
     try {
       const tokens = await adapter!.exchangeCode({ code: "apple-code", codeVerifier: "" });
       expect(seen[0]!.url).toBe("https://appleid.apple.com/auth/token");
@@ -212,7 +214,7 @@ describe("Apple code exchange", () => {
         accessToken: "apple-access", refreshToken: "apple-refresh",
       });
     } finally {
-      globalThis.fetch = original;
+      setSafeFetchTransportForTests(null);
     }
   });
 
@@ -228,12 +230,15 @@ describe("Apple code exchange", () => {
       .setIssuer(APPLE_ISSUER).setAudience(CLIENT_ID).setIssuedAt()
       .setExpirationTime(Math.floor(Date.now() / 1000) + 600)
       .sign((await p256()).privateKey);
-    const original = globalThis.fetch;
-    globalThis.fetch = (async () => new Response(JSON.stringify({ access_token: "a", id_token: forged }), { headers: { "content-type": "application/json" } })) as typeof fetch;
+    setSafeFetchTransportForTests(async () => ({
+      status: 200,
+      headers: new Headers({ "content-type": "application/json" }),
+      body: JSON.stringify({ access_token: "a", id_token: forged }),
+    }));
     try {
       await expect(adapter!.exchangeCode({ code: "c", codeVerifier: "" })).rejects.toThrow(/verified/);
     } finally {
-      globalThis.fetch = original;
+      setSafeFetchTransportForTests(null);
     }
   });
 });

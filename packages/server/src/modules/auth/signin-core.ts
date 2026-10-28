@@ -175,6 +175,8 @@ export interface CompleteSignInOptions {
   ip?: string;
   userAgent?: string;
   secondFactor?: boolean;
+  /** Rotates the browser's opaque client token when the session is created. */
+  rotateClientToken?: () => Promise<void>;
 }
 
 /** Creates the session and marks the sign-in complete. */
@@ -191,6 +193,7 @@ export async function completeSignIn(ctx: AppContext, row: SignInRow, opts: Comp
     firstFactor: true,
     secondFactor: opts.secondFactor ?? false,
     method: state.actor ? "ticket" : authMethodOf(state.first?.strategy),
+    rotateClientToken: opts.rotateClientToken,
   });
   const nextState: SignInState = { ...state, second: opts.secondFactor ? { ...(state.second ?? { strategy: "totp" }), status: "verified" } : state.second };
   await ctx.db.update(s.signIns).set({ status: "complete", createdSessionId: sessionId, state: nextState as Record<string, unknown>, updatedAt: Date.now() }).where(eq(s.signIns.id, row.id));

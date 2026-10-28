@@ -8,6 +8,7 @@ import { newId } from "../../lib/ids";
 import {
   assertValidCertificate, assertValidDomains, DEFAULT_ATTRIBUTE_MAPPING, encryptClientSecret, normalizeDomains,
 } from "../../services/saml";
+import { assertPublicUrl } from "../../lib/safe-fetch";
 import { first } from "../../lib/db";
 
 type ConnectionRow = typeof s.enterpriseConnections.$inferSelect;
@@ -70,6 +71,8 @@ function samlConfigFromBody(body: ConnectionBody) {
 export async function createConnection(ctx: AppContext, body: ConnectionBody): Promise<ConnectionRow> {
   const domains = normalizeDomains(body.domains);
   assertValidDomains(domains);
+  if (body.protocol === "saml" && body.idp_sso_url) await assertPublicUrl(ctx, body.idp_sso_url, "idp_sso_url");
+  if (body.discovery_url) await assertPublicUrl(ctx, body.discovery_url, "discovery_url");
   const now = Date.now();
   const config = body.protocol === "saml"
     ? samlConfigFromBody(body)
@@ -116,7 +119,10 @@ export async function updateConnection(ctx: AppContext, row: ConnectionRow, patc
   const config = { ...(row.config ?? {}) } as Record<string, unknown>;
   if (row.protocol === "saml") {
     if (patch.idp_entity_id !== undefined) config.idpEntityId = patch.idp_entity_id;
-    if (patch.idp_sso_url !== undefined) config.idpSsoUrl = patch.idp_sso_url;
+    if (patch.idp_sso_url !== undefined) {
+      await assertPublicUrl(ctx, patch.idp_sso_url, "idp_sso_url");
+      config.idpSsoUrl = patch.idp_sso_url;
+    }
     if (patch.idp_certificate !== undefined) config.idpCertificate = assertValidCertificate(patch.idp_certificate);
     if (patch.attribute_mapping !== undefined) {
       const current = (config.attributeMapping as Record<string, string> | undefined) ?? {};
@@ -126,6 +132,7 @@ export async function updateConnection(ctx: AppContext, row: ConnectionRow, patc
     if (patch.client_id !== undefined) config.clientId = patch.client_id;
     if (patch.client_secret !== undefined) config.clientSecretEnc = encryptClientSecret(ctx, patch.client_secret);
     if (patch.discovery_url !== undefined) {
+      await assertPublicUrl(ctx, patch.discovery_url, "discovery_url");
       config.discoveryUrl = patch.discovery_url;
       delete config.discovery; // re-resolve lazily against the new issuer
     }

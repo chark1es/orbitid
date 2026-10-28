@@ -16,7 +16,7 @@ import {
   serializeConnection, serviceProviderMetadata, validateSamlResponse, verifyEnterpriseIdToken,
 } from "../services/saml";
 import { bindBrowser, browserMatches, browserMismatchMessage } from "./auth/browser-binding";
-import { setClientCookie } from "./auth/client-auth";
+import { regenerateClientToken, setClientCookie } from "./auth/client-auth";
 import { createClient } from "./machine/auth";
 import { connectionBodySchema, connectionPatchSchema, createConnection, updateConnection } from "./machine/enterprise-config";
 import {
@@ -156,16 +156,18 @@ function frontendRoutes(ctx: AppContext): Hono {
     });
 
     let claims: Record<string, unknown> = {};
-    if (tokens.id_token) claims = await verifyEnterpriseIdToken(connection, discovery, tokens.id_token, state.nonce);
+    if (tokens.id_token) claims = await verifyEnterpriseIdToken(ctx, connection, discovery, tokens.id_token, state.nonce);
     let userInfo: Record<string, unknown> = {};
     try {
-      userInfo = await fetchEnterpriseUserInfo(discovery, tokens.access_token);
+      userInfo = await fetchEnterpriseUserInfo(ctx, discovery, tokens.access_token);
     } catch {
       // userinfo is optional when the id_token already carries the profile
       if (!tokens.id_token) throw new OrbitError(400, ErrorCodes.oauth_callback_error, "The identity provider returned neither id_token nor userinfo");
     }
     const merged = { ...userInfo, ...claims };
     const profile = enterpriseOidcProfile(connection, merged, tokens);
+    // The browser proved it owns this flow (binding cookie above): hand it a fresh client token before signing in.
+    await regenerateClientToken(ctx, c, state.flow.clientId);
     const { redirectTo } = await handleExternalIdentity(ctx, state.flow, profile);
     return c.redirect(redirectTo);
   });

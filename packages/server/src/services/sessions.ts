@@ -20,6 +20,8 @@ export interface CreateSessionInput {
   firstFactor?: boolean;
   secondFactor?: boolean;
   method?: AuthMethod | null;
+  /** Rotates the browser's opaque client token as the session is created (session-fixation defence). */
+  rotateClientToken?: () => Promise<void>;
 }
 
 const emitSessionEvent = async (ctx: AppContext, type: "session.created" | "session.ended" | "session.removed" | "session.revoked" | "session.pending", row: typeof s.sessions.$inferSelect) => {
@@ -61,6 +63,8 @@ export async function createSession(ctx: AppContext, input: CreateSessionInput):
             updatedAt: now,
           });
   await ctx.db.update(s.clients).set({ lastActiveSessionId: id, updatedAt: now }).where(eq(s.clients.id, input.clientId));
+  // Fixation defence: the token that authenticated this client stops being valid the moment it becomes signed in.
+  if (input.rotateClientToken) await input.rotateClientToken();
   await touchUser(ctx, input.userId, { lastSignInAt: now, lastActiveAt: now });
   const row = first(await ctx.db.select().from(s.sessions).where(eq(s.sessions.id, id)))!;
   await emitSessionEvent(ctx, "session.created", row);

@@ -27,7 +27,7 @@ export async function createContext(overrides: Partial<Env> = {}): Promise<AppCo
     db: handle.db,
     database: { driver: handle.driver, dialect: handle.dialect, label: handle.label },
     env: { ...env, secretKey },
-    settings: await createSettingsStore(handle.db, { production: env.nodeEnv === "production" }),
+    settings: await createSettingsStore(handle.db, { production: env.nodeEnv === "production", encryptionKey: env.encryptionKey }),
     publishableKey: encodePublishableKey(env.baseUrl, mode),
     close: () => handle.close(),
   };

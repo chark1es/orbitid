@@ -7,6 +7,7 @@ import {
 } from "@orbitid/shared";
 import { newId } from "../lib/ids";
 import { safeEqual } from "../lib/crypto";
+import { safeFetch } from "../lib/safe-fetch";
 import * as s from "../db/schema";
 import type { AppContext } from "../context";
 import { first } from "../lib/db";
@@ -123,7 +124,7 @@ async function attemptDelivery(ctx: AppContext, delivery: DeliveryRow, endpoint:
   let responseBody = "";
   let ok = false;
   try {
-    const res = await fetch(endpoint.url, {
+    const res = await safeFetch(ctx, endpoint.url, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -133,10 +134,11 @@ async function attemptDelivery(ctx: AppContext, delivery: DeliveryRow, endpoint:
         "svix-signature": signWebhook(endpoint.secret, event.id, timestamp, body),
       },
       body,
-      signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
+      timeoutMs: DELIVERY_TIMEOUT_MS,
+      maxBytes: RESPONSE_BODY_LIMIT * 4,
     });
     responseCode = res.status;
-    responseBody = await res.text();
+    responseBody = res.body;
     ok = res.ok;
   } catch (err) {
     responseBody = err instanceof Error ? `${err.name}: ${err.message}` : String(err);

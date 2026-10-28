@@ -9,8 +9,9 @@ import { ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../context";
 import * as s from "../db/schema";
 import { newId } from "../lib/ids";
-import { decrypt, randomToken } from "../lib/crypto";
-import { parseBody } from "../lib/http";
+import { decrypt } from "../lib/crypto";
+import { MAX_UPLOAD_BYTES, parseBody } from "../lib/http";
+import { assertImageBytes, randomImageName } from "../lib/images";
 import { hit } from "../lib/rate-limit";
 import { serializeEmail, serializeExternalAccount, serializePasskey, serializePhone, serializeSession, serializeUser } from "../serializers";
 import { assertPasswordValid, hashPassword, verifyPassword } from "../services/passwords";
@@ -36,41 +37,32 @@ import { createOAuthAuthorization } from "./auth/oauth-flow";
 import { validateRedirectUrl } from "./auth/redirects";
 import { first } from "../lib/db";
 
+const optionalName = z.string().max(256).nullish();
 const updateSchema = z.object({
-  first_name: z.string().nullish(),
-  last_name: z.string().nullish(),
-  username: z.string().nullish(),
+  first_name: optionalName,
+  last_name: optionalName,
+  username: z.string().max(64).nullish(),
   unsafe_metadata: zMetadata.optional(),
-  primary_email_address_id: z.string().nullish(),
-  primary_phone_number_id: z.string().nullish(),
+  primary_email_address_id: z.string().max(64).nullish(),
+  primary_phone_number_id: z.string().max(64).nullish(),
   legal_accepted: zBool.optional(),
 });
-const passwordChangeSchema = z.object({ current_password: z.string(), new_password: z.string(), sign_out_of_other_sessions: z.boolean().optional() });
-const passwordRemoveSchema = z.object({ current_password: z.string() });
-const emailCreateSchema = z.object({ email_address: z.string() });
-const phoneCreateSchema = z.object({ phone_number: z.string() });
+const passwordChangeSchema = z.object({ current_password: z.string().max(256), new_password: z.string().max(256), sign_out_of_other_sessions: z.boolean().optional() });
+const passwordRemoveSchema = z.object({ current_password: z.string().max(256) });
+const emailCreateSchema = z.object({ email_address: z.string().max(320) });
+const phoneCreateSchema = z.object({ phone_number: z.string().max(32) });
 const phoneUpdateSchema = z.object({ reserved_for_second_factor: zBool.optional(), default_second_factor: zBool.optional() });
-const verifyCodeSchema = z.object({ code: z.string(), strategy: z.string().optional() });
-const prepareSchema = z.object({ strategy: z.string().optional() });
+const verifyCodeSchema = z.object({ code: z.string().max(64), strategy: z.string().max(64).optional() });
+const prepareSchema = z.object({ strategy: z.string().max(64).optional() });
 const externalAccountCreateSchema = z.object({
-  strategy: z.string(), redirect_url: z.string().optional(), additional_scopes: z.array(z.string()).optional(),
+  strategy: z.string().max(64), redirect_url: z.string().max(2048).optional(), additional_scopes: z.array(z.string().max(256)).max(50).optional(),
 });
-const totpAttemptSchema = z.object({ code: z.string() });
-const passkeyCreateSchema = z.object({ name: z.string().optional(), authenticator_type: z.enum(["platform", "cross-platform"]).optional() });
-const passkeyAttemptSchema = z.object({ public_key_credential: z.unknown(), name: z.string().optional() });
-const passkeyRenameSchema = z.object({ name: z.string().min(1) });
-const imageSchema = z.object({ file: z.string() });
-
-const IMAGE_MIME: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/jpg": "jpg", "image/gif": "gif", "image/webp": "webp" };
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-
-const hasMagicBytes = (ext: string, bytes: Buffer) => {
-  if (ext === "png") return bytes.length > 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-  if (ext === "jpg") return bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
-  if (ext === "gif") return bytes.subarray(0, 4).toString("ascii") === "GIF8";
-  if (ext === "webp") return bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP";
-  return false;
-};
+const totpAttemptSchema = z.object({ code: z.string().max(64) });
+const passkeyCreateSchema = z.object({ name: z.string().max(128).optional(), authenticator_type: z.enum(["platform", "cross-platform"]).optional() });
+const passkeyAttemptSchema = z.object({ public_key_credential: z.unknown(), name: z.string().max(128).optional() });
+const passkeyRenameSchema = z.object({ name: z.string().min(1).max(128) });
+const MAX_IMAGE_BYTES = MAX_UPLOAD_BYTES;
+const imageSchema = z.object({ file: z.string().max(MAX_IMAGE_BYTES) });
 
 export default function routes(ctx: AppContext) {
   const app = new Hono();
@@ -168,33 +160,24 @@ export default function routes(ctx: AppContext) {
     }
     const ct = c.req.header("content-type") ?? "";
     let bytes: Buffer;
-    let ext: string | undefined;
     if (ct.includes("multipart/form-data")) {
       const body = await c.req.parseBody();
       const file = body["file"];
       if (!(file instanceof File)) throw new OrbitError(422, ErrorCodes.form_param_missing, "file is missing", { param_name: "file" });
-      const mime = file.type;
-      ext = IMAGE_MIME[mime];
-      if (!ext) throw new OrbitError(422, ErrorCodes.form_param_format_invalid, "Only PNG, JPEG, GIF and WebP images are supported", { param_name: "file" });
+      if (file.size > MAX_IMAGE_BYTES) throw new OrbitError(413, ErrorCodes.form_param_value_invalid, "Images must be smaller than 5MB", { param_name: "file" });
       bytes = Buffer.from(await file.arrayBuffer());
     } else {
       const body = await parseBody(c, imageSchema);
-      const match = /^data:(image\/[a-z+]+);base64,(.+)$/i.exec(body.file);
-      if (match) {
-        ext = IMAGE_MIME[match[1]!.toLowerCase()];
-        bytes = Buffer.from(match[2]!, "base64");
-      } else {
-        ext = "png";
-        bytes = Buffer.from(body.file, "base64");
-      }
-      if (!ext) throw new OrbitError(422, ErrorCodes.form_param_format_invalid, "Only PNG, JPEG, GIF and WebP images are supported", { param_name: "file" });
+      const match = /^data:([a-z0-9.+/-]+);base64,(.+)$/i.exec(body.file.trim());
+      bytes = match ? Buffer.from(match[2]!, "base64") : Buffer.from(body.file, "base64");
     }
     if (!bytes.length) throw new OrbitError(422, ErrorCodes.form_param_value_invalid, "The uploaded file is empty", { param_name: "file" });
-    if (bytes.length > MAX_IMAGE_BYTES) throw new OrbitError(422, ErrorCodes.form_param_value_invalid, "Images must be smaller than 5MB", { param_name: "file" });
-    if (!hasMagicBytes(ext, bytes)) throw new OrbitError(422, ErrorCodes.form_param_value_invalid, "The file is not a valid image", { param_name: "file" });
+    if (bytes.length > MAX_IMAGE_BYTES) throw new OrbitError(413, ErrorCodes.form_param_value_invalid, "Images must be smaller than 5MB", { param_name: "file" });
+    // The bytes decide: declared type and file extension are ignored (SVG and polyglots are refused).
+    const kind = assertImageBytes(bytes, "file");
     const dir = resolve(ctx.env.dataDir, "uploads");
     mkdirSync(dir, { recursive: true });
-    const name = `${user.id}_${randomToken(8)}.${ext}`;
+    const name = randomImageName(user.id, kind);
     writeFileSync(resolve(dir, name), bytes);
     await ctx.db.update(s.users).set({
                   imageUrl: `${ctx.env.baseUrl}/v1/client/images/${name}`, hasImage: true, updatedAt: Date.now(),

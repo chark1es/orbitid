@@ -2,6 +2,8 @@
 import nodemailer, { type Transporter } from "nodemailer";
 import type { AppContext } from "../context";
 import { ErrorCodes, OrbitError } from "@orbitid/shared";
+import { safeFetch } from "../lib/safe-fetch";
+import { logSafe } from "../lib/security";
 import { emitEvent } from "./webhooks";
 
 export type EmailTemplate =
@@ -479,14 +481,15 @@ async function sendViaTwilio(ctx: AppContext, to: string, body: string) {
     throw new OrbitError(500, ErrorCodes.request_body_invalid, "Twilio SMS is not configured");
   }
   const url = `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(sms.twilioAccountSid)}/Messages.json`;
-  const res = await fetch(url, {
+  const res = await safeFetch(ctx, url, {
     method: "POST",
     headers: {
       Authorization: `Basic ${Buffer.from(`${sms.twilioAccountSid}:${sms.twilioAuthToken}`).toString("base64")}`,
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body: new URLSearchParams({ To: to, From: sms.twilioFrom, Body: body }),
-    signal: AbortSignal.timeout(10_000),
+    timeoutMs: 10_000,
+    maxBytes: 64 * 1024,
   });
   if (!res.ok) throw new Error(`Twilio responded ${res.status}`);
 }
@@ -494,11 +497,12 @@ async function sendViaTwilio(ctx: AppContext, to: string, body: string) {
 async function sendViaWebhook(ctx: AppContext, to: string, body: string) {
   const url = ctx.settings.get().sms.webhookUrl;
   if (!url) throw new OrbitError(500, ErrorCodes.request_body_invalid, "SMS webhook is not configured");
-  const res = await fetch(url, {
+  const res = await safeFetch(ctx, url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ to, body, from: ctx.settings.get().application.name }),
-    signal: AbortSignal.timeout(10_000),
+    timeoutMs: 10_000,
+    maxBytes: 64 * 1024,
   });
   if (!res.ok) throw new Error(`SMS webhook responded ${res.status}`);
 }
@@ -514,11 +518,11 @@ export async function sendSms(ctx: AppContext, to: string, body: string): Promis
     else if (settings.sms.provider === "twilio") await sendViaTwilio(ctx, to, body);
     else if (settings.sms.provider === "webhook") await sendViaWebhook(ctx, to, body);
     else if (ctx.env.nodeEnv !== "test" && !process.env.VITEST) {
-      if (ctx.env.nodeEnv === "production") console.warn(`[orbitid:sms] no SMS provider configured; dropped message to ${to}`);
-      else console.log(`\n[orbitid:sms] to=${to}\n${body}\n`);
+      if (ctx.env.nodeEnv === "production") console.warn(`[orbitid:sms] no SMS provider configured; dropped message to ${logSafe(to)}`);
+      else console.log(`\n[orbitid:sms] to=${logSafe(to)}\n${body}\n`);
     }
   } catch {
-    if (ctx.env.nodeEnv !== "test") console.error(`[orbitid:sms] failed to deliver to ${to}`);
+    if (ctx.env.nodeEnv !== "test") console.error(`[orbitid:sms] failed to deliver to ${logSafe(to)}`);
   }
   await emitEvent(ctx, "sms.created", { object: "sms", to, body, created_at: Date.now() });
 }

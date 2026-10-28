@@ -169,17 +169,23 @@ export function page<T>(rows: T[], params: ListParams): { items: T[]; total: num
   return { items: rows.slice(params.offset, params.offset + params.limit), total: rows.length };
 }
 
-/** Deep-merges metadata objects (arrays/scalars replaced, `null` removes the key), used by the Backend API. */
+const PROTOTYPE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+/** Deep-merges metadata objects (arrays/scalars replaced, `null` removes the key). Prototype keys are ignored. */
 export function mergeMetadata(base: Record<string, unknown> | null | undefined, patch: Record<string, unknown> | null | undefined): Record<string, unknown> {
   const out: Record<string, unknown> = { ...(base ?? {}) };
   for (const [k, v] of Object.entries(patch ?? {})) {
+    if (PROTOTYPE_KEYS.has(k)) continue;
     if (v === null) {
       delete out[k];
       continue;
     }
     const prev = out[k];
     const bothObjects = !!prev && !!v && typeof prev === "object" && typeof v === "object" && !Array.isArray(prev) && !Array.isArray(v);
-    out[k] = bothObjects ? mergeMetadata(prev as Record<string, unknown>, v as Record<string, unknown>) : v;
+    Object.defineProperty(out, k, {
+      value: bothObjects ? mergeMetadata(prev as Record<string, unknown>, v as Record<string, unknown>) : v,
+      enumerable: true, writable: true, configurable: true,
+    });
   }
   return out;
 }

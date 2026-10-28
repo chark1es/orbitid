@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { ErrorCodes, ID_PREFIX, OrbitError, type InstanceSettings } from "@orbitid/shared";
 import { parseBody, zodToOrbit, clientIp } from "../../lib/http";
 import { randomToken, sha256 } from "../../lib/crypto";
+import { maskSecrets, unmaskSettingsPatch } from "../../lib/secrets";
 import { newId } from "../../lib/ids";
 import * as s from "../../db/schema";
 import { parseEmailFrom, parseSmtpUrl, sendEmail, sendTestEmail } from "../../services/mail";
@@ -16,42 +17,9 @@ import type { AppContext, DeepPartial } from "../../context";
 import { listParams } from "./shared";
 import { first } from "../../lib/db";
 
-const MASK = "••••";
 const TESTING_TOKEN_TTL_MS = 3_600_000;
 
 type SettingsTree = Record<string, unknown>;
-
-/** Deep clone with secret fields replaced by `••••` and sibling `<field>Set` booleans. */
-function maskSettings(settings: InstanceSettings): SettingsTree {
-  const copy = JSON.parse(JSON.stringify(settings)) as SettingsTree;
-  const maskField = (owner: SettingsTree | undefined, key: string) => {
-    if (!owner) return;
-    const value = owner[key];
-    owner[`${key}Set`] = typeof value === "string" && value.length > 0;
-    if (typeof value === "string" && value.length > 0) owner[key] = MASK;
-  };
-  maskField(copy.email as SettingsTree, "smtpUrl");
-  maskField(copy.sms as SettingsTree, "twilioAuthToken");
-  maskField(copy.security as SettingsTree, "captchaSecret");
-  for (const provider of Object.values((copy.social ?? {}) as Record<string, SettingsTree>)) maskField(provider, "clientSecret");
-  return copy;
-}
-
-/** Drops `*Set` helper keys and masked values so a round-tripped GET/PATCH keeps the stored secrets. */
-function stripMasked(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(stripMasked);
-  if (value && typeof value === "object") {
-    const out: SettingsTree = {};
-    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-      if (key.endsWith("Set")) continue;
-      const cleaned = stripMasked(item);
-      if (cleaned === MASK) continue;
-      out[key] = cleaned;
-    }
-    return out;
-  }
-  return value;
-}
 
 const INSTANCE_URL_FIELDS = ["homeUrl", "logoUrl", "termsUrl", "privacyUrl"] as const;
 const INSTANCE_URL_LIST_FIELDS = ["allowedOrigins", "allowedRedirectOrigins"] as const;
@@ -117,7 +85,7 @@ function instanceJson(ctx: AppContext) {
     environment_type: ctx.env.nodeEnv === "production" ? "production" : "development",
     publishable_key: ctx.publishableKey,
     database: { dialect: ctx.database.dialect, driver: ctx.database.driver, label: ctx.database.label },
-    ...maskSettings(settings),
+    ...maskSecrets(settings),
   };
 }
 
@@ -128,7 +96,8 @@ export default function routes(ctx: AppContext) {
 
   app.patch("/instance", async (c) => {
     const body = (await parseBody(c, z.record(z.string(), z.unknown()))) as SettingsTree;
-    const patch = stripMasked(body) as SettingsTree;
+    // Masks and unchanged echoes are dropped, so a full-object round trip keeps the stored credentials.
+    const patch = unmaskSettingsPatch(ctx.settings.get(), body);
     assertInstanceUrls(patch);
     assertEmailSettings(patch);
     try {

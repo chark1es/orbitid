@@ -193,7 +193,7 @@ export async function verifyMachineToken(ctx: AppContext, token: string): Promis
       const { payload } = await jwtVerify(token, async (header) => {
         const jwk = await instanceVerifyKey(ctx, header.kid);
         return importJWK(jwk, header.alg ?? "RS256");
-      }, { issuer: ctx.env.baseUrl, audience: M2M_TOKEN_AUDIENCE });
+      }, { issuer: ctx.env.baseUrl, audience: M2M_TOKEN_AUDIENCE, algorithms: ["RS256"] });
       sub = payload.sub;
     } catch (err) {
       throw err instanceof OrbitError ? err : invalid("Machine token signature is invalid");
