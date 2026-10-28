@@ -283,6 +283,8 @@ export class FakeOrbitID {
   signUp: SignUpResource | undefined = fakeSignUp();
 
   loadCalls = 0;
+  /** When set, `load()` waits for it, so tests can observe the not-yet-loaded state. */
+  loadGate: Promise<void> | null = null;
   loadError: Error | null = null;
   signOutCalls: SignOutParams[] = [];
   setActiveCalls: SetActiveParams[] = [];
@@ -333,6 +335,7 @@ export class FakeOrbitID {
 
   async load(): Promise<void> {
     this.loadCalls += 1;
+    if (this.loadGate) await this.loadGate;
     if (this.loadError) throw this.loadError;
     this.loaded = true;
     this.emit();

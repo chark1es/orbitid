@@ -13,7 +13,9 @@ export interface UseSignInReturn {
 /** The in-flight sign-in attempt (`signIn.create`, `attemptFirstFactor`, …). */
 export function useSignIn(): UseSignInReturn {
   const instance = useOrbitID();
-  const { isLoaded } = useAuth();
+  const { isLoaded: authLoaded } = useAuth();
+  // `initialState` (SSR) marks auth as loaded before the instance has; creating attempts then would race the first client fetch.
+  const isLoaded = authLoaded && instance.loaded;
 
   const setActive = useCallback(
     async (params: SetActiveParams) => {

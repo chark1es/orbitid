@@ -13,7 +13,9 @@ export interface UseSignUpReturn {
 /** The in-flight sign-up attempt (`signUp.create`, `attemptEmailAddressVerification`, …). */
 export function useSignUp(): UseSignUpReturn {
   const instance = useOrbitID();
-  const { isLoaded } = useAuth();
+  const { isLoaded: authLoaded } = useAuth();
+  // `initialState` (SSR) marks auth as loaded before the instance has; creating attempts then would race the first client fetch.
+  const isLoaded = authLoaded && instance.loaded;
 
   const setActive = useCallback(
     async (params: SetActiveParams) => {

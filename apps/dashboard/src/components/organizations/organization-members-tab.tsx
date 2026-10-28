@@ -56,7 +56,7 @@ function AddMemberDialog({
   const { roles } = useOrganizationRoles(org.id);
   const users = useApi<{ data: UserJSON[] }>(
     ["member-user-search", debounced],
-    `/users?query=${encodeURIComponent(debounced)}&limit=8`,
+    `/users?query=${encodeURIComponent(debounced)}&limit=8&paginated=true`,
     { enabled: open && debounced.length >= 1 },
   );
 

@@ -82,7 +82,7 @@ export default function Page() {
 
   const userSearch = useApi<PaginatedList<UserJSON>>(
     ["api-key-user-search", search],
-    `/users?query=${encodeURIComponent(search.trim())}&limit=8`,
+    `/users?query=${encodeURIComponent(search.trim())}&limit=8&paginated=true`,
     { enabled: createOpen && subjectType === "user" && search.trim().length > 0 },
   );
   const orgSearch = useApi<PaginatedList<OrganizationJSON>>(

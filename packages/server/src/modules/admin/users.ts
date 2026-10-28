@@ -75,7 +75,7 @@ const metadataPatchSchema = z.object({
   unsafe_metadata: metadataSchema.optional(),
 });
 
-/** Applies `query`, array filters, `banned`, `last_active_at_since` and date bounds. Array filters are intersected. */
+/** Applies `query`, array filters, `banned`, `locked`, `mfa`, `last_active_at_since` and date bounds. Array filters are intersected. */
 function userWhere(ctx: AppContext, c: Context): SQL | undefined {
   const conds: SQL[] = [];
   const search = c.req.query("query")?.trim();
@@ -133,6 +133,8 @@ function userWhere(ctx: AppContext, c: Context): SQL | undefined {
   if (banned === "true" || banned === "false") conds.push(eq(s.users.banned, banned === "true"));
   const locked = c.req.query("locked");
   if (locked === "true" || locked === "false") conds.push(eq(s.users.locked, locked === "true"));
+  const mfa = c.req.query("mfa");
+  if (mfa === "true" || mfa === "false") conds.push(eq(s.users.totpVerified, mfa === "true"));
   const activeSince = c.req.query("last_active_at_since");
   if (activeSince) conds.push(gte(s.users.lastActiveAt, Number(activeSince)));
   const createdAfter = c.req.query("created_at_after");

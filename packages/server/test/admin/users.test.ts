@@ -9,6 +9,19 @@ import { createSessionFixture, createUser, json, testApp, type ErrorBody } from 
 type OAuthTokenRow = { object: string; external_account_id: string; provider: string; token: string | null; scopes: string; expires_at: number | null };
 
 describe("users", () => {
+  it("filters the user list by mfa and wraps it with ?paginated=true", async () => {
+    const { api } = await testApp();
+    const withMfa = await createUser(api, { email_address: ["mfa@example.com"], password: "Sup3r-secret!", totp_secret: authenticator.generateSecret() });
+    const without = await createUser(api, { email_address: ["plain@example.com"], password: "Sup3r-secret!" });
+    expect(withMfa.totp_enabled).toBe(true);
+
+    const mfaOn = await json<PaginatedList<UserJSON>>(await api("GET", "/v1/users?mfa=true&paginated=true"));
+    expect(mfaOn.data.map((u) => u.id)).toEqual([withMfa.id]);
+    expect(mfaOn.total_count).toBe(1);
+    const mfaOff = await json<UserJSON[]>(await api("GET", "/v1/users?mfa=false"));
+    expect(mfaOff.map((u) => u.id)).toEqual([without.id]);
+  });
+
   it("creates a user with verified email, hashed password and metadata", async () => {
     const { api, ctx } = await testApp();
     const res = await api("POST", "/v1/users", {

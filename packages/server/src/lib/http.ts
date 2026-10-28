@@ -7,7 +7,10 @@ export async function parseBody<S extends ZodTypeAny>(c: Context, schema: S): Pr
   let raw: unknown = {};
   const ct = c.req.header("content-type") ?? "";
   try {
-    if (ct.includes("application/json")) raw = await c.req.json();
+    if (ct.includes("application/json")) {
+      const text = await c.req.text();
+      raw = text.trim() ? JSON.parse(text) : {};
+    }
     else if (ct.includes("form")) raw = Object.fromEntries(Object.entries(await c.req.parseBody()).map(([k, v]) => [k, v]));
   } catch {
     throw new OrbitError(400, ErrorCodes.request_body_invalid, "Request body is not valid");

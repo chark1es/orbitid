@@ -149,11 +149,18 @@ function view<T extends object>(raw: T): T {
   return Object.assign(Object.create(Object.getPrototypeOf(raw)) as T, raw);
 }
 
+/** Defines own data properties so they shadow getter-only accessors inherited from the SDK resource prototype. */
+function define(target: object, props: Record<string, unknown>): void {
+  for (const [key, value] of Object.entries(props)) {
+    Object.defineProperty(target, key, { value, writable: true, enumerable: true, configurable: true });
+  }
+}
+
 function bindMethods(target: object, raw: Record<string, unknown>, names: readonly string[]): void {
   for (const name of names) {
     const method = raw[name];
     if (typeof method === "function") {
-      Object.assign(target, { [name]: (...args: unknown[]) => (method as (...a: unknown[]) => unknown).apply(raw, args) });
+      define(target, { [name]: (...args: unknown[]) => (method as (...a: unknown[]) => unknown).apply(raw, args) });
     }
   }
 }
@@ -183,7 +190,7 @@ export function normalizeEmail(raw: unknown): NormalizedEmailAddress | null {
   if (!isRecord(raw)) return null;
   return cached(emailCache, raw, () => {
     const target = view(raw) as NormalizedEmailAddress;
-    Object.assign(target, {
+    define(target, {
       id: str(raw, "id") ?? "",
       email_address: str(raw, "email_address", "emailAddress") ?? "",
       verification: normalizeVerification(raw.verification),
@@ -200,7 +207,7 @@ export function normalizePhone(raw: unknown): NormalizedPhoneNumber | null {
   if (!isRecord(raw)) return null;
   return cached(phoneCache, raw, () => {
     const target = view(raw) as NormalizedPhoneNumber;
-    Object.assign(target, {
+    define(target, {
       id: str(raw, "id") ?? "",
       phone_number: str(raw, "phone_number", "phoneNumber") ?? "",
       reserved_for_second_factor: bool(raw, "reserved_for_second_factor", "reservedForSecondFactor"),
@@ -210,7 +217,7 @@ export function normalizePhone(raw: unknown): NormalizedPhoneNumber | null {
     bindMethods(target, raw, ["prepareVerification", "attemptVerification", "destroy", "setAsPrimary"]);
     const setReserved = raw.setReservedForSecondFactor;
     const setDefault = raw.makeDefaultSecondFactor;
-    Object.assign(target, {
+    define(target, {
       update: async (params: Record<string, unknown>) => {
         if (params.reservedForSecondFactor !== undefined && typeof setReserved === "function") {
           await (setReserved as (params: { reserved: boolean }) => Promise<unknown>).call(raw, {
@@ -232,7 +239,7 @@ export function normalizeExternalAccount(raw: unknown): NormalizedExternalAccoun
   if (!isRecord(raw)) return null;
   return cached(externalCache, raw, () => {
     const target = view(raw) as NormalizedExternalAccount;
-    Object.assign(target, {
+    define(target, {
       id: str(raw, "id") ?? "",
       provider: str(raw, "provider") ?? "",
       email_address: str(raw, "email_address", "emailAddress") ?? "",
@@ -251,7 +258,7 @@ export function normalizePasskey(raw: unknown): NormalizedPasskey | null {
   if (!isRecord(raw)) return null;
   return cached(passkeyCache, raw, () => {
     const target = view(raw) as NormalizedPasskey;
-    Object.assign(target, {
+    define(target, {
       id: str(raw, "id") ?? "",
       name: str(raw, "name") ?? "",
       created_at: num(raw, "created_at", "createdAt") ?? 0,
@@ -259,7 +266,7 @@ export function normalizePasskey(raw: unknown): NormalizedPasskey | null {
     });
     bindMethods(target, raw, ["delete"]);
     const rename = raw.rename;
-    Object.assign(target, {
+    define(target, {
       update: async (params: Record<string, unknown>) => {
         if (typeof rename === "function") {
           await (rename as (params: { name: string }) => Promise<unknown>).call(raw, { name: String(params.name ?? "") });
@@ -311,7 +318,7 @@ export function normalizeUser(raw: unknown): NormalizedUser | null {
       .map(normalizePasskey)
       .filter((passkey): passkey is NormalizedPasskey => passkey !== null);
 
-    Object.assign(target, {
+    define(target, {
       id: str(raw, "id") ?? "",
       first_name: str(raw, "first_name", "firstName"),
       last_name: str(raw, "last_name", "lastName"),
@@ -357,7 +364,7 @@ export function normalizeSignIn(raw: unknown): SignInResource | null {
   if (!isRecord(raw)) return null;
   return cached(signInCache, raw, () => {
     const target = view(raw) as unknown as SignInResource;
-    Object.assign(target, {
+    define(target, {
       id: str(raw, "id") ?? "",
       status: (str(raw, "status") ?? "needs_identifier") as SignInStatus,
       identifier: str(raw, "identifier"),
@@ -393,7 +400,7 @@ export function normalizeSignUp(raw: unknown): SignUpResource | null {
   return cached(signUpCache, raw, () => {
     const target = view(raw) as unknown as SignUpResource;
     const verifications = isRecord(raw.verifications) ? raw.verifications : {};
-    Object.assign(target, {
+    define(target, {
       id: str(raw, "id") ?? "",
       status: (str(raw, "status") ?? "missing_requirements") as SignUpStatus,
       required_fields: list<string>(read(raw, "required_fields", "requiredFields")),
@@ -475,7 +482,7 @@ export function normalizeSession(raw: unknown): NormalizedSession | null {
     const target = view(raw) as NormalizedSession;
     const publicUser = read(raw, "public_user_data", "publicUserData");
     const activity = read(raw, "latest_activity", "latestActivity");
-    Object.assign(target, {
+    define(target, {
       id: str(raw, "id") ?? "",
       status: str(raw, "status") ?? "active",
       public_user_data: isRecord(publicUser)

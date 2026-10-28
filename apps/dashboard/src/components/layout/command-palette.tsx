@@ -27,7 +27,7 @@ export function CommandPalette() {
 
   const { data, isFetching } = useApi<{ data: UserJSON[] }>(
     ["command-users", debounced],
-    `/users?query=${encodeURIComponent(debounced)}&limit=5&order_by=-created_at`,
+    `/users?query=${encodeURIComponent(debounced)}&limit=5&order_by=-created_at&paginated=true`,
     { enabled },
   );
 

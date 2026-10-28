@@ -4,10 +4,10 @@ import { usersListPath, buildListPath, limitFromParam, pageFromParam } from "./q
 describe("usersListPath", () => {
   it("maps page/limit to a zero-based offset with sorting and search", () => {
     expect(usersListPath({ page: 1, limit: 20, orderBy: "-created_at" })).toBe(
-      "/users?limit=20&offset=0&order_by=-created_at",
+      "/users?limit=20&offset=0&order_by=-created_at&paginated=true",
     );
     expect(usersListPath({ page: 3, limit: 20, query: "ann@example.com", orderBy: "created_at" })).toBe(
-      "/users?limit=20&offset=40&order_by=created_at&query=ann%40example.com",
+      "/users?limit=20&offset=40&order_by=created_at&query=ann%40example.com&paginated=true",
     );
   });
 
@@ -26,8 +26,8 @@ describe("usersListPath", () => {
     expect(params.get("banned")).toBe("true");
     expect(params.get("locked")).toBeNull();
     expect(params.get("mfa")).toBe("true");
-    expect(params.get("created_after")).toBe("1700000000000");
-    expect(params.get("created_before")).toBeNull();
+    expect(params.get("created_at_after")).toBe("1700000000000");
+    expect(params.get("created_at_before")).toBeNull();
   });
 });
 

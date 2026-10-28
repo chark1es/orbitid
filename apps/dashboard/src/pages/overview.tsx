@@ -41,7 +41,7 @@ export default function OverviewPage() {
   const stats = useApi<InstanceStatsJSON>(["stats"], "/stats", { refetchInterval: 30_000 });
   const health = useHealth();
   const instance = useInstance();
-  const recentUsers = useApi<{ data: UserJSON[] }>(["users", "recent"], "/users?limit=5&order_by=-created_at");
+  const recentUsers = useApi<{ data: UserJSON[] }>(["users", "recent"], "/users?limit=5&order_by=-created_at&paginated=true");
 
   const data = stats.data;
   const mfaAdoption = data ? percent(data.mfa_enabled_users, data.users_total) : "—";

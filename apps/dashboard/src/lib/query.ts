@@ -44,11 +44,12 @@ export function usersListPath(input: UsersQuery): string {
     query: input.query,
     orderBy: input.orderBy,
     extra: {
+      paginated: true,
       banned: input.banned,
       locked: input.locked,
       mfa: input.mfa,
-      created_after: input.createdAfter,
-      created_before: input.createdBefore,
+      created_at_after: input.createdAfter,
+      created_at_before: input.createdBefore,
     },
   });
 }
