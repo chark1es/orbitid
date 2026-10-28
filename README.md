@@ -51,6 +51,7 @@ From source (Bun for installing and scripts, Node 20 to run the server because t
 ```bash
 bun install
 export ORBITID_DATABASE_URL=postgres://user:password@localhost:5432/orbitid   # omit to use a local SQLite file
+export ORBITID_ENCRYPTION_KEY="$(openssl rand -base64 32)"   # required with Postgres; keep the same value across restarts
 bun run dev:server          # http://localhost:4000, prints your publishable and secret keys
 bun run dev:dashboard       # http://localhost:5173, sign in with the secret key
 ```

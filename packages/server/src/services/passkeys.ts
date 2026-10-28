@@ -195,7 +195,7 @@ export async function finishPasskeyAuthentication(ctx: AppContext, input: {
   } catch {
     verified = false;
   }
-  await ctx.db.update(s.verifications).set({ attempts: stored.attempts + 1, verifiedAt: verified ? Date.now() : null }).where(eq(s.verifications.id, stored.id));
+  if (verified) await ctx.db.update(s.verifications).set({ verifiedAt: Date.now() }).where(eq(s.verifications.id, stored.id));
   if (!verified) {
     throw new OrbitError(400, ErrorCodes.passkey_authentication_failure, "Passkey could not be verified");
   }

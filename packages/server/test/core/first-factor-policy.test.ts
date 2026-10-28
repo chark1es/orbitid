@@ -40,3 +40,15 @@ describe("first-factor policy", () => {
     expect(signedIn.sessionId).toMatch(/^sess_/);
   });
 });
+
+describe("passkey policy", () => {
+  it("refuses passkey sign-in while passkeys are switched off", async () => {
+    const { app, ctx } = await setup();
+    await ctx.settings.update({ attributes: { passkey: { enabled: false } } });
+    const client = testClient(app);
+    const started = await client.json<{ response: { id: string } }>("/v1/client/sign_ins", { body: {} });
+    const res = await client.request(`/v1/client/sign_ins/${started.response.id}/prepare_first_factor`, { body: { strategy: "passkey" } });
+    expect(res.status).toBe(400);
+    expect(errorsOf(await res.json())[0]?.code).toBe("strategy_for_user_invalid");
+  });
+});

@@ -223,7 +223,15 @@ export async function acceptInvitation(ctx: AppContext, invitation: InvitationRo
     return first(await ctx.db.select().from(s.organizationMemberships)
       .where(and(eq(s.organizationMemberships.organizationId, invitation.organizationId), eq(s.organizationMemberships.userId, userId)))) ?? null;
   }
-  const membership = await addMembership(ctx, { organizationId: invitation.organizationId, userId, roleKey: invitation.roleKey, publicMetadata: invitation.publicMetadata });
+  let membership: MembershipRow;
+  try {
+    membership = await addMembership(ctx, { organizationId: invitation.organizationId, userId, roleKey: invitation.roleKey, publicMetadata: invitation.publicMetadata });
+  } catch (err) {
+    // The invitation was not used up: put it back so the invitee can retry once the cause (for example capacity) is fixed.
+    await ctx.db.update(s.organizationInvitations).set({ status: "pending", updatedAt: Date.now() })
+      .where(and(eq(s.organizationInvitations.id, invitation.id), eq(s.organizationInvitations.status, "accepted")));
+    throw err;
+  }
   await emitEvent(ctx, "organizationInvitation.accepted", await serializeOrganizationInvitation(ctx, accepted, { backend: true }));
   return membership;
 }
