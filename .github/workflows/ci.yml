@@ -19,6 +19,8 @@ jobs:
         run: node -e "require('better-sqlite3')"
       - run: bun run typecheck
       - run: bun run test
+      - name: Committed OpenAPI document is current
+        run: bun run --filter @orbitid/server openapi:export && git diff --exit-code docs/openapi.json
       - name: Dashboard build
         run: bun run --filter @orbitid/dashboard build
       - name: Example app build

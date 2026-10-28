@@ -11,7 +11,7 @@ const MIME: Record<string, string> = {
 };
 
 /** Paths that belong to the API, never to the dashboard. */
-const API_PREFIXES = ["/v1", "/oauth", "/.well-known", "/health"];
+const API_PREFIXES = ["/v1", "/oauth", "/.well-known", "/health", "/docs"];
 
 /** Adds the nonce to every inline `<script>` of the built page (external `src` scripts stay as they are). */
 function withNonce(html: string, nonce: string): string {
