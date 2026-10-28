@@ -122,6 +122,7 @@ describe("authenticateRequest", () => {
     const refresh = await authenticateRequest(requestWith({ cookie: `__session=${expired}; __client_uat=1700000000` }), baseOptions());
     expect(refresh.status).toBe("signed-out");
     expect(refresh.reason).toBe("session-token-expired-refresh-needed");
+    expect(refresh.handshakeUrl).toBeNull();
 
     const expiredWithoutClient = await authenticateRequest(requestWith({ cookie: `__session=${expired}` }), baseOptions());
     expect(expiredWithoutClient.reason).toBe("session-token-expired");
@@ -132,6 +133,60 @@ describe("authenticateRequest", () => {
     const invalid = await authenticateRequest(requestWith({ cookie: "__session=garbage.token.value; __client_uat=1700000000" }), baseOptions());
     expect(invalid.reason).toBe("session-token-invalid");
     expect(invalid.toAuth().isAuthenticated).toBe(false);
+  });
+
+  it("offers a handshake URL when a live client holds a dead token", async () => {
+    const expired = await sign({ expiresAt: Math.floor(Date.now() / 1000) - 10 });
+    const options = { ...baseOptions(), apiUrl: "https://auth.example.com" };
+
+    const expiredState = await authenticateRequest(requestWith({ cookie: `__session=${expired}; __client_uat=1700000000` }), options);
+    expect(expiredState.reason).toBe("session-token-expired");
+    expect(expiredState.handshakeUrl).toBe(
+      `https://auth.example.com/v1/client/handshake?redirect_url=${encodeURIComponent("https://app.example.com/dashboard")}`,
+    );
+
+    const missingState = await authenticateRequest(requestWith({ cookie: "__client_uat=1700000000" }), options);
+    expect(missingState.reason).toBe("session-token-missing-refresh-needed");
+    expect(missingState.handshakeUrl).toContain("/v1/client/handshake?redirect_url=");
+
+    const invalidState = await authenticateRequest(requestWith({ cookie: "__session=garbage.token.value; __client_uat=1700000000" }), options);
+    expect(invalidState.reason).toBe("session-token-invalid");
+    expect(invalidState.handshakeUrl).toContain("/v1/client/handshake?redirect_url=");
+  });
+
+  it("builds the handshake URL from the publishable key and `returnBackUrl`", async () => {
+    const expired = await sign({ expiresAt: Math.floor(Date.now() / 1000) - 10 });
+    const { encodePublishableKey } = await import("@orbitid/shared");
+    const state = await authenticateRequest(requestWith({ cookie: `__session=${expired}; __client_uat=1700000000` }), {
+      ...baseOptions(),
+      publishableKey: encodePublishableKey("https://auth.example.com", "test"),
+      returnBackUrl: "https://app.example.com/settings?tab=2",
+    });
+    expect(state.handshakeUrl).toBe(
+      `https://auth.example.com/v1/client/handshake?redirect_url=${encodeURIComponent("https://app.example.com/settings?tab=2")}`,
+    );
+  });
+
+  it("never suggests a handshake without an API URL or for a bearer token", async () => {
+    const expired = await sign({ expiresAt: Math.floor(Date.now() / 1000) - 10 });
+    // No apiUrl / publishableKey → nothing to point at.
+    const noApi = await authenticateRequest(requestWith({ cookie: `__session=${expired}; __client_uat=1700000000` }), baseOptions());
+    expect(noApi.handshakeUrl).toBeNull();
+
+    // A Bearer caller can mint another token itself, and a handshake would be a useless redirect.
+    const bearerState = await authenticateRequest(requestWith({ authorization: `Bearer ${expired}`, cookie: "__client_uat=1700000000" }), {
+      ...baseOptions(),
+      apiUrl: "https://auth.example.com",
+    });
+    expect(bearerState.handshakeUrl).toBeNull();
+  });
+
+  it("never suggests a handshake for a signed-in request or a signed-out browser", async () => {
+    const token = await sign();
+    const options = { ...baseOptions(), apiUrl: "https://auth.example.com" };
+    expect((await authenticateRequest(requestWith({ authorization: `Bearer ${token}` }), options)).handshakeUrl).toBeNull();
+    expect((await authenticateRequest(requestWith({ cookie: "__client_uat=0" }), options)).handshakeUrl).toBeNull();
+    expect((await authenticateRequest(requestWith({}), options)).handshakeUrl).toBeNull();
   });
 
   it("mints refreshed tokens through the Backend API for toAuth().getToken", async () => {

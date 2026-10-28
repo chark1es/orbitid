@@ -43,9 +43,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 ```
 
 `OrbitIDProvider` is an async server component: it calls `auth()` and passes `initialState` to the
-client provider, so `useAuth()` is correct on the first render. When middleware reports a
-`handshake` (expired `__session` with a live `__client_uat`), it mounts `<HandshakeRefresher/>`,
-which waits for the SDK to mint a token and calls `router.refresh()` once.
+client provider, so `useAuth()` is correct on the first render. When middleware still reports a
+`handshake` (expired `__session` with a live `__client_uat` on a request the middleware did not
+redirect, or when the handshake is disabled), it mounts `<HandshakeRefresher/>`, which waits for the
+SDK to mint a token and calls `router.refresh()` once.
 
 ### Middleware
 
@@ -172,9 +173,12 @@ Signatures use `svix-id`, `svix-timestamp` and `svix-signature` with a 5-minute 
 - Token source order: `Authorization: Bearer` → `__session` cookie.
 - The middleware verifies the JWT offline (`ORBITID_JWT_KEY`) or via JWKS, checks `azp` against
   `authorizedParties`, and forwards `x-orbitid-auth-status|token|reason|url` to the app.
-- `__session` expired (or missing) + `__client_uat > 0` → forwarded as `handshake`: server code sees
-  a signed-out session, while `<HandshakeRefresher/>` refreshes the client token and reloads the RSC
-  tree.
+- `__session` expired (or missing) + `__client_uat > 0` on a top-level navigation → the middleware
+  sends the browser through `GET /v1/client/handshake` on the Frontend API, verifies the returned
+  `__orbit_handshake` token and writes `__session` / `__client_uat` before continuing. See
+  [docs/HANDSHAKE.md](../../docs/HANDSHAKE.md). Other requests keep the `handshake` state: server code
+  sees a signed-out session while `<HandshakeRefresher/>` refreshes the client token and reloads the
+  RSC tree.
 - `auth()` returns the shared `AuthObject` (`userId`, `sessionId`, `orgId`, `orgRole`, `orgSlug`,
   `orgPermissions`, `actor`, `sessionClaims`, `sessionStatus`, `isAuthenticated`, `getToken`,
   `has`) plus `protect()` and `redirectToSignIn()`.
@@ -184,5 +188,5 @@ Signatures use `svix-id`, `svix-timestamp` and `svix-signature` with a 5-minute 
 | Entry point | Exports |
 |---|---|
 | `@orbitid/nextjs` | everything from `@orbitid/react`, `ClientOrbitIDProvider` (also `OrbitIDProvider`), `HandshakeRefresher`, auth types, `getPublicEnv` |
-| `@orbitid/nextjs/server` | `auth`, `currentUser`, `getAuth`, `orbitIdClient`, `orbitIdMiddleware`, `createRouteMatcher`, `OrbitIDProvider` (server), `verifyWebhook`, `redirectToSignIn`, `redirectToSignUp` |
+| `@orbitid/nextjs/server` | `auth`, `currentUser`, `getAuth`, `orbitIdClient`, `orbitIdMiddleware`, `createRouteMatcher`, `OrbitIDProvider` (server), `verifyWebhook`, `redirectToSignIn`, `redirectToSignUp`, `completeHandshake`, `buildHandshakeUrl`, `isNavigationRequest` |
 | `@orbitid/nextjs/webhooks` | `verifyWebhook`, `WebhookVerificationError` |
