@@ -5,6 +5,7 @@ import { nanoid } from "nanoid";
 import type { AppContext } from "./context";
 import { requireSecretKey } from "./middleware";
 import { dashboardHandler } from "./modules/dashboard";
+import { csrfProtection, securityHeaders, uploadSizeLimit } from "./lib/security";
 
 import jwks from "./modules/jwks";
 import environment from "./modules/environment";
@@ -33,6 +34,12 @@ function isUniqueViolation(err: unknown): boolean {
 
 export function createApp(ctx: AppContext) {
   const app = new Hono();
+
+  // ───────────── security (headers, CSRF, body caps) ─────────────
+  // Mounted first so `await next()` wraps every response, including error responses from onError.
+  app.use("*", securityHeaders(ctx));
+  app.use("*", uploadSizeLimit());
+  app.use("*", csrfProtection(ctx));
 
   // CORS: Frontend API is called from browsers with credentials, so only allow configured origins.
   app.use("*", cors({

@@ -18,6 +18,7 @@ import {
   bool, deleted, getUserOrThrow, listParams, mergeMetadata, metadataSchema, normalizeEmail, page, parseOrderBy, queryValues,
 } from "./shared";
 import { first, containsText } from "../../lib/db";
+import { assertImageBytes, IMAGE_CONTENT_TYPES } from "../../lib/images";
 
 const AUDIT_ACTOR = "secret_key";
 const MAX_PROFILE_IMAGE_BYTES = 512 * 1024;
@@ -457,13 +458,20 @@ export default function routes(ctx: AppContext) {
       const file = body["file"];
       if (!(file instanceof File)) throw new OrbitError(422, ErrorCodes.form_param_missing, "file is required.", { param_name: "file" });
       if (file.size > MAX_PROFILE_IMAGE_BYTES) throw new OrbitError(413, ErrorCodes.form_param_format_invalid, "Image must be smaller than 512 KB.", { param_name: "file" });
-      dataUrl = `data:${file.type || "image/png"};base64,${Buffer.from(await file.arrayBuffer()).toString("base64")}`;
+      const bytes = Buffer.from(await file.arrayBuffer());
+      const kind = assertImageBytes(bytes, "file");
+      dataUrl = `data:${IMAGE_CONTENT_TYPES[kind]};base64,${bytes.toString("base64")}`;
     } else {
-      const body = await parseBody(c, z.object({ file: z.string() }));
-      if (!/^(data:image\/[a-z0-9.+-]+;base64,|https?:\/\/)/i.test(body.file)) {
-        throw new OrbitError(422, ErrorCodes.form_param_format_invalid, "file must be an image data URL or an http(s) URL.", { param_name: "file" });
+      const body = await parseBody(c, z.object({ file: z.string().max(MAX_PROFILE_IMAGE_BYTES) }));
+      // Only an image data URL of an allowed raster format; remote URLs are not fetched by the server.
+      const match = /^data:([a-z0-9.+/-]+);base64,(.+)$/i.exec(body.file.trim());
+      if (!match) {
+        throw new OrbitError(422, ErrorCodes.form_param_format_invalid, "file must be a base64 image data URL", { param_name: "file" });
       }
-      dataUrl = body.file;
+      const bytes = Buffer.from(match[2]!, "base64");
+      if (bytes.byteLength > MAX_PROFILE_IMAGE_BYTES) throw new OrbitError(413, ErrorCodes.form_param_format_invalid, "Image must be smaller than 512 KB.", { param_name: "file" });
+      const kind = assertImageBytes(bytes, "file");
+      dataUrl = `data:${IMAGE_CONTENT_TYPES[kind]};base64,${bytes.toString("base64")}`;
     }
     await ctx.db.update(s.users).set({ imageUrl: dataUrl, hasImage: true, updatedAt: Date.now() }).where(eq(s.users.id, existing.id));
     const json = await serializeUser(ctx, await getUserOrThrow(ctx, existing.id), { backend: true });

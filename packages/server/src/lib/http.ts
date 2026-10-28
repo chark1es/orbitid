@@ -3,20 +3,98 @@ import type { Context } from "hono";
 import { z, ZodError, type ZodTypeAny } from "zod";
 import { OrbitError, ErrorCodes } from "@orbitid/shared";
 
+/** JSON bodies are capped at 1 MB and multipart/form uploads at 5 MB (before any parsing happens). */
+export const MAX_JSON_BYTES = 1024 * 1024;
+export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+/** Deeper documents are refused: they only exist to exhaust the stack in recursive validators. */
+export const MAX_JSON_DEPTH = 32;
+
+const PROTOTYPE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+/** Removes `__proto__` / `constructor` / `prototype` keys at every level, so a merge cannot reach a prototype. */
+export function stripPrototypeKeys<T>(value: T): T {
+  if (Array.isArray(value)) return value.map((item) => stripPrototypeKeys(item)) as unknown as T;
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      if (PROTOTYPE_KEYS.has(key)) continue;
+      Object.defineProperty(out, key, { value: stripPrototypeKeys(item), enumerable: true, writable: true, configurable: true });
+    }
+    return out as unknown as T;
+  }
+  return value;
+}
+
+/** Throws `request_body_invalid` when the document nests deeper than `MAX_JSON_DEPTH`. */
+export function assertJsonDepth(value: unknown, max = MAX_JSON_DEPTH): void {
+  const stack: { value: unknown; depth: number }[] = [{ value, depth: 0 }];
+  while (stack.length) {
+    const { value: current, depth } = stack.pop()!;
+    if (!current || typeof current !== "object") continue;
+    if (depth >= max) throw new OrbitError(400, ErrorCodes.request_body_invalid, "Request body is nested too deeply");
+    for (const item of Array.isArray(current) ? current : Object.values(current as Record<string, unknown>)) {
+      stack.push({ value: item, depth: depth + 1 });
+    }
+  }
+}
+
+/** Human-readable cap, in KB below a megabyte so a small test cap does not read as "0 KB". */
+const describeBytes = (bytes: number) => (bytes >= 1024 * 1024 ? `${Math.round(bytes / 1024 / 1024)} MB` : `${Math.round(bytes / 1024)} KB`);
+
+/** Reads a body with a hard byte cap; the stream is cancelled as soon as the cap is crossed. */
+export async function readBodyCapped(c: Context, maxBytes = MAX_JSON_BYTES): Promise<string> {
+  const declared = Number(c.req.header("content-length") ?? NaN);
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    throw new OrbitError(413, ErrorCodes.request_body_invalid, `Request body must be smaller than ${describeBytes(maxBytes)}`);
+  }
+  const raw = c.req.raw.body;
+  if (!raw) return "";
+  const reader = raw.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new OrbitError(413, ErrorCodes.request_body_invalid, `Request body must be smaller than ${describeBytes(maxBytes)}`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock?.();
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks));
+}
+
 /** Parses a JSON or application/x-www-form-urlencoded body with zod. Throws a 422 OrbitError on failure. */
 export async function parseBody<S extends ZodTypeAny>(c: Context, schema: S): Promise<z.infer<S>> {
   let raw: unknown = {};
   const ct = c.req.header("content-type") ?? "";
+  const declared = Number(c.req.header("content-length") ?? NaN);
+  // A Request constructed in-process (tests, middleware) has no content-length header but does have a body.
+  const hasBody = (Number.isFinite(declared) && declared > 0) || !!c.req.raw.body;
   try {
     if (ct.includes("application/json")) {
-      const text = await c.req.text();
+      const text = await readBodyCapped(c, MAX_JSON_BYTES);
       raw = text.trim() ? JSON.parse(text) : {};
+    } else if (ct.includes("form")) {
+      if (Number.isFinite(declared) && declared > MAX_JSON_BYTES) {
+        throw new OrbitError(413, ErrorCodes.request_body_invalid, "Request body is too large");
+      }
+      raw = Object.fromEntries(Object.entries(await c.req.parseBody()));
+    } else if (hasBody) {
+      throw new OrbitError(415, ErrorCodes.request_body_invalid, "Content-Type must be application/json or application/x-www-form-urlencoded");
     }
-    else if (ct.includes("form")) raw = Object.fromEntries(Object.entries(await c.req.parseBody()).map(([k, v]) => [k, v]));
-  } catch {
+  } catch (err) {
+    if (err instanceof OrbitError) throw err;
     throw new OrbitError(400, ErrorCodes.request_body_invalid, "Request body is not valid");
   }
-  return validate(schema, raw ?? {});
+  if (raw && typeof raw === "object") assertJsonDepth(raw);
+  return validate(schema, raw === null ? {} : stripPrototypeKeys(raw));
 }
 export function validate<S extends ZodTypeAny>(schema: S, value: unknown): z.infer<S> {
   const r = schema.safeParse(value);

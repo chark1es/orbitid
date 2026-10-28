@@ -4,13 +4,14 @@
 // state (including IdP-initiated decisions) travels in RelayState via `oauth_states`, because the SAML
 // client is constructed per request and therefore has no in-memory request cache.
 import { X509Certificate } from "node:crypto";
-import { createRemoteJWKSet, jwtVerify } from "jose";
+import { jwtVerify } from "jose";
 import { SAML, ValidateInResponseTo, type CacheProvider, type Profile } from "@node-saml/node-saml";
 import { and, eq, gt, sql } from "drizzle-orm";
 import { ErrorCodes, OrbitError, type EnterpriseConnectionJSON } from "@orbitid/shared";
 import type { AppContext } from "../context";
 import * as s from "../db/schema";
 import { decrypt, encrypt } from "../lib/crypto";
+import { assertPublicUrl, remoteJwks, safeFetch } from "../lib/safe-fetch";
 import type { ExternalProfile } from "./external-identity";
 import { first } from "../lib/db";
 
@@ -254,9 +255,9 @@ export async function getOidcDiscovery(ctx: AppContext, conn: ConnectionRow): Pr
   if (cfg.discovery) return cfg.discovery;
   let doc: Record<string, unknown>;
   try {
-    const res = await fetch(cfg.discoveryUrl, { headers: { accept: "application/json" } });
+    const res = await safeFetch(ctx, cfg.discoveryUrl, { headers: { accept: "application/json" }, timeoutMs: 10_000, maxBytes: 256 * 1024 });
     if (!res.ok) throw new Error(`discovery returned ${res.status}`);
-    doc = (await res.json()) as Record<string, unknown>;
+    doc = JSON.parse(res.body) as Record<string, unknown>;
   } catch (err) {
     throw new OrbitError(400, ErrorCodes.oauth_callback_error, `Could not load OIDC discovery document: ${(err as Error).message}`);
   }
@@ -269,6 +270,12 @@ export async function getOidcDiscovery(ctx: AppContext, conn: ConnectionRow): Pr
   };
   if (!discovery.issuer || !discovery.authorization_endpoint || !discovery.token_endpoint || !discovery.jwks_uri) {
     throw new OrbitError(400, ErrorCodes.oauth_callback_error, "OIDC discovery document is incomplete");
+  }
+  // Every endpoint in the document is operator-controlled (an attacker with settings access could point it inward).
+  for (const value of [discovery.authorization_endpoint, discovery.token_endpoint, discovery.jwks_uri, discovery.userinfo_endpoint]) {
+    if (value) await assertPublicUrl(ctx, value, "discovery_url").catch(() => {
+      throw new OrbitError(400, ErrorCodes.oauth_callback_error, "OIDC discovery document points at a non-public address");
+    });
   }
   await ctx.db.update(s.enterpriseConnections)
             .set({ config: { ...(conn.config ?? {}), discovery }, updatedAt: Date.now() })
@@ -315,16 +322,17 @@ export async function exchangeEnterpriseOidcCode(
     client_secret: decryptClientSecret(ctx, conn),
   });
   if (params.codeVerifier) body.set("code_verifier", params.codeVerifier);
-  const res = await fetch(discovery.token_endpoint, {
+  const res = await safeFetch(ctx, discovery.token_endpoint, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
     body,
+    timeoutMs: 10_000,
+    maxBytes: 256 * 1024,
   });
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new OrbitError(400, ErrorCodes.oauth_callback_error, `OIDC token exchange failed (${res.status}): ${text.slice(0, 200)}`);
+    throw new OrbitError(400, ErrorCodes.oauth_callback_error, `OIDC token exchange failed (${res.status}): ${res.body.slice(0, 200)}`);
   }
-  const json = (await res.json()) as Record<string, unknown>;
+  const json = res.json<Record<string, unknown>>();
   if (typeof json.access_token !== "string") throw new OrbitError(400, ErrorCodes.oauth_callback_error, "OIDC token response has no access_token");
   return {
     access_token: json.access_token,
@@ -337,16 +345,19 @@ export async function exchangeEnterpriseOidcCode(
 
 /** Verifies the IdP's id_token against its published JWKS (issuer + audience + nonce). */
 export async function verifyEnterpriseIdToken(
+  ctx: AppContext,
   conn: ConnectionRow,
   discovery: OidcDiscovery,
   idToken: string,
   nonce: string | null,
 ): Promise<Record<string, unknown>> {
-  const jwks = createRemoteJWKSet(new URL(discovery.jwks_uri));
   try {
+    const jwks = await remoteJwks(ctx, discovery.jwks_uri);
     const { payload } = await jwtVerify(idToken, jwks, {
       issuer: discovery.issuer,
       audience: oidcConfig(conn).clientId,
+      // Pin the algorithm: without this an RS256 key could be used as an HMAC secret ("alg confusion").
+      algorithms: ["RS256", "ES256", "PS256", "EdDSA"],
     });
     if (nonce && payload.nonce !== nonce) throw new Error("nonce mismatch");
     return payload as Record<string, unknown>;
@@ -355,11 +366,15 @@ export async function verifyEnterpriseIdToken(
   }
 }
 
-export async function fetchEnterpriseUserInfo(discovery: OidcDiscovery, accessToken: string): Promise<Record<string, unknown>> {
+export async function fetchEnterpriseUserInfo(ctx: AppContext, discovery: OidcDiscovery, accessToken: string): Promise<Record<string, unknown>> {
   if (!discovery.userinfo_endpoint) return {};
-  const res = await fetch(discovery.userinfo_endpoint, { headers: { authorization: `Bearer ${accessToken}`, accept: "application/json" } });
+  const res = await safeFetch(ctx, discovery.userinfo_endpoint, {
+    headers: { authorization: `Bearer ${accessToken}`, accept: "application/json" },
+    timeoutMs: 10_000,
+    maxBytes: 512 * 1024,
+  });
   if (!res.ok) throw new OrbitError(400, ErrorCodes.oauth_callback_error, `OIDC userinfo request failed (${res.status})`);
-  return (await res.json()) as Record<string, unknown>;
+  return res.json<Record<string, unknown>>();
 }
 
 /** Builds the external profile for an enterprise OIDC login from id_token + userinfo claims. */

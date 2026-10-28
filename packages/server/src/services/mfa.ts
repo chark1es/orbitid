@@ -43,13 +43,17 @@ export function checkTotpAgainstSecret(secret: string, code: string): boolean {
 export const encryptTotpSecret = (ctx: AppContext, secret: string) => encrypt(ctx.env.encryptionKey, secret);
 
 const BACKUP_ALPHABET = "abcdefghijkmnopqrstuvwxyz23456789";
-/** 10 single-use backup codes, formatted `xxxx-xxxx`. Plaintext is returned once; only sha256 hashes are stored. */
+/**
+ * 10 single-use backup codes, formatted `xxxxx-xxxxx`. Ten characters from a 32-symbol alphabet is 50
+ * bits of entropy per code, which puts online guessing far beyond any realistic attempt budget. Plaintext
+ * is returned once; only sha256 hashes are stored.
+ */
 export function generateBackupCodes(count = 10): { plain: string[]; hashed: string[] } {
   const plain: string[] = [];
   for (let i = 0; i < count; i++) {
     let raw = "";
-    for (let j = 0; j < 8; j++) raw += BACKUP_ALPHABET[randomInt(0, BACKUP_ALPHABET.length)];
-    plain.push(`${raw.slice(0, 4)}-${raw.slice(4)}`);
+    for (let j = 0; j < 10; j++) raw += BACKUP_ALPHABET[randomInt(0, BACKUP_ALPHABET.length)];
+    plain.push(`${raw.slice(0, 5)}-${raw.slice(5)}`);
   }
   return { plain, hashed: plain.map(normalizeBackupCodeHash) };
 }

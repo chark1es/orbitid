@@ -7,6 +7,7 @@ import { ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../context";
 import * as s from "../db/schema";
 import { newId } from "../lib/ids";
+import { randomToken } from "../lib/crypto";
 import { clientIp, parseBody } from "../lib/http";
 import { hit } from "../lib/rate-limit";
 import { assertPasswordValid, hashPassword, verifyPassword } from "../services/passwords";
@@ -21,7 +22,7 @@ import {
 } from "../services/users";
 import { assertIdentifiersAllowed } from "../services/restrictions";
 import { isProviderEnabled, providerKeyFromStrategy } from "../services/oauth-providers";
-import { clientAzp, getOrCreateClient, serializeClient } from "./auth/client-auth";
+import { clientAzp, getOrCreateClient, rotateClientTokenOnSignIn, serializeClient } from "./auth/client-auth";
 import {
   afterFirstFactor, asSignInState, assertSignInAllowed, buildSignInJSON, completeSignIn, computeFirstFactors,
   enterpriseConnectionForEmail, latestTransferableSignIn, resolveTicket, saveSignInState, verifiedEmailOf, verifiedPhoneOf,
@@ -33,41 +34,60 @@ import { validateRedirectUrl } from "./auth/redirects";
 import { attachErrorItems } from "./auth/errors";
 import { first } from "../lib/db";
 
+// Per-field bounds; the 1 MB body cap is the outer limit. Nothing here may grow without a stated maximum.
+const shortText = (max: number) => z.string().max(max);
 const createSchema = z.object({
-  identifier: z.string().optional(),
-  strategy: z.string().optional(),
-  password: z.string().optional(),
-  ticket: z.string().optional(),
-  redirect_url: z.string().optional(),
-  action_complete_redirect_url: z.string().optional(),
-  captcha_token: z.string().optional(),
+  identifier: shortText(320).optional(),
+  strategy: shortText(64).optional(),
+  password: shortText(256).optional(),
+  ticket: shortText(512).optional(),
+  redirect_url: shortText(2048).optional(),
+  action_complete_redirect_url: shortText(2048).optional(),
+  captcha_token: shortText(4096).optional(),
   transfer: z.boolean().optional(),
 });
 const prepareFirstSchema = z.object({
-  strategy: z.string().optional(),
-  email_address_id: z.string().optional(),
-  phone_number_id: z.string().optional(),
-  redirect_url: z.string().optional(),
-  captcha_token: z.string().optional(),
+  strategy: shortText(64).optional(),
+  email_address_id: shortText(64).optional(),
+  phone_number_id: shortText(64).optional(),
+  redirect_url: shortText(2048).optional(),
+  captcha_token: shortText(4096).optional(),
 });
 const attemptFirstSchema = z.object({
-  strategy: z.string().optional(),
-  code: z.string().optional(),
-  password: z.string().optional(),
-  signature: z.string().optional(),
+  strategy: shortText(64).optional(),
+  code: shortText(64).optional(),
+  password: shortText(256).optional(),
+  signature: shortText(8192).optional(),
   public_key_credential: z.unknown().optional(),
 });
-const prepareSecondSchema = z.object({ strategy: z.string().optional(), phone_number_id: z.string().optional() });
-const attemptSecondSchema = z.object({ strategy: z.string().optional(), code: z.string().optional() });
+const prepareSecondSchema = z.object({ strategy: shortText(64).optional(), phone_number_id: shortText(64).optional() });
+const attemptSecondSchema = z.object({ strategy: shortText(64).optional(), code: shortText(64).optional() });
 const resetPasswordSchema = z.object({
-  password: z.string(),
+  password: shortText(256),
   sign_out_of_other_sessions: z.boolean().optional(),
-  redirect_url: z.string().optional(),
+  redirect_url: shortText(2048).optional(),
 });
 
 type SignInRow = typeof s.signIns.$inferSelect;
 
 const captchaToken = (c: Context, body: { captcha_token?: string }) => body.captcha_token ?? c.req.header("x-captcha-token") ?? undefined;
+
+/**
+ * A hash that no password matches, produced with this server's own argon2id parameters (so the dummy
+ * check costs exactly what a real one does). Verifying against it when the account does not exist, or
+ * has no password, keeps both response paths equally slow: timing cannot be used to enumerate accounts.
+ */
+let dummyPasswordHash: Promise<string> | null = null;
+const dummyHash = () => (dummyPasswordHash ??= hashPassword(randomToken(24)));
+
+/** Performs the same work as a real password check without revealing whether the account exists. */
+export async function spendPasswordCheck(hash: string | null | undefined, password: string | undefined): Promise<boolean> {
+  if (!hash) {
+    await verifyPassword(await dummyHash(), password ?? "not-the-password");
+    return false;
+  }
+  return verifyPassword(hash, password ?? "");
+}
 
 export default function routes(ctx: AppContext) {
   const app = new Hono();
@@ -77,6 +97,13 @@ export default function routes(ctx: AppContext) {
     const clientJson = await serializeClient(ctx, client, { azp: clientAzp(c) });
     return c.json({ response: await buildSignInJSON(ctx, row), client: clientJson });
   };
+
+  /** Common completion options: the client token is rotated as the session is created (fixation defence). */
+  const completionOpts = (c: Context, clientId: string) => ({
+    ip: clientIp(c),
+    userAgent: c.req.header("user-agent") ?? undefined,
+    rotateClientToken: () => rotateClientTokenOnSignIn(ctx, c, clientId),
+  });
 
   const reload = async (id: string) => first(await ctx.db.select().from(s.signIns).where(eq(s.signIns.id, id)))!;
 
@@ -134,7 +161,11 @@ export default function routes(ctx: AppContext) {
   async function attemptPassword(c: Context, clientId: string, row: SignInRow, password: string | undefined) {
     const user = await userForRow(row);
     await assertFirstFactorEnabled(user, "password");
-    if (!user.passwordHash) throw new OrbitError(400, ErrorCodes.strategy_for_user_invalid, "This account does not use a password", { param_name: "strategy" });
+    if (!user.passwordHash) {
+      // Same work as a real check, so "this account has no password" is not measurably faster.
+      await spendPasswordCheck(null, password);
+      throw new OrbitError(400, ErrorCodes.strategy_for_user_invalid, "This account does not use a password", { param_name: "strategy" });
+    }
     if (!password) throw new OrbitError(422, ErrorCodes.form_param_missing, "password is missing", { param_name: "password" });
     if (!(await verifyPassword(user.passwordHash, password))) {
       await recordFailedAttempt(ctx, user.id);
@@ -144,7 +175,7 @@ export default function routes(ctx: AppContext) {
     const state = asSignInState(row);
     const saved = await saveSignInState(ctx, row, { ...state, first: { strategy: "password", status: "verified" } });
     await ctx.db.update(s.signIns).set({ userId: user.id, updatedAt: Date.now() }).where(eq(s.signIns.id, row.id));
-    const result = await afterFirstFactor(ctx, saved, user, { ip: clientIp(c), userAgent: c.req.header("user-agent") ?? undefined });
+    const result = await afterFirstFactor(ctx, saved, user, completionOpts(c, clientId));
     if (result.sessionId) await notifySession(user, result.sessionId);
     return respond(c, clientId, await reload(row.id));
   }
@@ -210,7 +241,11 @@ export default function routes(ctx: AppContext) {
       await saveSignInState(ctx, row, ticketState);
       await ctx.db.update(s.signIns).set({ userId: user.id, updatedAt: Date.now() }).where(eq(s.signIns.id, row.id));
       // A ticket proves the identity: MFA is bypassed for impersonation (actor tokens).
-      const sessionId = await completeSignIn(ctx, await reload(row.id), { actor: ticket.actor, maxLifetimeSeconds: ticket.sessionMaxDurationSeconds, ip: clientIp(c), userAgent: c.req.header("user-agent") ?? undefined });
+      const sessionId = await completeSignIn(ctx, await reload(row.id), {
+        ...completionOpts(c, client.id),
+        actor: ticket.actor,
+        maxLifetimeSeconds: ticket.sessionMaxDurationSeconds,
+      });
       await notifySession(user, sessionId);
       return respond(c, client.id, await reload(row.id));
     }
@@ -274,6 +309,9 @@ export default function routes(ctx: AppContext) {
 
     const found = await getUserByIdentifier(ctx, identifier);
     if (!found) {
+      // Spend the same password work as the existing-account path before answering, then give the same
+      // shape of response either way so responses and timing cannot be used to enumerate accounts.
+      if (body.password) await spendPasswordCheck(null, body.password);
       if (ctx.settings.get().security.enumerationProtection) return respond(c, client.id, await reload(row.id));
       const err = new OrbitError(422, ErrorCodes.form_identifier_not_found, "Couldn't find your account", { param_name: "identifier" });
       throw attachErrorItems(err, [
@@ -455,7 +493,7 @@ export default function routes(ctx: AppContext) {
       await ctx.db.update(s.signIns).set({ userId: authed.id, identifier: row.identifier ?? authed.username ?? null, updatedAt: Date.now() }).where(eq(s.signIns.id, row.id));
       const current = await reload(row.id);
       const saved = await saveSignInState(ctx, current, { ...asSignInState(current), first: { strategy: "passkey", status: "verified" } });
-      const result = await afterFirstFactor(ctx, saved, authed, { ip: clientIp(c), userAgent: c.req.header("user-agent") ?? undefined });
+      const result = await afterFirstFactor(ctx, saved, authed, completionOpts(c, client.id));
       if (result.sessionId) await notifySession(authed, result.sessionId);
       return respond(c, client.id, await reload(row.id));
     }
@@ -469,7 +507,7 @@ export default function routes(ctx: AppContext) {
         return respond(c, client.id, await reload(row.id));
       }
       const saved = await saveSignInState(ctx, row, { ...state, first: { ...(state.first ?? { strategy }), status: "verified" } });
-      const result = await afterFirstFactor(ctx, saved, user, { ip: clientIp(c), userAgent: c.req.header("user-agent") ?? undefined });
+      const result = await afterFirstFactor(ctx, saved, user, completionOpts(c, client.id));
       if (result.sessionId) await notifySession(user, result.sessionId);
       return respond(c, client.id, await reload(row.id));
     }
@@ -491,7 +529,7 @@ export default function routes(ctx: AppContext) {
     await checkSignInCode(user, verification, body.code);
     await resetFailedAttempts(ctx, user.id);
     const saved = await saveSignInState(ctx, row, { ...state, first: { ...(state.first ?? { strategy }), status: "verified" } });
-    const result = await afterFirstFactor(ctx, saved, user, { ip: clientIp(c), userAgent: c.req.header("user-agent") ?? undefined });
+    const result = await afterFirstFactor(ctx, saved, user, completionOpts(c, client.id));
     if (result.sessionId) await notifySession(user, result.sessionId);
     return respond(c, client.id, await reload(row.id));
   });
@@ -524,7 +562,7 @@ export default function routes(ctx: AppContext) {
     if (signOut) await endSessionsForUser(ctx, user.id, "revoked");
     const { resetPassword, ...rest } = state;
     const saved = await saveSignInState(ctx, row, { ...rest, first: { strategy: resetPassword.strategy, status: "verified" } });
-    const result = await afterFirstFactor(ctx, saved, user, { ip: clientIp(c), userAgent: c.req.header("user-agent") ?? undefined });
+    const result = await afterFirstFactor(ctx, saved, user, completionOpts(c, client.id));
     if (result.sessionId) await notifySession(user, result.sessionId);
     return respond(c, client.id, await reload(row.id));
   });
@@ -596,9 +634,8 @@ export default function routes(ctx: AppContext) {
     await resetFailedAttempts(ctx, user.id);
     await saveSignInState(ctx, row, { ...state, second: { ...(state.second ?? { strategy }), status: "verified" } });
     const sessionId = await completeSignIn(ctx, await reload(row.id), {
+      ...completionOpts(c, client.id),
       secondFactor: true,
-      ip: clientIp(c),
-      userAgent: c.req.header("user-agent") ?? undefined,
     });
     await notifySession(user, sessionId);
     return respond(c, client.id, await reload(row.id));

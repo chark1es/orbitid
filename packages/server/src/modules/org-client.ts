@@ -67,10 +67,18 @@ export default function routes(ctx: AppContext) {
   // ─────────── public: logo files ───────────
   app.get("/organization_logos/:file", (c) => {
     const file = c.req.param("file");
-    if (!/^[A-Za-z0-9_.-]+$/.test(file)) return c.json({ errors: [{ code: ErrorCodes.resource_not_found, message: "Not found" }] }, 404);
+    if (!/^[A-Za-z0-9_.-]+$/.test(file) || file.includes("..")) return c.json({ errors: [{ code: ErrorCodes.resource_not_found, message: "Not found" }] }, 404);
     try {
       const bytes = readFileSync(resolve(uploadDir(ctx), file));
-      return new Response(new Uint8Array(bytes), { status: 200, headers: { "content-type": logoContentType(file), "x-content-type-options": "nosniff", "cache-control": "public, max-age=31536000, immutable" } });
+      return new Response(new Uint8Array(bytes), {
+        status: 200,
+        headers: {
+          "content-type": logoContentType(file),
+          "x-content-type-options": "nosniff",
+          "content-security-policy": "sandbox",
+          "cache-control": "public, max-age=31536000, immutable",
+        },
+      });
     } catch {
       return c.json({ errors: [{ code: ErrorCodes.resource_not_found, message: "Not found" }] }, 404);
     }

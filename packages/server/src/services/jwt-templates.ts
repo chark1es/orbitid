@@ -38,11 +38,16 @@ function splitFallbacks(expr: string): string[] {
   return parts;
 }
 
+const PROTOTYPE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
 /** `user.public_metadata.tier` → context.user.public_metadata.tier */
 function lookupPath(context: ShortcodeContext, path: string): unknown {
   let current: unknown = context;
   for (const key of path.split(".")) {
+    // Templates are admin-authored, but a path must still not be able to walk into Object.prototype.
+    if (PROTOTYPE_KEYS.has(key)) return undefined;
     if (current === null || typeof current !== "object") return undefined;
+    if (!Object.prototype.hasOwnProperty.call(current, key)) return undefined;
     current = (current as Record<string, unknown>)[key];
   }
   return current;
@@ -102,6 +107,7 @@ function renderDeep(value: unknown, context: ShortcodeContext): unknown | typeof
   if (value && typeof value === "object") {
     const out: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      if (PROTOTYPE_KEYS.has(key)) continue;
       const rendered = renderDeep(item, context);
       if (rendered !== OMIT) out[key] = rendered;
     }

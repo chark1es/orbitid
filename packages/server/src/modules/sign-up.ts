@@ -14,7 +14,7 @@ import { sendEmail, sendSms } from "../services/mail";
 import { normalizeEmail, normalizePhone, isValidEmail, assertUsernameAvailable } from "../services/users";
 import { redeemTicket } from "../services/restrictions";
 import { isProviderEnabled, providerKeyFromStrategy } from "../services/oauth-providers";
-import { clientAzp, getOrCreateClient, serializeClient } from "./auth/client-auth";
+import { clientAzp, getOrCreateClient, rotateClientTokenOnSignIn, serializeClient } from "./auth/client-auth";
 import { clearTransferProfile, latestTransferableSignIn, readTransferProfile } from "./auth/signin-core";
 import {
   applyExternalProfile, asSignUpFields, asSignUpVerifications, assertSignUpIdentifiers, buildSignUpJSON,
@@ -27,40 +27,42 @@ import { validateRedirectUrl } from "./auth/redirects";
 import { zBool, zMetadata } from "./auth/forms";
 import { first } from "../lib/db";
 
+// Every string a caller can send is bounded; the 1 MB body cap is the outer limit, these are the per-field ones.
+const shortText = (max: number) => z.string().max(max);
 const createSchema = z.object({
-  email_address: z.string().optional(),
-  phone_number: z.string().optional(),
-  username: z.string().optional(),
-  first_name: z.string().optional(),
-  last_name: z.string().optional(),
-  password: z.string().optional(),
-  external_id: z.string().nullish(),
-  strategy: z.string().optional(),
-  redirect_url: z.string().optional(),
-  action_complete_redirect_url: z.string().optional(),
-  ticket: z.string().optional(),
+  email_address: shortText(320).optional(),
+  phone_number: shortText(32).optional(),
+  username: shortText(64).optional(),
+  first_name: shortText(256).optional(),
+  last_name: shortText(256).optional(),
+  password: shortText(256).optional(),
+  external_id: shortText(256).nullish(),
+  strategy: shortText(64).optional(),
+  redirect_url: shortText(2048).optional(),
+  action_complete_redirect_url: shortText(2048).optional(),
+  ticket: shortText(512).optional(),
   transfer: zBool.optional(),
   unsafe_metadata: zMetadata.optional(),
   legal_accepted: zBool.optional(),
-  captcha_token: z.string().optional(),
+  captcha_token: shortText(4096).optional(),
 });
 
 const updateSchema = z.object({
-  email_address: z.string().nullish(),
-  phone_number: z.string().nullish(),
-  username: z.string().nullish(),
-  first_name: z.string().nullish(),
-  last_name: z.string().nullish(),
-  password: z.string().nullish(),
-  external_id: z.string().nullish(),
+  email_address: shortText(320).nullish(),
+  phone_number: shortText(32).nullish(),
+  username: shortText(64).nullish(),
+  first_name: shortText(256).nullish(),
+  last_name: shortText(256).nullish(),
+  password: shortText(256).nullish(),
+  external_id: shortText(256).nullish(),
   unsafe_metadata: zMetadata.optional(),
   legal_accepted: zBool.optional(),
-  redirect_url: z.string().optional(),
-  captcha_token: z.string().optional(),
+  redirect_url: shortText(2048).optional(),
+  captcha_token: shortText(4096).optional(),
 });
 
-const prepareSchema = z.object({ strategy: z.string().optional(), redirect_url: z.string().optional(), captcha_token: z.string().optional() });
-const attemptSchema = z.object({ strategy: z.string().optional(), code: z.string().optional() });
+const prepareSchema = z.object({ strategy: shortText(64).optional(), redirect_url: shortText(2048).optional(), captcha_token: shortText(4096).optional() });
+const attemptSchema = z.object({ strategy: shortText(64).optional(), code: shortText(64).optional() });
 
 const captchaToken = (c: Context, body: { captcha_token?: string }) => body.captcha_token ?? c.req.header("x-captcha-token") ?? undefined;
 
@@ -171,7 +173,7 @@ export default function routes(ctx: AppContext) {
       if (body.legal_accepted) await saveSignUp(ctx, updated, { fields: { ...asSignUpFields(updated), legalAcceptedAt: Date.now() } });
       await assertSignUpIdentifiers(ctx, asSignUpFields(updated));
       await clearTransferProfile(ctx, signIn);
-      const completed = await maybeCompleteSignUp(ctx, await reload(row.id), { ip: clientIp(c), userAgent: c.req.header("user-agent") ?? undefined });
+      const completed = await maybeCompleteSignUp(ctx, await reload(row.id), { ip: clientIp(c), userAgent: c.req.header("user-agent") ?? undefined, rotateClientToken: () => rotateClientTokenOnSignIn(ctx, c, client.id) });
       void completed;
       return respond(c, client.id, await reload(row.id));
     }
@@ -198,7 +200,7 @@ export default function routes(ctx: AppContext) {
       await assertSignUpIdentifiers(ctx, fields, { ticket: !!body.ticket, invitationTicket: body.ticket });
     }
     row = await saveSignUp(ctx, row, { fields });
-    await maybeCompleteSignUp(ctx, await reload(row.id), { ip: clientIp(c), userAgent: c.req.header("user-agent") ?? undefined });
+    await maybeCompleteSignUp(ctx, await reload(row.id), { ip: clientIp(c), userAgent: c.req.header("user-agent") ?? undefined, rotateClientToken: () => rotateClientTokenOnSignIn(ctx, c, client.id) });
     return respond(c, client.id, await reload(row.id));
   });
 
@@ -231,7 +233,7 @@ export default function routes(ctx: AppContext) {
           fields,
           unsafeMetadata: body.unsafe_metadata ?? row.unsafeMetadata,
         });
-    await maybeCompleteSignUp(ctx, await reload(updated.id), { ip: clientIp(c), userAgent: c.req.header("user-agent") ?? undefined });
+    await maybeCompleteSignUp(ctx, await reload(updated.id), { ip: clientIp(c), userAgent: c.req.header("user-agent") ?? undefined, rotateClientToken: () => rotateClientTokenOnSignIn(ctx, c, client.id) });
     return respond(c, client.id, await reload(row.id));
   });
 
@@ -318,7 +320,7 @@ export default function routes(ctx: AppContext) {
       [isPhone ? "phone_number" : "email_address"]: { ...snapshot, status: "verified", strategy: isPhone ? "phone_code" : snapshot.strategy },
     };
     await saveSignUp(ctx, row, { verifications: next });
-    await maybeCompleteSignUp(ctx, await reload(row.id), { ip: clientIp(c), userAgent: c.req.header("user-agent") ?? undefined });
+    await maybeCompleteSignUp(ctx, await reload(row.id), { ip: clientIp(c), userAgent: c.req.header("user-agent") ?? undefined, rotateClientToken: () => rotateClientTokenOnSignIn(ctx, c, client.id) });
     const finalRow = await reload(row.id);
     const response = await buildSignUpJSON(ctx, finalRow);
     const clientJson = await serializeClient(ctx, client, { azp: clientAzp(c) });
