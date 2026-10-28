@@ -2,7 +2,7 @@
   "name": "orbitid",
   "private": true,
   "version": "0.1.0",
-  "description": "Open source authentication & user management platform — a Clerk alternative.",
+  "description": "Open-source, self-hosted authentication and user management.",
   "license": "MIT",
   "workspaces": [
     "packages/*",

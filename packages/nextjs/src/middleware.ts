@@ -26,7 +26,7 @@ export interface ContentSecurityPolicyOptions {
 export type ContentSecurityPolicy = string | ContentSecurityPolicyOptions;
 
 export interface OrbitIdMiddlewareOptions extends ServerEnvOverrides {
-  /** Accepted for parity with `clerkMiddleware`; consumed by `orbitIdClient()` in server helpers. */
+  /** Consumed by `orbitIdClient()` in server helpers, not by the middleware itself. */
   secretKey?: string;
   debug?: boolean;
   contentSecurityPolicy?: ContentSecurityPolicy;
@@ -168,7 +168,7 @@ function applyCsp(response: Response, csp: ContentSecurityPolicy | undefined): R
 }
 
 /**
- * Drop-in equivalent of `clerkMiddleware`.
+ * Protects routes and forwards verified auth state to the server helpers.
  *
  * ```ts
  * // middleware.ts

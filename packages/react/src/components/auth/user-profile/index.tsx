@@ -9,7 +9,7 @@ import {
 import { KeyRoundIcon, ShieldCheckIcon, UserIcon } from "lucide-react";
 import { currentUser, displayName, primaryIdentifier } from "../_shared/api";
 import { AuthAppearanceScope, useElementClasses, useResolvedTheme } from "../_shared/appearance";
-import { contrastForeground } from "../../../appearance";
+import { contrastForeground, LIGHT_FOREGROUND } from "../../../appearance";
 import { AuthCard } from "../_shared/auth-card";
 import { useAuthRuntime } from "../_shared/w6";
 import type { UserProfileProps } from "../_shared/types";
@@ -87,10 +87,14 @@ function UserProfileInner(props: UserProfileProps) {
   const resolvedTheme = useResolvedTheme();
   const brandingStyle: Record<string, string> = { ...cssVariables };
   if (!appearance.variables.colorPrimary) {
-    brandingStyle["--primary"] = primaryColor;
-    brandingStyle["--ring"] = primaryColor;
     const foreground = contrastForeground(primaryColor);
-    if (foreground) brandingStyle["--primary-foreground"] = foreground;
+    // A dark brand color would vanish on the dark surface, so dark mode keeps the theme tokens.
+    const vanishesOnDark = resolvedTheme === "dark" && foreground === LIGHT_FOREGROUND;
+    if (!vanishesOnDark) {
+      brandingStyle["--primary"] = primaryColor;
+      brandingStyle["--ring"] = primaryColor;
+      if (foreground) brandingStyle["--primary-foreground"] = foreground;
+    }
   }
   const user = currentUser(orbit);
   const { pages, links } = parseChildren(props.children);

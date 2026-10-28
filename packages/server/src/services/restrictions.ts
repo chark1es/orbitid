@@ -206,7 +206,7 @@ export async function redeemTicket(
   // Only an invitation can still be live here; validateTicket raises the exact error otherwise.
   const grant = await validateTicket(ctx, _ticket);
   if (grant.kind !== "invitation") throw new OrbitError(422, ErrorCodes.ticket_invalid, "This ticket has already been used or revoked.");
-  // Invitations stay `pending` until the sign-up completes (markInvitationAccepted), like Clerk.
+  // Invitations stay `pending` until the sign-up completes (markInvitationAccepted).
   return { kind: "invitation", invitationId: grant.invitationId, email: grant.email, publicMetadata: grant.publicMetadata };
 }
 

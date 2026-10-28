@@ -253,7 +253,7 @@ export function createDefaultEnvironment(): EnvironmentJSON {
       support_email: null,
       terms_url: null,
       privacy_url: null,
-      primary_color: "#6366f1",
+      primary_color: "#2b2522",
       theme: "system",
       branded: true,
       captcha_enabled: false,
@@ -494,7 +494,7 @@ export function normalizeEnvironment(
       supportEmail: display.support_email ?? null,
       termsUrl: display.terms_url ?? null,
       privacyUrl: display.privacy_url ?? null,
-      primaryColor: display.primary_color || "#6366f1",
+      primaryColor: display.primary_color || "#2b2522",
       theme: display.theme || "system",
       branded: display.branded !== false,
       developmentMode: Boolean(

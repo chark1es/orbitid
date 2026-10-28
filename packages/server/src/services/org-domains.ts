@@ -95,7 +95,7 @@ export async function findDomain(ctx: AppContext, orgId: string, id: string): Pr
       .where(and(eq(s.organizationDomains.organizationId, orgId), eq(s.organizationDomains.id, id))));
 }
 
-/** Pending invitations addressed to mailboxes on this domain (Clerk's `total_pending_invitations`). */
+/** Pending invitations addressed to mailboxes on this domain (`total_pending_invitations`). */
 export async function pendingInvitationsForDomain(ctx: AppContext, orgId: string, domainName: string): Promise<number> {
   const rows = (await ctx.db
       .select()

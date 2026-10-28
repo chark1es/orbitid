@@ -17,9 +17,9 @@ export type ClientOrbitIDProviderProps = Omit<
   publishableKey?: string;
   signInUrl?: string;
   signUpUrl?: string;
-  /** Deprecated Clerk-compatible alias for `signInFallbackRedirectUrl`. */
+  /** Deprecated alias for `signInFallbackRedirectUrl`. */
   afterSignInUrl?: string;
-  /** Deprecated Clerk-compatible alias for `signUpFallbackRedirectUrl`. */
+  /** Deprecated alias for `signUpFallbackRedirectUrl`. */
   afterSignUpUrl?: string;
   /** Auth snapshot produced by the async provider in `@orbitid/nextjs/server`. */
   initialState?: InitialAuthState;

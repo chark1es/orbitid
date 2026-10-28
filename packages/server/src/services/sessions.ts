@@ -87,7 +87,7 @@ export async function completeMfaEnrollment(ctx: AppContext, userId: string, ses
 export async function sendNewSignInEmail(ctx: AppContext, user: UserRow, session: typeof s.sessions.$inferSelect, when = Date.now()) {
   const email = await primaryEmail(ctx, user);
   if (!email) return;
-  // Only notify for genuinely new devices (Clerk's "new sign-in" notification).
+  // Only notify for genuinely new devices (the new sign-in notification).
   const knownDevice = (await ctx.db.select().from(s.sessions)
       .where(eq(s.sessions.userId, user.id)))
     .some((row) => row.id !== session.id && row.ip === session.ip && row.userAgent === session.userAgent);
@@ -180,7 +180,7 @@ export async function touchSession(ctx: AppContext, row: typeof s.sessions.$infe
   return (await getSession(ctx, row.id))!;
 }
 
-/** Marks a reverification as done on the session. Level `first_factor` also refreshes the second factor age (Clerk semantics). */
+/** Marks a reverification as done on the session. Level `first_factor` also refreshes the second factor age. */
 export async function markSessionReverified(ctx: AppContext, sessionId: string, level: "first_factor" | "second_factor" | "multi_factor") {
   const now = Date.now();
   const patch: Partial<typeof s.sessions.$inferInsert> = { updatedAt: now };

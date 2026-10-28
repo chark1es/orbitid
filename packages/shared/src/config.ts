@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-/** Per-attribute sign-up/sign-in configuration (Clerk "User & Authentication" settings). */
+/** Per-attribute sign-up/sign-in configuration (the "User & Authentication" settings). */
 export const attributeSchema = z.object({
   enabled: z.boolean(),
   required: z.boolean().default(false),
@@ -143,7 +143,7 @@ export const instanceSettingsSchema = z.object({
     testingTokensEnabled: z.boolean().default(true),
   }).default({}),
   branding: z.object({
-    primaryColor: z.string().default("#6366f1"),
+    primaryColor: z.string().default("#2b2522"),
     showPoweredBy: z.boolean().default(true),
     theme: z.enum(["light", "dark", "system"]).default("system"),
   }).default({}),

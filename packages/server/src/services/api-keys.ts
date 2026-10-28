@@ -14,7 +14,7 @@ type ApiKeyRow = typeof s.apiKeys.$inferSelect;
 const SECRET_PREFIX = "ak_live_";
 /** Visible prefix length (kept in the DB so UIs can show which key it is). */
 const PREFIX_LENGTH = 12;
-/** Custom org permission that grants API-key management, alongside Clerk's `org:sys_profile:manage`. */
+/** Custom org permission that grants API-key management, alongside `org:sys_profile:manage`. */
 export const ORG_API_KEYS_PERMISSION = "org:sys_api_keys:manage";
 const ORG_PROFILE_MANAGE = "org:sys_profile:manage";
 const ADMIN_ROLE = "org:admin";

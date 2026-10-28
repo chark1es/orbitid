@@ -88,7 +88,7 @@ export function resolveJwksUrl(apiUrl: string): string {
   return `${stripTrailingSlash(apiUrl)}${JWKS_PATH}`;
 }
 
-/** `ORBITID_AUTHORIZED_PARTIES` is a comma-separated list; Clerk calls this `authorizedParties`. */
+/** `ORBITID_AUTHORIZED_PARTIES` is a comma-separated list of allowed origins. */
 export function parseAuthorizedParties(value: string | string[] | undefined): string[] | undefined {
   if (!value) return undefined;
   const list = Array.isArray(value) ? value : value.split(",");
@@ -178,7 +178,7 @@ export function toAbsoluteUrl(url: string, origin: string): string {
   return new URL(url, origin).toString();
 }
 
-/** Build a sign-in/sign-up URL carrying `redirect_url`, the parameter Clerk uses. */
+/** Build a sign-in/sign-up URL carrying `redirect_url`, the parameter the sign-in page reads. */
 export function buildAuthUrl(baseUrl: string, returnBackUrl?: string | null): string {
   if (!returnBackUrl) return baseUrl;
   const absolute = /^[a-z][a-z0-9+.-]*:\/\//i.test(baseUrl);

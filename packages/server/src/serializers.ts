@@ -7,7 +7,22 @@ import * as s from "./db/schema";
 import { first } from "./lib/db";
 
 type UserRow = typeof s.users.$inferSelect;
-export const DEFAULT_AVATAR = (seed: string) => `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(seed)}`;
+/** Low-chroma tints, so a list of people reads as one set instead of a rainbow. */
+const AVATAR_TINTS = ["#d9d4cc", "#cfd3d6", "#d6d0c4", "#c9cfc8", "#d8cfd0", "#cbd0d9"];
+
+const initialsOf = (seed: string): string => {
+  const words = seed.split("@")[0]!.split(/[\s._-]+/);
+  const letters = words.map((w) => /[\p{L}\p{N}]/u.exec(w)?.[0]?.toUpperCase() ?? "").filter(Boolean).slice(0, 2).join("");
+  return letters || "?";
+};
+
+/** A generated initials image, made here. Nothing is fetched from a third party. */
+export const DEFAULT_AVATAR = (seed: string): string => {
+  let hash = 0;
+  for (const ch of seed) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="${AVATAR_TINTS[hash % AVATAR_TINTS.length]}"/><text x="32" y="32" dy=".35em" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="600" fill="#2a2623">${initialsOf(seed)}</text></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+};
 
 export const verifiedVerification = (strategy: string, at: number | null): VerificationJSON => ({ status: "verified", strategy, attempts: null, expire_at: null });
 const unverified = (strategy: string): VerificationJSON => ({ status: "unverified", strategy, attempts: 0, expire_at: null });

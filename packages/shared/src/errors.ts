@@ -1,4 +1,4 @@
-/** Error codes returned by every OrbitID API. Mirrors Clerk's error vocabulary. */
+/** Error codes returned by every OrbitID API. Every API uses the same codes. */
 export const ErrorCodes = {
   // generic
   resource_not_found: "resource_not_found",
@@ -87,7 +87,7 @@ export interface ApiErrorItem {
   meta?: { param_name?: string; session_id?: string; email_addresses?: string[]; [k: string]: unknown };
 }
 
-/** Wire format of every error response: `{ errors: ApiErrorItem[], clerk_trace_id }` (we use `trace_id`). */
+/** Wire format of every error response: `{ errors: ApiErrorItem[], trace_id }`. */
 export interface ApiErrorBody {
   errors: ApiErrorItem[];
   trace_id?: string;

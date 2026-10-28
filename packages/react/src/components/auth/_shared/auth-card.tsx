@@ -12,7 +12,7 @@ import {
   cn,
 } from "@orbitid/ui";
 import { useAuthAppearance, useElementClasses, useResolvedTheme } from "./appearance";
-import { contrastForeground } from "../../../appearance";
+import { contrastForeground, LIGHT_FOREGROUND } from "../../../appearance";
 import { useAuthRuntime } from "./w6";
 import { SecuredByOrbitID } from "./form-error";
 
@@ -56,10 +56,14 @@ export function AuthCard({
   const resolvedTheme = useResolvedTheme();
   const brandingStyle: Record<string, string> = { ...cssVariables };
   if (!appearance.variables.colorPrimary) {
-    brandingStyle["--primary"] = primaryColor;
-    brandingStyle["--ring"] = primaryColor;
     const foreground = contrastForeground(primaryColor);
-    if (foreground) brandingStyle["--primary-foreground"] = foreground;
+    // A dark brand color would vanish on the dark surface, so dark mode keeps the theme tokens.
+    const vanishesOnDark = resolvedTheme === "dark" && foreground === LIGHT_FOREGROUND;
+    if (!vanishesOnDark) {
+      brandingStyle["--primary"] = primaryColor;
+      brandingStyle["--ring"] = primaryColor;
+      if (foreground) brandingStyle["--primary-foreground"] = foreground;
+    }
   }
 
   const layout = appearance.layout ?? {};

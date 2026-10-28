@@ -196,7 +196,7 @@ export default function routes(ctx: AppContext) {
       };
       await saveSignInState(ctx, row, ticketState);
       await ctx.db.update(s.signIns).set({ userId: user.id, updatedAt: Date.now() }).where(eq(s.signIns.id, row.id));
-      // A ticket proves the identity: MFA is bypassed for impersonation (Clerk actor tokens).
+      // A ticket proves the identity: MFA is bypassed for impersonation (actor tokens).
       const sessionId = await completeSignIn(ctx, await reload(row.id), { actor: ticket.actor, maxLifetimeSeconds: ticket.sessionMaxDurationSeconds, ip: clientIp(c), userAgent: c.req.header("user-agent") ?? undefined });
       await notifySession(user, sessionId);
       return respond(c, client.id, await reload(row.id));

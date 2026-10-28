@@ -213,7 +213,7 @@ export async function handleExternalIdentity(
       return signInExistingUser(ctx, flow, verifiedEmailUser, profile);
     }
 
-    // No account: make the sign-in transferable to a sign-up (Clerk behaviour).
+    // No account: make the sign-in transferable to a sign-up.
     let ownerId = flow.ownerId;
     if (!ownerId) {
       const now = Date.now();

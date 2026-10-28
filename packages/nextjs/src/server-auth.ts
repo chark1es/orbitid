@@ -69,7 +69,7 @@ export async function authWithState(): Promise<{ auth: AuthObject; state: Reques
   return { auth: buildAuthObject(state, env), state };
 }
 
-/** Async `auth()` equivalent to Clerk's: claims + `has()` + `protect()`. */
+/** Async `auth()`: claims, `has()` and `protect()`. */
 export async function auth(): Promise<AuthObject> {
   return (await authWithState()).auth;
 }

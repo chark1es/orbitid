@@ -19,6 +19,26 @@ colors:
   rule-dark: "oklch(0.32 0.01 60)"
   signal-dark: "oklch(0.68 0.2 27)"
 typography:
+  caption:
+    fontFamily: "Hanken Grotesk Variable, Helvetica Neue, Arial, sans-serif"
+    fontSize: "0.6875rem"
+    fontWeight: 500
+    lineHeight: 1.4
+  label:
+    fontFamily: "Hanken Grotesk Variable, Helvetica Neue, Arial, sans-serif"
+    fontSize: "0.75rem"
+    fontWeight: 600
+    lineHeight: 1.4
+  control:
+    fontFamily: "Hanken Grotesk Variable, Helvetica Neue, Arial, sans-serif"
+    fontSize: "0.9375rem"
+    fontWeight: 500
+    lineHeight: 1.4
+  figure:
+    fontFamily: "Hanken Grotesk Variable, Helvetica Neue, Arial, sans-serif"
+    fontSize: "1.75rem"
+    fontWeight: 650
+    lineHeight: 1.1
   body:
     fontFamily: "Hanken Grotesk Variable, Helvetica Neue, Arial, sans-serif"
     fontSize: "0.875rem"
@@ -36,6 +56,7 @@ typography:
     fontWeight: 450
     lineHeight: 1.4
 rounded:
+  pill: "999px"
   sm: "3px"
   md: "4px"
   lg: "6px"
@@ -89,7 +110,7 @@ Restrained palette with one committed region: the navigation rail is charcoal in
 
 One family carries the interface: Hanken Grotesk (variable, self-hosted). JetBrains Mono carries ids, keys, timestamps, claims and code, and nothing else. Numbers in tables and counters use tabular figures (`font-variant-numeric: tabular-nums`).
 
-Fixed rem scale at a 1.125 ratio: 0.75, 0.8125, 0.875 (body), 1, 1.125, 1.375 (page title), 1.75 (large figure), 2.25. No fluid type. Body measure for prose is 65 to 75 characters. Headings are weight 650, tracking -0.015em. Column headers are 0.75rem, weight 600, uppercase with +0.04em tracking, and sit in the row they head; there are no eyebrow labels above headings.
+Fixed rem scale at a 1.125 ratio: 0.6875 (captions inside chips and rail labels), 0.75 (column headers and labels), 0.8125 (data), 0.875 (body), 0.9375 (prominent controls), 1, 1.125, 1.375 (page title), 1.75 (large figure), 2.25. No fluid type. Body measure for prose is 65 to 75 characters. Headings are weight 650, tracking -0.015em. Column headers are 0.75rem, weight 600, uppercase with +0.04em tracking, and sit in the row they head; there are no eyebrow labels above headings.
 
 ## Layout
 

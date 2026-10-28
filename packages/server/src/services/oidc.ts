@@ -31,7 +31,7 @@ export const REFRESH_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
 export const AUTHORIZATION_CODE_TTL_SECONDS = 10 * 60;
 export const ID_TOKEN_TTL_SECONDS = 60 * 60;
 
-/** RFC 6749 error surfaced on OAuth endpoints (`{ error, error_description }`, not the Clerk error envelope). */
+/** RFC 6749 error surfaced on OAuth endpoints (`{ error, error_description }`, not the OrbitID error envelope). */
 export class OAuthError extends Error {
   constructor(public status: number, public error: string, description: string) {
     super(description);

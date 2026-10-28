@@ -51,7 +51,7 @@ function noStoreHeaders(): Record<string, string> {
  * Authenticates an incoming request from the `Authorization: Bearer` header or the `__session` cookie.
  * `__client_uat` short-circuits signed-out visitors and marks a refreshable (expired-token) session.
  *
- * OrbitID does not implement Clerk's handshake: an expired token with a live client (`__client_uat` > 0)
+ * OrbitID has no server-side handshake: an expired token with a live client (`__client_uat` > 0)
  * returns `signed-out` with reason `session-token-expired-refresh-needed`, and the browser SDK refreshes
  * the token on its next visit.
  */

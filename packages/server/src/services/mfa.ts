@@ -74,7 +74,7 @@ export async function verifiedSecondFactorPhones(ctx: AppContext, user: UserRow)
     .filter((p) => p.verified && p.reservedForSecondFactor);
 }
 
-/** Second factors the user can actually perform, in Clerk's priority order. */
+/** Second factors the user can actually perform, in priority order. */
 export async function supportedSecondFactors(ctx: AppContext, user: UserRow): Promise<SignInFactor[]> {
   const factors: SignInFactor[] = [];
   if (user.totpVerified) factors.push({ strategy: "totp" });

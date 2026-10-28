@@ -102,7 +102,7 @@ export interface SignUpRequirements {
   unverified_fields: string[];
 }
 
-/** Computes Clerk-style required/optional/missing/unverified field lists from instance settings. */
+/** Computes required/optional/missing/unverified field lists from instance settings. */
 export function computeRequirements(ctx: AppContext, fields: SignUpFields, verifications: SignUpVerifications): SignUpRequirements {
   const st = ctx.settings.get();
   const attrs = st.attributes;

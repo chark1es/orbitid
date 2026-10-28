@@ -10,7 +10,7 @@ export type RoleRow = typeof s.roles.$inferSelect;
 export type PermissionRow = typeof s.permissions.$inferSelect;
 export type MembershipRow = typeof s.organizationMemberships.$inferSelect;
 
-/** System permission keys (Clerk vocabulary). */
+/** System permission keys. */
 export const PERMISSIONS = {
   PROFILE_MANAGE: "org:sys_profile:manage",
   PROFILE_DELETE: "org:sys_profile:delete",

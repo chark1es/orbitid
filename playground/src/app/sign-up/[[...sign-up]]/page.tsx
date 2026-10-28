@@ -19,7 +19,6 @@ export default function SignUpPage() {
             path="/sign-up"
             signInUrl={process.env.NEXT_PUBLIC_ORBITID_SIGN_IN_URL ?? "/sign-in"}
             fallbackRedirectUrl="/account"
-            forceRedirectUrl="/account"
           />
         </div>
       </ProviderGate>

@@ -39,12 +39,12 @@ export default function Page() {
   const app = settings.application;
   const branding = settings.branding;
   const errors: string[] = [];
-  if (!COLOR_PATTERN.test(branding.primaryColor)) errors.push("Primary color must be a hex color such as #6366f1.");
+  if (!COLOR_PATTERN.test(branding.primaryColor)) errors.push("Primary color must be a hex color such as #2b2522.");
   if (!isHttpUrl(app.homeUrl)) errors.push("Home URL must be an http(s) URL.");
   if (app.allowedOrigins.some((origin) => !isHttpOrigin(origin))) errors.push("Every allowed origin must be an http(s) origin without a path.");
   if (app.allowedRedirectOrigins.some((origin) => !isHttpOrigin(origin))) errors.push("Every redirect origin must be an http(s) origin without a path.");
 
-  const previewColor = COLOR_PATTERN.test(branding.primaryColor) ? branding.primaryColor : "#6366f1";
+  const previewColor = COLOR_PATTERN.test(branding.primaryColor) ? branding.primaryColor : "#2b2522";
 
   return (
     <div className="space-y-6">
@@ -61,7 +61,7 @@ export default function Page() {
           <Field
             label="Primary color"
             htmlFor="primary-color"
-            error={COLOR_PATTERN.test(branding.primaryColor) ? null : "Enter a hex color, for example #6366f1."}
+            error={COLOR_PATTERN.test(branding.primaryColor) ? null : "Enter a hex color, for example #2b2522."}
           >
             <div className="flex items-center gap-2">
               <input
@@ -76,7 +76,7 @@ export default function Page() {
                 id="primary-color"
                 value={branding.primaryColor}
                 onChange={(event) => editor.patch({ branding: { primaryColor: event.target.value } })}
-                placeholder="#6366f1"
+                placeholder="#2b2522"
                 className="font-data text-xs"
               />
             </div>

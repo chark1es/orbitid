@@ -21,6 +21,7 @@ import { useAuthRuntime } from "../_shared/w6";
 import { OrbitIDOptionsContext } from "../../../provider";
 import type { SignInProps, SignInResource } from "../_shared/types";
 import { currentClient } from "../_shared/api";
+import { redirectUrlFromQuery } from "../_shared/guards";
 
 export const SIGN_IN_STEPS = [
   "start",
@@ -127,6 +128,7 @@ export function useSignInFlow(props: SignInProps, step: SignInStep, go: (step: S
     () =>
       props.forceRedirectUrl ??
       options.signInForceRedirectUrl ??
+      redirectUrlFromQuery() ??
       props.fallbackRedirectUrl ??
       options.signInFallbackRedirectUrl ??
       undefined,
@@ -368,6 +370,16 @@ export function useSignInFlow(props: SignInProps, step: SignInStep, go: (step: S
   );
 
   const authenticateWithPasskey = useCallback(async (options?: { autofill?: boolean }) => {
+    if (options?.autofill) {
+      // Conditional UI runs in the background: a dismissed or unavailable prompt is not an error to show.
+      try {
+        const result = await signInAuthenticateWithPasskey(orbit, options);
+        if (result?.signIn) await route(result.signIn);
+      } catch {
+        /* the user kept typing an identifier instead */
+      }
+      return;
+    }
     const result = await run(() => signInAuthenticateWithPasskey(orbit, options ?? {}));
     if (result?.signIn) await route(result.signIn);
   }, [orbit, run, route]);
@@ -449,14 +461,21 @@ export function useSignInFlow(props: SignInProps, step: SignInStep, go: (step: S
   }, [runtime, redirectTarget, go]);
 
   // Sign-in tokens and impersonation links from the Backend API arrive as `?__orbit_ticket=`.
+  // A visitor who already has an active session skips the form and goes where the sign-in would have led.
   const ticketStarted = useRef(false);
   useEffect(() => {
     if (!runtime.loaded || ticketStarted.current || typeof window === "undefined") return;
     const ticket = new URLSearchParams(window.location.search).get("__orbit_ticket");
-    if (!ticket) return;
+    if (!ticket) {
+      if (runtime.session?.status === "active" && redirectTarget) {
+        ticketStarted.current = true;
+        runtime.navigate(redirectTarget, { replace: true });
+      }
+      return;
+    }
     ticketStarted.current = true;
     void create({ strategy: "ticket", ticket });
-  }, [runtime.loaded, create]);
+  }, [runtime, redirectTarget, create]);
 
   return {
     signIn,

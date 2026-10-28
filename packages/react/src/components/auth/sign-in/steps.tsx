@@ -158,7 +158,7 @@ function useConditionalPasskey(flow: SignInFlow, enabled: boolean) {
     void (isAvailable as () => Promise<boolean>)
       .call(credential)
       .then((available) => {
-        if (available) void flowRef.current.authenticateWithPasskey();
+        if (available) void flowRef.current.authenticateWithPasskey({ autofill: true });
       })
       .catch(() => undefined);
   }, [enabled]);
@@ -221,7 +221,7 @@ export function StartStep({ flow, props }: StepProps) {
               <Input
                 {...field}
                 type={identifierInputType(environment.identifiers)}
-                autoComplete={identifierAutoComplete(environment.identifiers)}
+                autoComplete={`${identifierAutoComplete(environment.identifiers)}${passkeyEnabled && environment.passkey.allowAutofill ? " webauthn" : ""}`}
                 placeholder={t("signIn.start.identifierPlaceholder")}
                 autoFocus
                 disabled={flow.busy}

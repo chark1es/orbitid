@@ -104,7 +104,7 @@ export async function enterpriseConnectionForEmail(ctx: AppContext, email: strin
 
 export interface FirstFactorOptions { requestedReset?: boolean; requestedStrategy?: string }
 
-/** Factors this user may use to sign in (Clerk's `supported_first_factors`). */
+/** Factors this user may use to sign in (`supported_first_factors`). */
 export async function computeFirstFactors(ctx: AppContext, user: UserRow, opts: FirstFactorOptions = {}): Promise<SignInFactor[]> {
   const st = ctx.settings.get();
   const factors: SignInFactor[] = [];
@@ -267,7 +267,7 @@ export async function resolveTicket(ctx: AppContext, ticket: string): Promise<{ 
   return { userId: result.userId, actor: result.actor, sessionMaxDurationSeconds: result.sessionMaxDurationSeconds };
 }
 
-/** Throws when the user is banned/locked (with the Clerk-compatible error codes). */
+/** Throws when the user is banned/locked (with the documented error codes). */
 export function assertSignInAllowed(user: UserRow) {
   if (user.banned) throw new OrbitError(403, ErrorCodes.user_banned, "This user has been banned");
   if (user.locked && (!user.lockoutExpiresAt || user.lockoutExpiresAt > Date.now())) {

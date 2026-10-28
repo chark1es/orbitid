@@ -1,8 +1,8 @@
 # `@orbitid/nextjs`
 
-Next.js 14+ integration for OrbitID — the App Router equivalent of `@clerk/nextjs`.
+Next.js 14+ integration for OrbitID.
 
-- `orbitIdMiddleware` / `createRouteMatcher` (works like `clerkMiddleware`)
+- `orbitIdMiddleware` / `createRouteMatcher`
 - `auth()` with `protect()`, `currentUser()`, `getAuth()` (Pages Router)
 - `<OrbitIDProvider>` server wrapper with SSR hydration of `useAuth()`
 - `@orbitid/nextjs/webhooks` for Svix-compatible webhook verification
@@ -82,7 +82,7 @@ Options: `publishableKey`, `secretKey`, `jwtKey`, `authorizedParties`, `signInUr
 ```ts
 import { createRouteMatcher } from '@orbitid/nextjs/server';
 
-createRouteMatcher(['/dashboard(.*)']);          // Clerk-style group
+createRouteMatcher(['/dashboard(.*)']);          // route groups
 createRouteMatcher(['/api/:id']);                // one segment
 createRouteMatcher(['/api/:path*']);             // catch-all, also matches /api
 createRouteMatcher(['/admin/**']);               // glob

@@ -14,7 +14,7 @@ import { first } from "../../lib/db";
 
 const signInTokenSchema = z.object({
   user_id: z.string(),
-  /** 10s .. 30 days (Clerk limits); default 30 days. */
+  /** 10s .. 30 days; default 30 days. */
   expires_in_seconds: z.coerce.number().int().min(10).max(2_592_000).default(2_592_000),
 });
 

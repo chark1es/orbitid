@@ -196,7 +196,7 @@ export class DisplayConfig {
     this.supportEmail = json.support_email ?? null;
     this.termsUrl = json.terms_url ?? null;
     this.privacyUrl = json.privacy_url ?? null;
-    this.primaryColor = json.primary_color ?? "#6366f1";
+    this.primaryColor = json.primary_color ?? "#2b2522";
     this.theme = json.theme ?? "system";
     this.branded = json.branded ?? false;
     this.captchaEnabled = json.captcha_enabled ?? false;
