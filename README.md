@@ -148,6 +148,8 @@ bun run test        # every workspace (vitest)
 - SQLite only. The schema is Drizzle, so a Postgres dialect is a contained change.
 - There is no Clerk-style handshake: an expired session JWT with a live client reads as signed-out until the browser SDK refreshes it.
 - The OIDC provider issues opaque access tokens only, and its `id_token` carries no organization claims yet.
+- With `mfa.required`, a user who has no second factor yet gets a *pending* session that can only enrol one (`session_pending` elsewhere), and both SDKs report it as signed out. The prebuilt `<SignIn />` does not yet render a "set up two-factor" step for it; build one with `useUser().createTOTP()`.
+- Cross-site POST callbacks (SAML ACS, Apple `form_post`) need an https base URL: the browser-binding cookie is `SameSite=None; Secure` only over https.
 - The auth components keep a second English dictionary (`components/auth/_shared/strings.ts`) as a fallback next to the provider's `enUS`; they should share one.
 
 ## License

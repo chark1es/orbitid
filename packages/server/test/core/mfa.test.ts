@@ -3,7 +3,8 @@ import { authenticator } from "otplib";
 import { eq } from "drizzle-orm";
 import * as schema from "../../src/db/schema";
 import { getSmsOutbox } from "../../src/services/mail";
-import { errorsOf, setup, signUpUser, testClient, type TestClient } from "./helpers";
+import { endSessionsForUser } from "../../src/services/sessions";
+import { errorsOf, setup, signInWithPassword, signUpUser, testClient, type TestClient } from "./helpers";
 
 interface TotpSetup { response: { verified: boolean; secret: string; uri: string; qr_code: string; backup_codes?: { code: string }[] } }
 
@@ -31,6 +32,58 @@ describe("MFA", () => {
 
     await enableTotp(user.client);
     expect(statusOf()).toBe("active");
+  });
+
+  describe("pending sessions (required MFA, nothing enrolled yet)", () => {
+    const statusOf = (ctx: Awaited<ReturnType<typeof setup>>["ctx"], id: string) =>
+      ctx.db.select().from(schema.sessions).where(eq(schema.sessions.id, id)).get()?.status;
+    const pendingSetup = async () => {
+      const harness = await setup();
+      await harness.ctx.settings.update({ mfa: { required: true }, attributes: { authenticatorApp: { enabled: true } } });
+      return harness;
+    };
+
+    it("may enrol a factor but nothing else", async () => {
+      const { app } = await pendingSetup();
+      const user = await signUpUser(app);
+
+      expect((await user.client.json<{ response: { id: string } }>("/v1/client/me")).response.id).toBe(user.userId);
+      const blocked = await user.client.json("/v1/client/me", { method: "PATCH", body: { first_name: "Mallory" } });
+      expect(errorsOf(blocked)[0]?.code).toBe("session_pending");
+      const tokens = await user.client.json("/v1/client/me/external_accounts", { method: "POST", body: { strategy: "oauth_google" } });
+      expect(errorsOf(tokens)[0]?.code).toBe("session_pending");
+      expect((await user.client.json<TotpSetup>("/v1/client/me/totp", { body: {} })).response.uri).toMatch(/^otpauth:\/\//);
+    });
+
+    it("activates only the session that enrolled; other pending sessions are revoked", async () => {
+      const { app, ctx } = await pendingSetup();
+      const owner = await signUpUser(app);
+      const other = await signInWithPassword(app, owner.email, owner.password);
+      expect(statusOf(ctx, other.sessionId)).toBe("pending");
+
+      await enableTotp(owner.client);
+      expect(statusOf(ctx, owner.sessionId)).toBe("active");
+      expect(statusOf(ctx, other.sessionId)).toBe("revoked");
+    });
+
+    it("is included when every session of a user is ended", async () => {
+      const { app, ctx } = await pendingSetup();
+      const user = await signUpUser(app);
+      expect(statusOf(ctx, user.sessionId)).toBe("pending");
+      await endSessionsForUser(ctx, user.userId, "revoked");
+      expect(statusOf(ctx, user.sessionId)).toBe("revoked");
+    });
+
+    it("is activated by enrolling a verified phone as the second factor", async () => {
+      const { app, ctx } = await pendingSetup();
+      await ctx.settings.update({ attributes: { phoneNumber: { enabled: true, usedForSecondFactor: true } } });
+      const user = await signUpUser(app);
+      const now = Date.now();
+      ctx.db.insert(schema.phoneNumbers).values({ id: "idn_p_test", userId: user.userId, phone: "+15551230000", verified: true, verifiedAt: now, createdAt: now, updatedAt: now }).run();
+
+      await user.client.json("/v1/client/me/phone_numbers/idn_p_test", { method: "PATCH", body: { reserved_for_second_factor: true } });
+      expect(statusOf(ctx, user.sessionId)).toBe("active");
+    });
   });
 
   it("does not lock users out when no second factor can be enrolled", async () => {

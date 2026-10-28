@@ -63,13 +63,14 @@ interface AssertionOptions {
   /** ID of the AuthnRequest this response answers (omit for IdP-initiated responses). */
   inResponseTo?: string;
   assertionId?: string;
+  validForMs?: number;
 }
 
 /** Builds a Base64 SAML POST response with a signed Assertion (like a real IdP). */
 function signedSamlResponse(opts: AssertionOptions): string {
   const now = new Date();
   const notBefore = new Date(now.getTime() - 60_000).toISOString();
-  const notAfter = new Date(now.getTime() + 5 * 60_000).toISOString();
+  const notAfter = new Date(now.getTime() + (opts.validForMs ?? 5 * 60_000)).toISOString();
   const attributes = opts.attributes ?? { email: "ada@acme.com", firstName: "Ada", lastName: "Lovelace" };
   const attributeXml = Object.entries(attributes)
     .map(([name, value]) => `<saml:Attribute Name="${name}"><saml:AttributeValue xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="xs:string">${value}</saml:AttributeValue></saml:Attribute>`)
@@ -337,6 +338,20 @@ describe("SAML service provider", () => {
     const replay = await acs(h, conn.id, { SAMLResponse: captured, RelayState: attacker.relayState! }, attacker.cookie);
     expect(replay.status).toBe(400);
     expect(handleExternalIdentity).toHaveBeenCalledTimes(1);
+  });
+
+  it("remembers an assertion for as long as it is valid, and the OAuth callback cannot clear the cache", async () => {
+    const conn = await createSamlConnection(h);
+    const start = await startSaml(h);
+    const longLived = response(conn, { inResponseTo: start.requestId, assertionId: "_long_lived", validForMs: 3 * 60 * 60_000 });
+    expect((await acs(h, conn.id, { SAMLResponse: longLived, RelayState: start.relayState! }, start.cookie)).status).toBe(302);
+
+    const row = h.ctx.db.select().from(s.oauthStates).where(eq(s.oauthStates.provider, "saml_cache")).all().find((r) => r.state.includes("_long_lived"))!;
+    expect(row.expiresAt - Date.now()).toBeGreaterThan(2 * 60 * 60_000);
+
+    // The generic OAuth callback must not be able to consume replay-protection rows.
+    await h.app.request(`/v1/oauth_callback/saml_cache?state=${encodeURIComponent(row.state)}`);
+    expect(h.ctx.db.select().from(s.oauthStates).where(eq(s.oauthStates.state, row.state)).get()).toBeTruthy();
   });
 
   it("will not complete a flow in a browser other than the one that started it", async () => {

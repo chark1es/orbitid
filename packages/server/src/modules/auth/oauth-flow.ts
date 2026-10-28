@@ -47,8 +47,10 @@ export interface StoredOAuthFlow extends OAuthFlow { provider: string; codeVerif
 
 export function takeOAuthState(ctx: AppContext, state: string, provider: string): StoredOAuthFlow {
   const row = ctx.db.select().from(s.oauthStates).where(eq(s.oauthStates.state, state)).get();
-  if (!row || row.provider !== provider || row.expiresAt <= Date.now()) {
-    if (row && row.expiresAt <= Date.now()) ctx.db.delete(s.oauthStates).where(eq(s.oauthStates.state, state)).run();
+  // `oauth_states` also holds SAML cache and enterprise rows; only a real OAuth flow may be consumed here.
+  const isOAuthFlow = typeof (row?.flow as { kind?: unknown } | undefined)?.kind === "string" && !!row?.codeVerifier && !row.provider.startsWith("enterprise_");
+  if (!row || !isOAuthFlow || row.provider !== provider || row.expiresAt <= Date.now()) {
+    if (row && isOAuthFlow && row.expiresAt <= Date.now()) ctx.db.delete(s.oauthStates).where(eq(s.oauthStates.state, state)).run();
     throw new OrbitError(400, ErrorCodes.oauth_callback_error, "The OAuth state is invalid or has expired");
   }
   ctx.db.delete(s.oauthStates).where(eq(s.oauthStates.state, state)).run();

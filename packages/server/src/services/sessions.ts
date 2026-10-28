@@ -1,4 +1,4 @@
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { ErrorCodes, OrbitError, type SessionStatus } from "@orbitid/shared";
 import type { AppContext } from "../context";
 import * as s from "../db/schema";
@@ -65,13 +65,21 @@ export async function createSession(ctx: AppContext, input: CreateSessionInput):
   return id;
 }
 
-/** Promotes a user's pending sessions once they have enrolled a second factor. */
-export function activatePendingSessions(ctx: AppContext, userId: string) {
+/**
+ * The session that just enrolled a second factor becomes active. Other pending sessions of the user
+ * never presented that factor, so they are revoked instead of inheriting it.
+ */
+export async function completeMfaEnrollment(ctx: AppContext, userId: string, sessionId: string) {
   const now = Date.now();
   ctx.db.update(s.sessions)
     .set({ status: "active", secondFactorVerifiedAt: now, updatedAt: now })
-    .where(and(eq(s.sessions.userId, userId), eq(s.sessions.status, "pending")))
+    .where(and(eq(s.sessions.id, sessionId), eq(s.sessions.userId, userId), eq(s.sessions.status, "pending")))
     .run();
+  const others = ctx.db.select().from(s.sessions).where(and(eq(s.sessions.userId, userId), eq(s.sessions.status, "pending"))).all();
+  for (const row of others) {
+    ctx.db.update(s.sessions).set({ status: "revoked", updatedAt: now }).where(eq(s.sessions.id, row.id)).run();
+    await emitSessionEvent(ctx, "session.revoked", { ...row, status: "revoked", updatedAt: now });
+  }
 }
 
 /** Email notification for a new device/sign-in. Optional (called by sign-in flows when notifications are desired). */
@@ -97,7 +105,7 @@ export async function sendNewSignInEmail(ctx: AppContext, user: UserRow, session
 }
 
 export async function endSessionsForUser(ctx: AppContext, userId: string, status: "revoked" | "removed" | "ended", exceptSessionId?: string): Promise<void> {
-  const rows = ctx.db.select().from(s.sessions).where(and(eq(s.sessions.userId, userId), eq(s.sessions.status, "active"))).all();
+  const rows = ctx.db.select().from(s.sessions).where(and(eq(s.sessions.userId, userId), inArray(s.sessions.status, ["active", "pending"]))).all();
   const now = Date.now();
   for (const row of rows) {
     if (exceptSessionId && row.id === exceptSessionId) continue;

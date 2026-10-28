@@ -45,6 +45,7 @@ export const ErrorCodes = {
   ticket_expired: "ticket_expired",
   // account
   user_locked: "user_locked",
+  session_pending: "session_pending",
   user_banned: "user_banned",
   reverification_required: "session_reverification_required",
   needs_second_factor: "needs_second_factor",

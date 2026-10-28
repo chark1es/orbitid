@@ -7,7 +7,7 @@ import * as s from "../db/schema";
 import { getOAuthAdapter } from "../services/oauth-providers";
 import { handleExternalIdentity, type ExternalProfile } from "../services/external-identity";
 import { regenerateClientToken } from "./auth/client-auth";
-import { browserMatches } from "./auth/browser-binding";
+import { browserMatches, browserMismatchMessage } from "./auth/browser-binding";
 import { takeOAuthState, type StoredOAuthFlow } from "./auth/oauth-flow";
 import { withQuery } from "./auth/redirects";
 
@@ -68,7 +68,7 @@ export default function routes(ctx: AppContext) {
     if (!flow) return c.redirect(withQuery(ctx.settings.get().application.homeUrl, { __orbit_error: ErrorCodes.oauth_callback_error }), 302);
     const target = flow.actionCompleteRedirectUrl || flow.redirectUrl;
     if (!browserMatches(c, flow.browserHash)) {
-      return c.redirect(withQuery(target, { __orbit_error: ErrorCodes.oauth_callback_error, __orbit_error_message: "This sign-in was started in a different browser" }), 302);
+      return c.redirect(withQuery(target, { __orbit_error: ErrorCodes.oauth_callback_error, __orbit_error_message: browserMismatchMessage(ctx, c) }), 302);
     }
     if (params.error) {
       return c.redirect(withQuery(target, { __orbit_error: ErrorCodes.oauth_callback_error, __orbit_error_message: params.error }), 302);

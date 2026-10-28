@@ -95,7 +95,8 @@ export function oidcConfig(conn: ConnectionRow): OidcConfig {
 }
 
 const SAML_CACHE_TTL_MS = 10 * 60_000;
-const SAML_ASSERTION_TTL_MS = 60 * 60_000;
+/** An assertion older than this is refused, and its ID is remembered for at least this long, so a replay is never accepted. */
+const SAML_ASSERTION_MAX_AGE_MS = 24 * 60 * 60_000;
 
 /**
  * Remembers AuthnRequest IDs (so a response must answer a request we issued, once) and assertion IDs
@@ -137,7 +138,7 @@ function samlCache(ctx: AppContext): CacheProvider {
     },
     async saveIfAbsentAsync(key, value, expiresAtMs) {
       if (live(key)) return false;
-      write(key, value, Math.min(expiresAtMs, Date.now() + SAML_ASSERTION_TTL_MS));
+      write(key, value, Math.min(expiresAtMs, Date.now() + SAML_ASSERTION_MAX_AGE_MS + SAML_CACHE_TTL_MS));
       return true;
     },
   };
@@ -159,6 +160,7 @@ export function samlClient(ctx: AppContext, conn: ConnectionRow): SAML {
     cacheProvider: samlCache(ctx),
     requestIdExpirationPeriodMs: SAML_CACHE_TTL_MS,
     rejectReplayedAssertions: true,
+    maxAssertionAgeMs: SAML_ASSERTION_MAX_AGE_MS,
     acceptedClockSkewMs: 5000,
     disableRequestedAuthnContext: true,
   });

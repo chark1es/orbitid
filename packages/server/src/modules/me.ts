@@ -14,9 +14,9 @@ import { parseBody } from "../lib/http";
 import { hit } from "../lib/rate-limit";
 import { serializeEmail, serializeExternalAccount, serializePasskey, serializePhone, serializeSession, serializeUser } from "../serializers";
 import { assertPasswordValid, hashPassword, verifyPassword } from "../services/passwords";
-import { disableTotp, finishTotpSetup, generateBackupCodes, startTotpSetup } from "../services/mfa";
+import { disableTotp, finishTotpSetup, generateBackupCodes, startTotpSetup, userHasMfa } from "../services/mfa";
 import { beginPasskeyRegistration, finishPasskeyRegistration, listPasskeys } from "../services/passkeys";
-import { activatePendingSessions, endSession, endSessionsForUser } from "../services/sessions";
+import { completeMfaEnrollment, endSession, endSessionsForUser } from "../services/sessions";
 import { sendEmail, sendSms } from "../services/mail";
 import { onUserEmailVerified } from "../services/orgs";
 import {
@@ -74,10 +74,26 @@ const hasMagicBytes = (ext: string, bytes: Buffer) => {
 export default function routes(ctx: AppContext) {
   const app = new Hono();
 
+  // A pending session (required MFA, no factor yet) may only do what enrolling a factor takes.
+  const PENDING_ALLOWED = [
+    /^GET \/$/, /^GET \/totp$/, /^POST \/totp$/, /^POST \/totp\/attempt_verification$/,
+    /^(GET|POST) \/phone_numbers$/, /^(GET|PATCH) \/phone_numbers\/[^/]+$/, /^POST \/phone_numbers\/[^/]+\/(prepare|attempt)_verification$/,
+  ];
   const auth = (c: Context) => {
     const client = getOrCreateClient(ctx, c);
     const { session, user } = requireActiveUser(ctx, client);
+    if (session.status === "pending") {
+      const route = `${c.req.method} ${new URL(c.req.url).pathname.replace(/^\/v1\/client\/me/, "").replace(/\/+$/, "") || "/"}`;
+      if (!PENDING_ALLOWED.some((allowed) => allowed.test(route))) {
+        throw new OrbitError(403, ErrorCodes.session_pending, "Finish setting up two-factor authentication before doing anything else");
+      }
+    }
     return { client, session, user };
+  };
+
+  /** Enrolling a factor activates the session that did it (and only that one). */
+  const settleEnrollment = async (userId: string, sessionId: string) => {
+    if (userHasMfa(ctx, reloadUser(userId))) await completeMfaEnrollment(ctx, userId, sessionId);
   };
 
   const userResponse = (user: UserRow) => ({ response: serializeUser(ctx, user) });
@@ -340,7 +356,7 @@ export default function routes(ctx: AppContext) {
   });
 
   app.patch("/phone_numbers/:id", requireReverification(ctx, "first_factor", 10), async (c) => {
-    const { user } = auth(c);
+    const { user, session } = auth(c);
     const id = c.req.param("id")!;
     const row = ctx.db.select().from(s.phoneNumbers).where(and(eq(s.phoneNumbers.id, id), eq(s.phoneNumbers.userId, user.id))).get();
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Phone number not found");
@@ -358,6 +374,7 @@ export default function routes(ctx: AppContext) {
     }
     if (patch.reservedForSecondFactor && !row.verified) throw new OrbitError(422, ErrorCodes.verification_failed, "Only verified phone numbers can be a second factor");
     ctx.db.update(s.phoneNumbers).set(patch).where(eq(s.phoneNumbers.id, id)).run();
+    await settleEnrollment(user.id, session.id);
     await emitUserUpdated(user.id);
     return c.json({ response: serializePhone(ctx.db.select().from(s.phoneNumbers).where(eq(s.phoneNumbers.id, id)).get()!) });
   });
@@ -495,11 +512,11 @@ export default function routes(ctx: AppContext) {
   });
 
   app.post("/totp/attempt_verification", async (c) => {
-    const { user } = auth(c);
+    const { user, session } = auth(c);
     const body = await parseBody(c, totpAttemptSchema);
     hit(ctx, `totp:attempt:${user.id}`, 20, 60_000);
     const { backupCodes } = finishTotpSetup(ctx, user, body.code);
-    activatePendingSessions(ctx, user.id);
+    await settleEnrollment(user.id, session.id);
     await emitUserUpdated(user.id);
     return c.json({
       response: {

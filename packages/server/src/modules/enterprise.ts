@@ -15,7 +15,7 @@ import {
   findActiveConnection, findConnectionForIdentifier, getOidcDiscovery, profileToExternalProfile, samlAuthorizeUrl,
   serializeConnection, serviceProviderMetadata, validateSamlResponse, verifyEnterpriseIdToken,
 } from "../services/saml";
-import { bindBrowser, browserMatches } from "./auth/browser-binding";
+import { bindBrowser, browserMatches, browserMismatchMessage } from "./auth/browser-binding";
 import { setClientCookie } from "./auth/client-auth";
 import { createClient } from "./machine/auth";
 import { connectionBodySchema, connectionPatchSchema, createConnection, updateConnection } from "./machine/enterprise-config";
@@ -145,7 +145,7 @@ function frontendRoutes(ctx: AppContext): Hono {
 
     const state = takeEnterpriseState(ctx, q.state, providerFor("oidc", connection.id));
     if (!state) throw new OrbitError(400, ErrorCodes.verification_failed, "Enterprise SSO state is invalid or expired");
-    if (!browserMatches(c, state.flow.browserHash)) throw new OrbitError(400, ErrorCodes.verification_failed, "This sign-in was started in a different browser");
+    if (!browserMatches(c, state.flow.browserHash)) throw new OrbitError(400, ErrorCodes.verification_failed, browserMismatchMessage(ctx, c));
 
     const discovery = await getOidcDiscovery(ctx, connection);
     const tokens = await exchangeEnterpriseOidcCode(ctx, connection, discovery, {
@@ -212,7 +212,7 @@ function samlRoutes(ctx: AppContext): Hono {
     if (relayState) {
       const state = takeEnterpriseState(ctx, relayState, providerFor("saml", connection.id));
       if (!state) throw new OrbitError(400, ErrorCodes.verification_failed, "Enterprise SSO state is invalid or expired");
-      if (!browserMatches(c, state.flow.browserHash)) throw new OrbitError(400, ErrorCodes.verification_failed, "This sign-in was started in a different browser");
+      if (!browserMatches(c, state.flow.browserHash)) throw new OrbitError(400, ErrorCodes.verification_failed, browserMismatchMessage(ctx, c));
       flow = state.flow;
     } else if (connection.allowIdpInitiated) {
       const { client, token } = createClient(ctx, { ip: clientIp(c), userAgent: c.req.header("user-agent") });

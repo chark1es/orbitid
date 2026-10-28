@@ -17,6 +17,14 @@ export function bindBrowser(ctx: AppContext, c: Context): string {
   return sha256(nonce);
 }
 
+/** Why a callback was refused; cross-site POSTs (SAML ACS, Apple) only carry the cookie over https. */
+export function browserMismatchMessage(ctx: AppContext, c: Context): string {
+  const needsHttps = c.req.method === "POST" && !ctx.env.baseUrl.startsWith("https://");
+  return needsHttps
+    ? "This sign-in was started in a different browser, or the callback is a cross-site POST that needs an https base URL"
+    : "This sign-in was started in a different browser";
+}
+
 /** True when this request carries the cookie that was set for the stored hash. The cookie is single-use. */
 export function browserMatches(c: Context, expectedHash: string | undefined): boolean {
   const presented = getCookie(c, BROWSER_COOKIE);
