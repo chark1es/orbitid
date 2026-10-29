@@ -236,7 +236,7 @@ async function resolveExternalIdentity(
         throw new OrbitError(422, ErrorCodes.form_identifier_exists, "That email address is already in use");
       }
     }
-    if (profile.email) await assertSignUpIdentifiers(ctx, { emailAddress: profile.email });
+    if (profile.email) await assertSignUpIdentifiers(ctx, { emailAddress: profile.email }, { verifiedEmail: profile.emailVerified === true });
     await applyExternalProfile(ctx, signUp, profile);
     const row = first(await ctx.db.select().from(s.signUps).where(eq(s.signUps.id, signUp.id)))!;
     const completed = await maybeCompleteSignUp(ctx, row, {});

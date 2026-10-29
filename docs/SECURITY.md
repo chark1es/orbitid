@@ -215,7 +215,20 @@ The server hardens what it controls; these parts are yours.
    trace ids and user ids are fine, tokens and codes are never logged by the server (the one opt-in exception is `ORBITID_ALLOW_CONSOLE_EMAIL=true`, which exists for trials) but may appear in your proxy's
    logs if a client puts them in a URL.
 
+## Behind a reverse proxy
+
+Set `ORBITID_TRUST_PROXY` to the number of proxies in front of the server and make the outermost one **append the client
+address to `X-Forwarded-For`** (nginx: `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`, Caddy and Traefik do
+this by default). The server reads the right-hand hop of that header and ignores `X-Real-IP`, which a client could set.
+A proxy that sends only `X-Real-IP` leaves the server seeing the proxy's address for everyone, so every per-address limit
+(sign-in, sign-up, device codes, secret-key failures) is shared; the server logs one warning when it notices.
+
 ## Things that are deliberate
+
+- **First claim wins when email is not verified.** With `attributes.emailAddress.verifyAtSignUp` off, nobody proves a
+  mailbox at sign-up, so the first account to use an address keeps it, and a later plain sign-up with the same address is
+  refused. An identity provider that has verified the address (Google, a verified GitHub address, an enterprise IdP) takes
+  precedence: signing in through it replaces the unproven claim. Leave email verification on if mailbox ownership matters.
 
 - **Account enumeration.** `security.enumerationProtection` (off by default) makes sign-in answer an unknown
   identifier like a known one. It is off because the friendly "couldn't find your account, sign up?" message is what most

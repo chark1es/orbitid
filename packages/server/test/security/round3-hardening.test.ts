@@ -84,3 +84,27 @@ describe("import exemptions follow the export's schema version", () => {
 function ctx_dialect(): string {
   return process.env.ORBITID_DB_DIALECT === "postgres" ? "postgres" : "sqlite";
 }
+
+describe("a provider-verified address replaces an unproven claim", () => {
+  it("lets the real owner sign up through an identity provider that verified the mailbox", async () => {
+    const { app, ctx } = await setup();
+    // Passwords are optional here so an identity-provider sign-up can complete on its own.
+    await ctx.settings.update({ attributes: { emailAddress: { verifyAtSignUp: false }, password: { required: false } } });
+    const squatter = testClient(app);
+    const claimed = await squatter.json<{ response: { status: string } }>("/v1/client/sign_ups", { body: { email_address: "ceo@corp.example", password: "AttackerPass1!" } });
+    expect(claimed.response.status).toBe("complete");
+
+    const clients = await ctx.db.select().from(schema.clients);
+    const owner = testClient(app);
+    const started = await owner.json<{ response: { id: string } }>("/v1/client/sign_ups", { body: {} });
+    const result = await handleExternalIdentity(
+      ctx,
+      { clientId: (await ctx.db.select().from(schema.clients)).find((c) => !clients.some((o) => o.id === c.id))?.id ?? clients[clients.length - 1]!.id, kind: "sign_up", ownerId: started.response.id, redirectUrl: "http://localhost:3000/done" },
+      { provider: "google", providerUserId: "g-owner", email: "ceo@corp.example", emailVerified: true },
+    );
+    expect(result.redirectTo).not.toContain("__orbit_error");
+    const rows = await ctx.db.select().from(schema.emailAddresses).where(eq(schema.emailAddresses.email, "ceo@corp.example"));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.verified).toBe(true);
+  });
+});

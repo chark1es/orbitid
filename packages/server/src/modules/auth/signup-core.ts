@@ -207,7 +207,7 @@ const matchesDomainPattern = (identifier: string, pattern: string) => {
 };
 
 /** Rejects identifiers already claimed by another account or blocked by instance restrictions. */
-export async function assertSignUpIdentifiers(ctx: AppContext, fields: SignUpFields, opts: { ticket?: boolean; invitationTicket?: string } = {}) {
+export async function assertSignUpIdentifiers(ctx: AppContext, fields: SignUpFields, opts: { ticket?: boolean; invitationTicket?: string; verifiedEmail?: boolean } = {}) {
   const st = ctx.settings.get();
   const email = fields.emailAddress ? normalizeEmail(fields.emailAddress) : undefined;
   if (fields.phoneNumber && !st.attributes.phoneNumber.enabled) {
@@ -220,7 +220,8 @@ export async function assertSignUpIdentifiers(ctx: AppContext, fields: SignUpFie
     // A verified address is taken. An unverified claim on someone's mailbox must not lock them out of signing up, but
     // when this sign-up will not verify the address either, two unproven accounts cannot share it.
     const holder = await findEmail(ctx, email);
-    const willVerify = st.attributes.emailAddress.verifyAtSignUp;
+    // This attempt proves the mailbox when the instance verifies at sign-up, or when an identity provider already did.
+    const willVerify = st.attributes.emailAddress.verifyAtSignUp || opts.verifiedEmail === true;
     if (holder?.verified || (!willVerify && holder?.userId)) {
       throw new OrbitError(422, ErrorCodes.form_identifier_exists, "That email address is already in use", { param_name: "email_address" });
     }

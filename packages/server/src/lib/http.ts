@@ -123,6 +123,14 @@ export function parsePagination(c: Context) { return validate(paginationSchema, 
  * the socket address is used. Behind `n` trusted proxies set `ORBITID_TRUST_PROXY=n` (`true` means 1): the address
  * is then the nth entry from the right of `X-Forwarded-For`, the one your outermost proxy appended.
  */
+let warnedMissingForwardedFor = false;
+/** Once per process: a trusted proxy that sends no `X-Forwarded-For` makes every client share the proxy's address. */
+function warnMissingForwardedFor(): void {
+  if (warnedMissingForwardedFor || process.env.VITEST) return;
+  warnedMissingForwardedFor = true;
+  console.warn("[orbitid] ORBITID_TRUST_PROXY is set but a request arrived without an X-Forwarded-For hop; rate limits will treat every such client as the proxy. Make the proxy set X-Forwarded-For (see docs/SECURITY.md).");
+}
+
 export function clientIp(c: Context): string {
   const hops = process.env.ORBITID_TRUST_PROXY === "true" ? 1 : Number(process.env.ORBITID_TRUST_PROXY ?? 0);
   if (hops > 0) {
@@ -130,6 +138,7 @@ export function clientIp(c: Context): string {
     // `X-Real-IP` is not consulted: a client could set it, and only the proxy-appended hop of `X-Forwarded-For` is trustworthy.
     const forwarded = chain[chain.length - hops];
     if (forwarded) return forwarded;
+    warnMissingForwardedFor();
   }
   try {
     return getConnInfo(c).remote.address ?? "127.0.0.1";
