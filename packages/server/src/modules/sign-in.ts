@@ -148,8 +148,13 @@ export default function routes(ctx: AppContext) {
 
   /** A first factor the instance has switched off (or the user cannot use) is refused at the API, not just hidden in the UI. */
   async function assertFirstFactorEnabled(user: UserRow | undefined, strategy: string) {
-    if (strategy === "passkey" && !ctx.settings.get().attributes.passkey.enabled) {
-      throw new OrbitError(400, ErrorCodes.strategy_for_user_invalid, "Sign-in with passkeys is not enabled", { param_name: "strategy" });
+    if (strategy === "passkey") {
+      // `enabled` gates registration and the ceremony; `usedForFirstFactor` gates signing in with a passkey.
+      const passkeys = ctx.settings.get().attributes.passkey;
+      if (!passkeys.enabled || !passkeys.usedForFirstFactor) {
+        throw new OrbitError(400, ErrorCodes.strategy_for_user_invalid, "Sign-in with passkeys is not enabled", { param_name: "strategy" });
+      }
+      return;
     }
     if (!user || !["password", "email_code", "email_link", "phone_code"].includes(strategy)) return;
     const allowed = await computeFirstFactors(ctx, user);
@@ -284,6 +289,7 @@ export default function routes(ctx: AppContext) {
     if (!body.identifier) {
       if (strategy === "passkey") {
         // Discoverable passkey sign-in: no identifier is required until the assertion comes back.
+        await assertFirstFactorEnabled(undefined, "passkey");
         await saveSignInState(ctx, row, { ...state, first: { strategy: "passkey", status: "unverified" } });
         await ctx.db.update(s.signIns).set({ status: "needs_first_factor", updatedAt: Date.now() }).where(eq(s.signIns.id, row.id));
         return respond(c, client.id, await reload(row.id));
@@ -481,10 +487,8 @@ export default function routes(ctx: AppContext) {
 
     if (strategy === "passkey") {
       if (!body.public_key_credential) throw new OrbitError(422, ErrorCodes.form_param_missing, "public_key_credential is missing", { param_name: "public_key_credential" });
-      const rp = relyingParty(ctx, c.req.header("origin"));
       const { user: authed } = await finishPasskeyAuthentication(ctx, {
         ownerId: row.id,
-        rp,
         // The assertion is validated at runtime by @simplewebauthn/server.
         credential: body.public_key_credential as unknown as AuthenticationResponseJSON,
       });
