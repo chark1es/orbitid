@@ -12,7 +12,7 @@ import type {
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
   RegistrationResponseJSON,
-} from "@simplewebauthn/types";
+} from "@simplewebauthn/server";
 
 const sha256 = (data: Uint8Array | string): Buffer => createHash("sha256").update(data).digest();
 

@@ -15,8 +15,7 @@
   },
   "dependencies": {
     "@orbitid/shared": "*",
-    "@simplewebauthn/browser": "^10.0.0",
-    "@simplewebauthn/types": "^10.0.0",
+    "@simplewebauthn/browser": "^13",
     "jose": "^5.9.0"
   },
   "devDependencies": {

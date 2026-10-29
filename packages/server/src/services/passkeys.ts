@@ -1,4 +1,4 @@
-// WebAuthn / passkey ceremonies (@simplewebauthn/server v10).
+// WebAuthn / passkey ceremonies (@simplewebauthn/server v13).
 import type { VerifiedRegistrationResponse } from "@simplewebauthn/server";
 import {
   generateAuthenticationOptions,
@@ -6,7 +6,7 @@ import {
   verifyAuthenticationResponse,
   verifyRegistrationResponse,
 } from "@simplewebauthn/server";
-import type { AuthenticationResponseJSON, AuthenticatorTransportFuture, RegistrationResponseJSON } from "@simplewebauthn/types";
+import type { AuthenticationResponseJSON, AuthenticatorTransportFuture, RegistrationResponseJSON } from "@simplewebauthn/server";
 import { and, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import { ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../context";
@@ -166,7 +166,7 @@ export async function finishPasskeyRegistration(ctx: AppContext, input: {
     throw new OrbitError(400, ErrorCodes.passkey_registration_failure, "Passkey registration could not be verified");
   }
   await ctx.db.update(s.verifications).set({ verifiedAt: Date.now() }).where(eq(s.verifications.id, claimed.id));
-  if (first(await ctx.db.select().from(s.passkeys).where(eq(s.passkeys.credentialId, info.credentialID)))) {
+  if (first(await ctx.db.select().from(s.passkeys).where(eq(s.passkeys.credentialId, info.credential.id)))) {
     throw new OrbitError(409, ErrorCodes.passkey_registration_failure, "This authenticator is already registered");
   }
   const now = Date.now();
@@ -176,9 +176,9 @@ export async function finishPasskeyRegistration(ctx: AppContext, input: {
             id: input.passkeyId,
             userId: input.userId,
             name,
-            credentialId: info.credentialID,
-            publicKey: Buffer.from(info.credentialPublicKey).toString("base64url"),
-            counter: info.counter,
+            credentialId: info.credential.id,
+            publicKey: Buffer.from(info.credential.publicKey).toString("base64url"),
+            counter: info.credential.counter,
             transports: (input.credential.response.transports ?? []) as string[],
             deviceType: info.credentialDeviceType,
             backedUp: info.credentialBackedUp,
@@ -236,9 +236,9 @@ export async function finishPasskeyAuthentication(ctx: AppContext, input: {
       expectedChallenge: claimed.identifier,
       expectedOrigin: rp.origin,
       expectedRPID: rp.rpID,
-      authenticator: {
-        credentialID: passkey.credentialId,
-        credentialPublicKey: Buffer.from(passkey.publicKey, "base64url"),
+      credential: {
+        id: passkey.credentialId,
+        publicKey: new Uint8Array(Buffer.from(passkey.publicKey, "base64url")),
         counter: passkey.counter,
         transports: (passkey.transports ?? undefined) as AuthenticatorTransportFuture[] | undefined,
       },

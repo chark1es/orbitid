@@ -9,8 +9,7 @@ import type {
   SessionJSON,
   UserJSON,
 } from "@orbitid/shared";
-import { startRegistration } from "@simplewebauthn/browser";
-import type { PublicKeyCredentialCreationOptionsJSON } from "@simplewebauthn/types";
+import { startRegistration, type PublicKeyCredentialCreationOptionsJSON } from "@simplewebauthn/browser";
 import type { FapiClient } from "../fapi";
 import { fetchData, fetchPaginated, fetchList, unwrap } from "./base";
 import { isRecord } from "../util/object";
@@ -656,7 +655,7 @@ export class User {
     }
     const passkeyId = begin.id ?? begin.passkey_id;
     if (!passkeyId) throw new Error("OrbitID did not return a passkey id");
-    const credential = await startRegistration(options as PublicKeyCredentialCreationOptionsJSON);
+    const credential = await startRegistration({ optionsJSON: options as PublicKeyCredentialCreationOptionsJSON });
     const raw = await this.fapi.post<unknown>(`/v1/client/me/passkeys/${passkeyId}/attempt_verification`, {
       body: { public_key_credential: credential },
     });

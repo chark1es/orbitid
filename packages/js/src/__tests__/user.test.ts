@@ -286,7 +286,7 @@ describe("user resources", () => {
     const passkey = await user.createPasskey({ name: "Work laptop" });
     expect(api.lastCall("POST", "/v1/client/me/passkeys")?.body).toEqual({ name: "Work laptop" });
     expect(startRegistration).toHaveBeenCalledTimes(1);
-    expect(startRegistration).toHaveBeenCalledWith(expect.objectContaining({ challenge: "challenge" }));
+    expect(startRegistration).toHaveBeenCalledWith({ optionsJSON: expect.objectContaining({ challenge: "challenge" }) });
     expect(api.lastCall("POST", "/v1/client/me/passkeys/pkey_1/attempt_verification")?.body).toMatchObject({
       public_key_credential: { id: "cred_1" },
     });

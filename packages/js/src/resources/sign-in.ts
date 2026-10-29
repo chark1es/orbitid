@@ -1,6 +1,5 @@
 import type { SignInFactor as SignInFactorJSON, SignInJSON, SignInStatus } from "@orbitid/shared";
-import type { PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/types";
-import { startAuthentication } from "@simplewebauthn/browser";
+import { startAuthentication, type PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/browser";
 import type { FapiClient } from "../fapi";
 import { fetchData } from "./base";
 import { Verification } from "./verification";
@@ -302,7 +301,7 @@ export class SignIn {
       optionsJSON = toRequestOptions(this.firstFactorVerification?.nonce);
     }
     if (!optionsJSON) throw new Error("OrbitID did not return passkey request options");
-    const credential = await startAuthentication(optionsJSON, options.autofill);
+    const credential = await startAuthentication({ optionsJSON, useBrowserAutofill: options.autofill });
     return this.attemptFirstFactor({ strategy: "passkey", publicKeyCredential: credential });
   }
 

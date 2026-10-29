@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
-import type { PublicKeyCredentialCreationOptionsJSON } from "@simplewebauthn/types";
+import type { PublicKeyCredentialCreationOptionsJSON } from "@simplewebauthn/server";
 import * as schema from "../src/db/schema";
 import { first } from "../src/lib/db";
 import { errorsOf, setup, signUpUser, testClient } from "./core/helpers";

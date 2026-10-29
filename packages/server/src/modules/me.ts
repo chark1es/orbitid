@@ -1,6 +1,6 @@
 // /v1/client/me (profile, password, emails, phones, external accounts, totp, backup codes, passkeys, sessions, image, delete)
 import { Hono, type Context } from "hono";
-import type { RegistrationResponseJSON } from "@simplewebauthn/types";
+import type { RegistrationResponseJSON } from "@simplewebauthn/server";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { and, desc, eq, ne } from "drizzle-orm";

@@ -5,7 +5,7 @@ import { first } from "../src/lib/db";
 import type { AppContext } from "../src/context";
 import type { TestClient } from "./core/helpers";
 import { VirtualAuthenticator, type VirtualAuthenticatorOptions } from "./support/virtual-authenticator";
-import type { PublicKeyCredentialCreationOptionsJSON, PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/types";
+import type { PublicKeyCredentialCreationOptionsJSON, PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/server";
 
 /** The app origin the tests claim to come from; also the instance `application.homeUrl` default. */
 export const APP_ORIGIN = "http://localhost:3000";

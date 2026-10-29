@@ -1,6 +1,6 @@
 // /v1/client/sign_ins
 import { Hono, type Context } from "hono";
-import type { AuthenticationResponseJSON } from "@simplewebauthn/types";
+import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { ErrorCodes, OrbitError } from "@orbitid/shared";
