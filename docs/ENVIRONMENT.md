@@ -12,7 +12,7 @@ Rule of thumb: a value that can read or change users (the secret key, the encryp
 
 ## SERVER
 
-Set these where OrbitID runs: the container environment, `docker compose`'s `.env`, or the shell that starts `orbitid-server`. Nothing here belongs in a website.
+Set these where OrbitID runs: the container environment, `docker compose`'s `.env`, or the shell that starts `orbitid`. Nothing here belongs in a website.
 
 | Variable | Required | Default | Meaning |
 | --- | --- | --- | --- |
@@ -42,7 +42,7 @@ Set these on the server side of your own app: the Next.js server, an Express or 
 
 | Variable | Required | Read by | Meaning |
 | --- | --- | --- | --- |
-| `ORBITID_SECRET_KEY` | **yes** | `@orbitid/nextjs`, `@orbitid/node`, `@orbitid/backend` | Backend API key (`sk_…`). Print it with `orbitid-server keys` or copy it from the dashboard. |
+| `ORBITID_SECRET_KEY` | **yes** | `@orbitid/nextjs`, `@orbitid/node`, `@orbitid/backend` | Backend API key (`sk_…`). Print it with `orbitid keys` or copy it from the dashboard. |
 | `ORBITID_API_URL` | no | `@orbitid/node`, `@orbitid/backend` | URL of your OrbitID server. Defaults to the one encoded in the publishable key. |
 | `ORBITID_WEBHOOK_SECRET` | only to receive webhooks | all backend SDKs | Signing secret (`whsec_…`) of the webhook endpoint you registered in the dashboard. |
 | `ORBITID_JWT_KEY` | no | `@orbitid/nextjs` | PEM public key to verify session tokens without fetching the key set. |

@@ -65,7 +65,7 @@ The table below is the **SERVER** label: variables for the machine that runs Orb
 
 ## Moving between SQLite and Postgres
 
-`orbitid-server copy --from <url> --to <url>` moves everything (users with their passwords, MFA, passkeys, sessions, organizations, keys, webhooks, audit logs) and checks the row counts at the end. `export` and `import` do the same in two steps, which also makes them a backup and restore. Uploaded images are not part of the export; copy the uploads folder yourself. Step by step, with the downtime procedure: [DATA_MOVE.md](DATA_MOVE.md).
+`orbitid copy --from <url> --to <url>` moves everything (users with their passwords, MFA, passkeys, sessions, organizations, keys, webhooks, audit logs) and checks the row counts at the end. `export` and `import` do the same in two steps, which also makes them a backup and restore. Uploaded images are not part of the export; copy the uploads folder yourself. Step by step, with the downtime procedure: [DATA_MOVE.md](DATA_MOVE.md).
 
 ## Upgrading
 
