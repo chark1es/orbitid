@@ -72,6 +72,10 @@
     {
       "name": "Health",
       "description": "Unauthenticated liveness and key discovery."
+    },
+    {
+      "name": "Dashboard",
+      "description": "Operator sign-in for the dashboard: trade the instance secret key for a revocable httpOnly session."
     }
   ],
   "security": [],
@@ -98,6 +102,123 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          }
+        }
+      }
+    },
+    "/v1/operator_sessions": {
+      "post": {
+        "tags": [
+          "Dashboard"
+        ],
+        "summary": "Sign in to the dashboard with the secret key",
+        "operationId": "createOperatorSession",
+        "description": "The one place a browser may present the instance secret key. The key is compared in constant time and rate limited per address, then replaced by an opaque session token in an httpOnly cookie; the key is neither stored nor returned. Requires the request to come from this instance's own origin, and answers `429` with `Retry-After` after too many failed attempts.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "description": "The secret key. It travels once and is never echoed in the response.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "secret_key"
+                ],
+                "properties": {
+                  "secret_key": {
+                    "type": "string",
+                    "description": "The instance secret key (`sk_live_…` / `sk_test_…`).",
+                    "writeOnly": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Sets the `__orbit_operator` cookie and returns the session's id and expiry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorSession"
+                }
+              }
+            },
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string",
+                  "description": "`__orbit_operator=<opaque>; Path=/v1; HttpOnly; SameSite=Strict` (plus `Secure` over https)."
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/v1/operator_sessions/current": {
+      "get": {
+        "tags": [
+          "Dashboard"
+        ],
+        "summary": "Check the dashboard session",
+        "operationId": "getCurrentOperatorSession",
+        "description": "Reports whether this browser still has a live operator session. Used on dashboard load so an expired or revoked cookie sends the operator to the sign-in screen. Answers `401` and clears the cookie when there is none.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorSession"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Dashboard"
+        ],
+        "summary": "Sign out of the dashboard",
+        "operationId": "revokeOperatorSession",
+        "description": "Revokes this browser's operator session and clears the cookie. Safe to call without a session.",
+        "security": [],
+        "responses": {
+          "204": {
+            "description": "The session is revoked and the cookie cleared."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       }
@@ -180,7 +301,8 @@
                     "type": "string"
                   },
                   "transfer": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Carry a transferable OAuth verification from a sign-in into this sign-up."
                   }
                 }
               }
@@ -438,7 +560,9 @@
                     "type": "string",
                     "description": "Signed message for a web3 strategy."
                   },
-                  "public_key_credential": {}
+                  "public_key_credential": {
+                    "description": "WebAuthn assertion for the `passkey` strategy."
+                  }
                 }
               }
             }
@@ -822,7 +946,8 @@
                     "additionalProperties": {}
                   },
                   "legal_accepted": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   },
                   "captcha_token": {
                     "type": "string"
@@ -1015,7 +1140,8 @@
                     "additionalProperties": {}
                   },
                   "legal_accepted": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   },
                   "captcha_token": {
                     "type": "string"
@@ -1351,7 +1477,8 @@
                     ]
                   },
                   "legal_accepted": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   }
                 }
               }
@@ -2381,10 +2508,12 @@
                 "type": "object",
                 "properties": {
                   "reserved_for_second_factor": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   },
                   "default_second_factor": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   }
                 }
               }
@@ -3782,7 +3911,9 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "public_key_credential": {},
+                  "public_key_credential": {
+                    "description": "WebAuthn registration response."
+                  },
                   "name": {
                     "type": "string"
                   }
@@ -5459,7 +5590,8 @@
                 "properties": {
                   "email_address": {
                     "type": "string",
-                    "format": "email"
+                    "format": "email",
+                    "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
                   }
                 },
                 "required": [
@@ -7662,6 +7794,7 @@
                     ]
                   },
                   "delete_pending": {
+                    "description": "Revoke invitations that this domain created.",
                     "type": "boolean"
                   }
                 },
@@ -11107,6 +11240,7 @@
                 "type": "object",
                 "properties": {
                   "email_address": {
+                    "maxItems": 20,
                     "type": "array",
                     "items": {
                       "type": "string"
@@ -11114,6 +11248,7 @@
                     "description": "Email addresses to add; they are created verified."
                   },
                   "phone_number": {
+                    "maxItems": 20,
                     "type": "array",
                     "items": {
                       "type": "string"
@@ -11138,10 +11273,12 @@
                     ]
                   },
                   "skip_password_checks": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   },
                   "skip_password_requirement": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   },
                   "external_id": {
                     "type": "string"
@@ -11184,10 +11321,12 @@
                     "description": "Epoch milliseconds. Defaults to now."
                   },
                   "delete_self_enabled": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   },
                   "create_organization_enabled": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   },
                   "legal_accepted_at": {
                     "type": [
@@ -11423,10 +11562,12 @@
                     ]
                   },
                   "skip_password_checks": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   },
                   "sign_out_of_other_sessions": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   },
                   "totp_secret": {
                     "type": [
@@ -11456,10 +11597,12 @@
                     "additionalProperties": {}
                   },
                   "delete_self_enabled": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   },
                   "create_organization_enabled": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   },
                   "create_organizations_limit": {
                     "type": [
@@ -12579,10 +12722,12 @@
                     "type": "string"
                   },
                   "verified": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   },
                   "primary": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   }
                 },
                 "required": [
@@ -12694,10 +12839,12 @@
                 "type": "object",
                 "properties": {
                   "verified": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   },
                   "primary": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   }
                 }
               }
@@ -12886,13 +13033,16 @@
                     "type": "string"
                   },
                   "verified": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   },
                   "primary": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   },
                   "reserved_for_second_factor": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   }
                 },
                 "required": [
@@ -13005,16 +13155,20 @@
                 "type": "object",
                 "properties": {
                   "verified": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   },
                   "primary": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   },
                   "reserved_for_second_factor": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   },
                   "default_second_factor": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   }
                 }
               }
@@ -13185,7 +13339,8 @@
                     "type": "string"
                   },
                   "notify": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   },
                   "public_metadata": {
                     "type": "object",
@@ -14034,12 +14189,16 @@
                     },
                     "required": [
                       "sub"
-                    ]
+                    ],
+                    "additionalProperties": {},
+                    "description": "Extra claims copied into the session's `act` claim."
                   },
                   "expires_in_seconds": {
+                    "description": "Between 10 seconds and 12 hours. Defaults to one hour.",
                     "type": "integer"
                   },
                   "session_max_duration_in_seconds": {
+                    "description": "Lifetime of the impersonated session. Defaults to 30 minutes.",
                     "type": "integer"
                   }
                 },
@@ -14224,7 +14383,8 @@
                 "properties": {
                   "email_address": {
                     "type": "string",
-                    "format": "email"
+                    "format": "email",
+                    "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
                   },
                   "public_metadata": {
                     "type": "object",
@@ -14235,10 +14395,12 @@
                     "format": "uri"
                   },
                   "notify": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   },
                   "ignore_existing": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   },
                   "expires_in_days": {
                     "type": "integer"
@@ -14344,7 +14506,8 @@
                     "type": "array",
                     "items": {
                       "type": "string",
-                      "format": "email"
+                      "format": "email",
+                      "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
                     },
                     "description": "At most 100 addresses."
                   },
@@ -14357,10 +14520,12 @@
                     "format": "uri"
                   },
                   "notify": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   },
                   "ignore_existing": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   },
                   "expires_in_days": {
                     "type": "integer"
@@ -14542,7 +14707,8 @@
                 "properties": {
                   "email_address": {
                     "type": "string",
-                    "format": "email"
+                    "format": "email",
+                    "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
                   }
                 },
                 "required": [
@@ -14822,7 +14988,8 @@
                     "type": "integer"
                   },
                   "custom_signing_key": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   },
                   "signing_algorithm": {
                     "type": "string",
@@ -14952,7 +15119,8 @@
                     "type": "integer"
                   },
                   "custom_signing_key": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Accepts `true` and `false` in JSON, and `\"true\"`/`\"1\"` in form bodies."
                   },
                   "signing_algorithm": {
                     "type": "string",
@@ -15104,7 +15272,8 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": {}
+                "additionalProperties": {},
+                "description": "Partial `InstanceSettings` tree, deep-merged into the current settings. Omit masked secrets to keep them."
               }
             }
           }
@@ -15154,7 +15323,8 @@
                 "properties": {
                   "to": {
                     "type": "string",
-                    "format": "email"
+                    "format": "email",
+                    "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
                   }
                 }
               }
@@ -15820,7 +15990,8 @@
                     "type": "boolean"
                   },
                   "rotate_secret": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Replace the signing secret; the response then includes the new one."
                   }
                 }
               }
@@ -18596,7 +18767,8 @@
                     "type": "string"
                   },
                   "approve": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "`false` denies the request; the browser is then sent back with `error=access_denied`."
                   },
                   "scopes": {
                     "type": "array",
@@ -19168,6 +19340,7 @@
                 "type": "object",
                 "properties": {
                   "grant_type": {
+                    "type": "string",
                     "const": "client_credentials"
                   },
                   "machine_id": {
@@ -19335,7 +19508,8 @@
                     "description": "Space separated scopes. Defaults to `openid profile email`."
                   },
                   "public": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Public clients have no secret and must use PKCE."
                   },
                   "consent_screen_enabled": {
                     "type": "boolean"
@@ -19712,46 +19886,47 @@
                     "maxLength": 256
                   },
                   "protocol": {
+                    "default": "saml",
                     "type": "string",
                     "enum": [
                       "saml",
                       "oidc"
-                    ],
-                    "default": "saml"
+                    ]
                   },
                   "provider": {
+                    "default": "custom",
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": 64,
-                    "default": "custom"
+                    "maxLength": 64
                   },
                   "domains": {
+                    "default": [],
+                    "maxItems": 50,
                     "type": "array",
                     "items": {
                       "type": "string",
                       "minLength": 1
-                    },
-                    "default": []
+                    }
                   },
                   "active": {
-                    "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "type": "boolean"
                   },
                   "allow_subdomains": {
-                    "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "type": "boolean"
                   },
                   "allow_idp_initiated": {
-                    "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "type": "boolean"
                   },
                   "sync_user_attributes": {
-                    "type": "boolean",
-                    "default": true
+                    "default": true,
+                    "type": "boolean"
                   },
                   "disable_additional_identifications": {
-                    "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "type": "boolean"
                   },
                   "idp_entity_id": {
                     "type": "string",
@@ -19900,6 +20075,7 @@
                     "maxLength": 64
                   },
                   "domains": {
+                    "maxItems": 50,
                     "type": "array",
                     "items": {
                       "type": "string",
@@ -20622,6 +20798,28 @@
           "created_at",
           "updated_at"
         ]
+      },
+      "OperatorSession": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "const": "operator_session"
+          },
+          "id": {
+            "type": "string",
+            "description": "Session id (`osess_…`). The session token itself is only ever in the httpOnly cookie."
+          },
+          "expires_at": {
+            "type": "integer",
+            "description": "Epoch milliseconds. After this the cookie is refused and must be exchanged again."
+          }
+        },
+        "required": [
+          "object",
+          "id",
+          "expires_at"
+        ],
+        "description": "A dashboard operator session. The secret key is never part of this object or any response."
       },
       "User": {
         "type": "object",
@@ -23344,104 +23542,73 @@
             ]
           },
           "application": {
+            "default": {},
             "type": "object",
             "properties": {
               "name": {
-                "type": "string",
-                "default": "OrbitID App"
+                "default": "OrbitID App",
+                "type": "string"
               },
               "logoUrl": {
+                "default": null,
                 "type": [
                   "string",
                   "null"
-                ],
-                "default": null
+                ]
               },
               "homeUrl": {
-                "type": "string",
-                "default": "http://localhost:3000"
+                "default": "http://localhost:3000",
+                "type": "string"
               },
               "supportEmail": {
+                "default": null,
                 "type": [
                   "string",
                   "null"
-                ],
-                "default": null
+                ]
               },
               "termsUrl": {
+                "default": null,
                 "type": [
                   "string",
                   "null"
-                ],
-                "default": null
+                ]
               },
               "privacyUrl": {
+                "default": null,
                 "type": [
                   "string",
                   "null"
-                ],
-                "default": null
+                ]
               },
               "allowedOrigins": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                },
                 "default": [
                   "http://localhost:3000",
                   "http://localhost:5173"
-                ]
-              },
-              "allowedRedirectOrigins": {
+                ],
                 "type": "array",
                 "items": {
                   "type": "string"
-                },
-                "default": []
+                }
+              },
+              "allowedRedirectOrigins": {
+                "default": [],
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               },
               "developmentMode": {
-                "type": "boolean",
-                "default": true
+                "default": true,
+                "type": "boolean"
               }
-            },
-            "default": {}
+            }
           },
           "attributes": {
+            "default": {},
             "type": "object",
             "properties": {
               "emailAddress": {
-                "type": "object",
-                "properties": {
-                  "enabled": {
-                    "type": "boolean"
-                  },
-                  "required": {
-                    "type": "boolean",
-                    "default": false
-                  },
-                  "usedForFirstFactor": {
-                    "type": "boolean",
-                    "default": false
-                  },
-                  "usedForSecondFactor": {
-                    "type": "boolean",
-                    "default": false
-                  },
-                  "verifications": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    },
-                    "default": []
-                  },
-                  "verifyAtSignUp": {
-                    "type": "boolean",
-                    "default": true
-                  }
-                },
-                "required": [
-                  "enabled"
-                ],
                 "default": {
                   "enabled": true,
                   "required": true,
@@ -23450,41 +23617,41 @@
                     "email_code"
                   ],
                   "verifyAtSignUp": true
-                }
-              },
-              "phoneNumber": {
+                },
                 "type": "object",
                 "properties": {
                   "enabled": {
                     "type": "boolean"
                   },
                   "required": {
-                    "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "type": "boolean"
                   },
                   "usedForFirstFactor": {
-                    "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "type": "boolean"
                   },
                   "usedForSecondFactor": {
-                    "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "type": "boolean"
                   },
                   "verifications": {
+                    "default": [],
                     "type": "array",
                     "items": {
                       "type": "string"
-                    },
-                    "default": []
+                    }
                   },
                   "verifyAtSignUp": {
-                    "type": "boolean",
-                    "default": true
+                    "default": true,
+                    "type": "boolean"
                   }
                 },
                 "required": [
                   "enabled"
-                ],
+                ]
+              },
+              "phoneNumber": {
                 "default": {
                   "enabled": false,
                   "required": false,
@@ -23492,406 +23659,438 @@
                   "verifications": [
                     "phone_code"
                   ]
-                }
-              },
-              "username": {
+                },
                 "type": "object",
                 "properties": {
                   "enabled": {
                     "type": "boolean"
                   },
                   "required": {
-                    "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "type": "boolean"
                   },
                   "usedForFirstFactor": {
-                    "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "type": "boolean"
                   },
                   "usedForSecondFactor": {
-                    "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "type": "boolean"
                   },
                   "verifications": {
+                    "default": [],
                     "type": "array",
                     "items": {
                       "type": "string"
-                    },
-                    "default": []
+                    }
                   },
                   "verifyAtSignUp": {
-                    "type": "boolean",
-                    "default": true
+                    "default": true,
+                    "type": "boolean"
                   }
                 },
                 "required": [
                   "enabled"
-                ],
+                ]
+              },
+              "username": {
                 "default": {
                   "enabled": false,
                   "required": false,
                   "usedForFirstFactor": true,
                   "verifyAtSignUp": false
-                }
+                },
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "required": {
+                    "default": false,
+                    "type": "boolean"
+                  },
+                  "usedForFirstFactor": {
+                    "default": false,
+                    "type": "boolean"
+                  },
+                  "usedForSecondFactor": {
+                    "default": false,
+                    "type": "boolean"
+                  },
+                  "verifications": {
+                    "default": [],
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "verifyAtSignUp": {
+                    "default": true,
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled"
+                ]
               },
               "firstName": {
+                "default": {
+                  "enabled": true,
+                  "required": false,
+                  "verifyAtSignUp": false
+                },
                 "type": "object",
                 "properties": {
                   "enabled": {
                     "type": "boolean"
                   },
                   "required": {
-                    "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "type": "boolean"
                   },
                   "usedForFirstFactor": {
-                    "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "type": "boolean"
                   },
                   "usedForSecondFactor": {
-                    "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "type": "boolean"
                   },
                   "verifications": {
+                    "default": [],
                     "type": "array",
                     "items": {
                       "type": "string"
-                    },
-                    "default": []
+                    }
                   },
                   "verifyAtSignUp": {
-                    "type": "boolean",
-                    "default": true
+                    "default": true,
+                    "type": "boolean"
                   }
                 },
                 "required": [
                   "enabled"
-                ],
-                "default": {
-                  "enabled": true,
-                  "required": false,
-                  "verifyAtSignUp": false
-                }
+                ]
               },
               "lastName": {
-                "type": "object",
-                "properties": {
-                  "enabled": {
-                    "type": "boolean"
-                  },
-                  "required": {
-                    "type": "boolean",
-                    "default": false
-                  },
-                  "usedForFirstFactor": {
-                    "type": "boolean",
-                    "default": false
-                  },
-                  "usedForSecondFactor": {
-                    "type": "boolean",
-                    "default": false
-                  },
-                  "verifications": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    },
-                    "default": []
-                  },
-                  "verifyAtSignUp": {
-                    "type": "boolean",
-                    "default": true
-                  }
-                },
-                "required": [
-                  "enabled"
-                ],
                 "default": {
                   "enabled": true,
                   "required": false,
                   "verifyAtSignUp": false
-                }
-              },
-              "password": {
+                },
                 "type": "object",
                 "properties": {
                   "enabled": {
                     "type": "boolean"
                   },
                   "required": {
-                    "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "type": "boolean"
                   },
                   "usedForFirstFactor": {
-                    "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "type": "boolean"
                   },
                   "usedForSecondFactor": {
-                    "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "type": "boolean"
                   },
                   "verifications": {
+                    "default": [],
                     "type": "array",
                     "items": {
                       "type": "string"
-                    },
-                    "default": []
+                    }
                   },
                   "verifyAtSignUp": {
-                    "type": "boolean",
-                    "default": true
+                    "default": true,
+                    "type": "boolean"
                   }
                 },
                 "required": [
                   "enabled"
-                ],
+                ]
+              },
+              "password": {
                 "default": {
                   "enabled": true,
                   "required": true,
                   "usedForFirstFactor": true,
                   "verifyAtSignUp": false
-                }
-              },
-              "passkey": {
+                },
                 "type": "object",
                 "properties": {
                   "enabled": {
                     "type": "boolean"
                   },
                   "required": {
-                    "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "type": "boolean"
                   },
                   "usedForFirstFactor": {
-                    "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "type": "boolean"
                   },
                   "usedForSecondFactor": {
-                    "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "type": "boolean"
                   },
                   "verifications": {
+                    "default": [],
                     "type": "array",
                     "items": {
                       "type": "string"
-                    },
-                    "default": []
+                    }
                   },
                   "verifyAtSignUp": {
-                    "type": "boolean",
-                    "default": true
+                    "default": true,
+                    "type": "boolean"
                   }
                 },
                 "required": [
                   "enabled"
-                ],
+                ]
+              },
+              "passkey": {
                 "default": {
                   "enabled": false,
                   "required": false,
                   "usedForFirstFactor": true,
                   "verifyAtSignUp": false
-                }
+                },
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "required": {
+                    "default": false,
+                    "type": "boolean"
+                  },
+                  "usedForFirstFactor": {
+                    "default": false,
+                    "type": "boolean"
+                  },
+                  "usedForSecondFactor": {
+                    "default": false,
+                    "type": "boolean"
+                  },
+                  "verifications": {
+                    "default": [],
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "verifyAtSignUp": {
+                    "default": true,
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled"
+                ]
               },
               "backupCode": {
+                "default": {
+                  "enabled": false,
+                  "usedForSecondFactor": true
+                },
                 "type": "object",
                 "properties": {
                   "enabled": {
                     "type": "boolean"
                   },
                   "required": {
-                    "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "type": "boolean"
                   },
                   "usedForFirstFactor": {
-                    "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "type": "boolean"
                   },
                   "usedForSecondFactor": {
-                    "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "type": "boolean"
                   },
                   "verifications": {
+                    "default": [],
                     "type": "array",
                     "items": {
                       "type": "string"
-                    },
-                    "default": []
+                    }
                   },
                   "verifyAtSignUp": {
-                    "type": "boolean",
-                    "default": true
+                    "default": true,
+                    "type": "boolean"
                   }
                 },
                 "required": [
                   "enabled"
-                ],
-                "default": {
-                  "enabled": false,
-                  "usedForSecondFactor": true
-                }
+                ]
               },
               "authenticatorApp": {
+                "default": {
+                  "enabled": false,
+                  "usedForSecondFactor": true
+                },
                 "type": "object",
                 "properties": {
                   "enabled": {
                     "type": "boolean"
                   },
                   "required": {
-                    "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "type": "boolean"
                   },
                   "usedForFirstFactor": {
-                    "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "type": "boolean"
                   },
                   "usedForSecondFactor": {
-                    "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "type": "boolean"
                   },
                   "verifications": {
+                    "default": [],
                     "type": "array",
                     "items": {
                       "type": "string"
-                    },
-                    "default": []
+                    }
                   },
                   "verifyAtSignUp": {
-                    "type": "boolean",
-                    "default": true
+                    "default": true,
+                    "type": "boolean"
                   }
                 },
                 "required": [
                   "enabled"
-                ],
-                "default": {
-                  "enabled": false,
-                  "usedForSecondFactor": true
-                }
+                ]
               }
-            },
-            "default": {}
+            }
           },
           "password": {
+            "default": {},
             "type": "object",
             "properties": {
               "minLength": {
+                "default": 8,
                 "type": "integer",
-                "minimum": 1,
-                "default": 8
+                "minimum": 1
               },
               "maxLength": {
-                "type": "integer",
-                "default": 72
+                "default": 72,
+                "type": "integer"
               },
               "requireLowercase": {
-                "type": "boolean",
-                "default": false
+                "default": false,
+                "type": "boolean"
               },
               "requireUppercase": {
-                "type": "boolean",
-                "default": false
+                "default": false,
+                "type": "boolean"
               },
               "requireNumbers": {
-                "type": "boolean",
-                "default": false
+                "default": false,
+                "type": "boolean"
               },
               "requireSpecialCharacter": {
-                "type": "boolean",
-                "default": false
+                "default": false,
+                "type": "boolean"
               },
               "rejectPwned": {
-                "type": "boolean",
-                "default": false
+                "default": false,
+                "type": "boolean"
               },
               "signOutOfOtherSessionsOnChange": {
-                "type": "boolean",
-                "default": true
+                "default": true,
+                "type": "boolean"
               }
-            },
-            "default": {}
+            }
           },
           "username": {
+            "default": {},
             "type": "object",
             "properties": {
               "minLength": {
-                "type": "number",
-                "default": 4
+                "default": 4,
+                "type": "number"
               },
               "maxLength": {
-                "type": "number",
-                "default": 64
+                "default": 64,
+                "type": "number"
               }
-            },
-            "default": {}
+            }
           },
           "signUp": {
+            "default": {},
             "type": "object",
             "properties": {
               "mode": {
+                "default": "public",
                 "type": "string",
                 "enum": [
                   "public",
                   "restricted",
                   "waitlist"
-                ],
-                "default": "public"
+                ]
               },
               "legalConsentRequired": {
-                "type": "boolean",
-                "default": false
+                "default": false,
+                "type": "boolean"
               },
               "progressive": {
-                "type": "boolean",
-                "default": true
+                "default": true,
+                "type": "boolean"
               }
-            },
-            "default": {}
+            }
           },
           "restrictions": {
+            "default": {},
             "type": "object",
             "properties": {
               "allowlistEnabled": {
-                "type": "boolean",
-                "default": false
+                "default": false,
+                "type": "boolean"
               },
               "blocklistEnabled": {
-                "type": "boolean",
-                "default": false
+                "default": false,
+                "type": "boolean"
               },
               "blockEmailSubaddresses": {
-                "type": "boolean",
-                "default": false
+                "default": false,
+                "type": "boolean"
               },
               "blockDisposableEmailDomains": {
-                "type": "boolean",
-                "default": false
+                "default": false,
+                "type": "boolean"
               }
-            },
-            "default": {}
+            }
           },
           "social": {
+            "default": {},
             "type": "object",
             "additionalProperties": {
               "type": "object",
               "properties": {
                 "enabled": {
-                  "type": "boolean",
-                  "default": false
+                  "default": false,
+                  "type": "boolean"
                 },
                 "clientId": {
-                  "type": "string",
-                  "default": ""
+                  "default": "",
+                  "type": "string"
                 },
                 "clientSecret": {
-                  "type": "string",
-                  "default": ""
+                  "default": "",
+                  "type": "string"
                 },
                 "scopes": {
+                  "default": [],
                   "type": "array",
                   "items": {
                     "type": "string"
-                  },
-                  "default": []
+                  }
                 },
                 "discoveryUrl": {
                   "type": "string"
@@ -23900,8 +24099,8 @@
                   "type": "string"
                 },
                 "authenticatableAtSignIn": {
-                  "type": "boolean",
-                  "default": true
+                  "default": true,
+                  "type": "boolean"
                 },
                 "appleTeamId": {
                   "type": "string"
@@ -23913,310 +24112,309 @@
                   "type": "string"
                 }
               }
-            },
-            "default": {}
+            }
           },
           "mfa": {
+            "default": {},
             "type": "object",
             "properties": {
               "required": {
-                "type": "boolean",
-                "default": false
+                "default": false,
+                "type": "boolean"
               },
               "maxAttempts": {
-                "type": "number",
-                "default": 100
+                "default": 100,
+                "type": "number"
               },
               "lockoutDurationSeconds": {
-                "type": "number",
-                "default": 3600
+                "default": 3600,
+                "type": "number"
               }
-            },
-            "default": {}
+            }
           },
           "session": {
+            "default": {},
             "type": "object",
             "properties": {
               "lifetimeSeconds": {
-                "type": "number",
-                "default": 604800
+                "default": 604800,
+                "type": "number"
               },
               "inactivityTimeoutSeconds": {
-                "type": "number",
-                "default": 0
+                "default": 0,
+                "type": "number"
               },
               "tokenLifetimeSeconds": {
-                "type": "number",
-                "default": 60
+                "default": 60,
+                "type": "number"
               },
               "multiSession": {
-                "type": "boolean",
-                "default": false
+                "default": false,
+                "type": "boolean"
               },
               "trustedDevicesEnabled": {
-                "type": "boolean",
-                "default": false
+                "default": false,
+                "type": "boolean"
               },
               "trustedDeviceDays": {
+                "default": 30,
                 "type": "integer",
                 "minimum": 1,
-                "maximum": 365,
-                "default": 30
+                "maximum": 365
               },
               "customClaims": {
+                "default": {},
                 "type": "object",
-                "additionalProperties": {},
-                "default": {}
+                "additionalProperties": {}
               }
-            },
-            "default": {}
+            }
           },
           "anonymous": {
+            "default": {},
             "type": "object",
             "properties": {
               "enabled": {
-                "type": "boolean",
-                "default": false
+                "default": false,
+                "type": "boolean"
               },
               "retentionSeconds": {
+                "default": 2592000,
                 "type": "integer",
-                "minimum": 0,
-                "default": 2592000
+                "minimum": 0
               }
-            },
-            "default": {}
+            }
           },
           "oidcProvider": {
+            "default": {},
             "type": "object",
             "properties": {
               "accessTokenFormat": {
+                "default": "opaque",
                 "type": "string",
                 "enum": [
                   "opaque",
                   "jwt"
-                ],
-                "default": "opaque"
+                ]
               },
               "deviceAuthorizationEnabled": {
-                "type": "boolean",
-                "default": false
+                "default": false,
+                "type": "boolean"
               },
               "deviceCodeLifetimeSeconds": {
+                "default": 600,
                 "type": "integer",
-                "minimum": 60,
-                "default": 600
+                "minimum": 60
               },
               "deviceCodeIntervalSeconds": {
+                "default": 5,
                 "type": "integer",
-                "minimum": 1,
-                "default": 5
+                "minimum": 1
               }
-            },
-            "default": {}
+            }
           },
           "organizations": {
+            "default": {},
             "type": "object",
             "properties": {
               "enabled": {
-                "type": "boolean",
-                "default": false
+                "default": false,
+                "type": "boolean"
               },
               "creationEnabled": {
-                "type": "boolean",
-                "default": true
+                "default": true,
+                "type": "boolean"
               },
               "maxAllowedMemberships": {
-                "type": "number",
-                "default": 5
+                "default": 5,
+                "type": "number"
               },
               "slugEnabled": {
-                "type": "boolean",
-                "default": true
+                "default": true,
+                "type": "boolean"
               },
               "domainsEnabled": {
-                "type": "boolean",
-                "default": false
+                "default": false,
+                "type": "boolean"
               },
               "membershipRequestsEnabled": {
-                "type": "boolean",
-                "default": false
+                "default": false,
+                "type": "boolean"
               },
               "forceOrganizationSelection": {
-                "type": "boolean",
-                "default": false
+                "default": false,
+                "type": "boolean"
               },
               "creatorRole": {
-                "type": "string",
-                "default": "org:admin"
+                "default": "org:admin",
+                "type": "string"
               },
               "defaultRole": {
-                "type": "string",
-                "default": "org:member"
+                "default": "org:member",
+                "type": "string"
               },
               "adminDeleteEnabled": {
-                "type": "boolean",
-                "default": true
+                "default": true,
+                "type": "boolean"
               },
               "maxCreatedOrganizationsPerUser": {
+                "default": null,
                 "type": [
                   "number",
                   "null"
-                ],
-                "default": null
+                ]
               }
-            },
-            "default": {}
+            }
           },
           "userSettings": {
+            "default": {},
             "type": "object",
             "properties": {
               "deleteSelfEnabled": {
-                "type": "boolean",
-                "default": true
+                "default": true,
+                "type": "boolean"
               },
               "createOrganizationEnabled": {
-                "type": "boolean",
-                "default": true
+                "default": true,
+                "type": "boolean"
               },
               "allowProfileImageUpload": {
-                "type": "boolean",
-                "default": true
+                "default": true,
+                "type": "boolean"
               }
-            },
-            "default": {}
+            }
           },
           "email": {
+            "default": {},
             "type": "object",
             "properties": {
               "from": {
-                "type": "string",
-                "default": "OrbitID <no-reply@localhost>"
+                "default": "OrbitID <no-reply@localhost>",
+                "type": "string"
               },
               "provider": {
+                "default": "auto",
                 "type": "string",
                 "enum": [
                   "auto",
                   "console",
                   "smtp",
                   "resend"
-                ],
-                "default": "auto"
+                ]
               },
               "smtpUrl": {
-                "type": "string",
-                "default": ""
+                "default": "",
+                "type": "string"
               },
               "resendApiKey": {
-                "type": "string",
-                "default": ""
+                "default": "",
+                "type": "string"
               },
               "codeLength": {
-                "type": "number",
-                "default": 6
+                "default": 6,
+                "type": "number"
               },
               "codeLifetimeSeconds": {
-                "type": "number",
-                "default": 600
+                "default": 600,
+                "type": "number"
               },
               "linkLifetimeSeconds": {
-                "type": "number",
-                "default": 3600
+                "default": 3600,
+                "type": "number"
               }
-            },
-            "default": {}
+            }
           },
           "sms": {
+            "default": {},
             "type": "object",
             "properties": {
               "provider": {
+                "default": "console",
                 "type": "string",
                 "enum": [
                   "console",
                   "twilio",
                   "webhook"
-                ],
-                "default": "console"
+                ]
               },
               "twilioAccountSid": {
-                "type": "string",
-                "default": ""
+                "default": "",
+                "type": "string"
               },
               "twilioAuthToken": {
-                "type": "string",
-                "default": ""
+                "default": "",
+                "type": "string"
               },
               "twilioFrom": {
-                "type": "string",
-                "default": ""
+                "default": "",
+                "type": "string"
               },
               "webhookUrl": {
-                "type": "string",
-                "default": ""
+                "default": "",
+                "type": "string"
               }
-            },
-            "default": {}
+            }
           },
           "security": {
+            "default": {},
             "type": "object",
             "properties": {
               "botProtection": {
-                "type": "boolean",
-                "default": false
+                "default": false,
+                "type": "boolean"
               },
               "captchaProvider": {
+                "default": "none",
                 "type": "string",
                 "enum": [
                   "none",
                   "turnstile",
                   "hcaptcha"
-                ],
-                "default": "none"
+                ]
               },
               "captchaSecret": {
-                "type": "string",
-                "default": ""
+                "default": "",
+                "type": "string"
               },
               "captchaSiteKey": {
-                "type": "string",
-                "default": ""
+                "default": "",
+                "type": "string"
               },
               "rateLimitEnabled": {
-                "type": "boolean",
-                "default": true
+                "default": true,
+                "type": "boolean"
               },
               "enumerationProtection": {
-                "type": "boolean",
-                "default": false
+                "default": false,
+                "type": "boolean"
               },
               "testingTokensEnabled": {
-                "type": "boolean",
-                "default": true
+                "default": true,
+                "type": "boolean"
               }
-            },
-            "default": {}
+            }
           },
           "branding": {
+            "default": {},
             "type": "object",
             "properties": {
               "primaryColor": {
-                "type": "string",
-                "default": "#2b2522"
+                "default": "#2b2522",
+                "type": "string"
               },
               "showPoweredBy": {
-                "type": "boolean",
-                "default": true
+                "default": true,
+                "type": "boolean"
               },
               "theme": {
+                "default": "system",
                 "type": "string",
                 "enum": [
                   "light",
                   "dark",
                   "system"
-                ],
-                "default": "system"
+                ]
               }
-            },
-            "default": {}
+            }
           }
         },
         "required": [
@@ -24924,7 +25122,7 @@
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "sk_...",
-        "description": "Instance secret key (`sk_live_...` / `sk_test_...`) as `Authorization: Bearer sk_...`. Grants full Backend API access, so it must only ever be used from a server you control."
+        "description": "Instance secret key (`sk_live_...` / `sk_test_...`) as `Authorization: Bearer sk_...`. Grants full Backend API access, so it must only ever be used from a server you control. The dashboard does not hold it: it exchanges it once at `POST /v1/operator_sessions` for the httpOnly `__orbit_operator` cookie, which the Backend API also accepts from this instance's own origin."
       },
       "ClientCookie": {
         "type": "apiKey",

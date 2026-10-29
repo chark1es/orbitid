@@ -4,9 +4,44 @@ The dashboard is `apps/dashboard`: Vite + React + react-router + TanStack Query 
 from the `@orbitid/ui` primitives and the Timetable design system in [`DESIGN.md`](../DESIGN.md). The
 server serves the built files at `/` when `apps/dashboard/dist` exists.
 
-Sign-in is the instance secret key, kept in `sessionStorage`, so a reload keeps the session and closing the
-tab ends it. The API origin is chosen on the sign-in screen; it defaults to the server that served the page
-(`window.__ORBITID__.apiUrl`), then `VITE_ORBITID_API_URL`, then `http://localhost:4000`.
+## Sign-in and the operator session
+
+The dashboard signs in with the instance secret key exactly once. `POST /v1/operator_sessions` compares the
+key in constant time (rate limited per address, like the Backend API itself) and answers with an httpOnly
+cookie, `__orbit_operator`, scoped to `Path=/v1`, `SameSite=Strict` and `Secure` whenever the instance is
+served over https. The cookie holds an opaque 256-bit token; the server stores only its sha256 hash. The key
+is never written to `sessionStorage`, `localStorage` or `document.cookie`, and no response ever returns it.
+
+Every Backend API call from the dashboard then authenticates with that cookie. `Authorization: Bearer sk_…`
+still works unchanged for servers, SDKs and scripts; the cookie is only accepted from the instance's own
+origin, so a Backend API on another host or another browser origin cannot read it.
+
+- The session lasts 8 hours (`OPERATOR_SESSION_TTL_MS`). `GET /v1/operator_sessions/current` confirms it on
+  load, so an expired or revoked cookie lands on `/login` without a flash of the shell.
+- **Sign out** (`DELETE /v1/operator_sessions/current`) revokes the row and clears the cookie; replaying the
+  old token is refused. Signing in again in the same tab revokes the previous session.
+- Rotating the secret key ends every operator session, because each row is bound to a fingerprint of the key
+  it was approved with.
+- Operator sessions are audit-logged (`operator_session.created`, `operator_session.revoked`).
+
+The API origin is the server that served the page (`window.__ORBITID__.apiUrl`), falling back to the page's
+own origin. A dashboard on a different origin from its API cannot use the cookie and refuses to sign in;
+serve the built dashboard from the server, as a container deployment does.
+
+Sign-out revokes the session on the server before the shell reports success. If revocation fails (the server is
+unreachable, or answers `5xx`) the dashboard keeps the session and shows the error, because the cookie is still
+live; only a `401` — the session was already gone — counts as a completed sign-out.
+
+### Developing the dashboard
+
+`bun run dev:dashboard` runs Vite on port 5173. Its `vite.config.ts` proxies `/v1`, `/health`, `/oauth`,
+`/.well-known` and `/docs` to `ORBITID_DEV_API_URL` (default `http://localhost:4000`) **and rewrites
+`Origin`/`Referer` on the proxied request to that target**. The server therefore sees a genuine same-origin
+request and the session cookie behaves exactly as it does in a hosted deployment.
+
+This rewrite lives in the dev-server config, not in the server: production never trusts an arbitrary `localhost`
+origin, and a dashboard on another origin must be served behind the same origin as its API (the container image
+serves both). Set `ORBITID_DEV_API_URL` to a non-default port only together with a matching `ORBITID_BASE_URL`.
 
 ## Pages
 
@@ -43,7 +78,7 @@ The API reference is served by the server at `{apiUrl}/docs`, outside the dashbo
 
 - the publishable key, from the public `GET /health`;
 - the API URL the dashboard is pointed at;
-- the secret key of the signed-in session;
+- the live operator session (the secret key is a placeholder: the dashboard no longer holds it);
 - the database dialect reported by `/health`.
 
 It then renders, per framework tab (Next.js, React + backend, Node with Express, plain Node script), one
@@ -52,14 +87,15 @@ Variable names follow the SDKs (`NEXT_PUBLIC_*` for Next.js, `VITE_*` for Vite, 
 SDKs). The webhook secret is per endpoint — it comes from the Webhooks page — and is left blank in the
 block with a line saying where to find it. `ORBITID_JWT_KEY` is optional and commented out.
 
-Secrets are masked on screen and revealed with one toggle; copying always copies the real values, and
-"Copy all" pastes both blocks as one file. A read-only **Server (this instance)** block reports the
+The secret key line is a placeholder with a note saying where the real value comes from (the server log or
+`<data dir>/keys.json`), so copying a block can never move a live credential into a chat or a ticket. "Copy
+all" pastes both blocks as one file. A read-only **Server (this instance)** block reports the
 database, base URL, the email provider in effect and whether private networks are allowed, and points at
 `docs/ENVIRONMENT.md`. The encryption key never appears anywhere in the dashboard.
 
 **Check your setup** calls `GET /health` and `GET /v1/client/environment` and reads the saved settings,
 then reports each result with a word and a dot (Works, Check, Failed): server reachable, publishable key
-present, secret key in this session, sign-in methods published, email transport, and whether the
+present, dashboard session live, sign-in methods published, email transport, and whether the
 application home URL is an allowed origin.
 
 ## Secret fields

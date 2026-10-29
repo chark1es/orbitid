@@ -17,6 +17,8 @@ export const COOKIES = {
   session: "__session", client: "__client", clientUat: "__client_uat", handshake: "__orbit_handshake", devBrowser: "__orbit_db_jwt",
   /** Remembers a browser that may skip the second factor (`settings.session.trustedDevicesEnabled`). */
   trustedDevice: "__orbit_trusted",
+  /** Dashboard operator session, minted by exchanging the instance secret key. HttpOnly, `Path=/v1`, `SameSite=Strict`. */
+  operator: "__orbit_operator",
 } as const;
 /** ID prefixes. */
 export const ID_PREFIX = {
@@ -24,5 +26,5 @@ export const ID_PREFIX = {
   org: "org", membership: "orgmem", invitation: "orginv", domain: "orgdmn", request: "orgmreq", role: "role", permission: "perm",
   appInvitation: "inv", waitlist: "wle", allow: "alid", block: "blid", jwtTemplate: "jtmpl", actorToken: "act", signInToken: "sit",
   webhook: "we", webhookEvent: "evt", delivery: "whd", apiKey: "ak", machine: "mch", m2mToken: "mt", oauthApp: "oa", oauthGrant: "oag", enterprise: "ent", audit: "aud", verification: "ver",
-  trustedDevice: "tdev",
+  trustedDevice: "tdev", operatorSession: "osess",
 } as const;

@@ -182,6 +182,7 @@ describe("users table", () => {
   });
 
   it("confirms a bulk delete against the selected user", async () => {
+    sessionStorage.setItem("orbitid.apiUrl", "http://localhost:4000");
     const methods: string[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);

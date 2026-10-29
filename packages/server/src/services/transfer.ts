@@ -37,11 +37,13 @@ const INSERT_BATCH = 200;
 const CANARY_PREFIX = "orbitid-export-canary-v1:";
 
 /**
- * Ephemeral tables are not copied: rate-limit counters describe the old process, not the instance.
- * Everything else (webhooks, deliveries, audit logs, in-flight sessions) moves so the target behaves
- * exactly like the source.
+ * Ephemeral and environment-local tables are not copied. `rate_limits` counters describe the old process,
+ * not the instance. `operator_sessions` are dashboard logins: copying them would restore an operator's
+ * browser session on the target instance (and, with a shared secret key, make an old cookie live again), so
+ * an import signs every dashboard out and they sign in again. Everything else (webhooks, deliveries, audit
+ * logs, in-flight user sessions) moves so the target behaves exactly like the source.
  */
-export const SKIPPED_TABLES: ReadonlySet<string> = new Set(["rateLimits"]);
+export const SKIPPED_TABLES: ReadonlySet<string> = new Set(["rateLimits", "operatorSessions"]);
 
 /**
  * Tables that bootstrapping fills on a brand-new database (the instance settings row and the seeded

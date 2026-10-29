@@ -140,7 +140,6 @@ function mockUserDetail(options: MockOptions = {}) {
 
 function renderDetail(path = "/users/user_1") {
   sessionStorage.setItem("orbitid.apiUrl", "http://localhost:4000");
-  sessionStorage.setItem("orbitid.secretKey", "sk_test_dashboard_session");
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>

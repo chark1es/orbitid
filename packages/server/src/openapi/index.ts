@@ -14,9 +14,11 @@ import { healthPaths } from "./paths/health";
 import { oauthPaths, ssoPaths } from "./paths/oauth";
 import { organizationPaths } from "./paths/organizations";
 import { apiKeyPaths, m2mPaths, webhookPaths } from "./paths/webhooks";
+import { operatorSessionPaths } from "./paths/operator";
 
 const operations: DocumentedOperation[] = [
   ...healthPaths,
+  ...operatorSessionPaths,
   ...frontendPaths,
   ...organizationPaths,
   ...backendPaths,
@@ -156,7 +158,9 @@ export function buildOpenApi(options: OpenApiOptions) {
           bearerFormat: "sk_...",
           description:
             "Instance secret key (`sk_live_...` / `sk_test_...`) as `Authorization: Bearer sk_...`. Grants full " +
-            "Backend API access, so it must only ever be used from a server you control.",
+            "Backend API access, so it must only ever be used from a server you control. The dashboard does not " +
+            "hold it: it exchanges it once at `POST /v1/operator_sessions` for the httpOnly `__orbit_operator` " +
+            "cookie, which the Backend API also accepts from this instance's own origin.",
         },
         ClientCookie: {
           type: "apiKey",

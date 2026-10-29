@@ -43,6 +43,13 @@
       "when": 1793230538036,
       "tag": "0005_lovely_medusa",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1793267527961,
+      "tag": "0006_operator_sessions",
+      "breakpoints": true
     }
   ]
 }

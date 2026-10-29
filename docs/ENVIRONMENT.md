@@ -66,7 +66,7 @@ These are compiled into your site's client code, so everyone can read them. They
 | `NEXT_PUBLIC_ORBITID_SIGN_UP_URL` | no (`/sign-up`) | Where your sign-up page lives. |
 | `NEXT_PUBLIC_ORBITID_AFTER_SIGN_IN_URL` | no (`/`) | Where users land after signing in. |
 | `NEXT_PUBLIC_ORBITID_AFTER_SIGN_UP_URL` | no (`/`) | Where users land after signing up. |
-| `VITE_ORBITID_API_URL` | no | Build-time API URL for the OrbitID dashboard when it is served from a different origin than the server. The dashboard bundle ships to browsers, so this is public. See [DASHBOARD.md](DASHBOARD.md). |
+| `VITE_ORBITID_API_URL` | no | API origin the dashboard bundle calls. Leave it empty: the dashboard is same-origin with the instance it serves, which its operator session cookie requires. Only a Vite development server sets it (with a matching proxy). See [DASHBOARD.md](DASHBOARD.md). |
 
 ## Which file does each label go in?
 

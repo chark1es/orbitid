@@ -12,6 +12,7 @@ import { clients, sessions } from "../../db/schema";
 import { randomToken, sha256 } from "../../lib/crypto";
 import { newId } from "../../lib/ids";
 import { verifySessionToken } from "../../services/tokens";
+import { isSessionExpired } from "../../services/sessions";
 import { first } from "../../lib/db";
 
 type ClientRow = typeof clients.$inferSelect;
@@ -25,20 +26,20 @@ export interface MachineCaller {
   userId: string | null;
 }
 
-const isLiveSession = (row: SessionRow | undefined | null): row is SessionRow =>
-  !!row && row.status === "active" && row.expireAt > Date.now();
+const isLiveSession = (ctx: AppContext, row: SessionRow | undefined | null): row is SessionRow =>
+  !!row && row.status === "active" && !isSessionExpired(ctx, row);
 
 /** Client's newest active session, preferring the one the client marked as active. */
 async function activeSessionForClient(ctx: AppContext, client: ClientRow): Promise<SessionRow | null> {
   if (client.lastActiveSessionId) {
     const preferred = first(await ctx.db.select().from(sessions).where(eq(sessions.id, client.lastActiveSessionId)));
-    if (isLiveSession(preferred)) return preferred;
+    if (isLiveSession(ctx, preferred)) return preferred;
   }
   const row = (await ctx.db.select().from(sessions)
       .where(eq(sessions.clientId, client.id))
       .orderBy(desc(sessions.lastActiveAt))
       .limit(10))
-    .find(isLiveSession);
+    .find((session) => isLiveSession(ctx, session));
   return row ?? null;
 }
 
@@ -63,7 +64,7 @@ export async function resolveCaller(ctx: AppContext, c: Context): Promise<Machin
     try {
       const claims = await verifySessionToken(ctx, bearer);
       const session = first(await ctx.db.select().from(sessions).where(eq(sessions.id, claims.sid)));
-      if (isLiveSession(session) && session.userId === claims.sub) {
+      if (isLiveSession(ctx, session) && session.userId === claims.sub) {
         const client = first(await ctx.db.select().from(clients).where(eq(clients.id, session.clientId)));
         if (client) return { clientId: client.id, client, sessionId: session.id, session, userId: session.userId };
       }

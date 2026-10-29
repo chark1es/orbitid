@@ -24,7 +24,7 @@ The user's database, the user's server. There is no hosted service, no vendor ac
 
 ## Operating Context
 - Self-hosted: one container (or a plain `bun` process) plus Postgres. The dashboard is served by the server itself.
-- The dashboard signs in with the instance secret key. There are no separate dashboard accounts yet.
+- The dashboard signs in with the instance secret key once, then holds an httpOnly, same-origin operator session (8 hours, revocable). There are no named operator accounts yet.
 - Applications talk to the server with a publishable key (browser) and a secret key (backend).
 - Settings are stored as instance settings and edited in the dashboard. Environment variables cover only infrastructure (URL, database, encryption key).
 

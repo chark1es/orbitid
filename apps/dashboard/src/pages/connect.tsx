@@ -14,14 +14,12 @@ import {
   CircleX,
   Copy,
   Database,
-  Eye,
-  EyeOff,
   Loader2,
   RefreshCw,
   ShieldAlert,
 } from "lucide-react";
 import { toast } from "sonner";
-import { getApiUrl, getSecretKey } from "../lib/api";
+import { getApiUrl } from "../lib/api";
 import { fetchInstanceHealth, type InstanceHealth } from "../lib/instance-health";
 import {
   FRAMEWORKS,
@@ -46,6 +44,7 @@ import {
   SettingsSection,
 } from "./_config/ui";
 import { useSettingsEditor } from "./_config/use-settings";
+import { useAuth } from "../lib/auth";
 
 interface EnvironmentSummary {
   firstFactors: string[];
@@ -64,20 +63,9 @@ async function fetchEnvironment(apiUrl: string, signal: AbortSignal): Promise<En
   };
 }
 
-function SnippetBlock({
-  block,
-  reveal,
-  onToggleReveal,
-}: {
-  block: ConnectBlock;
-  reveal: boolean;
-  onToggleReveal: () => void;
-}) {
-  const display = renderEnvBlock(block, reveal);
-  // Copying always yields the real values: masking is a screen concern only. The heading travels with the
-  // block so a paste into a chat or a ticket keeps its "where this goes" line.
-  const copyValue = renderBlockWithHeader(block, true);
-  const hasSecret = block.variables.some((variable) => variable.secret);
+function SnippetBlock({ block }: { block: ConnectBlock }) {
+  // The heading travels with the block so a paste into a chat or a ticket keeps its "where this goes" line.
+  const copyValue = renderBlockWithHeader(block);
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -86,12 +74,6 @@ function SnippetBlock({
           <p className="max-w-[70ch] text-[0.8125rem] leading-relaxed text-muted-foreground">{block.where}</p>
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          {hasSecret ? (
-            <Button variant="outline" size="sm" onClick={onToggleReveal}>
-              {reveal ? <EyeOff className="size-4" aria-hidden /> : <Eye className="size-4" aria-hidden />}
-              {reveal ? "Hide secret" : "Reveal secret"}
-            </Button>
-          ) : null}
           <CopyButton value={copyValue} label="Copy" size="sm" variant="outline" />
         </div>
       </div>
@@ -100,7 +82,7 @@ function SnippetBlock({
           <span className="font-data text-[0.6875rem] text-muted-foreground">{block.filename}</span>
           <span className="text-[0.6875rem] text-muted-foreground">{block.id === "browser" ? "Public" : "Server only"}</span>
         </figcaption>
-        <pre className="overflow-x-auto px-3 py-2.5 font-data text-[0.8125rem] leading-6">{display}</pre>
+        <pre className="overflow-x-auto px-3 py-2.5 font-data text-[0.8125rem] leading-6">{renderEnvBlock(block)}</pre>
       </figure>
       {block.note ? <p className="max-w-[75ch] text-xs leading-relaxed text-muted-foreground">{block.note}</p> : null}
     </div>
@@ -131,11 +113,10 @@ function CheckRow({ label, state, detail }: { label: string; state: CheckState; 
 
 export default function Page() {
   const apiUrl = getApiUrl();
-  const secretKey = getSecretKey();
+  const { authenticated } = useAuth();
   const settingsEditor = useSettingsEditor();
   const settings: InstanceSettings | null = settingsEditor.settings;
   const [framework, setFramework] = useState<FrameworkKey>("nextjs");
-  const [revealed, setRevealed] = useState(false);
 
   const [health, setHealth] = useState<InstanceHealth | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
@@ -175,10 +156,9 @@ export default function Page() {
       connectTarget({
         publishableKey: health?.publishableKey ?? "",
         apiUrl,
-        secretKey,
         homeUrl: settings?.application.homeUrl,
       }),
-    [health?.publishableKey, apiUrl, secretKey, settings?.application.homeUrl],
+    [health?.publishableKey, apiUrl, settings?.application.homeUrl],
   );
   const plan = useMemo(() => buildConnectPlan(framework, target), [framework, target]);
   const summary = useMemo(
@@ -194,27 +174,20 @@ export default function Page() {
         environment,
         environmentError,
         publishableKey: target.publishableKey,
-        secretKey,
+        sessionActive: authenticated,
         settings,
       }),
-    [apiUrl, health, healthError, environment, environmentError, target.publishableKey, secretKey, settings],
+    [apiUrl, health, healthError, environment, environmentError, target.publishableKey, authenticated, settings],
   );
 
   const copyAll = async (blocks: readonly ConnectBlock[], label: string) => {
     try {
-      // Masking never reaches the clipboard.
-      await navigator.clipboard.writeText(renderEnvBlocks(blocks, true));
+      await navigator.clipboard.writeText(renderEnvBlocks(blocks));
       toast.success(`Copied ${label}`);
     } catch {
       toast.error("Could not copy", { description: "Select the block and copy it manually." });
     }
   };
-
-  const withoutSecretKey = [
-    `NEXT_PUBLIC_ORBITID_PUBLISHABLE_KEY=${target.publishableKey || "pk_test_…"}`,
-    `NEXT_PUBLIC_ORBITID_API_URL=${target.apiUrl}`,
-    "ORBITID_SECRET_KEY=sk_test_…",
-  ].join("\n");
 
   if (settingsEditor.isLoading && !settings) return <LoadingPage rows={4} />;
 
@@ -222,7 +195,7 @@ export default function Page() {
     <div className="space-y-6">
       <PageHeader
         title="Connect your app"
-        description="Copy the values for this instance into a new application. The publishable key is public; the secret key stays on a server."
+        description="Copy the values for this instance into a new application. The publishable key is public; the secret key stays on a server and is never held by this dashboard."
         badge={<MetaChip>{target.publishableKey ? "Instance ready" : "Checking instance"}</MetaChip>}
         actions={
           <Button variant="outline" size="sm" onClick={() => setCheckRun((value) => value + 1)} disabled={healthChecking}>
@@ -257,19 +230,12 @@ export default function Page() {
           </div>
           <div className="flex flex-wrap items-baseline justify-between gap-3 py-2">
             <dt className="text-[0.8125rem] font-medium">
-              Secret key <span className="font-normal text-muted-foreground">· this session, server only</span>
+              Dashboard session <span className="font-normal text-muted-foreground">· httpOnly cookie</span>
             </dt>
             <dd className="flex min-w-0 items-center gap-1">
-              <code className="min-w-0 truncate font-data text-xs text-muted-foreground">
-                {secretKey ? (revealed ? secretKey : `${secretKey.slice(0, 8)}${"•".repeat(12)}`) : "Not in this session"}
-              </code>
-              {secretKey ? (
-                <Button variant="ghost" size="icon-sm" onClick={() => setRevealed((value) => !value)} title={revealed ? "Hide" : "Reveal"}>
-                  {revealed ? <EyeOff className="size-3.5" aria-hidden /> : <Eye className="size-3.5" aria-hidden />}
-                  <span className="sr-only">{revealed ? "Hide secret key" : "Reveal secret key"}</span>
-                </Button>
-              ) : null}
-              {secretKey ? <CopyButton value={secretKey} size="icon-sm" /> : null}
+              <span className="text-xs text-muted-foreground">
+                {authenticated ? "Signed in. The secret key is not kept in this page." : "No live session"}
+              </span>
             </dd>
           </div>
           <div className="flex flex-wrap items-baseline justify-between gap-3 py-2">
@@ -305,14 +271,14 @@ export default function Page() {
               </div>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-[0.8125rem] leading-relaxed text-muted-foreground">
-                  Secrets are masked on screen. Copying always copies the real values.
+                  The secret key is a placeholder: copy the real value from the server, not from this page.
                 </p>
                 <Button variant="outline" size="sm" onClick={() => void copyAll(plan.blocks, `${plan.label} environment`)}>
                   <Copy className="size-4" aria-hidden /> Copy all
                 </Button>
               </div>
               {plan.blocks.map((block) => (
-                <SnippetBlock key={block.id} block={block} reveal={revealed} onToggleReveal={() => setRevealed((value) => !value)} />
+                <SnippetBlock key={block.id} block={block} />
               ))}
               <div className="space-y-2">
                 <div className="flex flex-wrap items-start justify-between gap-2">
@@ -394,27 +360,11 @@ export default function Page() {
             <p>Snippets below keep a placeholder. Fix the server first, then run this check again.</p>
           </Notice>
         ) : null}
-        {!secretKey ? (
-          <div className="space-y-2">
-            <Notice tone="danger" title="No secret key in this session">
-              <p>
-                This dashboard was opened without a stored key, so the backend block cannot be filled in. Sign in again to
-                read it from the session.
-              </p>
-            </Notice>
-            <figure className="overflow-hidden rounded-[4px] border border-border">
-              <figcaption className="border-b border-border bg-muted/40 px-3 py-1.5 font-data text-[0.6875rem] text-muted-foreground">
-                Placeholders
-              </figcaption>
-              <pre className="overflow-x-auto px-3 py-2.5 font-data text-[0.8125rem] leading-6">{withoutSecretKey}</pre>
-            </figure>
-            <CopyButton value={withoutSecretKey} label="Copy placeholders" size="sm" variant="outline" />
-          </div>
-        ) : null}
         <p className="flex items-start gap-2 text-xs leading-relaxed text-muted-foreground">
           <ShieldAlert className="mt-0.5 size-3.5 shrink-0" strokeWidth={1.5} aria-hidden />
-          Rotate the secret key if it was ever pasted into a browser bundle, a chat message or a public repository. Anyone
-          who holds it can read and change every user.
+          The dashboard signs in with the secret key once and then holds only an httpOnly session cookie, so the backend
+          blocks keep a placeholder. Copy the real key from the server log or <code className="font-data">&lt;data dir&gt;/keys.json</code>{" "}
+          into your server's environment, and rotate it if it was ever pasted into a browser bundle or a public repository.
         </p>
       </SettingsSection>
     </div>

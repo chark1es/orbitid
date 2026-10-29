@@ -1,9 +1,33 @@
+# Keep the build context small and free of anything secret or machine-specific.
 node_modules
 **/node_modules
-**/.next
+
+# Build output is rebuilt inside the image.
 **/dist
+**/.next
+**/.turbo
+**/tsconfig.tsbuildinfo
+
+# Local data and volumes.
 data
-.git
-*.log
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+uploads
+
+# Secrets and local configuration never enter an image layer.
 .env
-.env.local
+.env.*
+!.env.example
+*.pem
+*.p8
+*.key
+
+# Repository and tooling noise.
+.git
+.gitignore
+.github
+**/*.log
+**/coverage
+.DS_Store

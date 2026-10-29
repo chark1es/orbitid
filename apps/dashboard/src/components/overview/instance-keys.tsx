@@ -1,11 +1,11 @@
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import type { InstanceSettings } from "@orbitid/shared";
-import { Badge, Button } from "@orbitid/ui";
-import { Eye, KeyRound, TriangleAlert } from "lucide-react";
-import { getApiUrl, getSecretKey } from "../../lib/api";
+import { Badge } from "@orbitid/ui";
+import { KeyRound, TriangleAlert } from "lucide-react";
+import { getApiUrl } from "../../lib/api";
 import { homeUrlOf, type HealthJSON } from "../../lib/instance";
+import { SECRET_KEY_PLACEHOLDER } from "../../pages/_config/connect";
 import { CopyButton } from "../shared/copy-button";
-import { SecretReveal } from "../shared/secret-reveal";
 import { Panel, Section } from "../shared/section";
 import { Snippet } from "./snippet";
 
@@ -18,7 +18,8 @@ function KeyRow({
 }: {
   label: string;
   value: string;
-  copyLabel: string;
+  /** Omitted when there is nothing worth copying to the clipboard. */
+  copyLabel?: string;
   hint?: string;
   children?: ReactNode;
 }) {
@@ -33,15 +34,15 @@ function KeyRow({
           {value || "—"}
         </code>
         {children}
-        <CopyButton value={value} label={copyLabel} size="icon-sm" />
+        {copyLabel ? <CopyButton value={value} label={copyLabel} size="icon-sm" /> : null}
       </div>
     </div>
   );
 }
 
 /**
- * Publishable key and copy-paste setup, from `GET /health` and `GET /instance`. The secret key is
- * read from the session and only shown after an explicit reveal.
+ * Publishable key and copy-paste setup, from `GET /health` and `GET /instance`. The secret key is never
+ * shown: the dashboard holds an httpOnly session, not the key, and the snippets carry a placeholder.
  */
 export function InstanceKeys({
   health,
@@ -54,22 +55,20 @@ export function InstanceKeys({
   instance: InstanceSettings | undefined;
   loading: boolean;
 }) {
-  const [revealSecret, setRevealSecret] = useState(false);
   const publishableKey = health?.publishable_key ?? "";
   const apiUrl = getApiUrl();
   const homeUrl = homeUrlOf(instance);
   const signInUrl = homeUrl ? `${homeUrl.replace(/\/+$/, "")}/sign-in` : "https://your-app.example.com/sign-in";
-  const secretKey = getSecretKey();
 
   const nextEnv = [
     `NEXT_PUBLIC_ORBITID_PUBLISHABLE_KEY=${publishableKey || "pk_test_…"}`,
     `NEXT_PUBLIC_ORBITID_SIGN_IN_URL=${signInUrl}`,
-    "ORBITID_SECRET_KEY=sk_test_…",
+    `ORBITID_SECRET_KEY=${SECRET_KEY_PLACEHOLDER}`,
   ].join("\n");
 
   const backendEnv = [
     `ORBITID_API_URL=${apiUrl}`,
-    "ORBITID_SECRET_KEY=sk_test_…",
+    `ORBITID_SECRET_KEY=${SECRET_KEY_PLACEHOLDER}`,
   ].join("\n");
 
   const backendCode = [
@@ -84,7 +83,7 @@ export function InstanceKeys({
   return (
     <Section
       title="Keys"
-      description="The publishable key goes in the browser. The secret key stays on your server and is never shipped to a client bundle."
+      description="The publishable key goes in the browser. The secret key stays on your server: this dashboard signs in with it once and then holds only an httpOnly session."
       actions={
         <Badge variant="outline" className="font-normal">
           {loading ? "Checking instance" : health ? "Instance reachable" : "Instance status unknown"}
@@ -94,16 +93,7 @@ export function InstanceKeys({
       <Panel>
         <KeyRow label="Publishable key" value={publishableKey} copyLabel="Copy publishable key" />
         <KeyRow label="Frontend API URL" value={apiUrl} copyLabel="Copy frontend API URL" />
-        <KeyRow
-          label="Secret key"
-          value={secretKey ? `${secretKey.slice(0, 8)}${"•".repeat(12)}` : "Not in this session"}
-          copyLabel="Copy secret key"
-          hint="Server only"
-        >
-          <Button type="button" variant="outline" size="sm" onClick={() => setRevealSecret(true)} disabled={!secretKey}>
-            <Eye aria-hidden /> Reveal
-          </Button>
-        </KeyRow>
+        <KeyRow label="Secret key" value="Held by your server, not this page" hint="Server only" />
       </Panel>
 
       {healthError ? (
@@ -147,14 +137,6 @@ export function InstanceKeys({
         </p>
       )}
 
-      <SecretReveal
-        open={revealSecret}
-        onOpenChange={setRevealSecret}
-        title="Secret key"
-        description="Grants full Backend API access for this session."
-        secret={secretKey}
-        warning="Anyone with this key can read and change every user, session and organization. Keep it server-side and rotate it if it leaks."
-      />
     </Section>
   );
 }

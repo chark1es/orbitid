@@ -20,9 +20,15 @@ passkeys, client token hashes, OAuth tokens, webhook signing secrets and the JWT
 encrypted with `ORBITID_ENCRYPTION_KEY`). Nothing is re-hashed or re-encrypted, which is why the source and
 target must share the same encryption key.
 
-Tables whose contents describe a running process rather than the instance (`rate_limits` counters) are not
-copied. Everything else is, including webhook endpoints, deliveries, audit logs, sessions and one-time
-tokens; the target behaves like the source immediately.
+Tables whose contents describe a running process or a single deployment are not copied: `rate_limits`
+counters, and `operator_sessions` (dashboard logins). Everything else is, including webhook endpoints,
+deliveries, audit logs, user sessions and one-time tokens; the target behaves like the source immediately.
+
+Dashboard logins are deliberately left behind. An operator session is bound to the browser that exchanged the
+key, and copying it would make an old cookie live against the target instance (and restore a login nobody there
+approved). After an import every dashboard signs in again with the secret key; user sessions are unaffected.
+An export made before `operator_sessions` existed stays importable, because the table is skipped rather than
+required.
 
 ## When to use it
 

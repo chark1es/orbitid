@@ -47,18 +47,18 @@ export const instanceSettingsSchema = z.object({
     allowedOrigins: z.array(z.string()).default(["http://localhost:3000", "http://localhost:5173"]),
     allowedRedirectOrigins: z.array(z.string()).default([]),
     developmentMode: z.boolean().default(true),
-  }).default({}),
+  }).prefault({}),
   attributes: z.object({
-    emailAddress: attributeSchema.default({ enabled: true, required: true, usedForFirstFactor: true, verifications: ["email_code"], verifyAtSignUp: true }),
-    phoneNumber: attributeSchema.default({ enabled: false, required: false, usedForFirstFactor: false, verifications: ["phone_code"] }),
-    username: attributeSchema.default({ enabled: false, required: false, usedForFirstFactor: true, verifyAtSignUp: false }),
-    firstName: attributeSchema.default({ enabled: true, required: false, verifyAtSignUp: false }),
-    lastName: attributeSchema.default({ enabled: true, required: false, verifyAtSignUp: false }),
-    password: attributeSchema.default({ enabled: true, required: true, usedForFirstFactor: true, verifyAtSignUp: false }),
-    passkey: attributeSchema.default({ enabled: false, required: false, usedForFirstFactor: true, verifyAtSignUp: false }),
-    backupCode: attributeSchema.default({ enabled: false, usedForSecondFactor: true }),
-    authenticatorApp: attributeSchema.default({ enabled: false, usedForSecondFactor: true }),
-  }).default({}),
+    emailAddress: attributeSchema.prefault({ enabled: true, required: true, usedForFirstFactor: true, verifications: ["email_code"], verifyAtSignUp: true }),
+    phoneNumber: attributeSchema.prefault({ enabled: false, required: false, usedForFirstFactor: false, verifications: ["phone_code"] }),
+    username: attributeSchema.prefault({ enabled: false, required: false, usedForFirstFactor: true, verifyAtSignUp: false }),
+    firstName: attributeSchema.prefault({ enabled: true, required: false, verifyAtSignUp: false }),
+    lastName: attributeSchema.prefault({ enabled: true, required: false, verifyAtSignUp: false }),
+    password: attributeSchema.prefault({ enabled: true, required: true, usedForFirstFactor: true, verifyAtSignUp: false }),
+    passkey: attributeSchema.prefault({ enabled: false, required: false, usedForFirstFactor: true, verifyAtSignUp: false }),
+    backupCode: attributeSchema.prefault({ enabled: false, usedForSecondFactor: true }),
+    authenticatorApp: attributeSchema.prefault({ enabled: false, usedForSecondFactor: true }),
+  }).prefault({}),
   password: z.object({
     minLength: z.number().int().min(1).default(8),
     maxLength: z.number().int().default(72),
@@ -69,28 +69,28 @@ export const instanceSettingsSchema = z.object({
     /** Reject passwords found in HaveIBeenPwned (k-anonymity range API). */
     rejectPwned: z.boolean().default(false),
     signOutOfOtherSessionsOnChange: z.boolean().default(true),
-  }).default({}),
-  username: z.object({ minLength: z.number().default(4), maxLength: z.number().default(64) }).default({}),
+  }).prefault({}),
+  username: z.object({ minLength: z.number().default(4), maxLength: z.number().default(64) }).prefault({}),
   /** Sign-up mode. */
   signUp: z.object({
     mode: z.enum(["public", "restricted", "waitlist"]).default("public"),
     legalConsentRequired: z.boolean().default(false),
     /** Allow users to sign up with a different account than the one authenticated (progressive sign-up). */
     progressive: z.boolean().default(true),
-  }).default({}),
+  }).prefault({}),
   restrictions: z.object({
     allowlistEnabled: z.boolean().default(false),
     blocklistEnabled: z.boolean().default(false),
     blockEmailSubaddresses: z.boolean().default(false),
     blockDisposableEmailDomains: z.boolean().default(false),
-  }).default({}),
+  }).prefault({}),
   social: z.record(z.string(), socialProviderSchema).default({}),
   mfa: z.object({
     required: z.boolean().default(false),
     /** Max verification attempts before lock */
     maxAttempts: z.number().default(100),
     lockoutDurationSeconds: z.number().default(3600),
-  }).default({}),
+  }).prefault({}),
   session: z.object({
     /** Max lifetime of a session in seconds (default 7 days) */
     lifetimeSeconds: z.number().default(60 * 60 * 24 * 7),
@@ -102,13 +102,13 @@ export const instanceSettingsSchema = z.object({
     trustedDevicesEnabled: z.boolean().default(false),
     trustedDeviceDays: z.number().int().min(1).max(365).default(30),
     customClaims: z.record(z.string(), z.unknown()).default({}),
-  }).default({}),
+  }).prefault({}),
   /** Guest accounts: `POST /v1/client/sign_ups` with `strategy: "anonymous"` creates a user with no identifiers. */
   anonymous: z.object({
     enabled: z.boolean().default(false),
     /** Anonymous users with no activity for this long are deleted (0 keeps them). */
     retentionSeconds: z.number().int().min(0).default(60 * 60 * 24 * 30),
-  }).default({}),
+  }).prefault({}),
   /** OIDC provider behaviour for apps registered under OAuth applications. */
   oidcProvider: z.object({
     accessTokenFormat: z.enum(["opaque", "jwt"]).default("opaque"),
@@ -116,7 +116,7 @@ export const instanceSettingsSchema = z.object({
     deviceAuthorizationEnabled: z.boolean().default(false),
     deviceCodeLifetimeSeconds: z.number().int().min(60).default(600),
     deviceCodeIntervalSeconds: z.number().int().min(1).default(5),
-  }).default({}),
+  }).prefault({}),
   organizations: z.object({
     enabled: z.boolean().default(false),
     /** Let users create orgs. */
@@ -131,12 +131,12 @@ export const instanceSettingsSchema = z.object({
     defaultRole: z.string().default("org:member"),
     adminDeleteEnabled: z.boolean().default(true),
     maxCreatedOrganizationsPerUser: z.number().nullable().default(null),
-  }).default({}),
+  }).prefault({}),
   userSettings: z.object({
     deleteSelfEnabled: z.boolean().default(true),
     createOrganizationEnabled: z.boolean().default(true),
     allowProfileImageUpload: z.boolean().default(true),
-  }).default({}),
+  }).prefault({}),
   email: z.object({
     from: z.string().default("OrbitID <no-reply@localhost>"),
     /**
@@ -152,7 +152,7 @@ export const instanceSettingsSchema = z.object({
     codeLength: z.number().default(6),
     codeLifetimeSeconds: z.number().default(600),
     linkLifetimeSeconds: z.number().default(3600),
-  }).default({}),
+  }).prefault({}),
   sms: z.object({
     /** "console" | "twilio" | "webhook" */
     provider: z.enum(["console", "twilio", "webhook"]).default("console"),
@@ -160,7 +160,7 @@ export const instanceSettingsSchema = z.object({
     twilioAuthToken: z.string().default(""),
     twilioFrom: z.string().default(""),
     webhookUrl: z.string().default(""),
-  }).default({}),
+  }).prefault({}),
   security: z.object({
     botProtection: z.boolean().default(false),
     /** hCaptcha / Cloudflare Turnstile secret; empty disables */
@@ -170,12 +170,12 @@ export const instanceSettingsSchema = z.object({
     rateLimitEnabled: z.boolean().default(true),
     enumerationProtection: z.boolean().default(false),
     testingTokensEnabled: z.boolean().default(true),
-  }).default({}),
+  }).prefault({}),
   branding: z.object({
     primaryColor: z.string().default("#2b2522"),
     showPoweredBy: z.boolean().default(true),
     theme: z.enum(["light", "dark", "system"]).default("system"),
-  }).default({}),
+  }).prefault({}),
 });
 export type InstanceSettings = z.infer<typeof instanceSettingsSchema>;
 export const defaultInstanceSettings = (): InstanceSettings => instanceSettingsSchema.parse({});

@@ -4,6 +4,7 @@ import { render } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { vi } from "vitest";
 import { defaultInstanceSettings, type InstanceSettings } from "@orbitid/shared";
+import { AuthProvider } from "../../../lib/auth";
 
 export interface ApiCall {
   method: string;
@@ -29,6 +30,8 @@ export interface MockApiOptions {
   health?: unknown;
   /** Status and body for `POST /v1/instance/email_test`; defaults to success. */
   emailTest?: { status: number; body: unknown };
+  /** Whether `GET /v1/operator_sessions/current` reports a live session. Defaults to true. */
+  sessionActive?: boolean;
   /** Extra handler for paths the page calls outside the settings API. */
   handle?: (call: ApiCall) => Response | undefined;
 }
@@ -52,6 +55,11 @@ export function mockApi(options: MockApiOptions = {}): ApiCall[] {
     if (url.endsWith("/health")) {
       return json(options.health ?? { status: "ok", publishable_key: "pk_test_demo", database: "postgres" });
     }
+    if (url.includes("/v1/operator_sessions/current")) {
+      return options.sessionActive === false
+        ? json({ errors: [{ code: "authentication_invalid", message: "Your dashboard session ended. Sign in again." }] }, 401)
+        : json({ object: "operator_session", id: "osess_test", expires_at: Date.now() + 3_600_000 });
+    }
     if (url.includes("/v1/client/environment")) {
       return json(
         options.environment ?? {
@@ -74,15 +82,25 @@ export function mockApi(options: MockApiOptions = {}): ApiCall[] {
   return calls;
 }
 
-export function renderPage(ui: ReactElement, options: { secretKey?: string | null } = {}) {
+export function renderPage(ui: ReactElement) {
   sessionStorage.setItem("orbitid.apiUrl", "http://localhost:4000");
-  const secretKey = options.secretKey === undefined ? "sk_test_dashboard_session" : options.secretKey;
-  if (secretKey) sessionStorage.setItem("orbitid.secretKey", secretKey);
-  else sessionStorage.removeItem("orbitid.secretKey");
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter>{ui}</MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+/** Wraps a page in `AuthProvider` for pages that read the session (Connect, UserMenu). */
+export function renderAuthedPage(ui: ReactElement) {
+  sessionStorage.setItem("orbitid.apiUrl", "http://localhost:4000");
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <AuthProvider>{ui}</AuthProvider>
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
