@@ -155,7 +155,9 @@ export async function assertIdentifiersAllowed(
   }
 
   const mode = settings.signUp.mode;
-  if (mode === "public") return {};
+  // The allowlist is a restriction in its own right: when it is on, only listed identifiers (or invited ones) get in,
+  // whatever the sign-up mode says.
+  if (mode === "public" && !settings.restrictions.allowlistEnabled) return {};
 
   let invitation: Awaited<ReturnType<typeof pendingInvitationFor>>;
   for (const email of emails) {
@@ -164,7 +166,7 @@ export async function assertIdentifiersAllowed(
   }
   const allowlisted = settings.restrictions.allowlistEnabled && await allowlistMatches(ctx, emails, phones);
 
-  if (mode === "restricted") {
+  if (mode === "restricted" || mode === "public") {
     if (allowlisted || invitation) return { invitationId: invitation?.id };
     throw new OrbitError(422, ErrorCodes.sign_up_restricted, "Sign-ups are restricted to invited users on this application.");
   }

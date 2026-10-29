@@ -254,7 +254,8 @@ export function listEnabledSocialProviders(ctx: AppContext): SocialProviderListi
 const rec = (v: unknown): Record<string, unknown> => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
 const str = (v: unknown): string | undefined => (typeof v === "string" && v.length > 0 ? v : undefined);
 const strOrEmpty = (v: unknown): string => (typeof v === "string" ? v : "");
-const boolOrUndefined = (v: unknown): boolean | undefined => (typeof v === "boolean" ? v : undefined);
+/** Providers send flags as booleans or as the strings "true"/"false" (Apple does the latter). Anything else is unknown. */
+const boolOrUndefined = (v: unknown): boolean | undefined => (typeof v === "boolean" ? v : v === "true" ? true : v === "false" ? false : undefined);
 const at = (obj: unknown, path: string): unknown => path.split(".").reduce<unknown>((acc, part) => rec(acc)[part], obj);
 
 async function requestJson(ctx: AppContext, url: string, init: RequestInit = {}): Promise<unknown> {
@@ -321,7 +322,7 @@ function idTokenProfile(key: string, tokens: OAuthTokenSet): ExternalProfile {
   return profile(key, {
     providerUserId: sub,
     email: str(claims.email),
-    emailVerified: boolOrUndefined(claims.email_verified) ?? !!claims.email,
+    emailVerified: boolOrUndefined(claims.email_verified) ?? false,
     firstName: str(claims.given_name),
     lastName: str(claims.family_name),
     username: str(claims.preferred_username),
@@ -337,7 +338,7 @@ function normalizeProfile(key: string, data: unknown, tokens: OAuthTokenSet): Ex
       const d = rec(data);
       return profile(key, {
         providerUserId: strOrEmpty(d.sub) || strOrEmpty(d.email),
-        email: str(d.email), emailVerified: boolOrUndefined(d.email_verified) ?? true,
+        email: str(d.email), emailVerified: boolOrUndefined(d.email_verified) ?? false,
         firstName: str(d.given_name), lastName: str(d.family_name), username: str(d.email)?.split("@")[0],
         imageUrl: str(d.picture), raw: d,
       }, tokens);
@@ -348,7 +349,7 @@ function normalizeProfile(key: string, data: unknown, tokens: OAuthTokenSet): Ex
       const [first, ...rest] = (name ?? "").split(" ");
       return profile(key, {
         providerUserId: String(d.id ?? ""),
-        email: str(d.email), emailVerified: true,
+        email: str(d.email), emailVerified: false,
         firstName: first || undefined, lastName: rest.join(" ") || undefined, username: str(d.login),
         imageUrl: str(d.avatar_url), raw: d,
       }, tokens);
@@ -359,7 +360,7 @@ function normalizeProfile(key: string, data: unknown, tokens: OAuthTokenSet): Ex
       const [first, ...rest] = (name ?? "").split(" ");
       return profile(key, {
         providerUserId: String(d.id ?? ""),
-        email: str(d.email), emailVerified: true,
+        email: str(d.email), emailVerified: !!d.confirmed_at,
         firstName: first || undefined, lastName: rest.join(" ") || undefined, username: str(d.username),
         imageUrl: str(d.avatar_url), raw: d,
       }, tokens);
@@ -369,7 +370,7 @@ function normalizeProfile(key: string, data: unknown, tokens: OAuthTokenSet): Ex
       const avatar = str(d.avatar);
       return profile(key, {
         providerUserId: String(d.id ?? ""),
-        email: str(d.email), emailVerified: boolOrUndefined(d.verified) ?? true,
+        email: str(d.email), emailVerified: boolOrUndefined(d.verified) ?? false,
         username: str(d.username), imageUrl: avatar ? `https://cdn.discordapp.com/avatars/${String(d.id)}/${avatar}.png` : undefined, raw: d,
       }, tokens);
     }
@@ -378,7 +379,7 @@ function normalizeProfile(key: string, data: unknown, tokens: OAuthTokenSet): Ex
       const email = str(d.email) ?? str(d.preferred_username);
       return profile(key, {
         providerUserId: strOrEmpty(d.sub) || strOrEmpty(d.oid) || strOrEmpty(email),
-        email, emailVerified: true,
+        email, emailVerified: false,
         firstName: str(d.given_name), lastName: str(d.family_name), username: email?.split("@")[0],
         imageUrl: str(d.picture), raw: d,
       }, tokens);
@@ -388,7 +389,7 @@ function normalizeProfile(key: string, data: unknown, tokens: OAuthTokenSet): Ex
       const [first, ...rest] = strOrEmpty(d.name).split(" ");
       return profile(key, {
         providerUserId: String(d.id ?? ""),
-        email: str(d.email), emailVerified: !!d.email,
+        email: str(d.email), emailVerified: false,
         firstName: str(d.first_name) ?? first, lastName: str(d.last_name) ?? (rest.join(" ") || undefined),
         imageUrl: str(at(d, "picture.data.url")), raw: d,
       }, tokens);
@@ -406,7 +407,7 @@ function normalizeProfile(key: string, data: unknown, tokens: OAuthTokenSet): Ex
       const d = rec(data);
       return profile(key, {
         providerUserId: strOrEmpty(d.sub) || strOrEmpty(d.email),
-        email: str(d.email), emailVerified: boolOrUndefined(d.email_verified) ?? true,
+        email: str(d.email), emailVerified: boolOrUndefined(d.email_verified) ?? false,
         firstName: str(d.given_name), lastName: str(d.family_name), imageUrl: str(d.picture), raw: d,
       }, tokens);
     }
@@ -414,14 +415,14 @@ function normalizeProfile(key: string, data: unknown, tokens: OAuthTokenSet): Ex
       const d = rec(data);
       return profile(key, {
         providerUserId: strOrEmpty(d.sub) || strOrEmpty(d.email),
-        email: str(d.email), emailVerified: boolOrUndefined(d.email_verified) ?? true,
+        email: str(d.email), emailVerified: boolOrUndefined(d.email_verified) ?? false,
         firstName: str(d.name), imageUrl: str(d.picture), raw: d,
       }, tokens);
     }
     case "twitch": {
       const d = rec(Array.isArray(rec(data).data) ? (rec(data).data as unknown[])[0] : {});
       return profile(key, {
-        providerUserId: String(d.id ?? ""), email: str(d.email), emailVerified: true,
+        providerUserId: String(d.id ?? ""), email: str(d.email), emailVerified: false,
         username: str(d.display_name), firstName: str(d.display_name), imageUrl: str(d.profile_image_url), raw: d,
       }, tokens);
     }
@@ -429,7 +430,7 @@ function normalizeProfile(key: string, data: unknown, tokens: OAuthTokenSet): Ex
       const d = rec(data);
       const images = Array.isArray(d.images) ? d.images : [];
       return profile(key, {
-        providerUserId: String(d.id ?? ""), email: str(d.email), emailVerified: true,
+        providerUserId: String(d.id ?? ""), email: str(d.email), emailVerified: false,
         firstName: str(d.display_name), username: str(d.display_name),
         imageUrl: str(rec(images[0]).url), raw: d,
       }, tokens);
@@ -438,7 +439,7 @@ function normalizeProfile(key: string, data: unknown, tokens: OAuthTokenSet): Ex
       const d = rec(data);
       return profile(key, {
         providerUserId: strOrEmpty(d.uuid) || strOrEmpty(d.username),
-        email: str(d.email), emailVerified: true,
+        email: str(d.email), emailVerified: false,
         firstName: str(d.display_name), username: str(d.username), imageUrl: str(at(d, "links.avatar.href")), raw: d,
       }, tokens);
     }
@@ -446,7 +447,7 @@ function normalizeProfile(key: string, data: unknown, tokens: OAuthTokenSet): Ex
       const d = rec(data);
       return profile(key, {
         providerUserId: strOrEmpty(d.account_id),
-        email: str(d.email), emailVerified: boolOrUndefined(d.email_verified) ?? true,
+        email: str(d.email), emailVerified: boolOrUndefined(d.email_verified) ?? false,
         firstName: str(at(d, "name.display_name")), imageUrl: str(d.profile_photo_url), raw: d,
       }, tokens);
     }
@@ -454,7 +455,7 @@ function normalizeProfile(key: string, data: unknown, tokens: OAuthTokenSet): Ex
       const d = rec(data);
       return profile(key, {
         providerUserId: strOrEmpty(d.id) || strOrEmpty(d.bot_id),
-        email: str(at(d, "person.email")), emailVerified: true,
+        email: str(at(d, "person.email")), emailVerified: false,
         firstName: str(d.name), imageUrl: str(d.avatar_url), raw: d,
       }, tokens);
     }
@@ -462,7 +463,7 @@ function normalizeProfile(key: string, data: unknown, tokens: OAuthTokenSet): Ex
       const d = rec(data);
       return profile(key, {
         providerUserId: strOrEmpty(d.user) || strOrEmpty(d.hub_id),
-        email: str(d.user), emailVerified: true, raw: d,
+        email: str(d.user), emailVerified: false, raw: d,
       }, tokens);
     }
     case "tiktok": {
@@ -475,7 +476,7 @@ function normalizeProfile(key: string, data: unknown, tokens: OAuthTokenSet): Ex
     case "coinbase": {
       const d = rec(rec(data).data);
       return profile(key, {
-        providerUserId: strOrEmpty(d.id), email: str(d.email), emailVerified: !!d.email,
+        providerUserId: strOrEmpty(d.id), email: str(d.email), emailVerified: false,
         firstName: str(d.name), username: str(d.username), imageUrl: str(d.avatar_url), raw: d,
       }, tokens);
     }
@@ -489,21 +490,21 @@ function normalizeProfile(key: string, data: unknown, tokens: OAuthTokenSet): Ex
     case "linear": {
       const d = rec(at(data, "data.viewer"));
       return profile(key, {
-        providerUserId: strOrEmpty(d.id), email: str(d.email), emailVerified: true,
+        providerUserId: strOrEmpty(d.id), email: str(d.email), emailVerified: false,
         firstName: str(d.name), username: str(d.displayName), imageUrl: str(d.avatarUrl), raw: d,
       }, tokens);
     }
     case "huggingface": {
       const d = rec(data);
       return profile(key, {
-        providerUserId: strOrEmpty(d.id), email: str(d.email), emailVerified: boolOrUndefined(d.emailVerified) ?? !!d.email,
+        providerUserId: strOrEmpty(d.id), email: str(d.email), emailVerified: boolOrUndefined(d.emailVerified) ?? false,
         firstName: str(d.fullname) ?? str(d.name), username: str(d.name), imageUrl: str(d.avatarUrl), raw: d,
       }, tokens);
     }
     case "box": {
       const d = rec(data);
       return profile(key, {
-        providerUserId: strOrEmpty(d.id), email: str(d.login), emailVerified: true,
+        providerUserId: strOrEmpty(d.id), email: str(d.login), emailVerified: false,
         firstName: str(d.name), username: str(d.login), imageUrl: str(d.avatar_url), raw: d,
       }, tokens);
     }
@@ -511,14 +512,14 @@ function normalizeProfile(key: string, data: unknown, tokens: OAuthTokenSet): Ex
       const d = rec(data);
       return profile(key, {
         providerUserId: strOrEmpty(d.account_id) || strOrEmpty(d.email),
-        email: str(d.email), emailVerified: true, firstName: str(d.name), imageUrl: str(d.picture), raw: d,
+        email: str(d.email), emailVerified: false, firstName: str(d.name), imageUrl: str(d.picture), raw: d,
       }, tokens);
     }
     default: {
       const d = rec(data);
       return profile(key, {
         providerUserId: strOrEmpty(d.sub) || strOrEmpty(d.id) || strOrEmpty(d.email),
-        email: str(d.email), emailVerified: boolOrUndefined(d.email_verified) ?? !!d.email,
+        email: str(d.email), emailVerified: boolOrUndefined(d.email_verified) ?? false,
         firstName: str(d.given_name) ?? str(d.first_name) ?? str(d.name),
         lastName: str(d.family_name) ?? str(d.last_name),
         username: str(d.preferred_username) ?? str(d.username),
@@ -615,15 +616,19 @@ async function fetchProfileFor(ctx: AppContext, cfg: OAuthProviderConfig, tokens
     case "github": {
       const data = await requestJson(ctx, "https://api.github.com/user", { headers: { ...headers, "User-Agent": "OrbitID", Accept: "application/vnd.github+json" } });
       const p = normalizeProfile(key, data, tokens);
-      if (!p.email) {
+      // The public profile email is unverified, so always ask for the verified list and prefer it.
+      try {
         const emails = await requestJson(ctx, "https://api.github.com/user/emails", { headers: { ...headers, "User-Agent": "OrbitID", Accept: "application/vnd.github+json" } });
         if (Array.isArray(emails)) {
-          const primary = emails.map(rec).find((e) => e.primary === true) ?? emails.map(rec).find((e) => e.verified === true);
+          const list = emails.map(rec);
+          const primary = list.find((e) => e.primary === true && e.verified === true) ?? list.find((e) => e.verified === true);
           if (primary) {
             p.email = str(primary.email);
             p.emailVerified = primary.verified === true;
           }
         }
+      } catch {
+        // Without the `user:email` scope only the (unverified) public address is known.
       }
       return p;
     }
@@ -670,7 +675,7 @@ async function fetchProfileFor(ctx: AppContext, cfg: OAuthProviderConfig, tokens
       try {
         const auth = rec(await requestJson(ctx, "https://api.coinbase.com/v2/user/auth", { headers }));
         const email = str(rec(auth.data).email) ?? str(rec(rec(auth.data).user).email);
-        if (email) { p.email = email; p.emailVerified = true; }
+        if (email) { p.email = email; p.emailVerified = false; }
       } catch {
         // email scope may be unavailable; ignore.
       }
@@ -682,7 +687,7 @@ async function fetchProfileFor(ctx: AppContext, cfg: OAuthProviderConfig, tokens
       if (tokens.idToken) {
         const claims = decodeJwt(tokens.idToken);
         p.email = str(claims.email);
-        p.emailVerified = !!p.email;
+        p.emailVerified = boolOrUndefined(claims.email_verified) ?? false;
       }
       return p;
     }
@@ -841,7 +846,7 @@ async function appleProfile(_ctx: AppContext, cfg: OAuthProviderConfig, tokens: 
   return profile("apple", {
     providerUserId: sub,
     email: str(claims.email),
-    emailVerified: boolOrUndefined(claims.email_verified) ?? !!claims.email,
+    emailVerified: boolOrUndefined(claims.email_verified) ?? false,
     raw: claims as Record<string, unknown>,
   }, tokens);
 }

@@ -25,7 +25,7 @@ import {
   assertNotLastIdentification, assertUsernameAvailable, countIdentifications, deleteEmailAddress, deletePhoneNumber,
   findEmail, getUserById, isValidEmail, listEmails, listPhones, normalizeEmail, normalizePhone,
   primaryEmail, recordFailedAttempt, resetFailedAttempts, setPrimaryEmail, setPrimaryPhone,
-  hasVerifiedIdentifier, upgradeAnonymousUser, type UserRow,
+  hasVerifiedIdentifier, purgeUnverifiedClaims, upgradeAnonymousUser, type UserRow,
 } from "../services/users";
 import { deleteUser } from "../services/users";
 import { emitEvent } from "../services/webhooks";
@@ -258,7 +258,12 @@ export default function routes(ctx: AppContext) {
     if (!ctx.settings.get().attributes.emailAddress.enabled) throw new OrbitError(422, ErrorCodes.form_param_unknown, "Email addresses are disabled for this instance", { param_name: "email_address" });
     const email = normalizeEmail(body.email_address);
     if (!isValidEmail(email)) throw new OrbitError(422, ErrorCodes.form_param_format_invalid, "email_address is not valid", { param_name: "email_address" });
-    if (await findEmail(ctx, email)) throw new OrbitError(422, ErrorCodes.form_identifier_exists, "That email address is already in use", { param_name: "email_address" });
+    // Claiming an address is allowed while nobody has verified it (the owner of the mailbox settles it by verifying);
+    // an address another account has verified, or one this account already holds, is taken.
+    const claimed = await findEmail(ctx, email);
+    if (claimed && (claimed.verified || claimed.userId === user.id)) {
+      throw new OrbitError(422, ErrorCodes.form_identifier_exists, "That email address is already in use", { param_name: "email_address" });
+    }
     // Turning a guest into a registered user is a sign-up: it must pass the same allowlist and blocklist checks.
     if (user.isAnonymous) await assertIdentifiersAllowed(ctx, { emails: [email] });
     const now = Date.now();
@@ -320,6 +325,7 @@ export default function routes(ctx: AppContext) {
       throw new OrbitError(409, ErrorCodes.duplicate_record, "That email address is already verified by another account");
     }
     await ctx.db.update(s.emailAddresses).set({ verified: true, verifiedAt: Date.now(), verifiedStrategy: "email_code", updatedAt: Date.now() }).where(eq(s.emailAddresses.id, row.id));
+    await purgeUnverifiedClaims(ctx, row.email, user.id);
     await onUserEmailVerified(ctx, user.id, row.email);
     // A verified email address turns a guest account into a regular one.
     await upgradeAnonymousUser(ctx, user.id);

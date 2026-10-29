@@ -127,7 +127,8 @@ export function clientIp(c: Context): string {
   const hops = process.env.ORBITID_TRUST_PROXY === "true" ? 1 : Number(process.env.ORBITID_TRUST_PROXY ?? 0);
   if (hops > 0) {
     const chain = (c.req.header("x-forwarded-for") ?? "").split(",").map((part) => part.trim()).filter(Boolean);
-    const forwarded = chain[chain.length - hops] ?? c.req.header("x-real-ip");
+    // `X-Real-IP` is not consulted: a client could set it, and only the proxy-appended hop of `X-Forwarded-For` is trustworthy.
+    const forwarded = chain[chain.length - hops];
     if (forwarded) return forwarded;
   }
   try {

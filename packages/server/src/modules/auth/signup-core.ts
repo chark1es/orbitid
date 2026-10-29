@@ -217,7 +217,8 @@ export async function assertSignUpIdentifiers(ctx: AppContext, fields: SignUpFie
     throw new OrbitError(422, ErrorCodes.form_param_unknown, "Usernames are disabled for this instance", { param_name: "username" });
   }
   if (email) {
-    if (await findEmail(ctx, email)) {
+    // Only a verified address is taken: an unverified claim on someone's mailbox must not lock them out of signing up.
+    if ((await findEmail(ctx, email))?.verified) {
       throw new OrbitError(422, ErrorCodes.form_identifier_exists, "That email address is already in use", { param_name: "email_address" });
     }
     if (!st.attributes.emailAddress.enabled) {

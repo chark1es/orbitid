@@ -154,7 +154,12 @@ export default function routes(ctx: AppContext) {
       // Tight budget: guest accounts are cheap to mint, so one address cannot flood the instance.
       await hit(ctx, `sign_up:anonymous:${clientIp(c)}`, 10, 60 * 60_000);
       row = await saveSignUp(ctx, row, { fields: { anonymous: true, legalAcceptedAt: body.legal_accepted ? now : null } });
-      await completeSignUp(ctx, row, { ip: clientIp(c), userAgent: c.req.header("user-agent") ?? undefined });
+      // A guest session is a new login: replace the client cookie so a value planted beforehand cannot ride along.
+      await completeSignUp(ctx, row, {
+        ip: clientIp(c),
+        userAgent: c.req.header("user-agent") ?? undefined,
+        rotateClientToken: () => rotateClientTokenOnSignIn(ctx, c, client.id),
+      });
       return respond(c, client.id, await reload(row.id));
     }
 

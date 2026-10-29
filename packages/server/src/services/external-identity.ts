@@ -229,7 +229,7 @@ async function resolveExternalIdentity(
     // Signing up with an email that belongs to an existing account must not create a duplicate.
     if (profile.email) {
       const claimed = await findEmail(ctx, profile.email);
-      if (claimed?.userId) {
+      if (claimed?.userId && claimed.verified) {
         throw new OrbitError(422, ErrorCodes.form_identifier_exists, "That email address is already in use");
       }
     }

@@ -215,6 +215,21 @@ The server hardens what it controls; these parts are yours.
    trace ids and user ids are fine, tokens and codes are never logged by the server (the one opt-in exception is `ORBITID_ALLOW_CONSOLE_EMAIL=true`, which exists for trials) but may appear in your proxy's
    logs if a client puts them in a URL.
 
+## Things that are deliberate
+
+- **Account enumeration.** `security.enumerationProtection` (off by default) makes sign-in answer an unknown
+  identifier like a known one. It is off because the friendly "couldn't find your account, sign up?" message is what most
+  apps want, and because sign-up must say when an address is already registered. Turn it on if hiding which addresses have
+  accounts matters more to you than that message. Failed attempts are rate limited and unknown identifiers cost the same
+  password work either way.
+- **Authorization requests are not CSRF-protected.** `GET /oauth/authorize` is a top-level navigation by design (the
+  OAuth protocol requires it). What keeps it safe is that a code can only be sent to a `redirect_uri` registered for the
+  client, is bound to PKCE, and a client with `consent_screen_enabled: false` is treated as first-party. Only turn the
+  consent screen off for apps you run yourself; anyone who can register an OAuth application on your instance can see
+  the profile of any signed-in user who visits a page that starts an authorization for it.
+- **Invitation links.** Opening an organization invitation link while signed in as the invited address accepts it. The
+  link is the capability (it was emailed to that address); an inviter cannot use it against anyone but the invitee.
+
 ## Dashboard sign-in
 
 The dashboard has no accounts of its own yet: an operator pastes the instance secret key, which the page keeps in

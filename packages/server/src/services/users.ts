@@ -47,8 +47,27 @@ export async function requireUser(ctx: AppContext, id: string): Promise<UserRow>
   return u;
 }
 
-export const findEmail = async (ctx: AppContext, email: string): Promise<EmailRow | undefined> =>
-  first(await ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.email, normalizeEmail(email))));
+/**
+ * The row that owns an address. Several accounts may *claim* an address without proving it (an unverified row), but
+ * only one can verify it, so a verified row always wins; an unverified one is returned only when nobody has verified it.
+ */
+export const findEmail = async (ctx: AppContext, email: string): Promise<EmailRow | undefined> => {
+  const rows = await ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.email, normalizeEmail(email)));
+  return rows.find((row) => row.verified) ?? rows[0];
+};
+
+/** Once someone has verified an address, other accounts' unverified claims on it are dead weight: remove them. */
+export async function purgeUnverifiedClaims(ctx: AppContext, email: string, exceptUserId: string): Promise<void> {
+  const rows = await ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.email, normalizeEmail(email)));
+  for (const row of rows) {
+    if (row.verified || row.userId === exceptUserId) continue;
+    if (row.userId) {
+      const owner = await getUserById(ctx, row.userId);
+      if (owner?.primaryEmailAddressId === row.id) await ctx.db.update(s.users).set({ primaryEmailAddressId: null }).where(eq(s.users.id, row.userId));
+    }
+    await ctx.db.delete(s.emailAddresses).where(eq(s.emailAddresses.id, row.id));
+  }
+}
 
 export const findPhone = async (ctx: AppContext, phone: string): Promise<PhoneRow | undefined> =>
   first(await ctx.db.select().from(s.phoneNumbers).where(eq(s.phoneNumbers.phone, normalizePhone(phone))));
@@ -158,7 +177,8 @@ export async function createUser(ctx: AppContext, input: CreateUserInput): Promi
   if (email) {
     if (!isValidEmail(email)) throw new OrbitError(422, ErrorCodes.form_param_format_invalid, "email_address is not valid", { param_name: "email_address" });
     const existing = await findEmail(ctx, email);
-    if (existing?.verified || (existing?.userId && !input.silent)) {
+    // Only a verified address is taken; an unverified claim by someone else cannot reserve a mailbox.
+    if (existing?.verified) {
       throw new OrbitError(422, ErrorCodes.form_identifier_exists, "That email address is already in use", { param_name: "email_address" });
     }
   }
@@ -199,6 +219,7 @@ export async function createUser(ctx: AppContext, input: CreateUserInput): Promi
                   verifiedStrategy: verified ? input.emailVerifiedStrategy ?? "email_code" : null, createdAt: now, updatedAt: now,
                 });
     await ctx.db.update(s.users).set({ primaryEmailAddressId: emailId }).where(eq(s.users.id, id));
+    if (verified) await purgeUnverifiedClaims(ctx, email, id);
   }
   if (phone) {
     const phoneId = newId("idn_p");
