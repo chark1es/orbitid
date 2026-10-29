@@ -185,6 +185,17 @@ async function resolveExternalIdentity(
     if (account?.userId && account.userId !== flow.userId) {
       throw new OrbitError(409, ErrorCodes.external_account_exists, "This external account is already linked to another user");
     }
+    // Connecting a social account to a guest is what turns it into a registered user, so it is a sign-up and its
+    // identity has to clear the same allowlist, blocklist and disposable-domain checks.
+    const guest = await getUserById(ctx, flow.userId);
+    if (guest?.isAnonymous) {
+      const settings = ctx.settings.get();
+      if (profile.email) await assertIdentifiersAllowed(ctx, { emails: [profile.email] });
+      else if (settings.restrictions.allowlistEnabled || settings.signUp.mode !== "public") {
+        // Nothing to check against the allowlist, so a restricted instance cannot admit this identity.
+        throw new OrbitError(422, ErrorCodes.not_allowed_access, "This account does not share an email address, which this instance requires to sign up.");
+      }
+    }
     const linked = await linkExternalAccount(ctx, flow.userId, profile);
     // Connecting an account gives a guest a way to sign in again.
     await upgradeAnonymousUser(ctx, flow.userId);

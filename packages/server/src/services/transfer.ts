@@ -148,6 +148,9 @@ function portable(value: unknown): unknown {
   return value;
 }
 
+/** Tables introduced after the first release: an export from an older version legitimately lacks them. */
+const ADDED_IN_LATER_RELEASES = new Set(["trusted_devices", "device_codes"]);
+
 function schemaVersion(): string {
   try {
     const journal = resolve(dirname(fileURLToPath(import.meta.url)), `../../drizzle/${dialect}/meta/_journal.json`);
@@ -456,6 +459,15 @@ async function importInto(ctx: AppContext, options: ImportOptions): Promise<Impo
         const unknownTables = header.tables.filter((name) => !local.has(name));
         if (unknownTables.length) throw new Error(`The export contains tables this version does not know: ${unknownTables.join(", ")}`);
         if (new Set(header.tables).size !== header.tables.length) throw new Error("The export header lists a table twice");
+        // A replacement import clears every table, so the file has to account for every table it clears. Only tables
+        // added in a later release may be absent (an export from an older version cannot contain them).
+        const listed = new Set(header.tables);
+        const absent = [...local.values()].filter((entry) => !SKIPPED_TABLES.has(entry.key) && !listed.has(entry.name) && !ADDED_IN_LATER_RELEASES.has(entry.name)).map((entry) => entry.name);
+        if (absent.length) {
+          throw new Error(`The export is incomplete: it does not list ${absent.join(", ")}. Importing it would leave those tables empty. Use a complete export.`);
+        }
+        const uncounted = header.tables.filter((name) => header!.counts[name] === undefined);
+        if (uncounted.length) throw new Error(`The export header has no row count for ${uncounted.join(", ")}, so it cannot be verified`);
         order = header.tables.map((name) => local.get(name)!);
         assertDependencyOrder(order);
 

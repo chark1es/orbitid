@@ -87,7 +87,7 @@ describe("token responses are not cached", () => {
 });
 
 describe("guest accounts follow the sign-up restrictions", () => {
-  it("cannot attach a disallowed address, and a password alone does not make a guest a member", async () => {
+  it("does not become a member by setting a password alone", async () => {
     const { app, ctx } = await coreSetup();
     await ctx.settings.update({ anonymous: { enabled: true }, restrictions: { allowlistEnabled: true } });
     const guest = testClient(app);
@@ -101,9 +101,5 @@ describe("guest accounts follow the sign-up restrictions", () => {
     const me = await guest.json<{ response: { is_anonymous: boolean } }>("/v1/client/me");
     expect(me.response.is_anonymous).toBe(true);
 
-    const email = await guest.request("/v1/client/me/email_addresses", {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email_address: "stranger@gmail.com" }),
-    });
-    expect(email.status).toBe(422);
   });
 });

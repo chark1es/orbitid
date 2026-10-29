@@ -7,7 +7,7 @@ import * as s from "../db/schema";
 import { clientIp } from "../lib/http";
 import { getUserById } from "../services/users";
 import { consumeLink, getVerificationByToken } from "./auth/verifications";
-import { findClient } from "./auth/client-auth";
+import { findClient, rotateClientTokenOnSignIn } from "./auth/client-auth";
 import { afterFirstFactor, asSignInState, assertSignInAllowed, saveSignInState } from "./auth/signin-core";
 import { asSignUpFields, asSignUpVerifications, maybeCompleteSignUp, saveSignUp } from "./auth/signup-core";
 import { validateRedirectUrl, withQuery } from "./auth/redirects";
@@ -54,7 +54,12 @@ export default function routes(ctx: AppContext) {
             await saveSignInState(ctx, signIn, { ...state, first: { strategy: row.strategy, status: "verified", verificationId: row.id } });
             await ctx.db.update(s.signIns).set({ updatedAt: Date.now() }).where(eq(s.signIns.id, signIn.id));
             const fresh = first(await ctx.db.select().from(s.signIns).where(eq(s.signIns.id, signIn.id)))!;
-            await afterFirstFactor(ctx, fresh, user, { ip: clientIp(c), userAgent: c.req.header("user-agent") ?? undefined });
+            // The cookie the browser held before the link was opened must not stay valid for the new session.
+            await afterFirstFactor(ctx, fresh, user, {
+              ip: clientIp(c),
+              userAgent: c.req.header("user-agent") ?? undefined,
+              rotateClientToken: () => rotateClientTokenOnSignIn(ctx, c, fresh.clientId),
+            });
           }
         }
       } else if (row.purpose === "sign_up_email") {
@@ -74,7 +79,11 @@ export default function routes(ctx: AppContext) {
                         },
                       });
           const fresh = first(await ctx.db.select().from(s.signUps).where(eq(s.signUps.id, signUp.id)))!;
-          await maybeCompleteSignUp(ctx, fresh, { ip: clientIp(c), userAgent: c.req.header("user-agent") ?? undefined });
+          await maybeCompleteSignUp(ctx, fresh, {
+            ip: clientIp(c),
+            userAgent: c.req.header("user-agent") ?? undefined,
+            rotateClientToken: () => rotateClientTokenOnSignIn(ctx, c, fresh.clientId),
+          });
         }
       }
     } catch {
