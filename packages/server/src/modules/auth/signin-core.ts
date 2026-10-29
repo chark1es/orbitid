@@ -126,7 +126,7 @@ export async function computeFirstFactors(ctx: AppContext, user: UserRow, opts: 
   if (st.attributes.phoneNumber.enabled && st.attributes.phoneNumber.usedForFirstFactor && phone?.verified) {
     factors.push({ strategy: "phone_code", phone_number_id: phone.id, safe_identifier: maskPhone(phone.phone), primary: phone.id === user.primaryPhoneNumberId });
   }
-  if (st.attributes.passkey.enabled && (await listPasskeys(ctx, user.id)).length > 0) {
+  if (st.attributes.passkey.enabled && st.attributes.passkey.usedForFirstFactor && (await listPasskeys(ctx, user.id)).length > 0) {
     factors.push({ strategy: "passkey" });
   }
   for (const provider of listEnabledSocialProviders(ctx)) {

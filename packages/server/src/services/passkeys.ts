@@ -7,11 +7,12 @@ import {
   verifyRegistrationResponse,
 } from "@simplewebauthn/server";
 import type { AuthenticationResponseJSON, AuthenticatorTransportFuture, RegistrationResponseJSON } from "@simplewebauthn/types";
-import { and, eq, lt, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import { ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../context";
 import * as s from "../db/schema";
 import { newId } from "../lib/ids";
+import { requestOriginAllowed } from "../lib/security";
 import type { UserRow } from "./users";
 import { first } from "../lib/db";
 
@@ -21,17 +22,29 @@ const CHALLENGE_TTL_MS = 5 * 60_000;
 
 export interface RelyingParty { rpID: string; origin: string }
 
-/** Derives {rpID, origin} from the caller's Origin header or the redirect/frontend URL, falling back to the instance URL. */
-export function relyingParty(ctx: AppContext, originHint?: string | null): RelyingParty {
-  const candidate = originHint || ctx.settings.get().application.homeUrl || ctx.env.baseUrl;
-  let origin: string;
+const originOf = (value: string | null | undefined): string | null => {
+  if (!value) return null;
   try {
-    origin = new URL(candidate).origin;
+    return new URL(value).origin;
   } catch {
-    origin = ctx.env.baseUrl;
+    return null;
   }
-  const host = new URL(origin).hostname;
-  return { rpID: host, origin };
+};
+
+/**
+ * Derives {rpID, origin} for a ceremony. The browser scopes a credential to the *page's* origin, so the
+ * `Origin` header wins — but only when this instance trusts it; anything else falls back to the
+ * configured app URL and then to the instance URL. `rpID` is the hostname without the port, which is
+ * what the WebAuthn `rpId` field requires.
+ */
+export function relyingParty(ctx: AppContext, originHint?: string | null): RelyingParty {
+  const app = ctx.settings.get().application;
+  const trusted = (value: string | null | undefined) => {
+    const origin = originOf(value);
+    return origin && requestOriginAllowed(ctx, origin) ? origin : null;
+  };
+  const origin = trusted(originHint) ?? trusted(app.homeUrl) ?? originOf(ctx.env.baseUrl)!;
+  return { rpID: new URL(origin).hostname, origin };
 }
 
 async function storeChallenge(ctx: AppContext, purpose: "passkey_registration" | "passkey_authentication", ownerId: string, challenge: string, data: Record<string, unknown>) {
@@ -44,8 +57,40 @@ async function storeChallenge(ctx: AppContext, purpose: "passkey_registration" |
 async function loadChallenge(ctx: AppContext, purpose: string, ownerId: string) {
   const rows = (await ctx.db.select().from(s.verifications)
       .where(and(eq(s.verifications.purpose, purpose), eq(s.verifications.ownerId, ownerId))))
-    .filter((r) => !r.verifiedAt && r.expiresAt > Date.now());
+    .filter((r) => !r.verifiedAt && !r.consumedAt && r.expiresAt > Date.now());
   return rows.sort((a, b) => b.createdAt - a.createdAt)[0];
+}
+
+/**
+ * Takes exclusive ownership of a challenge before any signature work, so one challenge can never be
+ * presented twice: concurrent requests that loaded the same row race on this single statement and only
+ * one of them gets it back. `consumedAt` is released again when verification fails, which keeps the
+ * existing retry-up-to-maxAttempts behaviour. The security decisions of the ceremony (rpID, origin,
+ * user) were fixed when the challenge was issued and are not taken from the finishing request.
+ */
+async function claimChallenge(ctx: AppContext, stored: PasskeyVerificationRow) {
+  return first(await ctx.db.update(s.verifications)
+    .set({ consumedAt: Date.now(), attempts: sql`${s.verifications.attempts} + 1` })
+    .where(and(
+      eq(s.verifications.id, stored.id),
+      isNull(s.verifications.verifiedAt),
+      isNull(s.verifications.consumedAt),
+      lt(s.verifications.attempts, s.verifications.maxAttempts),
+      gt(s.verifications.expiresAt, Date.now()),
+    ))
+    .returning());
+}
+
+type PasskeyVerificationRow = typeof s.verifications.$inferSelect;
+
+/** The relying party captured when the ceremony started; a later request cannot move it. */
+function ceremonyRelyingParty(stored: PasskeyVerificationRow): RelyingParty {
+  const rpID = typeof stored.data?.rpID === "string" ? stored.data.rpID : "";
+  const origin = typeof stored.data?.origin === "string" ? stored.data.origin : "";
+  if (!rpID || !origin) {
+    throw new OrbitError(400, ErrorCodes.verification_expired, "Passkey ceremony expired. Please try again.");
+  }
+  return { rpID, origin };
 }
 
 export interface BeginPasskeyRegistrationInput {
@@ -88,21 +133,26 @@ export async function finishPasskeyRegistration(ctx: AppContext, input: {
   passkeyId: string;
   userId: string;
   credential: RegistrationResponseJSON;
-  rp: RelyingParty;
   name?: string;
 }) {
   const stored = await loadChallenge(ctx, "passkey_registration", input.passkeyId);
   if (!stored || stored.data?.userId !== input.userId) {
     throw new OrbitError(400, ErrorCodes.verification_expired, "Passkey registration expired. Please try again.");
   }
+  const claimed = await claimChallenge(ctx, stored);
+  if (!claimed) {
+    throw new OrbitError(400, ErrorCodes.verification_expired, "Passkey registration expired. Please try again.");
+  }
+  // The ceremony's relying party was fixed when the challenge was issued; this request cannot move it.
+  const rp = ceremonyRelyingParty(claimed);
   let verified = false;
   let info: VerifiedRegistrationResponse["registrationInfo"];
   try {
     const result = await verifyRegistrationResponse({
       response: input.credential,
-      expectedChallenge: stored.identifier,
-      expectedOrigin: input.rp.origin,
-      expectedRPID: input.rp.rpID,
+      expectedChallenge: claimed.identifier,
+      expectedOrigin: rp.origin,
+      expectedRPID: rp.rpID,
       requireUserVerification: true,
     });
     verified = result.verified;
@@ -110,16 +160,19 @@ export async function finishPasskeyRegistration(ctx: AppContext, input: {
   } catch {
     verified = false;
   }
-  if (verified) await ctx.db.update(s.verifications).set({ verifiedAt: Date.now() }).where(eq(s.verifications.id, stored.id));
   if (!verified || !info) {
+    // Give the attempt back so the browser can retry within the challenge lifetime.
+    await ctx.db.update(s.verifications).set({ consumedAt: null }).where(eq(s.verifications.id, claimed.id));
     throw new OrbitError(400, ErrorCodes.passkey_registration_failure, "Passkey registration could not be verified");
   }
+  await ctx.db.update(s.verifications).set({ verifiedAt: Date.now() }).where(eq(s.verifications.id, claimed.id));
   if (first(await ctx.db.select().from(s.passkeys).where(eq(s.passkeys.credentialId, info.credentialID)))) {
     throw new OrbitError(409, ErrorCodes.passkey_registration_failure, "This authenticator is already registered");
   }
   const now = Date.now();
-  const name = input.name?.trim() || (typeof stored.data?.name === "string" ? stored.data.name : "") || "Passkey";
-  await ctx.db.insert(s.passkeys).values({
+  const name = input.name?.trim() || (typeof claimed.data?.name === "string" ? claimed.data.name : "") || "Passkey";
+  // A unique index on `credential_id` settles the two-challenges-at-once case the same way as the check above.
+  const inserted = await ctx.db.insert(s.passkeys).values({
             id: input.passkeyId,
             userId: input.userId,
             name,
@@ -131,8 +184,11 @@ export async function finishPasskeyRegistration(ctx: AppContext, input: {
             backedUp: info.credentialBackedUp,
             createdAt: now,
             updatedAt: now,
-          });
-  return first(await ctx.db.select().from(s.passkeys).where(eq(s.passkeys.id, input.passkeyId)))!;
+          }).onConflictDoNothing().returning();
+  if (!inserted.length) {
+    throw new OrbitError(409, ErrorCodes.passkey_registration_failure, "This authenticator is already registered");
+  }
+  return inserted[0]!;
 }
 
 /** Options for `navigator.credentials.get()`. With `userId` limits to that user's credentials. */
@@ -161,15 +217,13 @@ export async function beginPasskeyAuthentication(ctx: AppContext, input: {
 export async function finishPasskeyAuthentication(ctx: AppContext, input: {
   ownerId: string;
   credential: AuthenticationResponseJSON;
-  rp: RelyingParty;
 }): Promise<{ user: UserRow; passkey: PasskeyRow }> {
   const stored = await loadChallenge(ctx, "passkey_authentication", input.ownerId);
   if (!stored) throw new OrbitError(400, ErrorCodes.verification_expired, "Passkey sign-in expired. Please try again.");
-  // Spend an attempt before any signature work, so a challenge cannot be tried an unlimited number of times.
-  const claimed = first(await ctx.db.update(s.verifications).set({ attempts: sql`${s.verifications.attempts} + 1` })
-    .where(and(eq(s.verifications.id, stored.id), lt(s.verifications.attempts, s.verifications.maxAttempts)))
-    .returning());
+  // Take the challenge before any signature work: one challenge, one attempt, however many requests race.
+  const claimed = await claimChallenge(ctx, stored);
   if (!claimed) throw new OrbitError(400, ErrorCodes.verification_expired, "Too many passkey attempts. Please try again.");
+  const rp = ceremonyRelyingParty(claimed);
   const passkey = first(await ctx.db.select().from(s.passkeys).where(eq(s.passkeys.credentialId, input.credential.id)));
   if (!passkey) {
     throw new OrbitError(400, ErrorCodes.passkey_authentication_failure, "Unknown passkey");
@@ -179,9 +233,9 @@ export async function finishPasskeyAuthentication(ctx: AppContext, input: {
   try {
     const result = await verifyAuthenticationResponse({
       response: input.credential,
-      expectedChallenge: stored.identifier,
-      expectedOrigin: input.rp.origin,
-      expectedRPID: input.rp.rpID,
+      expectedChallenge: claimed.identifier,
+      expectedOrigin: rp.origin,
+      expectedRPID: rp.rpID,
       authenticator: {
         credentialID: passkey.credentialId,
         credentialPublicKey: Buffer.from(passkey.publicKey, "base64url"),
@@ -195,10 +249,12 @@ export async function finishPasskeyAuthentication(ctx: AppContext, input: {
   } catch {
     verified = false;
   }
-  if (verified) await ctx.db.update(s.verifications).set({ verifiedAt: Date.now() }).where(eq(s.verifications.id, stored.id));
   if (!verified) {
+    // Hand the challenge back so the user can retry (bounded by maxAttempts) while it is still valid.
+    await ctx.db.update(s.verifications).set({ consumedAt: null }).where(eq(s.verifications.id, claimed.id));
     throw new OrbitError(400, ErrorCodes.passkey_authentication_failure, "Passkey could not be verified");
   }
+  await ctx.db.update(s.verifications).set({ verifiedAt: Date.now() }).where(eq(s.verifications.id, claimed.id));
   const now = Date.now();
   const updated = first(await ctx.db.update(s.passkeys)
     .set({

@@ -587,10 +587,9 @@ export default function routes(ctx: AppContext) {
     const id = c.req.param("id")!;
     const body = await parseBody(c, passkeyAttemptSchema);
     if (!body.public_key_credential) throw new OrbitError(422, ErrorCodes.form_param_missing, "public_key_credential is missing", { param_name: "public_key_credential" });
-    const rp = relyingParty(ctx, c.req.header("origin"));
     const passkey = await finishPasskeyRegistration(ctx, {
       // The credential is validated at runtime by @simplewebauthn/server.
-      passkeyId: id, userId: user.id, rp, credential: body.public_key_credential as unknown as RegistrationResponseJSON, name: body.name,
+      passkeyId: id, userId: user.id, credential: body.public_key_credential as unknown as RegistrationResponseJSON, name: body.name,
     });
     await emitUserUpdated(user.id);
     return c.json({ response: serializePasskey(passkey) });

@@ -33,7 +33,7 @@ export function buildEnvironment(ctx: AppContext): EnvironmentJSON {
   }
   if (st.attributes.password.enabled && st.attributes.password.usedForFirstFactor) firstFactors.push("password");
   if (st.attributes.phoneNumber.enabled && st.attributes.phoneNumber.usedForFirstFactor) firstFactors.push("phone_code");
-  if (st.attributes.passkey.enabled) firstFactors.push("passkey");
+  if (st.attributes.passkey.enabled && st.attributes.passkey.usedForFirstFactor) firstFactors.push("passkey");
   for (const p of social) firstFactors.push(p.strategy);
 
   const secondFactors: string[] = [];
