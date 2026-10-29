@@ -108,6 +108,7 @@ export default function Page() {
   const [selected, setSelected] = useState<EnterpriseConnectionJSON | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [updatingAdvanced, setUpdatingAdvanced] = useState(false);
+  const [replacementSecret, setReplacementSecret] = useState("");
 
   const openWizard = () => {
     setForm(EMPTY_FORM);
@@ -191,6 +192,21 @@ export default function Page() {
       toast.success("Connection updated");
     } catch (error) {
       toast.error("Could not update connection", { description: errorMessage(error) });
+    } finally {
+      setUpdatingAdvanced(false);
+    }
+  };
+
+  /** The OIDC client secret is write-only: it is sent alone, never echoed back with the rest of the connection. */
+  const replaceOidcSecret = async () => {
+    if (!detail || !replacementSecret.trim()) return;
+    setUpdatingAdvanced(true);
+    try {
+      await api("PATCH", `/enterprise_connections/${detail.id}`, { client_secret: replacementSecret });
+      setReplacementSecret("");
+      toast.success("Client secret replaced", { description: "The previous secret stops working immediately." });
+    } catch (error) {
+      toast.error("Could not replace client secret", { description: errorMessage(error) });
     } finally {
       setUpdatingAdvanced(false);
     }
@@ -560,6 +576,28 @@ export default function Page() {
                     <CopyButton value={detail.oidc.client_id} size="icon-sm" variant="outline" />
                   </div>
                 ) : null}
+                <Field
+                  label="Replace client secret"
+                  htmlFor="sso-oidc-replace-secret"
+                  description="The stored secret is never returned by the API. Leave blank to keep it; type a new value to replace it."
+                >
+                  <Input
+                    id="sso-oidc-replace-secret"
+                    type="password"
+                    autoComplete="new-password"
+                    value={replacementSecret}
+                    onChange={(event) => setReplacementSecret(event.target.value)}
+                    placeholder="Leave blank to keep the stored secret"
+                  />
+                </Field>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!replacementSecret.trim() || updatingAdvanced}
+                  onClick={() => void replaceOidcSecret()}
+                >
+                  Replace secret
+                </Button>
               </div>
             )}
             <div>

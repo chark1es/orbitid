@@ -22,7 +22,7 @@ import {
   Textarea,
   cn,
 } from "@orbitid/ui";
-import { AlertCircle, Check, Copy, Eye, EyeOff, Inbox, Loader2, Plus, X } from "lucide-react";
+import { AlertCircle, Check, Copy, Eye, EyeOff, Inbox, Info, Loader2, Plus, TriangleAlert, X } from "lucide-react";
 import { toast } from "sonner";
 
 export function PageHeader({
@@ -121,6 +121,103 @@ export function Field({
       ) : description ? (
         <p className="text-xs leading-relaxed text-muted-foreground">{description}</p>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Write-only secret field. The server masks a stored secret (`••••`) and marks it with `<field>Set`, so the
+ * input starts blank: typing a value replaces the stored one, leaving it blank keeps it.
+ */
+export function SecretInput({
+  id,
+  label,
+  value,
+  onChange,
+  configured,
+  description,
+  placeholder,
+  disabled,
+  required,
+  className,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  configured: boolean;
+  description?: React.ReactNode;
+  placeholder?: string;
+  disabled?: boolean;
+  required?: boolean;
+  className?: string;
+}) {
+  return (
+    <Field
+      label={label}
+      htmlFor={id}
+      description={
+        <span className="flex flex-wrap items-center gap-1.5">
+          <SecretSetChip configured={configured} />
+          <span>{description ?? (configured ? "A value is stored. Leave blank to keep it." : "No value is stored yet.")}</span>
+        </span>
+      }
+      required={required}
+      className={className}
+    >
+      <Input
+        id={id}
+        type="password"
+        autoComplete="new-password"
+        disabled={disabled}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder ?? (configured ? "Stored value, leave blank to keep" : "Not set")}
+      />
+    </Field>
+  );
+}
+
+/** A word plus a dot, so the state does not rely on colour. */
+export function SecretSetChip({ configured }: { configured: boolean }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-sm border border-border px-1.5 py-0.5 text-[0.6875rem] font-medium text-muted-foreground">
+      <span className={cn("size-1.5 rounded-full", configured ? "bg-go" : "bg-muted-foreground")} aria-hidden />
+      {configured ? "Set" : "Not set"}
+    </span>
+  );
+}
+
+/** Inline note with a worded state. Sits in the page flow, never as a floating toast. */
+export function Notice({
+  tone = "info",
+  title,
+  children,
+  role = "note",
+}: {
+  tone?: "info" | "caution" | "danger";
+  title: string;
+  children?: React.ReactNode;
+  role?: "note" | "status" | "alert";
+}) {
+  const Icon = tone === "danger" ? AlertCircle : tone === "caution" ? TriangleAlert : Info;
+  return (
+    <div
+      role={role}
+      className={cn(
+        "rounded-md border px-3 py-2.5",
+        tone === "danger" ? "border-destructive/40" : tone === "caution" ? "border-caution/50" : "border-border",
+      )}
+    >
+      <p className="flex items-start gap-2 text-sm font-medium">
+        <Icon
+          className={cn("mt-0.5 size-4 shrink-0", tone === "danger" ? "text-destructive" : tone === "caution" ? "text-caution" : "text-muted-foreground")}
+          strokeWidth={1.5}
+          aria-hidden
+        />
+        {title}
+      </p>
+      {children ? <div className="mt-1 space-y-1 pl-6 text-[0.8125rem] leading-relaxed text-muted-foreground">{children}</div> : null}
     </div>
   );
 }

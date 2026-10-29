@@ -3,6 +3,11 @@ import type { OAuthApplicationJSON, PaginatedList } from "@orbitid/shared";
 import {
   Button,
   Input,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   TableBody,
   TableCell,
   TableHead,
@@ -24,14 +29,18 @@ import {
   ErrorAlert,
   Field,
   MetaChip,
+  Notice,
   PageHeader,
   RuledTable,
+  SaveBar,
   SecretReveal,
+  SettingsSection,
   StringListEditor,
   SwitchRow,
   TableSkeleton,
   ValidationSummary,
 } from "./_config/ui";
+import { useSettingsEditor } from "./_config/use-settings";
 
 interface AppForm {
   id?: string;
@@ -52,10 +61,17 @@ const EMPTY_FORM: AppForm = {
   consentScreenEnabled: true,
 };
 
+function numberFrom(value: string): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 export default function Page() {
   const apiBase = getApiUrl();
   const query = useApi<PaginatedList<OAuthApplicationJSON>>(["oauth_applications"], "/oauth_applications?limit=100");
   const applications = unwrapList<OAuthApplicationJSON>(query.data);
+  const config = useSettingsEditor();
+  const settings = config.settings;
   const [sheetOpen, setSheetOpen] = useState(false);
   const [form, setForm] = useState<AppForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
@@ -89,6 +105,14 @@ export default function Page() {
   if (uris.some((uri) => !isHttpUrl(uri))) formErrors.push("Every redirect URI must be an absolute http(s) URL.");
   if (form.publicClient && !form.pkceRequired) formErrors.push("Public clients must require PKCE (S256).");
   if (!form.scopes.trim()) formErrors.push("At least one scope is required.");
+
+  const oidcErrors: string[] = [];
+  if (settings) {
+    if (settings.oidcProvider.deviceCodeLifetimeSeconds < 60) oidcErrors.push("Device code lifetime must be at least 60 seconds.");
+    if (settings.oidcProvider.deviceCodeIntervalSeconds < 1) oidcErrors.push("Polling interval must be at least 1 second.");
+    if (settings.oidcProvider.deviceCodeIntervalSeconds >= settings.oidcProvider.deviceCodeLifetimeSeconds)
+      oidcErrors.push("Polling interval must be shorter than the device code lifetime.");
+  }
 
   const saveApplication = async () => {
     if (formErrors.length > 0) return;
@@ -167,6 +191,96 @@ export default function Page() {
       />
 
       {query.error ? <ErrorAlert error={errorMessage(query.error)} onRetry={() => void query.refetch()} /> : null}
+
+      {config.isLoading ? (
+        <p className="border-t border-border pt-4 text-[0.8125rem] text-muted-foreground">Loading provider options…</p>
+      ) : null}
+      {config.error ? <ErrorAlert error={config.error} onRetry={config.refetch} /> : null}
+
+      {settings ? (
+        <SettingsSection
+          title="Provider options"
+          description="Instance-wide behaviour for every application registered below."
+          actions={<MetaChip>{settings.oidcProvider.accessTokenFormat === "jwt" ? "JWT access tokens" : "Opaque access tokens"}</MetaChip>}
+        >
+          <Field
+            label="Access token format"
+            htmlFor="oidc-token-format"
+            description={
+              settings.oidcProvider.accessTokenFormat === "jwt"
+                ? "Access tokens are RS256 JWTs signed with the instance key, so resource servers verify them offline against the JWKS. Revocation still applies."
+                : "Access tokens are opaque strings. Every resource server calls the userinfo or introspection endpoint to check them."
+            }
+            className="max-w-lg"
+          >
+            <Select
+              value={settings.oidcProvider.accessTokenFormat}
+              onValueChange={(accessTokenFormat) =>
+                config.patch({ oidcProvider: { accessTokenFormat: accessTokenFormat as "opaque" | "jwt" } })
+              }
+            >
+              <SelectTrigger id="oidc-token-format" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="opaque">Opaque (server lookup)</SelectItem>
+                <SelectItem value="jwt">JWT (verify offline)</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+
+          <SwitchRow
+            label="Allow the device authorization grant"
+            description="Let CLIs and TVs sign in by showing a short code. Endpoints return 404 while this is off."
+            checked={settings.oidcProvider.deviceAuthorizationEnabled}
+            onCheckedChange={(deviceAuthorizationEnabled) => config.patch({ oidcProvider: { deviceAuthorizationEnabled } })}
+          />
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field
+              label="Device code lifetime (seconds)"
+              htmlFor="oidc-device-lifetime"
+              description="How long the user has to enter the code."
+            >
+              <Input
+                id="oidc-device-lifetime"
+                type="number"
+                min={60}
+                value={settings.oidcProvider.deviceCodeLifetimeSeconds}
+                disabled={!settings.oidcProvider.deviceAuthorizationEnabled}
+                onChange={(event) =>
+                  config.patch({ oidcProvider: { deviceCodeLifetimeSeconds: numberFrom(event.target.value) } })
+                }
+              />
+            </Field>
+            <Field
+              label="Minimum polling interval (seconds)"
+              htmlFor="oidc-device-interval"
+              description="Faster polls are answered with slow_down."
+            >
+              <Input
+                id="oidc-device-interval"
+                type="number"
+                min={1}
+                value={settings.oidcProvider.deviceCodeIntervalSeconds}
+                disabled={!settings.oidcProvider.deviceAuthorizationEnabled}
+                onChange={(event) =>
+                  config.patch({ oidcProvider: { deviceCodeIntervalSeconds: numberFrom(event.target.value) } })
+                }
+              />
+            </Field>
+          </div>
+
+          {settings.oidcProvider.deviceAuthorizationEnabled ? (
+            <div>
+              <p className="pb-1 text-sm font-medium">Device flow endpoints</p>
+              <EndpointRow label="Device authorization" url={`${apiBase}/oauth/device_authorization`} />
+              <EndpointRow label="Verification page" url={`${apiBase}/oauth/device`} />
+            </div>
+          ) : null}
+          {oidcErrors.length > 0 ? <ValidationSummary errors={oidcErrors} title="Fix the provider options" /> : null}
+        </SettingsSection>
+      ) : null}
 
       {query.isLoading ? (
         <TableSkeleton />
@@ -344,7 +458,34 @@ export default function Page() {
               <EndpointRow label="Token endpoint" url={`${apiBase}/oauth/token`} />
               <EndpointRow label="UserInfo endpoint" url={`${apiBase}/oauth/userinfo`} />
               <EndpointRow label="JWKS" url={`${apiBase}/oauth/jwks`} />
+              {settings?.oidcProvider.deviceAuthorizationEnabled ? (
+                <>
+                  <EndpointRow label="Device authorization endpoint" url={`${apiBase}/oauth/device_authorization`} />
+                  <EndpointRow
+                    label="Device verification page"
+                    url={`${apiBase}/oauth/device`}
+                    description="Show the user code the device receives, or open this page with it filled in."
+                  />
+                </>
+              ) : null}
             </div>
+            {settings?.oidcProvider.deviceAuthorizationEnabled ? (
+              <Notice title="Device flow is on for this application">
+                <p>
+                  POST <code className="font-data text-xs">client_id</code> and{" "}
+                  <code className="font-data text-xs">scope</code> to the device authorization endpoint, then poll the
+                  token endpoint with <code className="font-data text-xs">grant_type=urn:ietf:params:oauth:grant-type:device_code</code>{" "}
+                  every {settings.oidcProvider.deviceCodeIntervalSeconds} seconds for up to{" "}
+                  {Math.round(settings.oidcProvider.deviceCodeLifetimeSeconds / 60)} minutes.
+                </p>
+              </Notice>
+            ) : null}
+            {!detail.public ? (
+              <p className="text-[0.8125rem] leading-relaxed text-muted-foreground">
+                Client secret: <span className="font-medium text-foreground">not shown again</span>. It was displayed once
+                when the application was created. Rotate the secret below to issue and show a new one.
+              </p>
+            ) : null}
             <div>
               <p className="pb-1 text-sm font-medium">Redirect URIs</p>
               {detail.redirect_uris.map((uri) => (
@@ -416,6 +557,19 @@ export default function Page() {
         loading={deleting}
         onConfirm={() => void deleteApplication()}
       />
+
+      {settings ? (
+        <SaveBar
+          dirty={config.dirty}
+          saving={config.saving}
+          disabled={oidcErrors.length > 0}
+          errors={oidcErrors}
+          error={config.saveError}
+          onSave={config.save}
+          onDiscard={config.reset}
+          saveLabel="Save provider options"
+        />
+      ) : null}
     </div>
   );
 }

@@ -11,6 +11,7 @@ import {
   MailPlus,
   MonitorSmartphone,
   Palette,
+  Plug,
   ScrollText,
   Share2,
   ShieldBan,
@@ -66,6 +67,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: "Developers",
     items: [
+      { title: "Connect your app", href: "/connect", icon: Plug },
       { title: "API keys", href: "/api-keys", icon: KeyRound },
       { title: "M2M", href: "/m2m", icon: Cpu },
       { title: "OAuth apps", href: "/oauth-apps", icon: AppWindow },
@@ -91,6 +93,7 @@ export const ROUTE_LABELS: Record<string, string> = {
   "email-sms": "Email & SMS",
   appearance: "Appearance",
   "jwt-templates": "JWT templates",
+  connect: "Connect your app",
   "api-keys": "API keys",
   m2m: "M2M",
   "oauth-apps": "OAuth apps",
