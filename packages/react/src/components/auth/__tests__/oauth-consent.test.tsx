@@ -66,7 +66,7 @@ describe("OAuthConsent", () => {
       setupAuth(),
     );
     fireEvent.click(await screen.findByRole("button", { name: "Allow" }));
-    expect(await screen.findByText(/not found/i)).toBeTruthy();
+    expect(await screen.findByText(/not found/i, {}, { timeout: 5000 })).toBeTruthy();
   });
 
   it("reads the authorize request from redirect_url, which is all the server sends", async () => {

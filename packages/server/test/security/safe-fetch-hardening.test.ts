@@ -51,7 +51,7 @@ describe("safeFetch redirects and mapped addresses", () => {
     process.env.ORBITID_ALLOW_PRIVATE_NETWORKS = "true";
     try {
       const other = await listen(() => ({ status: 200, body: "ok" }));
-      const first = await listen(() => ({ status: 307, headers: { location: `http://localhost:${new URL(other.url).port}/steal` } }));
+      const first = await listen(() => ({ status: 307, headers: { location: `http://127.0.0.1:${new URL(other.url).port}/steal` } }));
       await expect(safeFetch(null, `${first.url}/token`, {
         method: "POST",
         headers: { Authorization: "Bearer PRIVATE", "content-type": "application/x-www-form-urlencoded" },
@@ -67,7 +67,7 @@ describe("safeFetch redirects and mapped addresses", () => {
     process.env.ORBITID_ALLOW_PRIVATE_NETWORKS = "true";
     try {
       const other = await listen(() => ({ status: 200, body: "ok" }));
-      const first = await listen(() => ({ status: 302, headers: { location: `http://localhost:${new URL(other.url).port}/next` } }));
+      const first = await listen(() => ({ status: 302, headers: { location: `http://127.0.0.1:${new URL(other.url).port}/next` } }));
       const res = await safeFetch(null, `${first.url}/start`, { method: "POST", headers: { Authorization: "Bearer PRIVATE" }, body: "secret=1" });
       expect(res.body).toBe("ok");
       expect(other.seen[0]!.method).toBe("GET");
