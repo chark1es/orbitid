@@ -30,6 +30,7 @@ Set these where OrbitID runs: the container environment, `docker compose`'s `.en
 | `ORBITID_DASHBOARD_CONNECT_SRC` | no | none | Extra origins the dashboard may call, when its API lives elsewhere. See [SECURITY.md](SECURITY.md). |
 | `ORBITID_RESEND_API_KEY` | no | none | Send email through Resend. See [EMAIL.md](EMAIL.md). |
 | `ORBITID_SMTP_URL` | no | none | Send email through SMTP, `smtps://user:password@host:465`. |
+| `ORBITID_ALLOW_CONSOLE_EMAIL` | no | `false` | Production only. Lets the console transport print email, codes and links included, to the server log. For a trial run, never for real users. See [EMAIL.md](EMAIL.md). |
 | `ORBITID_EMAIL_FROM` | no | `OrbitID <no-reply@localhost>` | From address for all email. |
 | `NODE_ENV` | no | `development` | Set to `production` in deployments (the Docker image does). Turns on production checks. |
 | `POSTGRES_PASSWORD` | docker compose only | `orbitid` | Password of the bundled Postgres container. |

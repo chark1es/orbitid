@@ -112,10 +112,14 @@ and does not report transport failures.
 
 ## Console mode
 
-Without Resend or SMTP, mail is printed to the server log. This is meant for local development only: anyone who can
-read the log can read sign-in codes and magic links, and use them until they expire. A production instance running on
-the console transport prints a warning in its startup banner listing what to configure. Set `email.provider` (or the
-environment variables above) before going live.
+Without Resend or SMTP, mail is printed to the server log. This is for local development only: anyone who can read
+the log can read sign-in codes and magic links, and use them until they expire.
+
+In production (`NODE_ENV=production`, which the Docker image sets) the console transport is **refused**: nothing is
+printed, sign-in codes and links are not delivered, the startup banner says email is not configured, and the test
+endpoint answers `503 email_not_configured`. Passwords and every other flow keep working. To try a production build
+before you have a provider, set `ORBITID_ALLOW_CONSOLE_EMAIL=true` (scope: SERVER); the banner then warns loudly that
+codes are going to the log. Remove it before real users arrive.
 
 ## How messages are built
 

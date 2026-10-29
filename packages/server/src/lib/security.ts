@@ -1,4 +1,5 @@
 // Response hardening + cross-site request protection for the whole server.
+import { bodyLimit } from "hono/body-limit";
 import type { MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
 import { COOKIES, ErrorCodes, OrbitError } from "@orbitid/shared";
@@ -115,17 +116,24 @@ export function logSafe(value: unknown): string {
   return String(value).replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, (ch) => `\\x${ch.charCodeAt(0).toString(16).padStart(2, "0")}`);
 }
 
+/** Routes that legitimately take an image upload; everything else is capped much lower. */
+const UPLOAD_PATH = /\/(profile_image|logo)(\/|$)/;
+const MAX_BODY_BYTES = 1024 * 1024;
+
 /**
- * Upload bodies (multipart, octet-stream, image data URLs sent as a body) are capped at 5 MB; JSON is
- * capped by `parseBody` at 1 MB. This runs before any route parses the body, so a huge payload is
- * refused while it is still on the wire.
+ * Request body cap, enforced on the stream itself: a declared `Content-Length` over the cap is refused up front,
+ * and a body that arrives without one (chunked) is cut off with a 413 as soon as it passes the cap. Image uploads
+ * get 5 MB, everything else 1 MB. It runs before any route parses a body, callbacks and multipart forms included.
  */
 export const uploadSizeLimit = (maxBytes = MAX_UPLOAD_BYTES): MiddlewareHandler => async (c, next) => {
   const method = c.req.method.toUpperCase();
-  if (method === "GET" || method === "HEAD" || method === "OPTIONS" || method === "DELETE") return next();
-  const declared = Number(c.req.header("content-length") ?? NaN);
-  if (Number.isFinite(declared) && declared > maxBytes) {
-    throw new OrbitError(413, ErrorCodes.request_body_invalid, `Request body must be smaller than ${Math.round(maxBytes / 1024 / 1024)} MB`);
-  }
-  return next();
+  if (method === "GET" || method === "HEAD" || method === "OPTIONS") return next();
+  const cap = UPLOAD_PATH.test(c.req.path) ? maxBytes : Math.min(maxBytes, MAX_BODY_BYTES);
+  const limited = bodyLimit({
+    maxSize: cap,
+    onError: () => {
+      throw new OrbitError(413, ErrorCodes.request_body_invalid, `Request body must be smaller than ${cap >= 1024 * 1024 ? Math.round(cap / 1024 / 1024) + " MB" : Math.round(cap / 1024) + " KB"}`);
+    },
+  });
+  return limited(c, next);
 };

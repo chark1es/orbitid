@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../../src/app";
 import { createContext } from "../../src/bootstrap";
 import { loadEnv } from "../../src/env";
@@ -11,6 +11,7 @@ import {
   parseSmtpUrl,
   resolveEmailTransport,
   sendEmail,
+  sendTestEmail,
   setResendEndpointForTests,
 } from "../../src/services/mail";
 import { errorsOf, testClient } from "./helpers";
@@ -153,9 +154,28 @@ describe("email settings", () => {
     }
   });
 
+  it("never prints sign-in codes in production unless the operator opts in", async () => {
+    const production = await instance({ nodeEnv: "production", encryptionKey: "k".repeat(40), baseUrl: "https://auth.example.com" });
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    delete process.env.ORBITID_ALLOW_CONSOLE_EMAIL;
+    // The test seam would bypass delivery; clear it so the real console path runs.
+    await sendEmail(production.ctx, { to: "ada@example.com", template: "verification_code", vars: { code: "424242" } });
+    expect(log.mock.calls.flat().join("\n")).not.toContain("424242");
+    await expect(sendTestEmail(production.ctx, "ada@example.com")).rejects.toThrow(/not configured/i);
+    log.mockRestore();
+  });
+
   it("warns loudly in production when mail goes to the console", async () => {
     const production = await instance({ nodeEnv: "production", encryptionKey: "k".repeat(40), baseUrl: "https://auth.example.com" });
-    const warning = emailStartupWarnings(production.ctx).join("\n");
+    let warning = emailStartupWarnings(production.ctx).join("\n");
+    expect(warning).toContain("EMAIL IS NOT CONFIGURED");
+    expect(warning).toContain("ORBITID_RESEND_API_KEY");
+    process.env.ORBITID_ALLOW_CONSOLE_EMAIL = "true";
+    try {
+      warning = emailStartupWarnings(production.ctx).join("\n");
+    } finally {
+      delete process.env.ORBITID_ALLOW_CONSOLE_EMAIL;
+    }
     expect(warning).toContain("EMAIL IS PRINTED TO THIS LOG");
     expect(warning).toContain("Sign-in codes");
     expect(warning).toContain("ORBITID_RESEND_API_KEY");

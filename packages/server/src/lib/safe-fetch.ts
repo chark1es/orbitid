@@ -84,23 +84,61 @@ const V4_BLOCKS: { parts: number[]; bits: number; label: string }[] = [
   { parts: [240, 0, 0, 0], bits: 4, label: "reserved" },
 ];
 
+/** Expands an IPv6 literal into its 16 bytes (handles `::` and an embedded dotted IPv4 tail). `null` when malformed. */
+function ipv6Bytes(address: string): number[] | null {
+  let text = address.toLowerCase().split("%")[0]!;
+  const tail = /((?:\d{1,3}\.){3}\d{1,3})$/.exec(text);
+  if (tail) {
+    const v4 = ipv4Parts(tail[1]!);
+    if (!v4) return null;
+    text = `${text.slice(0, -tail[1]!.length)}${((v4[0]! << 8) | v4[1]!).toString(16)}:${((v4[2]! << 8) | v4[3]!).toString(16)}`;
+  }
+  const halves = text.split("::");
+  if (halves.length > 2) return null;
+  const toWords = (part: string) => (part === "" ? [] : part.split(":"));
+  const head = toWords(halves[0]!);
+  const rest = halves.length === 2 ? toWords(halves[1]!) : [];
+  const missing = 8 - head.length - rest.length;
+  if (halves.length === 2 ? missing < 1 : head.length !== 8) return null;
+  const words = [...head, ...Array(halves.length === 2 ? missing : 0).fill("0"), ...rest];
+  if (words.length !== 8) return null;
+  const bytes: number[] = [];
+  for (const word of words) {
+    if (!/^[0-9a-f]{1,4}$/.test(word)) return null;
+    const n = parseInt(word, 16);
+    bytes.push(n >> 8, n & 0xff);
+  }
+  return bytes;
+}
+
+const v4Verdict = (b: number[]) => V4_BLOCKS.some((block) => inV4(b, block.parts, block.bits));
+
 /** True when this address must not be contacted for a user-supplied URL. */
 export function isPrivateAddress(address: string): boolean {
   const family = isIP(address);
   if (family === 4) {
     const parts = ipv4Parts(address);
     if (!parts) return true;
-    return V4_BLOCKS.some((block) => inV4(parts, block.parts, block.bits));
+    return v4Verdict(parts);
   }
   if (family === 6) {
-    const lower = address.toLowerCase().split("%")[0]!;
-    // IPv4-mapped (::ffff:127.0.0.1) and IPv4-compatible addresses inherit the IPv4 verdict.
-    const mapped = /^(?:::ffff:|::)((?:\d{1,3}\.){3}\d{1,3})$/.exec(lower);
-    if (mapped) return isPrivateAddress(mapped[1]!);
-    if (lower === "::" || lower === "::1") return true;
-    if (/^f[cd][0-9a-f]{2}:/.test(lower)) return true; // unique local fc00::/7
-    if (/^fe[89ab][0-9a-f]:/.test(lower)) return true; // link-local fe80::/10
-    if (/^ff[0-9a-f]{2}:/.test(lower)) return true; // multicast
+    // Judge the 16 bytes, not the text: `[::ffff:127.0.0.1]` is normalized by URL parsing to `::ffff:7f00:1`.
+    const b = ipv6Bytes(address);
+    if (!b) return true;
+    const zeros = (from: number, to: number) => b.slice(from, to).every((x) => x === 0);
+    // ::, ::1 and IPv4-compatible (::a.b.c.d): everything under ::/96 is either unspecified, loopback or an embedded IPv4.
+    if (zeros(0, 12)) return b[12] === 0 && b[13] === 0 && b[14] === 0 ? true : v4Verdict(b.slice(12));
+    // IPv4-mapped ::ffff:a.b.c.d
+    if (zeros(0, 10) && b[10] === 0xff && b[11] === 0xff) return v4Verdict(b.slice(12));
+    // NAT64 64:ff9b::/96 and 6to4 2002::/16 embed an IPv4 address too.
+    if (b[0] === 0x00 && b[1] === 0x64 && b[2] === 0xff && b[3] === 0x9b && zeros(4, 12)) return v4Verdict(b.slice(12));
+    if (b[0] === 0x20 && b[1] === 0x02) return v4Verdict(b.slice(2, 6));
+    if ((b[0]! & 0xfe) === 0xfc) return true; // unique local fc00::/7
+    if (b[0] === 0xfe && (b[1]! & 0xc0) === 0x80) return true; // link-local fe80::/10
+    if (b[0] === 0xfe && (b[1]! & 0xc0) === 0xc0) return true; // site-local fec0::/10 (deprecated)
+    if (b[0] === 0xff) return true; // multicast
+    if (b[0] === 0x20 && b[1] === 0x01 && b[2] === 0x0d && b[3] === 0xb8) return true; // documentation 2001:db8::/32
+    if (b[0] === 0x01 && zeros(1, 8)) return true; // discard-only 100::/64
     return false;
   }
   // Not an IP at all: callers resolve first, so this is defensive.
@@ -274,6 +312,32 @@ export async function safeFetchJson<T = unknown>(
  * connection pinned to the vetted address, at most `maxRedirects` hops re-validated one by one, and a
  * bounded time budget and response size.
  */
+const SENSITIVE_HEADERS = new Set(["authorization", "proxy-authorization", "cookie"]);
+
+/**
+ * What a redirect may carry along. A secret meant for one origin must never reach another, an https request must not
+ * fall back to plain http, and a request body is only replayed by 307/308 to the same origin; 301/302/303 turn a
+ * POST into a body-less GET, as browsers do.
+ */
+function redirectedOptions(from: URL, to: URL, status: number, options: SafeFetchOptions): SafeFetchOptions {
+  if (from.protocol === "https:" && to.protocol === "http:") throw new SafeFetchError("Refusing a redirect from https to http");
+  const sameOrigin = from.origin === to.origin;
+  const headers: Record<string, string> = {};
+  for (const [name, value] of Object.entries(options.headers ?? {})) {
+    if (!sameOrigin && SENSITIVE_HEADERS.has(name.toLowerCase())) continue;
+    headers[name] = value;
+  }
+  const hasBody = options.body !== undefined;
+  const method = (options.method ?? "GET").toUpperCase();
+  if (status === 307 || status === 308) {
+    if (hasBody && !sameOrigin) throw new SafeFetchError("Refusing a redirect that would resend the request body to another origin");
+    return { ...options, headers };
+  }
+  if (method === "GET" || method === "HEAD") return { ...options, headers };
+  for (const name of Object.keys(headers)) if (/^content-(type|length)$/i.test(name)) delete headers[name];
+  return { ...options, method: "GET", body: undefined, headers };
+}
+
 type TestTransport = (url: URL, options: SafeFetchOptions) => Promise<{ status: number; headers: Headers; body: string }>;
 let testTransport: TestTransport | null = null;
 
@@ -295,18 +359,21 @@ export async function safeFetch(ctx: AppContext | null, rawUrl: string, options:
   timer.unref?.();
   try {
     let url = parseExternalUrl(rawUrl);
+    let current: SafeFetchOptions = options;
     for (let hop = 0; ; hop++) {
       let res: { status: number; headers: Headers; body: string };
       if (testTransport) {
-        res = await testTransport(url, options);
+        res = await testTransport(url, current);
       } else {
         const { address, family } = await resolvePublicAddress(url, allowPrivate);
-        res = await sendOnce(url, address, family, options, controller.signal);
+        res = await sendOnce(url, address, family, current, controller.signal);
       }
       const location = res.headers.get("location");
       if (res.status >= 300 && res.status < 400 && location) {
         if (hop >= maxRedirects) throw new SafeFetchError(`Too many redirects (more than ${maxRedirects})`);
-        url = parseExternalUrl(new URL(location, url).toString());
+        const next = parseExternalUrl(new URL(location, url).toString());
+        current = redirectedOptions(url, next, res.status, current);
+        url = next;
         continue;
       }
       return {

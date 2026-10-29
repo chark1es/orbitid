@@ -209,7 +209,7 @@ The server hardens what it controls; these parts are yours.
 6. **Upgrades.** Watch dependency advisories and upgrade. Run `bun audit` (or your registry's equivalent) as part
    of maintenance, and rebuild the image when a fix lands.
 7. **Backups and logs.** Back up the database and the data directory together. Scrub logs before sharing them:
-   trace ids and user ids are fine, tokens and codes are never logged by the server but may appear in your proxy's
+   trace ids and user ids are fine, tokens and codes are never logged by the server (the one opt-in exception is `ORBITID_ALLOW_CONSOLE_EMAIL=true`, which exists for trials) but may appear in your proxy's
    logs if a client puts them in a URL.
 
 ## Dependency status

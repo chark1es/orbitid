@@ -362,7 +362,32 @@ function allTables(): TableEntry[] {
  * Writes an export into the configured, freshly migrated database. The header is validated (format,
  * known tables, encryption-key canary) before anything is deleted or written.
  */
+/**
+ * Everything the import does, the clearing of the target included, happens in one transaction: a malformed line, a
+ * constraint failure or a count mismatch rolls the whole thing back and leaves the target exactly as it was.
+ * SQLite's driver is synchronous (its transaction callback cannot await), so there the single connection is driven with
+ * explicit BEGIN / COMMIT / ROLLBACK.
+ */
 export async function importDatabase(ctx: AppContext, options: ImportOptions): Promise<ImportResult> {
+  if (options.truncate && !options.yes) {
+    throw new Error("--truncate deletes everything in the target database. Pass --yes to confirm.");
+  }
+  if (ctx.database.driver !== "sqlite") {
+    return ctx.db.transaction(async (tx) => importInto({ ...ctx, db: tx as unknown as AppContext["db"] }, options));
+  }
+  const raw = ctx.db as unknown as { run(query: unknown): unknown };
+  await raw.run(sql`BEGIN IMMEDIATE`);
+  try {
+    const result = await importInto(ctx, options);
+    await raw.run(sql`COMMIT`);
+    return result;
+  } catch (error) {
+    await raw.run(sql`ROLLBACK`);
+    throw error;
+  }
+}
+
+async function importInto(ctx: AppContext, options: ImportOptions): Promise<ImportResult> {
   const progress = options.progress ?? (() => {});
   if (options.truncate && !options.yes) {
     throw new Error("--truncate deletes everything in the target database. Pass --yes to confirm.");

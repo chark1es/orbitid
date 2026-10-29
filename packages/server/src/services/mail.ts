@@ -189,6 +189,14 @@ export function resolveEmailTransport(ctx: AppContext): ResolvedEmailTransport {
 }
 
 /** Startup banner lines describing how email leaves this instance, warnings included. */
+/**
+ * The console transport prints every message, codes and links included. In production that is refused unless the
+ * operator sets `ORBITID_ALLOW_CONSOLE_EMAIL=true` (a trial run, never a real deployment).
+ */
+export function consoleMailAllowed(ctx: AppContext): boolean {
+  return ctx.env.nodeEnv !== "production" || process.env.ORBITID_ALLOW_CONSOLE_EMAIL === "true";
+}
+
 export function emailStartupWarnings(ctx: AppContext): string[] {
   let transport: ResolvedEmailTransport | undefined;
   try {
@@ -200,13 +208,22 @@ export function emailStartupWarnings(ctx: AppContext): string[] {
   if (transport.provider === "resend") return [`  Email           : Resend`];
   if (transport.provider === "smtp") return [`  Email           : SMTP (${redactSmtpUrl(transport.smtpUrl ?? "")})`];
   if (transport.provider === "console" && ctx.env.nodeEnv === "production") {
+    if (!consoleMailAllowed(ctx)) {
+      return [
+        "  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
+        "  !! EMAIL IS NOT CONFIGURED, SO NO EMAIL IS SENT.                                   !!",
+        "  !! Sign-in codes, magic links and invitations cannot be delivered.                 !!",
+        "  !! Set ORBITID_RESEND_API_KEY or ORBITID_SMTP_URL (or pick a provider in the       !!",
+        "  !! dashboard). See docs/EMAIL.md.                                                  !!",
+        "  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
+      ];
+    }
     return [
       "  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
-      "  !! EMAIL IS PRINTED TO THIS LOG, NOT DELIVERED.                                   !!",
+      "  !! ORBITID_ALLOW_CONSOLE_EMAIL=true: EMAIL IS PRINTED TO THIS LOG, NOT DELIVERED.  !!",
       "  !! Sign-in codes and magic links appear in plain text, so anyone who can read      !!",
-      "  !! this log can sign in as your users.                                             !!",
-      "  !! Fix it: set email.provider=resend with an API key (ORBITID_RESEND_API_KEY)      !!",
-      "  !! or email.smtpUrl (ORBITID_SMTP_URL). See docs/EMAIL.md.                         !!",
+      "  !! this log can sign in as your users. Use this for a trial only: set              !!",
+      "  !! ORBITID_RESEND_API_KEY or ORBITID_SMTP_URL for real use (docs/EMAIL.md).        !!",
       "  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
     ];
   }
@@ -418,6 +435,10 @@ async function deliver(ctx: AppContext, transport: ResolvedEmailTransport, messa
       throw new OrbitError(502, "email_delivery_failed", `SMTP delivery failed${detail ? `: ${detail}` : ""}`);
     }
     return;
+  }
+  // Printing a message prints its sign-in code or link, so production only does it when the operator opted in.
+  if (!consoleMailAllowed(ctx)) {
+    throw new OrbitError(503, "email_not_configured", "Email is not configured. Set ORBITID_RESEND_API_KEY or ORBITID_SMTP_URL, or choose a provider in the dashboard.");
   }
   if (ctx.env.nodeEnv !== "test" && !process.env.VITEST) {
     console.log(`\n[orbitid:mail] console transport to=${message.to}\n${message.subject}\n${message.text}\n`);

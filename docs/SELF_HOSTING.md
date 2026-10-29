@@ -60,7 +60,7 @@ The table below is the **SERVER** label: variables for the machine that runs Orb
 1. Open the dashboard and sign in with the secret key.
 2. Under Authentication, choose the identifiers and sign-in methods you want.
 3. Under Appearance, add the origin of each app that will call OrbitID, for example `https://app.example.com`. A new production instance trusts no origins until you do.
-4. Under Email and SMS, choose Resend or SMTP (or set `ORBITID_RESEND_API_KEY` / `ORBITID_SMTP_URL` for the server) and send a test email. Until then codes and links are printed in the server log. See [EMAIL.md](EMAIL.md).
+4. Under Email and SMS, choose Resend or SMTP (or set `ORBITID_RESEND_API_KEY` / `ORBITID_SMTP_URL` for the server) and send a test email. Until then a production instance cannot send email (sign-in codes and links are not delivered, and nothing is printed to the log). To trial it anyway, set `ORBITID_ALLOW_CONSOLE_EMAIL=true`. See [EMAIL.md](EMAIL.md).
 5. Open **Connect your app**: it prints copy-ready blocks, labelled by where they go. The publishable key goes into your website's browser environment and the secret key into its backend environment ([ENVIRONMENT.md](ENVIRONMENT.md)).
 
 ## Moving between SQLite and Postgres

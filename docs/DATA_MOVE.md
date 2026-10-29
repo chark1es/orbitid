@@ -118,8 +118,9 @@ writes first; the whole procedure is fast and the downtime is the length of the 
    one), load the dashboard, accept a pending organization invitation, send a webhook test event.
 8. Keep the old database and the export until the new instance has run for a while.
 
-Because the export only reads and the import verifies what it wrote, a failed attempt costs nothing: fix the
-problem and run the import again into a freshly truncated target.
+The export only reads, and the import runs as one transaction that includes clearing the target: a bad line, a
+constraint failure or a row-count mismatch rolls everything back and leaves the target as it was. A failed attempt
+costs nothing; fix the problem and run the import again.
 
 ## Restoring a backup
 
