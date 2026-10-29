@@ -41,6 +41,8 @@ With no `ORBITID_DATABASE_URL` the server uses a SQLite file at `./data/orbitid.
 
 Only infrastructure comes from environment variables. Everything about how sign-in behaves is an instance setting that you edit in the dashboard.
 
+The table below is the **SERVER** label: variables for the machine that runs OrbitID. Variables for your own website (**WEBSITE · BACKEND** and **WEBSITE · BROWSER**) are in [ENVIRONMENT.md](ENVIRONMENT.md), which also lists these in full.
+
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `ORBITID_DATABASE_URL` | SQLite file in the data dir | `postgres://…`, `pglite://<dir>` or `sqlite:<file>`. `DATABASE_URL` also works. |
@@ -58,12 +60,12 @@ Only infrastructure comes from environment variables. Everything about how sign-
 1. Open the dashboard and sign in with the secret key.
 2. Under Authentication, choose the identifiers and sign-in methods you want.
 3. Under Appearance, add the origin of each app that will call OrbitID, for example `https://app.example.com`. A new production instance trusts no origins until you do.
-4. Under Email and SMS, add an SMTP URL. Until then codes and links are printed in the server log.
-5. Copy the publishable key into your app's frontend environment and the secret key into its backend environment.
+4. Under Email and SMS, choose Resend or SMTP (or set `ORBITID_RESEND_API_KEY` / `ORBITID_SMTP_URL` for the server) and send a test email. Until then codes and links are printed in the server log. See [EMAIL.md](EMAIL.md).
+5. Open **Connect your app**: it prints copy-ready blocks, labelled by where they go. The publishable key goes into your website's browser environment and the secret key into its backend environment ([ENVIRONMENT.md](ENVIRONMENT.md)).
 
-## Moving from SQLite to Postgres
+## Moving between SQLite and Postgres
 
-The two databases use the same tables, each with its own migration history. There is no automatic data copy. For a small instance you can re-create users on the new one with the Backend API (`GET /v1/users`, then `POST /v1/users`), but that carries over profile data only: the export does not include password digests, TOTP secrets, backup codes or passkeys, and user ids change. Plan on users resetting their passwords and enrolling second factors again, or start on Postgres from the beginning.
+`orbitid-server copy --from <url> --to <url>` moves everything (users with their passwords, MFA, passkeys, sessions, organizations, keys, webhooks, audit logs) and checks the row counts at the end. `export` and `import` do the same in two steps, which also makes them a backup and restore. Uploaded images are not part of the export; copy the uploads folder yourself. Step by step, with the downtime procedure: [DATA_MOVE.md](DATA_MOVE.md).
 
 ## Upgrading
 
