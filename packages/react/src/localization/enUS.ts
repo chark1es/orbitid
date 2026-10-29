@@ -834,6 +834,7 @@ const baseStrings = {
     unknown_error: "Something went wrong. Please try again.",
     // delivery
     email_delivery_failed: "We couldn't send the email. Please try again.",
+    link_different_browser: "Open the link in the browser where you started signing in, or ask for an email code instead.",
 
     // identifiers / credentials
     form_identifier_not_found: "Couldn't find your account.",

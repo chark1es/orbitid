@@ -461,6 +461,14 @@ export function useSignInFlow(props: SignInProps, step: SignInStep, go: (step: S
     else go("success");
   }, [runtime, redirectTarget, go]);
 
+  // A magic link opened in a different browser than the one that asked for it is refused; say so instead of showing nothing.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (new URLSearchParams(window.location.search).get("__orbit_status") === "different_browser") {
+      setError(t("unstable__errors.link_different_browser"));
+    }
+  }, [t]);
+
   // Sign-in tokens and impersonation links from the Backend API arrive as `?__orbit_ticket=`.
   // A visitor who already has an active session skips the form and goes where the sign-in would have led.
   const ticketStarted = useRef(false);

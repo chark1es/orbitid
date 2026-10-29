@@ -30,6 +30,17 @@ describe("SignIn", () => {
     }
   });
 
+  it("tells the visitor when a magic link was opened in the wrong browser", async () => {
+    window.history.pushState({}, "", "/sign-in?__orbit_status=different_browser");
+    try {
+      const harness = setupAuth({ signedIn: false });
+      renderSignIn(harness);
+      expect(await screen.findByText(/Open the link in the browser where you started signing in/)).toBeTruthy();
+    } finally {
+      window.history.pushState({}, "", "/");
+    }
+  });
+
   it("signs in with a password and redirects", async () => {
     const harness = setupAuth({ signedIn: false });
     const signIn = makeSignIn(harness.instance, {
