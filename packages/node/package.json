@@ -21,7 +21,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@hono/node-server": "^1.13.0",
+    "@hono/node-server": "^2",
     "@orbitid/server": "*",
     "@types/node": "^20",
     "hono": "^4.6.0",
