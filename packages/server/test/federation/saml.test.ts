@@ -165,7 +165,7 @@ describe("SAML service provider — real SP-initiated flow", () => {
 
   it("honours a custom attribute mapping", async () => {
     // Only one connection may claim the domain, or routing and the assertion land on different ones.
-    await backend(sp, "PATCH", `/v1/enterprise_connections/${connectionId}`, { active: false });
+    await backend(sp, "DELETE", `/v1/enterprise_connections/${connectionId}`);
     const mapped = await createConnection({
       attribute_mapping: { email: "mail", first_name: "givenName", last_name: "sn", user_id: "uid" },
     });
@@ -349,7 +349,7 @@ describe("SAML service provider — real SP-initiated flow", () => {
   });
 
   it("accepts IdP-initiated login only when the connection allows it", async () => {
-    await backend(sp, "PATCH", `/v1/enterprise_connections/${connectionId}`, { active: false });
+    await backend(sp, "DELETE", `/v1/enterprise_connections/${connectionId}`);
     const replacement = await createConnection({ allow_idp_initiated: false });
     connectionId = replacement.id;
     const unsolicited = () => samlResponse(idp, {

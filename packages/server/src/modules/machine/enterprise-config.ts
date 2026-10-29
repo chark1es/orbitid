@@ -68,9 +68,31 @@ function samlConfigFromBody(body: ConnectionBody) {
   };
 }
 
+/**
+ * One domain, one connection. If two connections claimed the same domain, sign-in routing and the assertion could land
+ * on different connections, so a second tenant could capture another's users. A connection that allows subdomains also
+ * claims everything beneath its domains.
+ */
+async function assertDomainsUnclaimed(ctx: AppContext, domains: string[], allowSubdomains: boolean, exceptId?: string): Promise<void> {
+  if (!domains.length) return;
+  const others = (await ctx.db.select().from(s.enterpriseConnections)).filter((row) => row.id !== exceptId);
+  const under = (child: string, parent: string) => child === parent || child.endsWith(`.${parent}`);
+  for (const domain of domains) {
+    for (const other of others) {
+      for (const taken of other.domains ?? []) {
+        const clash = domain === taken
+          || (other.allowSubdomains && under(domain, taken))
+          || (allowSubdomains && under(taken, domain));
+        if (clash) throw new OrbitError(409, ErrorCodes.duplicate_record, `The domain ${domain} already belongs to another connection`, { param_name: "domains" });
+      }
+    }
+  }
+}
+
 export async function createConnection(ctx: AppContext, body: ConnectionBody): Promise<ConnectionRow> {
   const domains = normalizeDomains(body.domains);
   assertValidDomains(domains);
+  await assertDomainsUnclaimed(ctx, domains, body.allow_subdomains);
   if (body.protocol === "saml" && body.idp_sso_url) await assertPublicUrl(ctx, body.idp_sso_url, "idp_sso_url");
   if (body.discovery_url) await assertPublicUrl(ctx, body.discovery_url, "discovery_url");
   const now = Date.now();
@@ -114,6 +136,9 @@ export async function updateConnection(ctx: AppContext, row: ConnectionRow, patc
     const domains = normalizeDomains(patch.domains);
     assertValidDomains(domains);
     set.domains = domains;
+  }
+  if (patch.domains !== undefined || patch.allow_subdomains !== undefined) {
+    await assertDomainsUnclaimed(ctx, set.domains ?? row.domains ?? [], set.allowSubdomains ?? row.allowSubdomains, row.id);
   }
 
   const config = { ...(row.config ?? {}) } as Record<string, unknown>;
