@@ -58,7 +58,10 @@ export const securityHeaders = (ctx: AppContext): MiddlewareHandler => async (c,
   if (h.get("content-type")?.includes("text/html") && !h.has("content-security-policy")) {
     h.set("content-security-policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
   }
-  if (c.req.path.startsWith("/v1/") && !h.has("cache-control")) h.set("cache-control", "no-store");
+  // Token responses (RFC 6749 section 5.1) and every API answer that can carry personal data are never cached. The key
+  // set, the discovery document and the device page's static files keep their own cache headers.
+  const cacheable = c.req.path === "/oauth/jwks" || c.req.path === "/oauth/device.js" || c.req.path === "/oauth/device.css";
+  if ((c.req.path.startsWith("/v1/") || (c.req.path.startsWith("/oauth/") && !cacheable)) && !h.has("cache-control")) h.set("cache-control", "no-store");
 };
 
 const originOf = (value: string | undefined): string | null => {
@@ -74,7 +77,8 @@ const originOf = (value: string | undefined): string | null => {
 export function requestOriginAllowed(ctx: AppContext, origin: string): boolean {
   const app = ctx.settings.get().application;
   const allowed = new Set<string>();
-  for (const value of [...app.allowedOrigins, ...app.allowedRedirectOrigins]) {
+  // `allowedRedirectOrigins` only says where a browser may be sent after sign-in; it never earns API access.
+  for (const value of app.allowedOrigins) {
     const normalized = originOf(value);
     if (normalized) allowed.add(normalized);
   }
@@ -95,11 +99,16 @@ export function requestOriginAllowed(ctx: AppContext, origin: string): boolean {
 export const csrfProtection = (ctx: AppContext): MiddlewareHandler => async (c, next) => {
   const method = c.req.method.toUpperCase();
   if (method !== "POST" && method !== "PUT" && method !== "PATCH" && method !== "DELETE") return next();
-  if (!c.req.path.startsWith("/v1/client")) return next();
+  // The OAuth consent POST records a grant for the signed-in user, so it needs the same protection as the Frontend API.
+  if (!c.req.path.startsWith("/v1/client") && c.req.path !== "/oauth/consent") return next();
   if (!getCookie(c, COOKIES.client)) return next();
 
   const fetchSite = c.req.header("sec-fetch-site")?.toLowerCase() ?? "";
   const origin = c.req.header("origin");
+  // A literal `Origin: null` comes from sandboxed frames and some redirects; it is never a trusted application.
+  if (origin?.trim().toLowerCase() === "null") {
+    throw new OrbitError(403, ErrorCodes.not_allowed_access, "Cross-site request blocked. Start the request from this application's origin.", { origin: null });
+  }
   const candidate = origin ? originOf(origin) : originOf(c.req.header("referer"));
 
   if (candidate && requestOriginAllowed(ctx, candidate)) return next();

@@ -143,9 +143,9 @@ describe("GET /v1/client/handshake", () => {
     }
   });
 
-  it("accepts a relative path, an allow-listed redirect origin and the API's own origin", async () => {
+  it("accepts a relative path, another application origin and the API's own origin, but not a redirect-only origin", async () => {
     const { app, ctx } = await setupApp();
-    await ctx.settings.update({ application: { allowedRedirectOrigins: ["https://admin.example.com"] } });
+    await ctx.settings.update({ application: { allowedOrigins: [APP, "https://admin.example.com"], allowedRedirectOrigins: ["https://partner.example.com"] } });
     const user = await signUpUser(app);
 
     const relative = new URL((await handshake(user.client, "/after-login")).headers.get("location")!);
@@ -156,6 +156,9 @@ describe("GET /v1/client/handshake", () => {
 
     const apiOrigin = new URL((await handshake(user.client, `${ctx.env.baseUrl}/dashboard`)).headers.get("location")!);
     expect(apiOrigin.origin).toBe(ctx.env.baseUrl);
+
+    // A place users may be redirected to after sign-in is not trusted with a session token.
+    expect((await handshake(user.client, "https://partner.example.com/x")).status).toBe(400);
   });
 
   it("rate-limits the endpoint", async () => {

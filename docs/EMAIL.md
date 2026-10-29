@@ -110,6 +110,13 @@ client address, 60 per minute overall).
 The older `POST /v1/instance/test_email` still exists for compatibility: it queues a test through the normal send path
 and does not report transport failures.
 
+## Magic links open in the browser that asked for them
+
+A magic link finishes a sign-in or sign-up only in the browser that started it. If it is opened anywhere else
+(another device, a mail app's built-in browser, a stranger who was sent a link they did not ask for), the server
+refuses and redirects with `__orbit_status=different_browser`. Without this, anyone could start a sign-in for somebody
+else's address and have the real owner's click sign the attacker in. For sign-in across devices, use the email code.
+
 ## Console mode
 
 Without Resend or SMTP, mail is printed to the server log. This is for local development only: anyone who can read

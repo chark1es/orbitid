@@ -68,7 +68,7 @@ Two values define a passkey's scope, and both are derived from the **page** orig
 `relyingParty()` in `packages/server/src/services/passkeys.ts`:
 
 1. The request's `Origin` header — **if** `requestOriginAllowed()` trusts it (it must be the configured
-   app URL, an entry in `application.allowedOrigins` / `allowedRedirectOrigins`, the instance base URL, or
+   app URL, an entry in `application.allowedOrigins`, the instance base URL, or
    a localhost origin while `application.developmentMode` is on).
 2. Otherwise `application.homeUrl` (the app URL configured in the dashboard).
 3. Otherwise `ORBITID_BASE_URL`.

@@ -7,6 +7,7 @@ import * as s from "../db/schema";
 import { clientIp } from "../lib/http";
 import { getUserById } from "../services/users";
 import { consumeLink, getVerificationByToken } from "./auth/verifications";
+import { findClient } from "./auth/client-auth";
 import { afterFirstFactor, asSignInState, assertSignInAllowed, saveSignInState } from "./auth/signin-core";
 import { asSignUpFields, asSignUpVerifications, maybeCompleteSignUp, saveSignUp } from "./auth/signup-core";
 import { validateRedirectUrl, withQuery } from "./auth/redirects";
@@ -27,6 +28,17 @@ export default function routes(ctx: AppContext) {
     }
     if (row.verifiedAt || row.consumedAt) {
       return c.redirect(withQuery(target, { __orbit_status: "verified" }), 302);
+    }
+    // A link only completes a flow in the browser that started it. Otherwise anyone could start a sign-in or
+    // sign-up for somebody else's address and have the real owner's click finish it for them.
+    if (row.purpose === "sign_in_first_factor" || row.purpose === "sign_up_email") {
+      const owner = row.purpose === "sign_in_first_factor"
+        ? first(await ctx.db.select().from(s.signIns).where(eq(s.signIns.id, row.ownerId)))
+        : first(await ctx.db.select().from(s.signUps).where(eq(s.signUps.id, row.ownerId)));
+      const client = await findClient(ctx, c);
+      if (!owner || !client || client.id !== owner.clientId) {
+        return c.redirect(withQuery(target, { __orbit_status: "different_browser" }), 302);
+      }
     }
     await consumeLink(ctx, row);
 

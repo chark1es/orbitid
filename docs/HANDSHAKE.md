@@ -68,10 +68,11 @@ instead of an error.
 
 Every response carries `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
 
-`redirect_url` is validated by the same `validateRedirectUrl` used for post-sign-in navigation: a
-relative path, the instance's `application.homeUrl`, or an origin in `application.allowedOrigins` /
-`application.allowedRedirectOrigins` (plus `localhost` in development mode). The API's own origin is
-also accepted. Credentials (`user:pass@`) are rejected. `//evil.example`, `/\evil.example`,
+`redirect_url` receives a session token, so it must be an *application* origin: a relative path (resolved against
+`application.homeUrl`), the instance's `application.homeUrl`, or an origin in `application.allowedOrigins` (plus
+`localhost` in development mode). The API's own origin is also accepted. An origin that is only in
+`application.allowedRedirectOrigins` is refused, because that list means "users may be sent there", not "this site
+may act as the user". Credentials (`user:pass@`) are rejected. `//evil.example`, `/\evil.example`,
 `javascript:` and `data:` cannot pass because the value is resolved against the instance URL first and
 the resulting origin is what gets checked.
 
@@ -132,7 +133,7 @@ sent to the proxied origin instead.
   domain, or force `Secure` with `{ handshake: { secure: true } }` behind a TLS-terminating proxy that
   hides the scheme.
 - **The API must know your app origin.** A hard navigation only succeeds if the app's origin is in
-  `allowedOrigins`/`allowedRedirectOrigins` (or is `homeUrl`) in the instance settings; otherwise the
+  `allowedOrigins` (or is `homeUrl`) in the instance settings; otherwise the
   API answers the handshake with a 400 instead of redirecting. Development mode accepts `localhost`.
 - **Server helpers see a signed-in user.** `auth()` no longer observes `handshake` state on a hard
   navigation because the navigation never reaches the app with a dead token: it is redirected through

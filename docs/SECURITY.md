@@ -54,8 +54,11 @@ requests started by *any* site. Every state-changing method (POST/PUT/PATCH/DELE
 cookie** must therefore prove where it came from (`packages/server/src/lib/security.ts`, `csrfProtection`):
 
 - `Origin` (or `Referer` when `Origin` is absent) must be one of `settings.application.allowedOrigins`,
-  `allowedRedirectOrigins`, `homeUrl`, or this server's own base URL. In development mode `localhost` is
-  additionally accepted.
+  `homeUrl`, or this server's own base URL. In development mode `localhost` is additionally accepted.
+  `allowedRedirectOrigins` is deliberately **not** on this list: it only says where a browser may be sent after
+  sign-in, never who may call the API with a user's cookie (the same list governs CORS and the handshake).
+- A literal `Origin: null` (sandboxed frames, some redirects) is refused.
+- The same guard covers `POST /oauth/consent`, which records a grant for the signed-in user.
 - A request flagged `Sec-Fetch-Site: cross-site` with no acceptable origin is refused (403).
 - Requests without the `__client` cookie (bearer tokens, unauthenticated callers, server-side SDKs) are not
   affected, because a bearer token is not an ambient credential.

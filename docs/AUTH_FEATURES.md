@@ -162,7 +162,7 @@ per device. `UserProfile` hides the section entirely when the feature is off.
 ## 3. Anonymous (guest) accounts
 
 A guest account has no identifier at all: no email, no phone number, no password, no OAuth account.
-It gets an active session immediately and upgrades **in place** as soon as it gains a way to sign in.
+It gets an active session immediately and upgrades **in place** as soon as it gains a verified way to be found again.
 
 ### Enabling it
 
@@ -199,11 +199,12 @@ the existing `/me` endpoints:
 
 - adds and **verifies** an email address (`POST /me/email_addresses`, `…/attempt_verification`),
 - adds and **verifies** a phone number (same flow),
-- sets or changes a password (`POST /me/change_password`; `current_password` is optional when the
-  account has no password yet),
 - connects an external account (`POST /me/external_accounts` → OAuth callback with `kind: "connect"`).
 
-Unverified identifiers and profile fields (name, username, metadata, picture) do not upgrade the account.
+Unverified identifiers, a password and profile fields (name, username, metadata, picture) do not upgrade the
+account. A guest cannot set a password until it has a verified email or phone number, and adding an address or
+number goes through the same allowlist, blocklist, subaddress and disposable-domain checks as a sign-up, so a guest
+cannot get around restricted sign-up.
 
 ### What guests may not do
 
@@ -268,4 +269,4 @@ The public environment exposes `auth_config.anonymous: { enabled }`. `useUser()`
 - **Rate limits.** Guest creation is limited to 10 per IP per hour. `prepare_second_factor` (30/min) and
   `attempt_second_factor` (60/min) limits are unchanged; individual codes additionally cap attempts at 5.
 - **Upgrade is driven by the server.** `is_anonymous` is derived from what the account can actually do
-  (a verified identifier, a password, or a connected account), never from a client-supplied field.
+  (a verified identifier or a connected account), never from a client-supplied field.

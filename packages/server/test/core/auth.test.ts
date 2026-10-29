@@ -7,6 +7,8 @@ import * as schema from "../../src/db/schema";
 import { errorsOf, getClient, lastLink, setup, signInWithPassword, signUpUser, testClient } from "./helpers";
 import { first } from "../../src/lib/db";
 
+const pathOf = (link: string) => { const url = new URL(link); return `${url.pathname}${url.search}`; };
+
 describe("sign-up", () => {
   it("creates an account from email + password, verifies the email code and returns a session", async () => {
     const { app, ctx } = await setup();
@@ -56,7 +58,7 @@ describe("sign-up", () => {
     });
     await client.json(`/v1/client/sign_ups/${created.response.id}/prepare_verification`, { body: { strategy: "email_link" } });
     const link = lastLink("magic-signup@example.com")!;
-    const landing = await app.request(link, { redirect: "manual" });
+    const landing = await client.request(pathOf(link));
     expect(landing.status).toBe(302);
 
     const completed = await client.json<{ response: { status: string; unverified_fields: string[]; created_session_id: string } }>(`/v1/client/sign_ups/${created.response.id}`);
@@ -82,7 +84,7 @@ describe("sign-up", () => {
 
     // Same sign-up, different mailbox: the outstanding link must no longer count.
     await client.json(`/v1/client/sign_ups/${id}`, { method: "PATCH", body: { email_address: "victim@example.com" } });
-    const landing = await app.request(link, { redirect: "manual" });
+    const landing = await client.request(pathOf(link));
     expect(landing.headers.get("location")).toContain("__orbit_status=failed");
 
     const after = await client.json<{ response: { status: string; unverified_fields: string[]; created_user_id: string | null } }>(`/v1/client/sign_ups/${id}`);
@@ -257,7 +259,7 @@ describe("sign-in", () => {
     expect(errorsOf(correct)[0]?.code).toBe("too_many_attempts");
   });
 
-  it("completes a magic-link sign-in across devices by polling the attempt", async () => {
+  it("completes a magic-link sign-in in the browser that started it, and refuses any other browser", async () => {
     const { app } = await setup();
     const user = await signUpUser(app);
     const client = testClient(app);
@@ -275,8 +277,12 @@ describe("sign-in", () => {
     expect(pending.response.status).toBe("needs_first_factor");
     expect(pending.response.first_factor_verification.status).toBe("unverified");
 
-    // Open the link in another browser (no cookie).
-    const landing = await app.request(link, { redirect: "manual" });
+    // Another browser (no cookie) cannot finish a sign-in it did not start.
+    const elsewhere = await app.request(link, { redirect: "manual" });
+    expect(elsewhere.headers.get("location")).toContain("__orbit_status=different_browser");
+
+    // The browser that started it can.
+    const landing = await client.request(pathOf(link));
     expect(landing.status).toBe(302);
     expect(landing.headers.get("location")).toContain("__orbit_status=verified");
 

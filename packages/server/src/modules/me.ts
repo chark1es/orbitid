@@ -13,6 +13,7 @@ import { decrypt } from "../lib/crypto";
 import { MAX_UPLOAD_BYTES, parseBody } from "../lib/http";
 import { assertImageBytes, randomImageName } from "../lib/images";
 import { hit } from "../lib/rate-limit";
+import { assertIdentifiersAllowed } from "../services/restrictions";
 import { serializeEmail, serializeExternalAccount, serializePasskey, serializePhone, serializeSession, serializeTrustedDevice, serializeUser } from "../serializers";
 import { assertPasswordValid, hashPassword, verifyPassword } from "../services/passwords";
 import { disableTotp, finishTotpSetup, generateBackupCodes, startTotpSetup, userHasMfa, verifiedSecondFactorPhones } from "../services/mfa";
@@ -24,7 +25,7 @@ import {
   assertNotLastIdentification, assertUsernameAvailable, countIdentifications, deleteEmailAddress, deletePhoneNumber,
   findEmail, getUserById, isValidEmail, listEmails, listPhones, normalizeEmail, normalizePhone,
   primaryEmail, recordFailedAttempt, resetFailedAttempts, setPrimaryEmail, setPrimaryPhone,
-  upgradeAnonymousUser, type UserRow,
+  hasVerifiedIdentifier, upgradeAnonymousUser, type UserRow,
 } from "../services/users";
 import { deleteUser } from "../services/users";
 import { emitEvent } from "../services/webhooks";
@@ -208,6 +209,10 @@ export default function routes(ctx: AppContext) {
       }
       await resetFailedAttempts(ctx, user.id);
     }
+    // A guest has to be able to come back before a password means anything: verify an email or phone first.
+    if (user.isAnonymous && !(await hasVerifiedIdentifier(ctx, user.id))) {
+      throw new OrbitError(422, ErrorCodes.form_param_value_invalid, "Add and verify an email address or phone number before setting a password.", { param_name: "new_password" });
+    }
     await assertPasswordValid(ctx, body.new_password);
     const passwordHash = await hashPassword(body.new_password);
     await ctx.db.update(s.users).set({ passwordHash, passwordUpdatedAt: Date.now(), updatedAt: Date.now() }).where(eq(s.users.id, user.id));
@@ -254,6 +259,8 @@ export default function routes(ctx: AppContext) {
     const email = normalizeEmail(body.email_address);
     if (!isValidEmail(email)) throw new OrbitError(422, ErrorCodes.form_param_format_invalid, "email_address is not valid", { param_name: "email_address" });
     if (await findEmail(ctx, email)) throw new OrbitError(422, ErrorCodes.form_identifier_exists, "That email address is already in use", { param_name: "email_address" });
+    // Turning a guest into a registered user is a sign-up: it must pass the same allowlist and blocklist checks.
+    if (user.isAnonymous) await assertIdentifiersAllowed(ctx, { emails: [email] });
     const now = Date.now();
     const id = newId("idn_e");
     await ctx.db.insert(s.emailAddresses).values({
@@ -334,6 +341,7 @@ export default function routes(ctx: AppContext) {
     if (first(await ctx.db.select().from(s.phoneNumbers).where(eq(s.phoneNumbers.phone, phone)))) {
       throw new OrbitError(422, ErrorCodes.form_identifier_exists, "That phone number is already in use", { param_name: "phone_number" });
     }
+    if (user.isAnonymous) await assertIdentifiersAllowed(ctx, { phones: [phone] });
     const now = Date.now();
     const id = newId("idn_p");
     await ctx.db.insert(s.phoneNumbers).values({

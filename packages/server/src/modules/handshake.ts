@@ -7,7 +7,8 @@ import { clientIp } from "../lib/http";
 import { hit } from "../lib/rate-limit";
 import { signSessionToken } from "../services/tokens";
 import { activeClientSession, findClient } from "./auth/client-auth";
-import { validateRedirectUrl, withQuery } from "./auth/redirects";
+import { withQuery } from "./auth/redirects";
+import { requestOriginAllowed } from "../lib/security";
 
 /** Marker returned when the request has no usable client session; the middleware clears `__client_uat`. */
 export const HANDSHAKE_SIGNED_OUT = "signed_out";
@@ -59,31 +60,22 @@ function requireRedirectUrl(ctx: AppContext, value: string | undefined): string 
   if (!value?.trim()) {
     throw new OrbitError(400, ErrorCodes.form_param_missing, "redirect_url is required", { param_name: "redirect_url" });
   }
-  const raw = value.trim();
-  let target: string;
+  let url: URL;
   try {
-    target = validateRedirectUrl(ctx, raw) ?? "";
-  } catch (error) {
-    if (!(error instanceof OrbitError)) throw error;
-    // The API's own origin is a legitimate return target even when it is not the app's origin.
-    let own: URL | null = null;
-    try { own = new URL(raw, ctx.env.baseUrl); } catch { own = null; }
-    if (!own || own.origin !== safeOrigin(ctx.env.baseUrl)) {
-      throw new OrbitError(400, error.code, error.message, error.meta);
-    }
-    target = own.toString();
+    url = new URL(value.trim(), ctx.settings.get().application.homeUrl || ctx.env.baseUrl);
+  } catch {
+    throw new OrbitError(400, ErrorCodes.form_param_format_invalid, "redirect_url is not a valid URL", { param_name: "redirect_url" });
   }
-  const url = new URL(target);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new OrbitError(400, ErrorCodes.form_param_format_invalid, "redirect_url must use http(s)", { param_name: "redirect_url" });
+  }
   if (url.username || url.password) {
     throw new OrbitError(400, ErrorCodes.form_param_format_invalid, "redirect_url must not contain credentials", { param_name: "redirect_url" });
   }
-  return url.toString();
-}
-
-function safeOrigin(value: string): string | null {
-  try {
-    return new URL(value).origin;
-  } catch {
-    return null;
+  // The token goes to this origin, so it must be an application origin (or this server), not merely a place users
+  // may be redirected to after sign-in.
+  if (!requestOriginAllowed(ctx, url.origin)) {
+    throw new OrbitError(400, ErrorCodes.form_param_format_invalid, "redirect_url origin is not allowed", { param_name: "redirect_url" });
   }
+  return url.toString();
 }

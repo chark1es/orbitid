@@ -485,15 +485,15 @@ describe("anonymous accounts", () => {
     expect(claims.anonymous).toBeUndefined();
   });
 
-  it("stops advertising the claim after setting a password", async () => {
+  it("needs a verified identifier before a password can be set, and a password alone does not upgrade a guest", async () => {
     const { app, ctx } = await setup();
     await enableAnonymous(ctx);
     const { client } = await createAnonymous(app);
-    const updated = await client.json<{ response: { is_anonymous: boolean; password_enabled: boolean } }>("/v1/client/me/change_password", {
-      body: { new_password: "Sup3rSecret!" },
-    });
-    expect(updated.response.password_enabled).toBe(true);
-    expect(updated.response.is_anonymous).toBe(false);
+    const refused = await client.json("/v1/client/me/change_password", { body: { new_password: "Sup3rSecret!" } });
+    expect(errorsOf(refused)[0]?.code).toBe("form_param_value_invalid");
+    const still = await client.json<{ response: { is_anonymous: boolean; password_enabled: boolean } }>("/v1/client/me");
+    expect(still.response.is_anonymous).toBe(true);
+    expect(still.response.password_enabled).toBe(false);
   });
 
   it("may not create organizations or API keys", async () => {

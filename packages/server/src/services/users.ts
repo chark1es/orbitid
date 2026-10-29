@@ -320,17 +320,22 @@ export async function findUserByVerifiedEmail(ctx: AppContext, email: string): P
 }
 
 /**
- * A guest account becomes a regular one as soon as it gains a way to sign in: a verified email address,
- * a verified phone number, a password or a connected external account. Every `/me` mutation that can do
+ * A guest account becomes a regular one as soon as it gains a verified way to be found again: a verified email address,
+ * a verified phone number or a connected external account. Every `/me` mutation that can do
  * that funnels through here, so the flag can never get out of sync.
  */
+export async function hasVerifiedIdentifier(ctx: AppContext, userId: string): Promise<boolean> {
+  return (await listEmails(ctx, userId)).some((e) => e.verified)
+    || (await listPhones(ctx, userId)).some((p) => p.verified)
+    || (await ctx.db.select({ id: s.externalAccounts.id }).from(s.externalAccounts).where(eq(s.externalAccounts.userId, userId))).length > 0;
+}
+
 export async function upgradeAnonymousUser(ctx: AppContext, userId: string): Promise<UserRow | undefined> {
   const user = await getUserById(ctx, userId);
   if (!user || !user.isAnonymous) return user;
-  const verifiedIdentifiers = (await listEmails(ctx, userId)).some((e) => e.verified)
-    || (await listPhones(ctx, userId)).some((p) => p.verified)
-    || (await ctx.db.select({ id: s.externalAccounts.id }).from(s.externalAccounts).where(eq(s.externalAccounts.userId, userId))).length > 0;
-  if (!verifiedIdentifiers && !user.passwordHash) return user;
+  // A password alone never upgrades a guest: only a verified way to be found again does, and that identifier has
+  // already passed the sign-up restrictions (see the /me routes that add one).
+  if (!(await hasVerifiedIdentifier(ctx, userId))) return user;
   await ctx.db.update(s.users).set({ isAnonymous: false, updatedAt: Date.now() }).where(eq(s.users.id, userId));
   return getUserById(ctx, userId);
 }

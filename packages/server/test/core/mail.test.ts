@@ -64,6 +64,8 @@ async function signInWithEmailCode(app: ReturnType<typeof createApp>, email: str
   return done.response.created_session_id;
 }
 
+const pathOf = (link: string) => { const url = new URL(link); return `${url.pathname}${url.search}`; };
+
 describe("email settings", () => {
   it("accepts smtp(s) URLs and rejects anything else", () => {
     expect(parseSmtpUrl("smtp://user:pass@mail.example.com:587")).toMatchObject({ host: "mail.example.com", port: 587, secure: false, user: "user", pass: "pass" });
@@ -231,7 +233,7 @@ describe("Resend transport", () => {
 
     const link = linkIn(readableMessage(resend.last()!.body.text ?? ""))!;
     expect(link).toContain("/v1/verify?token=");
-    const landing = await app.request(link, { redirect: "manual" });
+    const landing = await client.request(pathOf(link));
     expect(landing.status).toBe(302);
     expect(landing.headers.get("location")).toContain("__orbit_status=verified");
     const done = await client.json<{ response: { status: string; created_session_id: string } }>(`/v1/client/sign_ins/${created.response.id}`);
@@ -315,7 +317,7 @@ describe("SMTP transport", () => {
     });
     await client.json(`/v1/client/sign_ins/${created.response.id}/prepare_first_factor`, { body: { strategy: "email_link" } });
     const link = linkIn(readableMessage(smtp.last()!.raw))!;
-    const landing = await app.request(link, { redirect: "manual" });
+    const landing = await client.request(pathOf(link));
     expect(landing.status).toBe(302);
     expect(landing.headers.get("location")).toContain("__orbit_status=verified");
     const done = await client.json<{ response: { status: string } }>(`/v1/client/sign_ins/${created.response.id}`);
@@ -343,7 +345,7 @@ describe("SMTP transport", () => {
     expect(message.recipients).toEqual(["smtp-signup@example.com"]);
     const link = linkIn(readableMessage(message.raw))!;
     expect(link).toContain("/v1/verify?token=");
-    const landing = await app.request(link, { redirect: "manual" });
+    const landing = await client.request(pathOf(link));
     expect(landing.status).toBe(302);
     expect(landing.headers.get("location")).toContain("__orbit_status=verified");
 

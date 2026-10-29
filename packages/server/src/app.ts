@@ -47,7 +47,8 @@ export function createApp(ctx: AppContext) {
   app.use("*", cors({
     origin: (origin) => {
       const a = ctx.settings.get().application;
-      return [...a.allowedOrigins, ...a.allowedRedirectOrigins].includes(origin) || (a.developmentMode && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) ? origin : null;
+      // Redirect-only origins may receive the user after sign-in; they are not trusted to call this API with credentials.
+      return a.allowedOrigins.includes(origin) || (a.developmentMode && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) ? origin : null;
     },
     credentials: true,
     allowHeaders: ["Content-Type", "Authorization", "X-OrbitID-Client", "X-Requested-With"],

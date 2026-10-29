@@ -173,7 +173,7 @@ export default function Page() {
             emptyLabel="No origins configured. Browser clients cannot call the API until you add one."
           />
         </Field>
-        <Field label="Allowed redirect origins" description="Origins permitted in redirect_url values after sign-in.">
+        <Field label="Allowed redirect origins" description="Origins a browser may be sent to after sign-in. They are not allowed to call this API; list apps that do under Allowed origins.">
           <StringListEditor
             values={app.allowedRedirectOrigins}
             onChange={(allowedRedirectOrigins) => editor.patch({ application: { allowedRedirectOrigins } })}
