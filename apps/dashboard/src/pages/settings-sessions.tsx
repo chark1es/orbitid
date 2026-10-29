@@ -56,6 +56,8 @@ export default function Page() {
   if (settings.session.tokenLifetimeSeconds <= 0) errors.push("Token lifetime must be greater than zero.");
   if (settings.session.inactivityTimeoutSeconds > 0 && settings.session.inactivityTimeoutSeconds > settings.session.lifetimeSeconds)
     errors.push("Inactivity timeout cannot exceed the session lifetime.");
+  if (settings.session.trustedDevicesEnabled && (settings.session.trustedDeviceDays < 1 || settings.session.trustedDeviceDays > 365))
+    errors.push("Trusted device duration must be between 1 and 365 days.");
   if (claimsError) errors.push("Custom claims are not valid JSON.");
 
   const number = (value: string) => {
@@ -155,6 +157,34 @@ export default function Page() {
             <dd className="font-data text-xs font-medium">Every {humanDuration(settings.session.tokenLifetimeSeconds)}</dd>
           </div>
         </dl>
+      </SettingsSection>
+
+      <SettingsSection
+        title="Trusted devices"
+        description="Let a user skip the second factor on a browser they have marked as trusted, until the trust expires."
+      >
+        <SwitchRow
+          label="Allow trusted devices"
+          description="A user can remember this browser after a successful second factor, so the next sign-in asks for the password only."
+          checked={settings.session.trustedDevicesEnabled}
+          onCheckedChange={(trustedDevicesEnabled) => editor.patch({ session: { trustedDevicesEnabled } })}
+        />
+        <Field
+          label="Trust duration (days)"
+          htmlFor="trusted-device-days"
+          description="How long a remembered browser keeps skipping the second factor. Turning the feature off keeps but ignores the records."
+          className="max-w-md"
+        >
+          <Input
+            id="trusted-device-days"
+            type="number"
+            min={1}
+            max={365}
+            value={settings.session.trustedDeviceDays}
+            disabled={!settings.session.trustedDevicesEnabled}
+            onChange={(event) => editor.patch({ session: { trustedDeviceDays: number(event.target.value) } })}
+          />
+        </Field>
       </SettingsSection>
 
       <SettingsSection

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { SOCIAL_PROVIDERS, type SocialProviderConfig } from "@orbitid/shared";
-import { Button, Input, Switch } from "@orbitid/ui";
+import { Button, Input, Switch, Textarea } from "@orbitid/ui";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
 import { getApiUrl } from "../lib/api";
@@ -26,6 +26,8 @@ import {
   MetaChip,
   PageHeader,
   SaveBar,
+  SecretInput,
+  SecretSetChip,
   SettingsSection,
   ValidationSummary,
 } from "./_config/ui";
@@ -97,7 +99,14 @@ export default function Page() {
     if (!config.enabled) continue;
     const label = providerLabel(key, config);
     if (!config.clientId.trim()) socialErrors.push(`${label}: client ID is required.`);
-    if (!config.clientSecret) socialErrors.push(`${label}: client secret is required.`);
+    // Apple signs its own client secret from the .p8 key, so a stored client secret is optional there.
+    const usesAppleKey = key === "apple" && (Boolean(config.appleTeamId?.trim()) || Boolean(config.appleKeyId?.trim()) || secretIsConfigured(config.applePrivateKey));
+    if (!config.clientSecret && !usesAppleKey) socialErrors.push(`${label}: client secret is required.`);
+    if (key === "apple" && usesAppleKey) {
+      if (!config.appleTeamId?.trim()) socialErrors.push(`${label}: team ID is required when the .p8 key is used.`);
+      if (!config.appleKeyId?.trim()) socialErrors.push(`${label}: key ID is required when the .p8 key is used.`);
+      if (!secretIsConfigured(config.applePrivateKey)) socialErrors.push(`${label}: paste the .p8 private key, or use a client secret instead.`);
+    }
     if (isCustomProviderKey(key) && !isHttpUrl(config.discoveryUrl ?? "")) socialErrors.push(`${label}: discovery URL must be an http(s) URL.`);
   }
 
@@ -169,7 +178,8 @@ export default function Page() {
         <ul className="-mt-3 border-b border-border">
           {providers.map((key) => {
             const config = socialProviderConfig(settings, key);
-            const configured = Boolean(config.clientId && config.clientSecret);
+            const appleKey = key === "apple" && Boolean(config.appleTeamId?.trim() || config.appleKeyId?.trim() || secretIsConfigured(config.applePrivateKey));
+            const configured = Boolean(config.clientId && (config.clientSecret || appleKey));
             return (
               <li key={key} className="flex flex-wrap items-center gap-3 border-t border-border py-3 first:border-t-0">
                 <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -237,7 +247,7 @@ export default function Page() {
               />
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Client ID" htmlFor={`${selectedKey}-client-id`}>
+              <Field label="Client ID" htmlFor={`${selectedKey}-client-id`} description={selectedKey === "apple" ? "The Apple Services ID." : undefined}>
                 <Input
                   id={`${selectedKey}-client-id`}
                   value={selectedConfig.clientId}
@@ -246,22 +256,87 @@ export default function Page() {
                   className="font-data text-xs"
                 />
               </Field>
-              <Field
-                label="Client secret"
-                htmlFor={`${selectedKey}-client-secret`}
-                description={secretIsConfigured(selectedConfig.clientSecret) ? "A secret is stored. Leave blank to keep it." : undefined}
-              >
-                <Input
+              {selectedKey === "apple" ? (
+                <Field label="Team ID" htmlFor="apple-team-id" description="From the Apple developer account.">
+                  <Input
+                    id="apple-team-id"
+                    value={selectedConfig.appleTeamId ?? ""}
+                    disabled={!selectedConfig.enabled}
+                    onChange={(event) => updateProvider(selectedKey, { appleTeamId: event.target.value })}
+                    placeholder="TEAM123456"
+                    className="font-data text-xs"
+                  />
+                </Field>
+              ) : (
+                <SecretInput
                   id={`${selectedKey}-client-secret`}
-                  type="password"
-                  autoComplete="new-password"
+                  label="Client secret"
+                  configured={secretIsConfigured(selectedConfig.clientSecret)}
                   disabled={!selectedConfig.enabled}
                   value={secretInputValue(selectedConfig.clientSecret)}
-                  onChange={(event) => updateProvider(selectedKey, { clientSecret: event.target.value })}
-                  placeholder={secretIsConfigured(selectedConfig.clientSecret) ? "Stored secret, leave blank to keep" : "Client secret"}
+                  onChange={(clientSecret) => updateProvider(selectedKey, { clientSecret })}
+                  description={
+                    secretIsConfigured(selectedConfig.clientSecret)
+                      ? "A secret is stored. Leave blank to keep it."
+                      : "Shown once by the provider when you create the app."
+                  }
                 />
-              </Field>
+              )}
             </div>
+            {selectedKey === "apple" ? (
+              <>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="Key ID" htmlFor="apple-key-id" description="The 10-character identifier of the .p8 key.">
+                    <Input
+                      id="apple-key-id"
+                      value={selectedConfig.appleKeyId ?? ""}
+                      disabled={!selectedConfig.enabled}
+                      onChange={(event) => updateProvider(selectedKey, { appleKeyId: event.target.value })}
+                      placeholder="KEY7890123"
+                      className="font-data text-xs"
+                    />
+                  </Field>
+                </div>
+                <Field
+                  label={
+                    <span className="flex flex-wrap items-center gap-2">
+                      Private key (.p8)
+                      <SecretSetChip configured={secretIsConfigured(selectedConfig.applePrivateKey)} />
+                    </span>
+                  }
+                  htmlFor="apple-private-key"
+                  description="Paste the whole file, including the BEGIN PRIVATE KEY and END PRIVATE KEY lines. The server uses it to sign the client secret for each token request."
+                >
+                  <Textarea
+                    id="apple-private-key"
+                    rows={6}
+                    spellCheck={false}
+                    autoComplete="off"
+                    disabled={!selectedConfig.enabled}
+                    value={secretInputValue(selectedConfig.applePrivateKey)}
+                    onChange={(event) => updateProvider(selectedKey, { applePrivateKey: event.target.value })}
+                    placeholder={secretIsConfigured(selectedConfig.applePrivateKey) ? "Stored key, leave blank to keep" : "-----BEGIN PRIVATE KEY-----"}
+                    className="font-data text-xs"
+                  />
+                </Field>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Register <code className="font-data">{callbackFor(selectedKey)}</code> as the return URL in the Apple
+                  developer console, and request the <code className="font-data">name</code> and{" "}
+                  <code className="font-data">email</code> scopes. A client secret is optional: if one is stored it is used
+                  verbatim instead of signing the .p8 key.
+                </p>
+                <SecretInput
+                  id="apple-client-secret"
+                  label="Client secret (optional)"
+                  configured={secretIsConfigured(selectedConfig.clientSecret)}
+                  disabled={!selectedConfig.enabled}
+                  value={secretInputValue(selectedConfig.clientSecret)}
+                  onChange={(clientSecret) => updateProvider(selectedKey, { clientSecret })}
+                  description="Only when you generate the JWT elsewhere. Leave blank to sign it from the .p8 key."
+                  placeholder={secretIsConfigured(selectedConfig.clientSecret) ? "Stored secret, leave blank to keep" : "Not used"}
+                />
+              </>
+            ) : null}
             {isCustomProviderKey(selectedKey) ? (
               <Field label="Discovery URL" htmlFor={`${selectedKey}-discovery`} description="OpenID Connect discovery document.">
                 <Input

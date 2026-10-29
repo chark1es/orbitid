@@ -16,10 +16,11 @@ import {
   MetaChip,
   PageHeader,
   SaveBar,
+  SecretInput,
   SettingsSection,
   SwitchRow,
 } from "./_config/ui";
-import { secretInputValue, secretIsConfigured } from "./_config/settings";
+import { secretInputValue, secretIsConfigured, humanDuration } from "./_config/settings";
 import { useSettingsEditor } from "./_config/use-settings";
 
 const ATTRIBUTE_KEYS = ["emailAddress", "phoneNumber", "username", "firstName", "lastName", "password", "passkey", "backupCode", "authenticatorApp"] as const;
@@ -144,9 +145,13 @@ export default function Page() {
   };
 
   const captchaSecretConfigured = secretIsConfigured(settings.security.captchaSecret);
+  const emailSecondFactor = settings.attributes.emailAddress.usedForSecondFactor;
   const hasSecondFactor =
     settings.attributes.authenticatorApp.enabled || settings.attributes.backupCode.enabled || settings.attributes.phoneNumber.usedForSecondFactor;
-  if (settings.mfa.required && !hasSecondFactor) errors.push("Enable at least one second factor before requiring MFA.");
+  if (settings.mfa.required && !hasSecondFactor && !emailSecondFactor) errors.push("Enable at least one second factor before requiring MFA.");
+  if (emailSecondFactor && !settings.attributes.emailAddress.enabled) errors.push("Enable the email address identifier before using it as a second factor.");
+  if (emailSecondFactor && settings.attributes.emailAddress.verifications.length === 0)
+    errors.push("Email code as a second factor needs a verification method on the email address.");
 
   return (
     <div className="space-y-6">
@@ -291,6 +296,13 @@ export default function Page() {
             onCheckedChange={(enabled) => updateAttribute("backupCode", { enabled })}
           />
           <CheckboxRow
+            label="Email one-time code"
+            description="Send a code to the user's verified email address as the second step."
+            checked={settings.attributes.emailAddress.usedForSecondFactor}
+            disabled={!settings.attributes.emailAddress.enabled}
+            onCheckedChange={(usedForSecondFactor) => updateAttribute("emailAddress", { usedForSecondFactor })}
+          />
+          <CheckboxRow
             label="SMS code"
             description="Requires a verified phone number."
             checked={settings.attributes.phoneNumber.usedForSecondFactor}
@@ -362,6 +374,41 @@ export default function Page() {
         />
       </SettingsSection>
 
+      <SettingsSection
+        title="Guest accounts"
+        description="Let a visitor start using the app before they sign up. A guest has no identifier until they add one."
+      >
+        <SwitchRow
+          label="Allow anonymous sign-ups"
+          description="The anonymous sign-up strategy is accepted and creates a user with no email address or password."
+          checked={settings.anonymous.enabled}
+          onCheckedChange={(enabled) => editor.patch({ anonymous: { enabled } })}
+        />
+        <Field
+          label="Delete inactive guests after (seconds)"
+          htmlFor="anonymous-retention"
+          description={
+            settings.anonymous.retentionSeconds > 0
+              ? `A guest with no activity for ${humanDuration(settings.anonymous.retentionSeconds)} is deleted. 0 keeps them forever.`
+              : "0 keeps guests until they are deleted by hand."
+          }
+          className="max-w-md"
+        >
+          <Input
+            id="anonymous-retention"
+            type="number"
+            min={0}
+            value={settings.anonymous.retentionSeconds}
+            disabled={!settings.anonymous.enabled}
+            onChange={(event) => editor.patch({ anonymous: { retentionSeconds: number(event.target.value) } })}
+          />
+        </Field>
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Guests count against your user totals and can reach anything a signed-in user can, so keep the list short in
+          the Users page.
+        </p>
+      </SettingsSection>
+
       <SettingsSection title="Personal information" description="Name fields collected during sign-up.">
         <div className="grid gap-6 sm:grid-cols-2">
           {([
@@ -414,24 +461,19 @@ export default function Page() {
               value={settings.security.captchaSiteKey}
               onChange={(event) => editor.patch({ security: { captchaSiteKey: event.target.value } })}
               placeholder="0x4AAAAAAA…"
-              className="font-mono"
+              className="font-data"
             />
           </Field>
-          <Field
+          <SecretInput
+            id="captcha-secret"
             label="Secret key"
-            htmlFor="captcha-secret"
-            description={captchaSecretConfigured ? "A secret is stored. Leave blank to keep it." : "Leave blank to keep the stored secret."}
+            configured={captchaSecretConfigured}
+            value={secretInputValue(settings.security.captchaSecret)}
+            onChange={(captchaSecret) => editor.patch({ security: { captchaSecret } })}
+            description={captchaSecretConfigured ? "A secret is stored. Leave blank to keep it." : "From the captcha provider's dashboard."}
+            placeholder={captchaSecretConfigured ? "Stored secret, leave blank to keep" : "Captcha secret"}
             className="sm:col-span-2"
-          >
-            <Input
-              id="captcha-secret"
-              type="password"
-              autoComplete="new-password"
-              value={secretInputValue(settings.security.captchaSecret)}
-              onChange={(event) => editor.patch({ security: { captchaSecret: event.target.value } })}
-              placeholder={captchaSecretConfigured ? "Stored secret, leave blank to keep" : "Captcha secret"}
-            />
-          </Field>
+          />
         </div>
         <SwitchRow
           label="Enumeration protection"

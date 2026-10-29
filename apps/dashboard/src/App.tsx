@@ -23,6 +23,7 @@ const SettingsAppearancePage = lazy(() => import("./pages/settings-appearance"))
 const RestrictionsPage = lazy(() => import("./pages/allow-block-lists"));
 const JwtTemplatesPage = lazy(() => import("./pages/jwt-templates"));
 const WebhooksPage = lazy(() => import("./pages/webhooks"));
+const ConnectPage = lazy(() => import("./pages/connect"));
 const ApiKeysPage = lazy(() => import("./pages/api-keys"));
 const M2mPage = lazy(() => import("./pages/m2m"));
 const OAuthAppsPage = lazy(() => import("./pages/oauth-apps"));
@@ -75,6 +76,7 @@ export default function App() {
           <Route path="settings/email-sms" element={<SettingsEmailSmsPage />} />
           <Route path="settings/appearance" element={<SettingsAppearancePage />} />
           <Route path="restrictions" element={<RestrictionsPage />} />
+          <Route path="connect" element={<ConnectPage />} />
           <Route path="jwt-templates" element={<JwtTemplatesPage />} />
           <Route path="webhooks" element={<WebhooksPage />} />
           <Route path="api-keys" element={<ApiKeysPage />} />

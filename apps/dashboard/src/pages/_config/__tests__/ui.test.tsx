@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { ConfirmDialog, DetailSheet, JsonEditor, SaveBar, SecretReveal, StatusBadge } from "../ui";
+import { ConfirmDialog, DetailSheet, JsonEditor, Notice, SaveBar, SecretInput, SecretReveal, StatusBadge } from "../ui";
 
 describe("SaveBar", () => {
   it("is hidden when there is nothing to save", () => {
@@ -128,5 +128,36 @@ describe("ConfirmDialog", () => {
     expect(screen.getByText("Deliveries stop immediately.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Delete endpoint" }));
     expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("SecretInput", () => {
+  it("starts blank with a Set mark so a stored secret is never resubmitted", () => {
+    const onChange = vi.fn();
+    render(<SecretInput id="s" label="API key" value="" onChange={onChange} configured />);
+    const input = screen.getByLabelText(/API key/) as HTMLInputElement;
+    expect(input.value).toBe("");
+    expect(input.type).toBe("password");
+    expect(input.placeholder).toMatch(/leave blank to keep/i);
+    expect(screen.getByText("Set")).toBeTruthy();
+    fireEvent.change(input, { target: { value: "re_new" } });
+    expect(onChange).toHaveBeenCalledWith("re_new");
+  });
+
+  it("says Not set when nothing is stored", () => {
+    render(<SecretInput id="s2" label="Token" value="" onChange={vi.fn()} configured={false} />);
+    expect(screen.getByText("Not set")).toBeTruthy();
+  });
+});
+
+describe("Notice", () => {
+  it("carries a worded title and lists the consequence", () => {
+    render(
+      <Notice tone="caution" title="Email is printed to the server log" role="alert">
+        <p>Codes appear in plain text.</p>
+      </Notice>,
+    );
+    expect(screen.getByRole("alert").textContent).toContain("Email is printed to the server log");
+    expect(screen.getByText("Codes appear in plain text.")).toBeTruthy();
   });
 });
