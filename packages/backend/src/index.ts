@@ -12,7 +12,7 @@ export {
   type CreateOrganizationInvitationParams,
   type CreateInvitationParams,
 } from "./client";
-export { BackendHttp, DEFAULT_API_URL, type BackendFetch, type BackendHttpOptions, type BackendRequestOptions } from "./http";
+export { BackendHttp, type BackendFetch, type BackendHttpOptions, type BackendRequestOptions } from "./http";
 export { OrbitIdAPIError, isOrbitIdAPIError } from "./errors";
 export { camelizeDeep, snakeizeDeep, camelCaseKey, snakeCaseKey } from "./case";
 export type { Camelize, CamelCaseKey, SnakeCaseKey } from "./case";

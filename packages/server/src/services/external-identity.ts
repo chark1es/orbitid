@@ -190,10 +190,12 @@ async function resolveExternalIdentity(
     const guest = await getUserById(ctx, flow.userId);
     if (guest?.isAnonymous) {
       const settings = ctx.settings.get();
+      const restricted = settings.restrictions.allowlistEnabled || settings.signUp.mode !== "public";
       if (profile.email) await assertIdentifiersAllowed(ctx, { emails: [profile.email] });
-      else if (settings.restrictions.allowlistEnabled || settings.signUp.mode !== "public") {
-        // Nothing to check against the allowlist, so a restricted instance cannot admit this identity.
-        throw new OrbitError(422, ErrorCodes.not_allowed_access, "This account does not share an email address, which this instance requires to sign up.");
+      // Admission rests on the mailbox, so a restricted instance needs the provider to vouch for it: an address the
+      // provider did not verify proves nothing about who is connecting.
+      if (restricted && !(profile.email && profile.emailVerified)) {
+        throw new OrbitError(422, ErrorCodes.not_allowed_access, "This account does not share a verified email address, which this instance requires to sign up.");
       }
     }
     const linked = await linkExternalAccount(ctx, flow.userId, profile);
@@ -229,7 +231,8 @@ async function resolveExternalIdentity(
     // Signing up with an email that belongs to an existing account must not create a duplicate.
     if (profile.email) {
       const claimed = await findEmail(ctx, profile.email);
-      if (claimed?.userId && claimed.verified) {
+      // A verified address is taken; an unproven claim only blocks another unproven one.
+      if (claimed?.userId && (claimed.verified || !profile.emailVerified)) {
         throw new OrbitError(422, ErrorCodes.form_identifier_exists, "That email address is already in use");
       }
     }

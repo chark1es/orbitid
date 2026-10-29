@@ -177,8 +177,10 @@ export async function createUser(ctx: AppContext, input: CreateUserInput): Promi
   if (email) {
     if (!isValidEmail(email)) throw new OrbitError(422, ErrorCodes.form_param_format_invalid, "email_address is not valid", { param_name: "email_address" });
     const existing = await findEmail(ctx, email);
-    // Only a verified address is taken; an unverified claim by someone else cannot reserve a mailbox.
-    if (existing?.verified) {
+    // A verified address is taken. An unverified claim by someone else cannot reserve a mailbox against its owner, but
+    // two accounts cannot both rest on an address neither has proved, or signing in by it would be ambiguous.
+    const newRowVerified = !!input.emailVerified;
+    if (existing?.verified || (!newRowVerified && existing?.userId && !input.silent)) {
       throw new OrbitError(422, ErrorCodes.form_identifier_exists, "That email address is already in use", { param_name: "email_address" });
     }
   }

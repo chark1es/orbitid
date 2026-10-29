@@ -17,7 +17,7 @@ docker compose up -d
 docker compose logs orbitid      # prints the dashboard URL and your publishable key
 ```
 
-The compose file starts Postgres 17 and OrbitID, runs the migrations on boot, and keeps data in two named volumes. Open `http://localhost:4000` and sign in to the dashboard with the secret key. A production instance shows only the end of the secret key in its log; print the whole key with:
+The compose file passes only the variables it lists (the ones in `.env.example`) into the container, so a variable you add to `.env` has no effect until it is also listed under `environment:` in `docker-compose.yml`. It starts Postgres 17 and OrbitID, runs the migrations on boot, and keeps data in two named volumes. Open `http://localhost:4000` and sign in to the dashboard with the secret key. A production instance shows only the end of the secret key in its log; print the whole key with:
 
 ```bash
 docker compose exec orbitid node_modules/.bin/tsx packages/server/src/cli.ts keys
@@ -31,7 +31,9 @@ The secret key is derived from `ORBITID_ENCRYPTION_KEY`, so it is the same after
 bun install
 bun run --filter @orbitid/dashboard build        # optional, lets the server host the dashboard
 export ORBITID_DATABASE_URL=postgres://user:password@localhost:5432/orbitid
-export ORBITID_ENCRYPTION_KEY="$(openssl rand -base64 32)"
+export ORBITID_ENCRYPTION_KEY="$(openssl rand -base64 32)"   # keep this value: it is needed on every start
+export ORBITID_BASE_URL=https://auth.example.com          # the public URL browsers and your apps use
+export NODE_ENV=production                                # turns on the production checks (the Docker image sets it)
 node_modules/.bin/tsx packages/server/src/cli.ts start
 ```
 

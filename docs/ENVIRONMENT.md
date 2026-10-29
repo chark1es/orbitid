@@ -45,13 +45,13 @@ Set these on the server side of your own app: the Next.js server, an Express or 
 | Variable | Required | Read by | Meaning |
 | --- | --- | --- | --- |
 | `ORBITID_SECRET_KEY` | **yes** | `@orbitid/nextjs`, `@orbitid/node`, `@orbitid/backend` | Backend API key (`sk_…`). Print it with `orbitid keys` or copy it from the dashboard. |
-| `ORBITID_API_URL` | no | `@orbitid/node`, `@orbitid/backend` | URL of your OrbitID server. Defaults to the one encoded in the publishable key. |
+| `ORBITID_API_URL` | **yes**, unless a publishable key is given | `@orbitid/node`, `@orbitid/backend` | URL of your OrbitID server (`https://auth.example.com`). There is no hosted default, so the SDK refuses to start without it (or `ORBITID_PUBLISHABLE_KEY`, which carries the URL). |
 | `ORBITID_WEBHOOK_SECRET` | only to receive webhooks | all backend SDKs | Signing secret (`whsec_…`) of the webhook endpoint you registered in the dashboard. |
 | `ORBITID_JWT_KEY` | no | `@orbitid/nextjs` | PEM public key to verify session tokens without fetching the key set. |
 | `ORBITID_JWKS_URL` | no | `@orbitid/node` | Key set URL when it is not `<api url>/.well-known/jwks.json`. |
 | `ORBITID_AUTHORIZED_PARTIES` | no | `@orbitid/nextjs` | Comma-separated origins accepted in the token's `azp` claim. |
 | `ORBITID_AUDIENCE` | no | `@orbitid/node` | Required token audience, if you set one. |
-| `ORBITID_PUBLISHABLE_KEY` | no | `@orbitid/node` | Only needed by server code that builds links for the browser. |
+| `ORBITID_PUBLISHABLE_KEY` | no | `@orbitid/node` | A stand-in for `ORBITID_API_URL`: the server URL is read from it. |
 
 ## WEBSITE · BROWSER (public)
 

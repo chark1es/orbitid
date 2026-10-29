@@ -218,6 +218,14 @@ const SIGNED_OUT_REASONS = new Set([
 export function createOrbitId(options: CreateOrbitIdOptions = {}): OrbitIdNode {
   const secretKey = resolveSecretKey(options);
   const resolvedApiUrl = resolveApiUrl(options);
+  // There is no hosted OrbitID to fall back to, and the secret key must never go anywhere the operator did not name.
+  if (!resolvedApiUrl) {
+    throw new OrbitIdError({
+      code: "configuration_invalid",
+      reason: "configuration",
+      message: "Set ORBITID_API_URL (or the apiUrl option) to the URL of your OrbitID server, or supply a publishable key it can be read from",
+    });
+  }
   const transport: Transport = createTransport({
     fetch: options.fetch,
     timeoutMs: options.timeoutMs,
@@ -227,7 +235,7 @@ export function createOrbitId(options: CreateOrbitIdOptions = {}): OrbitIdNode {
 
   const client = createOrbitIdClient({
     secretKey,
-    ...(resolvedApiUrl ? { apiUrl: resolvedApiUrl } : {}),
+    apiUrl: resolvedApiUrl,
     fetch: transport.request,
   });
 

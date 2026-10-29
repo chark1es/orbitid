@@ -16,8 +16,6 @@ export interface BackendRequestOptions {
   formData?: FormData;
 }
 
-export const DEFAULT_API_URL = "https://api.orbitid.dev";
-
 function joinUrl(base: string, path: string): string {
   return `${base.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
 }
@@ -46,7 +44,11 @@ export class BackendHttp {
   constructor(options: BackendHttpOptions) {
     if (!options.secretKey) throw new Error("createOrbitIdClient requires a secretKey");
     if (!options.fetch && typeof fetch !== "function") throw new Error("No fetch implementation available");
-    this.apiUrl = (options.apiUrl ?? DEFAULT_API_URL).replace(/\/+$/, "");
+    // There is no hosted OrbitID: the secret key may only go where the caller says their own server is.
+    if (!options.apiUrl) {
+      throw new Error("createOrbitIdClient requires an apiUrl: the URL of your OrbitID server, for example https://auth.example.com");
+    }
+    this.apiUrl = options.apiUrl.replace(/\/+$/, "");
     this.secretKey = options.secretKey;
     this.fetchImpl = (options.fetch ?? fetch).bind(globalThis);
   }

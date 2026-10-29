@@ -148,8 +148,24 @@ function portable(value: unknown): unknown {
   return value;
 }
 
-/** Tables introduced after the first release: an export from an older version legitimately lacks them. */
-const ADDED_IN_LATER_RELEASES = new Set(["trusted_devices", "device_codes"]);
+/**
+ * Tables introduced after the first release, with the number of migrations (per dialect) from which they exist. An
+ * export whose schema is older than that legitimately lacks them; a newer one that omits them is incomplete.
+ */
+const ADDED_IN_LATER_RELEASES: Record<string, { postgres: number; sqlite: number }> = {
+  trusted_devices: { postgres: 3, sqlite: 5 },
+  device_codes: { postgres: 3, sqlite: 5 },
+};
+
+/** True when an export made at `schemaVersion` (`<dialect>:<migrations>:<tag>`) predates `table`. */
+function exportPredates(table: string, version: string): boolean {
+  const added = ADDED_IN_LATER_RELEASES[table];
+  if (!added) return false;
+  const [exportDialect, count] = version.split(":");
+  const migrations = Number(count);
+  if ((exportDialect !== "postgres" && exportDialect !== "sqlite") || !Number.isFinite(migrations)) return false;
+  return migrations < added[exportDialect];
+}
 
 function schemaVersion(): string {
   try {
@@ -462,7 +478,7 @@ async function importInto(ctx: AppContext, options: ImportOptions): Promise<Impo
         // A replacement import clears every table, so the file has to account for every table it clears. Only tables
         // added in a later release may be absent (an export from an older version cannot contain them).
         const listed = new Set(header.tables);
-        const absent = [...local.values()].filter((entry) => !SKIPPED_TABLES.has(entry.key) && !listed.has(entry.name) && !ADDED_IN_LATER_RELEASES.has(entry.name)).map((entry) => entry.name);
+        const absent = [...local.values()].filter((entry) => !SKIPPED_TABLES.has(entry.key) && !listed.has(entry.name) && !exportPredates(entry.name, header!.schema_version)).map((entry) => entry.name);
         if (absent.length) {
           throw new Error(`The export is incomplete: it does not list ${absent.join(", ")}. Importing it would leave those tables empty. Use a complete export.`);
         }

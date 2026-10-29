@@ -33,9 +33,9 @@ never returned.
 | Option | Environment variable | Required | Notes |
 |---|---|---|---|
 | `secretKey` | `ORBITID_SECRET_KEY` | **Yes** | `sk_test_…` / `sk_live_…`. A `pk_…` key is rejected: that one belongs in the browser. |
-| `apiUrl` | `ORBITID_API_URL` | No | Defaults to the URL encoded in the publishable key, then the SDK default. |
+| `apiUrl` | `ORBITID_API_URL` | **Yes**, unless a publishable key is given | URL of your OrbitID server. There is no hosted default: without it (or a publishable key to read it from) `createOrbitId()` throws. |
 | `jwksUrl` | `ORBITID_JWKS_URL` | No | Defaults to `${apiUrl}/.well-known/jwks.json`. |
-| `publishableKey` | `ORBITID_PUBLISHABLE_KEY` | No | Only used to derive `apiUrl` when that is unset. |
+| `publishableKey` | `ORBITID_PUBLISHABLE_KEY` | No | A stand-in for `apiUrl`: the server URL is read from it. |
 | `audience` | `ORBITID_AUDIENCE` | No | Expected `aud`. Leave unset for session tokens, which carry none. |
 | `webhookSecret` | `ORBITID_WEBHOOK_SECRET` | No | `whsec_…`. Without it `webhooks.verify()` throws a configuration error. |
 | `clockToleranceSeconds` | — | No | Clock skew allowed for `exp`/`nbf`. Default `5`. |
