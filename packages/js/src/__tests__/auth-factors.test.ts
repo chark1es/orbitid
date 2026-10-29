@@ -133,4 +133,23 @@ describe("trusted devices, email second factor and guest accounts", () => {
     expect(orbit.environment?.authConfig.anonymous.enabled).toBe(true);
     orbit.dispose();
   });
+
+  it("exposes how a session was created and whether a trusted device skipped the second factor", async () => {
+    const api = new ApiMock((call) => {
+      const key = `${call.method} ${call.path}`;
+      if (key === "GET /v1/client") {
+        const session = { ...sessionJSON({ id: "sess_1" }), user: userJSON(), sign_in_method: "passkey" as const, second_factor_skipped_by_trusted_device: true };
+        const client = clientJSON({ sessions: [session], last_active_session_id: "sess_1" });
+        return { body: { response: client, client } };
+      }
+      if (key === "GET /v1/client/environment") return { body: { response: environmentJSON() } };
+      if (key === "POST /v1/client/sessions/sess_1/tokens") return { body: { jwt: fakeJwt() } };
+      return { status: 404, body: {} };
+    });
+    const orbit = new OrbitID(publishableKey, { fetch: api.fetch });
+    await orbit.load();
+    expect(orbit.session?.signInMethod).toBe("passkey");
+    expect(orbit.session?.secondFactorSkippedByTrustedDevice).toBe(true);
+    orbit.dispose();
+  });
 });

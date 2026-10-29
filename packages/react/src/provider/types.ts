@@ -253,6 +253,10 @@ export interface SessionResource {
   publicUserData?: SessionPublicUserData | null;
   actor?: Actor | null;
   lastActiveOrganizationId?: string | null;
+  /** How the session was created (`password`, `email_code`, `passkey`, …), when known. */
+  signInMethod?: string | null;
+  /** True when a trusted device let this sign-in skip the second factor. */
+  secondFactorSkippedByTrustedDevice?: boolean;
   lastActiveToken?: TokenResource | null;
   factorVerificationAge?: [number, number] | null;
   expireAt?: number;
@@ -683,6 +687,8 @@ export interface SignUpResource {
   abandonAt?: number;
   legalAcceptedAt?: number | null;
   create(params?: SignUpCreateParams): Promise<SignUpResource>;
+  /** Creates a guest account (needs `anonymous.enabled` on the instance). */
+  createAnonymous?(params?: { unsafeMetadata?: Metadata; legalAccepted?: boolean }): Promise<SignUpResource>;
   update(params: SignUpCreateParams): Promise<SignUpResource>;
   reload(): Promise<SignUpResource>;
   prepareVerification(params?: { strategy?: string }): Promise<SignUpResource>;
