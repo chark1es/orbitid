@@ -212,6 +212,14 @@ The server hardens what it controls; these parts are yours.
    trace ids and user ids are fine, tokens and codes are never logged by the server but may appear in your proxy's
    logs if a client puts them in a URL.
 
+## Dependency status
+
+`bun audit` is clean except for one advisory in `zod` 3.x (memory use when validating very large arrays that carry
+a length constraint). Fixing it means moving the whole codebase to zod 4, which changes validation behavior across
+every endpoint, so it is tracked separately. It is not reachable in practice: request bodies are capped at 1 MB
+before any validation runs, so the memory a request can cost is bounded by that cap. Development-only tooling
+(vitest, vite, esbuild, postcss) is kept on patched versions through `overrides` in the root `package.json`.
+
 ## Reporting a vulnerability
 
 Please do not open a public issue for a security problem.
