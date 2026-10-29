@@ -98,6 +98,12 @@ describe("sessionActivityRow", () => {
     expect(sessionActivityRow({ ...session(), sign_in_method: null }).method).toBe("unknown");
   });
 
+  it("marks a session that skipped its second factor on a trusted device", () => {
+    const row = sessionActivityRow(session({ second_factor_skipped_by_trusted_device: true }));
+    expect(row.detail).toBe("Second factor skipped: trusted device");
+    expect(row.outcome).toBe("success");
+  });
+
   it("maps a list", () => {
     expect(sessionActivityRows([session(), session({ id: "sess_2" })])).toHaveLength(2);
     expect(sessionActivityRows(undefined)).toEqual([]);

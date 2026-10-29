@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button, Skeleton, Tabs, TabsContent } from "@orbitid/ui";
-import { ArrowLeft, Loader2, UserRound } from "lucide-react";
+import { ArrowLeft, Ghost, Loader2, UserRound } from "lucide-react";
 import type { UserJSON } from "@orbitid/shared";
 import { useApi } from "../lib/api";
 import { errorMessage } from "../lib/errors";
@@ -19,6 +19,7 @@ import { UserProfileTab } from "../components/users/user-profile-tab";
 import { UserIdentifiersTab } from "../components/users/user-identifiers-tab";
 import { UserSecurityTab } from "../components/users/user-security-tab";
 import { UserSessionsTab } from "../components/users/user-sessions-tab";
+import { UserTrustedDevices } from "../components/users/user-trusted-devices";
 import { UserOrganizationsTab } from "../components/users/user-organizations-tab";
 import { UserMetadataTab } from "../components/users/user-metadata-tab";
 import { UserActivityTab } from "../components/users/user-activity-tab";
@@ -29,6 +30,7 @@ const TABS = [
   { value: "identifiers", label: "Identifiers" },
   { value: "security", label: "Security" },
   { value: "sessions", label: "Sessions" },
+  { value: "devices", label: "Trusted devices" },
   { value: "organizations", label: "Organizations" },
   { value: "metadata", label: "Metadata" },
   { value: "activity", label: "Activity" },
@@ -120,7 +122,8 @@ export default function UserDetailPage() {
               {user.banned ? <StatusBadge status="banned" /> : null}
               {user.locked ? <StatusBadge status="locked" /> : null}
               {user.two_factor_enabled ? <StatusBadge status="enabled" label="MFA" /> : null}
-              {!user.banned && !user.locked ? <StatusBadge status="active" /> : null}
+              {user.is_anonymous ? <StatusBadge status="guest" tone="info" label="Guest" /> : null}
+              {!user.banned && !user.locked && !user.is_anonymous ? <StatusBadge status="active" /> : null}
             </div>
             <p className="font-data text-[0.8125rem] text-muted-foreground">{primaryEmail(user) || "No email address"}</p>
             <div className="flex items-center gap-1">
@@ -161,6 +164,21 @@ export default function UserDetailPage() {
         </div>
       </header>
 
+      {user.is_anonymous ? (
+        <div role="note" className="rounded-[4px] border border-info/35 bg-info/5 px-3 py-2.5">
+          <p className="flex items-start gap-2 text-sm font-medium">
+            <Ghost className="mt-0.5 size-4 shrink-0 text-info" strokeWidth={1.5} aria-hidden />
+            Guest account
+          </p>
+          <p className="mt-1 max-w-[75ch] text-sm leading-6 text-muted-foreground">
+            This account has no verified identifier and no password, so it can only be used from the session it was
+            created with. It becomes a registered account the moment it gains a verified email address, a verified phone
+            number, a password or a connected account, and keeps its ID, metadata and sessions. Guests cannot create
+            organizations or API keys.
+          </p>
+        </div>
+      ) : null}
+
       <Tabs value={tab} onValueChange={setTab}>
         <TabStrip tabs={TABS} />
 
@@ -175,6 +193,9 @@ export default function UserDetailPage() {
         </TabsContent>
         <TabsContent value="sessions">
           <UserSessionsTab user={user} onUpdated={refresh} />
+        </TabsContent>
+        <TabsContent value="devices">
+          <UserTrustedDevices userId={user.id} />
         </TabsContent>
         <TabsContent value="organizations">
           <UserOrganizationsTab user={user} onUpdated={refresh} />

@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import type { UserJSON } from "@orbitid/shared";
 import { api } from "../../lib/api";
 import { errorMessage } from "../../lib/errors";
+import { useInstance } from "../../lib/instance";
 import { useUserAdmin } from "../../lib/user-admin";
 import { formatDateTime } from "../../lib/format";
 import { ConfirmDialog } from "../shared/confirm-dialog";
@@ -25,6 +26,9 @@ import { StatusBadge } from "../shared/status-badge";
 
 export function UserSecurityTab({ user, onUpdated }: { user: UserJSON; onUpdated: () => void }) {
   const admin = useUserAdmin(user.id);
+  const instance = useInstance();
+  const emailSecondFactor = instance.data?.attributes?.emailAddress?.usedForSecondFactor === true;
+  const trustedDevicesEnabled = instance.data?.session?.trustedDevicesEnabled;
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [password, setPassword] = useState("");
   const [skipChecks, setSkipChecks] = useState(false);
@@ -117,7 +121,9 @@ export function UserSecurityTab({ user, onUpdated }: { user: UserJSON; onUpdated
             Multi-factor authentication
           </h3>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            TOTP authenticator and single-use backup codes.
+            {emailSecondFactor
+              ? "Authenticator app, email codes and single-use backup codes."
+              : "TOTP authenticator and single-use backup codes."}
           </p>
           <div className="mt-3">
             <div className="flex items-center justify-between gap-3 border-b border-border py-2">
@@ -128,6 +134,13 @@ export function UserSecurityTab({ user, onUpdated }: { user: UserJSON; onUpdated
               />
             </div>
             <div className="flex items-center justify-between gap-3 border-b border-border py-2">
+              <span className="text-sm">Email code</span>
+              <StatusBadge
+                status={emailSecondFactor ? "enabled" : "unverified"}
+                label={emailSecondFactor ? "Offered as a second factor" : "Not offered"}
+              />
+            </div>
+            <div className="flex items-center justify-between gap-3 border-b border-border py-2">
               <span className="text-sm">Backup codes</span>
               <StatusBadge
                 status={user.backup_code_enabled ? "enabled" : "unverified"}
@@ -135,6 +148,18 @@ export function UserSecurityTab({ user, onUpdated }: { user: UserJSON; onUpdated
               />
             </div>
           </div>
+          {emailSecondFactor ? (
+            <p className="mt-3 text-xs leading-5 text-muted-foreground">
+              Email codes are sent to the user&rsquo;s verified address and never offered when the first factor was
+              already an email code or link.
+            </p>
+          ) : null}
+          {trustedDevicesEnabled === false ? (
+            <p className="mt-2 text-xs leading-5 text-muted-foreground">
+              Trusted devices are off on this instance. Turn them on under Sessions to let a browser skip the second
+              factor.
+            </p>
+          ) : null}
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <Button
               size="sm"

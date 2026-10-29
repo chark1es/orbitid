@@ -29,6 +29,15 @@ describe("usersListPath", () => {
     expect(params.get("created_at_after")).toBe("1700000000000");
     expect(params.get("created_at_before")).toBeNull();
   });
+
+  it("sends the account-type filter for both values", () => {
+    const guests = new URLSearchParams(usersListPath({ page: 1, limit: 20, isAnonymous: true }).split("?")[1]);
+    expect(guests.get("is_anonymous")).toBe("true");
+    const registered = new URLSearchParams(usersListPath({ page: 1, limit: 20, isAnonymous: false }).split("?")[1]);
+    expect(registered.get("is_anonymous")).toBe("false");
+    const any = new URLSearchParams(usersListPath({ page: 1, limit: 20 }).split("?")[1]);
+    expect(any.get("is_anonymous")).toBeNull();
+  });
 });
 
 describe("buildListPath", () => {

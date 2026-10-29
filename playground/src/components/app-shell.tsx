@@ -7,10 +7,12 @@ import type { LucideIcon } from "lucide-react";
 import {
   Building2,
   DatabaseZap,
+  Ghost,
   Hourglass,
   KeyRound,
   LogIn,
   Menu,
+  MonitorSmartphone,
   Moon,
   ScanSearch,
   SlidersHorizontal,
@@ -45,6 +47,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/sign-in", label: "Sign in", icon: LogIn },
       { href: "/sign-up", label: "Sign up", icon: UserPlus },
+      { href: "/guest", label: "Guest accounts", icon: Ghost },
       { href: "/waitlist", label: "Waitlist", icon: Hourglass },
     ],
   },
@@ -56,6 +59,12 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   { label: "Organizations", items: [{ href: "/organizations", label: "Organizations", icon: Building2 }] },
+  {
+    label: "OIDC",
+    items: [
+      { href: "/device", label: "Device flow", icon: MonitorSmartphone },
+    ],
+  },
   { label: "Inspector", items: [{ href: "/inspector", label: "Inspector", icon: ScanSearch }] },
   { label: "API lab", items: [{ href: "/api-lab", label: "API lab", icon: Terminal }] },
   { label: "Webhooks", items: [{ href: "/webhooks", label: "Webhooks", icon: Webhook }] },

@@ -1,4 +1,5 @@
 import type { EnvironmentJSON } from "@orbitid/shared";
+import { describeEmailTransport, emailFromEnvironment, EMAIL_TRANSPORT_LABELS, resolveEmailTransport } from "./email";
 import { formatDuration } from "./format";
 
 export type FeatureStatus = "enabled" | "off" | "needs-config";
@@ -27,8 +28,26 @@ export interface InstanceSnapshot {
     lifetimeSeconds?: number;
     tokenLifetimeSeconds?: number;
     multiSession?: boolean;
+    trustedDevicesEnabled?: boolean;
+    trustedDeviceDays?: number;
   };
   mfa?: { required?: boolean };
+  anonymous?: { enabled?: boolean; retentionSeconds?: number };
+  /** Masked email settings: only the `<field>Set` markers are read, never a value. */
+  email?: {
+    provider?: string;
+    resendApiKeySet?: boolean;
+    smtpUrlSet?: boolean;
+  };
+  oidcProvider?: {
+    accessTokenFormat?: string;
+    deviceAuthorizationEnabled?: boolean;
+    deviceCodeLifetimeSeconds?: number;
+    deviceCodeIntervalSeconds?: number;
+  };
+  attributes?: {
+    emailAddress?: { usedForSecondFactor?: boolean };
+  };
 }
 
 export const STATUS_LABEL: Record<FeatureStatus, string> = {
@@ -61,6 +80,7 @@ const FIRST_FACTORS: Array<{ factor: string; label: string; value: string; detai
 const SECOND_FACTORS: Array<{ factor: string; label: string; value: string; detail: string }> = [
   { factor: "totp", label: "Authenticator app", value: "TOTP codes accepted", detail: "Users enroll from the account page security tab." },
   { factor: "phone_code", label: "SMS code", value: "Codes sent to the phone number", detail: "Requires the phone number attribute and an SMS provider." },
+  { factor: "email_code", label: "Email code", value: "Codes sent to the email address", detail: "Never offered when the first factor was an email code or link, so one mailbox cannot satisfy both steps." },
   { factor: "backup_code", label: "Backup codes", value: "Single-use recovery codes accepted", detail: "Ten codes are issued when a user enables them." },
 ];
 
@@ -317,6 +337,139 @@ function captchaRows(env: EnvironmentJSON): FeatureRow[] {
   ];
 }
 
+/** Mail delivery: prefer a public environment field when one exists, else the secret-key settings snapshot. */
+function emailRows(env: EnvironmentJSON, instance?: InstanceSnapshot): FeatureRow[] {
+  const emailCodeSecondFactor = (env.auth_config?.second_factors ?? []).includes("email_code");
+  const rows: FeatureRow[] = [];
+  const fromEnvironment = emailFromEnvironment(env);
+  const email = fromEnvironment ?? instance?.email;
+  if (!email) {
+    rows.push({
+      id: "email.transport",
+      label: "Email delivery",
+      status: "needs-config",
+      value: "Not exposed by the public environment",
+      detail: "Set ORBITID_SECRET_KEY so the setup page can read the mail transport from the Backend API.",
+      tryHref: "/api-lab",
+    });
+  } else {
+    const resolved = resolveEmailTransport(email);
+    rows.push({
+      id: "email.transport",
+      label: "Email delivery",
+      status: resolved.missing ? "needs-config" : resolved.provider === "console" ? "off" : "enabled",
+      value: EMAIL_TRANSPORT_LABELS[resolved.provider],
+      detail: describeEmailTransport(resolved),
+      tryHref: "/api-lab",
+    });
+  }
+  rows.push({
+    id: "email.secondFactor",
+    label: "Email code second factor",
+    status: emailCodeSecondFactor ? "enabled" : "off",
+    value: emailCodeSecondFactor ? "Offered after the first factor" : "Not offered",
+    detail: emailCodeSecondFactor
+      ? "The code goes to a verified email address, with the same lifetime as every other email code."
+      : "Turn it on under User and authentication in the dashboard.",
+    tryHref: "/account",
+  });
+  return rows;
+}
+
+/** Trusted browsers skip the second factor; the public environment carries both switch and duration. */
+function trustedDeviceRows(env: EnvironmentJSON): FeatureRow[] {
+  const trusted = env.auth_config?.trusted_devices;
+  return [
+    {
+      id: "trustedDevices.enabled",
+      label: "Trusted devices",
+      status: trusted?.enabled ? "enabled" : "off",
+      value: trusted?.enabled
+        ? `Remembered for ${trusted.days} ${trusted.days === 1 ? "day" : "days"}`
+        : "Remembered browsers are not offered",
+      detail: trusted?.enabled
+        ? "A second factor can tick “Trust this browser”. Each use rotates the token and the lifetime never extends."
+        : "Turn it on under Sessions in the dashboard to offer the checkbox in the second-factor step.",
+      tryHref: "/account",
+    },
+  ];
+}
+
+/** Guest accounts: public switch, plus the retention period when the secret key can read it. */
+function anonymousRows(env: EnvironmentJSON, instance?: InstanceSnapshot): FeatureRow[] {
+  const enabled = env.auth_config?.anonymous?.enabled === true;
+  const retention = instance?.anonymous?.retentionSeconds;
+  const detail = !enabled
+    ? "Turn it on under User and authentication in the dashboard to accept strategy anonymous."
+    : typeof retention === "number"
+      ? retention > 0
+        ? `Guests with no activity for ${formatDuration(retention)} are deleted.`
+        : "Guest accounts are kept indefinitely; cleanup is off."
+      : "Set ORBITID_SECRET_KEY to read how long inactive guests are kept.";
+  return [
+    {
+      id: "anonymous.enabled",
+      label: "Guest accounts",
+      status: enabled ? "enabled" : "off",
+      value: enabled ? "Anonymous sign-up accepted" : "Not offered",
+      detail,
+      tryHref: "/guest",
+    },
+  ];
+}
+
+/** OIDC provider options live only in the settings tree, so every row needs the secret key. */
+function oidcRows(instance?: InstanceSnapshot): FeatureRow[] {
+  const oidc = instance?.oidcProvider;
+  const deviceEnabled = oidc?.deviceAuthorizationEnabled === true;
+  const jwtTokens = oidc?.accessTokenFormat === "jwt";
+  const lifetime = oidc?.deviceCodeLifetimeSeconds;
+  const interval = oidc?.deviceCodeIntervalSeconds;
+  return [
+    {
+      id: "oidc.deviceFlow",
+      label: "Device authorization grant",
+      status: oidc ? (deviceEnabled ? "enabled" : "off") : "needs-config",
+      value: oidc ? (deviceEnabled ? "CLIs and TVs can request a code" : "Endpoints answer 404") : "Not exposed by the public environment",
+      detail: oidc
+        ? deviceEnabled
+          ? `Codes last ${typeof lifetime === "number" ? formatDuration(lifetime) : "ten minutes"} and the token endpoint accepts one poll every ${interval ?? 5} seconds.`
+          : "Turn it on under OAuth applications in the dashboard."
+        : "Set ORBITID_SECRET_KEY so the setup page can read the provider settings from the Backend API.",
+      tryHref: "/device",
+    },
+    {
+      id: "oidc.accessTokens",
+      label: "JWT access tokens",
+      status: oidc ? (jwtTokens ? "enabled" : "off") : "needs-config",
+      value: oidc ? (jwtTokens ? "RS256 JWTs, verified with the JWKS" : "Opaque tokens, checked at userinfo") : "Not exposed by the public environment",
+      detail: oidc
+        ? jwtTokens
+          ? "Resource servers verify offline. Revocation still wins because grants are recorded."
+          : "Set oidcProvider.accessTokenFormat to jwt to hand out signed access tokens."
+        : "Set ORBITID_SECRET_KEY so the setup page can read the provider settings from the Backend API.",
+      tryHref: "/device",
+    },
+  ];
+}
+
+/** The handshake route is public: the flow is always available, only the redirect rules depend on settings. */
+function handshakeRows(env: EnvironmentJSON): FeatureRow[] {
+  const homeUrl = env.display_config?.home_url;
+  return [
+    {
+      id: "handshake.enabled",
+      label: "Server-side handshake",
+      status: "enabled",
+      value: "GET /v1/client/handshake",
+      detail: homeUrl
+        ? `Mints a fresh session token for a live client cookie and redirects to ${homeUrl}. Other origins answer 400.`
+        : "Mints a fresh session token for a live client cookie and redirects to an allowed origin.",
+      tryHref: "/api-lab",
+    },
+  ];
+}
+
 /** Builds every row the setup page shows from the instance's public environment plus optional settings. */
 export function buildFeatureMatrix(env: EnvironmentJSON, instance?: InstanceSnapshot): FeatureSection[] {
   const identifiers: FeatureRow[] = IDENTIFIERS.map(({ key, label }) => {
@@ -404,6 +557,36 @@ export function buildFeatureMatrix(env: EnvironmentJSON, instance?: InstanceSnap
       id: "session",
       title: "Sessions",
       rows: sessionRows(env, instance),
+    },
+    {
+      id: "trusted-devices",
+      title: "Trusted devices",
+      hint: "Browsers that may skip the second factor.",
+      rows: trustedDeviceRows(env),
+    },
+    {
+      id: "guests",
+      title: "Guest accounts",
+      hint: "Accounts with no identifier yet.",
+      rows: anonymousRows(env, instance),
+    },
+    {
+      id: "email",
+      title: "Email",
+      hint: "How codes and links leave the server.",
+      rows: emailRows(env, instance),
+    },
+    {
+      id: "oidc",
+      title: "OIDC provider",
+      hint: "How OrbitID issues tokens to your applications.",
+      rows: oidcRows(instance),
+    },
+    {
+      id: "handshake",
+      title: "Handshake",
+      hint: "How a hard navigation finds a live session.",
+      rows: handshakeRows(env),
     },
     {
       id: "branding",

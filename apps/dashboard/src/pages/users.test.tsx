@@ -126,6 +126,61 @@ describe("users table", () => {
     expect(requested.some((url) => url.includes("locked=true") && url.includes("banned=true"))).toBe(false);
   });
 
+  it("marks guest accounts and filters the list by account type", async () => {
+    const GUEST: UserJSON = {
+      ...USER,
+      id: "user_guest",
+      username: null,
+      first_name: null,
+      last_name: null,
+      primary_email_address_id: null,
+      email_addresses: [],
+      password_enabled: false,
+      is_anonymous: true,
+    };
+    const requested: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      requested.push(url);
+      const body = url.includes("/v1/users")
+        ? { data: [USER, GUEST], total_count: 2 }
+        : url.includes("/v1/instance")
+          ? { application: { homeUrl: "http://localhost:3000" } }
+          : { data: [], total_count: 0 };
+      return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/users"]}>
+          <Routes>
+            <Route path="/users" element={<UsersPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("Guest")).toBeTruthy();
+    // A registered user keeps the plain status chip, so the word Guest is never ambiguous.
+    expect(screen.getAllByText("Active")).toHaveLength(1);
+
+    const trigger = screen.getByRole("combobox", { name: "Filter users by account type" });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("option", { name: "Guests" }));
+
+    await waitFor(() => {
+      expect(requested.some((url) => url.includes("/v1/users") && url.includes("is_anonymous=true"))).toBe(true);
+    });
+
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Filter users by account type" }), { key: "Enter" });
+    fireEvent.click(await screen.findByRole("option", { name: "Registered" }));
+    await waitFor(() => {
+      expect(requested.some((url) => url.includes("/v1/users") && url.includes("is_anonymous=false"))).toBe(true);
+    });
+  });
+
   it("confirms a bulk delete against the selected user", async () => {
     const methods: string[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {

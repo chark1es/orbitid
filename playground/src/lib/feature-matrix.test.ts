@@ -21,6 +21,11 @@ describe("buildFeatureMatrix", () => {
       "passkeys",
       "organizations",
       "session",
+      "trusted-devices",
+      "guests",
+      "email",
+      "oidc",
+      "handshake",
       "branding",
       "captcha",
     ]);
@@ -155,5 +160,131 @@ describe("buildFeatureMatrix", () => {
     expect(counts.enabled + counts.off + counts["needs-config"]).toBe(total);
     expect(counts.enabled).toBeGreaterThan(0);
     expect(counts.off).toBeGreaterThan(0);
+  });
+
+  it("lists the new server features without the secret key, marking the unreadable ones", () => {
+    const secretRows = ["email.transport", "oidc.deviceFlow", "oidc.accessTokens"];
+    for (const id of secretRows) {
+      expect(findFeatureRow(sections, id)).toMatchObject({
+        status: "needs-config",
+        value: "Not exposed by the public environment",
+      });
+      expect(findFeatureRow(sections, id)?.detail).toContain("ORBITID_SECRET_KEY");
+    }
+    // These two come from the public environment alone.
+    expect(findFeatureRow(sections, "trustedDevices.enabled")).toMatchObject({
+      status: "enabled",
+      value: "Remembered for 30 days",
+      tryHref: "/account",
+    });
+    expect(findFeatureRow(sections, "anonymous.enabled")).toMatchObject({
+      status: "enabled",
+      tryHref: "/guest",
+    });
+    expect(findFeatureRow(sections, "handshake.enabled")).toMatchObject({
+      status: "enabled",
+      value: "GET /v1/client/handshake",
+      tryHref: "/api-lab",
+    });
+  });
+
+  it("reports email code as a second factor from the public environment", () => {
+    const withoutEmail = buildFeatureMatrix({
+      ...environmentFixture,
+      auth_config: { ...environmentFixture.auth_config, second_factors: ["totp", "backup_code"] },
+    });
+    expect(findFeatureRow(sections, "secondFactor.email_code")).toMatchObject({
+      status: "off",
+      value: "Not offered",
+      tryHref: "/account",
+    });
+    expect(findFeatureRow(withoutEmail, "email.secondFactor")).toMatchObject({
+      status: "off",
+      value: "Not offered",
+    });
+    const withEmail = buildFeatureMatrix({
+      ...environmentFixture,
+      auth_config: { ...environmentFixture.auth_config, second_factors: ["totp", "email_code"] },
+    });
+    expect(findFeatureRow(withEmail, "email.secondFactor")).toMatchObject({
+      status: "enabled",
+      value: "Offered after the first factor",
+    });
+  });
+
+  it("reads the mail transport from the instance snapshot and never prints a secret", () => {
+    const resend = buildFeatureMatrix(environmentFixture, {
+      email: { provider: "auto", resendApiKeySet: true, smtpUrlSet: true },
+    });
+    const transport = findFeatureRow(resend, "email.transport");
+    expect(transport).toMatchObject({ status: "enabled", value: "Resend" });
+    expect(transport?.detail).toContain("Inferred from the stored credentials");
+
+    const smtp = buildFeatureMatrix(environmentFixture, {
+      email: { provider: "auto", resendApiKeySet: false, smtpUrlSet: true },
+    });
+    expect(findFeatureRow(smtp, "email.transport")).toMatchObject({ status: "enabled", value: "SMTP" });
+
+    const consoleTransport = buildFeatureMatrix(environmentFixture, {
+      email: { provider: "auto", resendApiKeySet: false, smtpUrlSet: false },
+    });
+    expect(findFeatureRow(consoleTransport, "email.transport")).toMatchObject({
+      status: "off",
+      value: "Print to server log",
+    });
+
+    const explicit = buildFeatureMatrix(environmentFixture, {
+      email: { provider: "resend", resendApiKeySet: false, smtpUrlSet: true },
+    });
+    expect(findFeatureRow(explicit, "email.transport")).toMatchObject({
+      status: "needs-config",
+      value: "Resend",
+    });
+    expect(findFeatureRow(explicit, "email.transport")?.detail).toContain("Sending fails until an API key");
+    expect(JSON.stringify(explicit)).not.toContain("re_");
+  });
+
+  it("reports guest retention, device flow and JWT tokens from the instance snapshot", () => {
+    const enriched = buildFeatureMatrix(environmentFixture, {
+      anonymous: { enabled: true, retentionSeconds: 2_592_000 },
+      oidcProvider: {
+        accessTokenFormat: "jwt",
+        deviceAuthorizationEnabled: true,
+        deviceCodeLifetimeSeconds: 600,
+        deviceCodeIntervalSeconds: 5,
+      },
+    });
+    expect(findFeatureRow(enriched, "anonymous.enabled")?.detail).toBe(
+      "Guests with no activity for 30 days are deleted.",
+    );
+    expect(findFeatureRow(enriched, "oidc.deviceFlow")).toMatchObject({
+      status: "enabled",
+      tryHref: "/device",
+    });
+    expect(findFeatureRow(enriched, "oidc.deviceFlow")?.detail).toContain("one poll every 5 seconds");
+    expect(findFeatureRow(enriched, "oidc.accessTokens")).toMatchObject({ status: "enabled" });
+
+    const indefinite = buildFeatureMatrix(environmentFixture, { anonymous: { enabled: true, retentionSeconds: 0 } });
+    expect(findFeatureRow(indefinite, "anonymous.enabled")?.detail).toBe(
+      "Guest accounts are kept indefinitely; cleanup is off.",
+    );
+
+    const off = buildFeatureMatrix(environmentFixture, {
+      anonymous: { enabled: true, retentionSeconds: 86_400 },
+      oidcProvider: { accessTokenFormat: "opaque", deviceAuthorizationEnabled: false, deviceCodeIntervalSeconds: 5 },
+    });
+    expect(findFeatureRow(off, "oidc.deviceFlow")).toMatchObject({ status: "off", value: "Endpoints answer 404" });
+    expect(findFeatureRow(off, "oidc.accessTokens")?.value).toBe("Opaque tokens, checked at userinfo");
+  });
+
+  it("explains trusted devices that are switched off", () => {
+    const off = buildFeatureMatrix({
+      ...environmentFixture,
+      auth_config: { ...environmentFixture.auth_config, trusted_devices: { enabled: false, days: 30 } },
+    });
+    expect(findFeatureRow(off, "trustedDevices.enabled")).toMatchObject({
+      status: "off",
+      value: "Remembered browsers are not offered",
+    });
   });
 });

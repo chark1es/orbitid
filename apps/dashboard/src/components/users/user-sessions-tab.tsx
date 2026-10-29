@@ -73,7 +73,14 @@ export function UserSessionsTab({ user, onUpdated }: { user: UserJSON; onUpdated
     {
       id: "status",
       header: "Status",
-      cell: (session) => <StatusBadge status={session.status} />,
+      cell: (session) => (
+        <div className="space-y-1">
+          <StatusBadge status={session.status} />
+          {session.second_factor_skipped_by_trusted_device ? (
+            <StatusBadge status="skipped" tone="info" label="Second factor skipped: trusted device" />
+          ) : null}
+        </div>
+      ),
     },
     {
       id: "created",

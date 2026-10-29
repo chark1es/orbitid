@@ -7,7 +7,7 @@ export default function InspectorPage() {
     <div className="space-y-8">
       <PageHeader
         title="Inspector"
-        description="Read the live session: ids, organization, permissions, the decoded JWT and every check that decides access."
+        description="Read the live session: ids, organization, permissions, the decoded JWT, trusted devices and the second-factor skip marker."
       />
       <ProviderGate
         title="The inspector needs a publishable key"
