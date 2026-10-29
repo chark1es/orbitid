@@ -75,7 +75,7 @@ export default function routes(ctx: AppContext) {
 
     let profile: ExternalProfile;
     try {
-      const tokens = await adapter.exchangeCode({ code: params.code, codeVerifier: flow.codeVerifier });
+      const tokens = await adapter.exchangeCode({ code: params.code, codeVerifier: flow.codeVerifier, nonce: flow.nonce ?? undefined });
       profile = await adapter.fetchProfile({ tokens });
       if (provider === "apple") {
         // Apple sends the name only on the very first authorization; later ones carry no `user` field.

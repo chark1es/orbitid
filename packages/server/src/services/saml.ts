@@ -175,12 +175,56 @@ export async function samlAuthorizeUrl(ctx: AppContext, conn: ConnectionRow, rel
   return samlClient(ctx, conn).getAuthorizeUrlAsync(relayState, undefined);
 }
 
+const SUCCESS_STATUS = "urn:oasis:names:tc:SAML:2.0:status:Success";
+
+/** Decodes the five predefined XML entities (attribute values of the values we compare are URLs). */
+const decodeXmlEntities = (value: string) =>
+  value.replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+
+/** Compares URLs the way the validator does (`new URL(...).href`), falling back to a literal comparison. */
+const sameUrl = (received: string, expected: string): boolean => {
+  try {
+    return new URL(received).href === new URL(expected).href;
+  } catch {
+    return received === expected;
+  }
+};
+
+const responseAttribute = (xml: string, element: string, attribute: string): string | null => {
+  const match = new RegExp(`<(?:[\\w.-]+:)?${element}\\b[^>]*\\b${attribute}="([^"]*)"`).exec(xml);
+  return match?.[1] !== undefined ? decodeXmlEntities(match[1]) : null;
+};
+
+/**
+ * Checks the parts of the response `@node-saml/node-saml` only warns about: the status code, the signed
+ * `Destination` and the bearer `Recipient` of the assertion. Reading them unverified is safe here because
+ * this function only ever *rejects*: altering any of these fields on a signed message breaks its signature,
+ * which the library refuses first.
+ */
+function assertResponseTarget(xml: string, acsUrl: string): void {
+  const status = responseAttribute(xml, "StatusCode", "Value");
+  if (status && status !== SUCCESS_STATUS) {
+    throw new Error(`the identity provider reported ${status.split(":").pop()}`);
+  }
+  const destination = responseAttribute(xml, "Response", "Destination");
+  if (destination && !sameUrl(destination, acsUrl)) {
+    throw new Error("the response is addressed to another assertion consumer service");
+  }
+  // Some IdPs omit `Recipient`; when one is present it must name this ACS (SAML profiles §4.1.4.3).
+  const recipients = [...xml.matchAll(/<(?:[\w.-]+:)?SubjectConfirmationData\b[^>]*\bRecipient="([^"]*)"/g)]
+    .map((match) => decodeXmlEntities(match[1]!));
+  if (recipients.length > 0 && !recipients.some((recipient) => sameUrl(recipient, acsUrl))) {
+    throw new Error("the assertion is not addressed to this assertion consumer service");
+  }
+}
+
 /** Validates a signed POST response and returns the parsed profile. */
 export async function validateSamlResponse(ctx: AppContext, conn: ConnectionRow, container: { SAMLResponse?: string }): Promise<Profile> {
   if (!container.SAMLResponse) {
     throw new OrbitError(400, ErrorCodes.verification_failed, "SAMLResponse is missing");
   }
   try {
+    assertResponseTarget(Buffer.from(container.SAMLResponse, "base64").toString("utf8"), acsUrlFor(ctx, conn.id));
     const { profile } = await samlClient(ctx, conn).validatePostResponseAsync({ SAMLResponse: container.SAMLResponse });
     if (!profile) throw new Error("no profile");
     return profile;
