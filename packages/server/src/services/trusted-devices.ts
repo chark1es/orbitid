@@ -12,11 +12,27 @@ import { first } from "../lib/db";
 
 export type TrustedDeviceRow = typeof s.trustedDevices.$inferSelect;
 
-/** A device label that says what it is without naming other products. */
+/** A short, human label such as "Safari on macOS", taken from the user agent. Falls back to a generic name. */
 export function trustedDeviceLabel(userAgent?: string | null): string {
   if (!userAgent) return "Trusted browser";
-  if (/ipad|tablet|silk/i.test(userAgent)) return "Trusted tablet";
-  if (/mobile|android|iphone|ipod/i.test(userAgent)) return "Trusted mobile browser";
+  const ua = userAgent;
+  const os = /iphone|ipod/i.test(ua) ? "iOS"
+    : /ipad/i.test(ua) ? "iPadOS"
+    : /android/i.test(ua) ? "Android"
+    : /windows/i.test(ua) ? "Windows"
+    : /mac os x|macintosh/i.test(ua) ? "macOS"
+    : /cros/i.test(ua) ? "ChromeOS"
+    : /linux|x11/i.test(ua) ? "Linux"
+    : null;
+  const browser = /edg(e|a|ios)?\//i.test(ua) ? "Edge"
+    : /opr\/|opera/i.test(ua) ? "Opera"
+    : /firefox|fxios/i.test(ua) ? "Firefox"
+    : /chrome|crios|chromium/i.test(ua) ? "Chrome"
+    : /safari/i.test(ua) ? "Safari"
+    : null;
+  if (browser && os) return `${browser} on ${os}`;
+  if (browser) return browser;
+  if (os) return `Browser on ${os}`;
   return "Trusted browser";
 }
 
