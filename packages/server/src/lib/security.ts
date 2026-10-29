@@ -6,7 +6,6 @@ import { COOKIES, ErrorCodes, OrbitError } from "@orbitid/shared";
 import { randomToken } from "./crypto";
 import { MAX_UPLOAD_BYTES } from "./http";
 import type { AppContext } from "../context";
-import { operatorCookieOriginAllowed } from "../services/operator-session";
 
 /** Extra origins the dashboard may call (`connect-src`), for operators whose API lives elsewhere. */
 export function dashboardConnectSources(ctx: AppContext): string[] {
@@ -97,29 +96,15 @@ export function requestOriginAllowed(ctx: AppContext, origin: string): boolean {
  * `Origin` on such requests (or at least `Referer`); a request with neither cannot be a browser-driven
  * cross-site attack, so non-browser clients keep working. Bearer-token requests are unaffected.
  *
- * The dashboard's operator cookie is guarded the same way, but only this server's own origin is trusted
- * for it, because the dashboard is served here. A request that carries the operator cookie to any
- * state-changing `/v1` route is checked, not just the Frontend API: the cookie is a Backend API credential.
+ * The Backend API and operator-session endpoints check their own operator-cookie origin. Its presence
+ * must not change the rules for Frontend API requests or federation callbacks that do not authenticate with it.
  */
 export const csrfProtection = (ctx: AppContext): MiddlewareHandler => async (c, next) => {
   const method = c.req.method.toUpperCase();
   if (method !== "POST" && method !== "PUT" && method !== "PATCH" && method !== "DELETE") return next();
   // The OAuth consent POST records a grant for the signed-in user, so it needs the same protection as the Frontend API.
-  const clientRoute = c.req.path.startsWith("/v1/client") || c.req.path === "/oauth/consent";
-  const operatorCookie = getCookie(c, COOKIES.operator);
-  const operatorRoute = !!operatorCookie && c.req.path.startsWith("/v1/");
-  if (!clientRoute && !operatorRoute) return next();
-  const clientCookie = getCookie(c, COOKIES.client);
-  if (!clientCookie && !operatorCookie) return next();
-
-  // The operator cookie belongs to this dashboard only, so it is held to the stricter rule: this server's own
-  // origin, with an explicit Origin never overridden by a Referer. A Frontend API cookie keeps the broader app list.
-  if (operatorCookie && !clientCookie) {
-    if (operatorCookieOriginAllowed(ctx, c)) return next();
-    throw new OrbitError(403, ErrorCodes.not_allowed_access, "Cross-site request blocked. Start the request from this application's origin.", {
-      origin: originOf(c.req.header("origin")),
-    });
-  }
+  if (!c.req.path.startsWith("/v1/client") && c.req.path !== "/oauth/consent") return next();
+  if (!getCookie(c, COOKIES.client)) return next();
 
   const fetchSite = c.req.header("sec-fetch-site")?.toLowerCase() ?? "";
   const origin = c.req.header("origin");

@@ -39,8 +39,8 @@ const CANARY_PREFIX = "orbitid-export-canary-v1:";
 /**
  * Ephemeral and environment-local tables are not copied. `rate_limits` counters describe the old process,
  * not the instance. `operator_sessions` are dashboard logins: copying them would restore an operator's
- * browser session on the target instance (and, with a shared secret key, make an old cookie live again), so
- * an import signs every dashboard out and they sign in again. Everything else (webhooks, deliveries, audit
+ * browser session on the target instance (and, with a shared secret key, make an old cookie live again).
+ * Operators sign in to the target separately. Everything else (webhooks, deliveries, audit
  * logs, in-flight user sessions) moves so the target behaves exactly like the source.
  */
 export const SKIPPED_TABLES: ReadonlySet<string> = new Set(["rateLimits", "operatorSessions"]);
@@ -476,6 +476,8 @@ async function importInto(ctx: AppContext, options: ImportOptions): Promise<Impo
         }
         const unknownTables = header.tables.filter((name) => !local.has(name));
         if (unknownTables.length) throw new Error(`The export contains tables this version does not know: ${unknownTables.join(", ")}`);
+        const excluded = header.tables.filter((name) => SKIPPED_TABLES.has(local.get(name)!.key));
+        if (excluded.length) throw new Error(`The export contains excluded tables that cannot be imported: ${excluded.join(", ")}`);
         if (new Set(header.tables).size !== header.tables.length) throw new Error("The export header lists a table twice");
         // A replacement import clears every table, so the file has to account for every table it clears. Only tables
         // added in a later release may be absent (an export from an older version cannot contain them).

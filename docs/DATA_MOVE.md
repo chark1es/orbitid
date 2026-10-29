@@ -26,9 +26,13 @@ deliveries, audit logs, user sessions and one-time tokens; the target behaves li
 
 Dashboard logins are deliberately left behind. An operator session is bound to the browser that exchanged the
 key, and copying it would make an old cookie live against the target instance (and restore a login nobody there
-approved). After an import every dashboard signs in again with the secret key; user sessions are unaffected.
+approved). An import does not restore source dashboard logins; sign in to the target with its secret key.
+A replacement import also clears existing dashboard logins on the target. User sessions are unaffected.
 An export made before `operator_sessions` existed stays importable, because the table is skipped rather than
 required.
+
+An import that explicitly lists either excluded table is refused before target data is changed, even when
+`--truncate --yes` is set.
 
 ## When to use it
 

@@ -40,7 +40,7 @@ round trip.
 
 ### Backend API: the secret key
 
-Every route under `/v1` outside `/v1/client` needs the instance secret key, except the browser-facing and discovery routes, which carry no secret key: `/v1/jwks`, `/v1/verify` (the magic-link landing page), `/v1/oauth_callback/{provider}`, `/v1/saml/{id}/metadata`, `/v1/saml/{id}/sso`, `/v1/saml/{id}/acs`, `/v1/openapi.json` and the three `/v1/operator_sessions` routes. The `/oauth/*` and `/.well-known/*` protocol endpoints authenticate with OAuth client credentials or not at all, as their standards define. The reference at `/docs` marks each operation with its security requirement.
+Every route under `/v1` outside `/v1/client` needs the instance secret key, except the browser-facing and discovery routes, which carry no secret key: `/v1/jwks`, `/v1/verify` (the magic-link landing page), `/v1/oauth_callback/{provider}`, `/v1/saml/{id}/metadata`, `/v1/saml/{id}/sso`, `/v1/saml/{id}/acs`, `/v1/openapi.json` and the three `/v1/operator_sessions` operations. The `/oauth/*` and `/.well-known/*` protocol endpoints authenticate with OAuth client credentials or not at all, as their standards define. The reference at `/docs` marks each operation with its security requirement.
 
 ```
 Authorization: Bearer sk_live_...

@@ -1,15 +1,9 @@
 /** Dashboard operator sessions: exchanging the instance secret key for an httpOnly, revocable cookie. */
 import { ref } from "../schema";
-import { op, type DocumentedOperation } from "../operation";
-
-/** The `Dashboard` tag, kept in the shared tag list so every operation points at a declared tag. */
-export const dashboardTag = {
-  name: "Dashboard",
-  description: "Operator sign-in for the dashboard: trade the instance secret key for a revocable httpOnly session.",
-};
+import { op, Tags, type DocumentedOperation } from "../operation";
 
 export const operatorSessionPaths: DocumentedOperation[] = [
-  op("post", "/v1/operator_sessions", dashboardTag.name, "createOperatorSession", "Sign in to the dashboard with the secret key", {
+  op("post", "/v1/operator_sessions", Tags.dashboard, "createOperatorSession", "Sign in to the dashboard with the secret key", {
     security: "none",
     description:
       "The one place a browser may present the instance secret key. The key is compared in constant time and rate " +
@@ -37,14 +31,14 @@ export const operatorSessionPaths: DocumentedOperation[] = [
     },
     errors: [401, 403, 429],
   }),
-  op("get", "/v1/operator_sessions/current", dashboardTag.name, "getCurrentOperatorSession", "Check the dashboard session", {
+  op("get", "/v1/operator_sessions/current", Tags.dashboard, "getCurrentOperatorSession", "Check the dashboard session", {
     security: "none",    description:
       "Reports whether this browser still has a live operator session. Used on dashboard load so an expired or " +
       "revoked cookie sends the operator to the sign-in screen. Answers `401` and clears the cookie when there is none.",
     success: { status: 200, schema: ref("OperatorSession") },
-    errors: [401],
+    errors: [401, 403],
   }),
-  op("delete", "/v1/operator_sessions/current", dashboardTag.name, "revokeOperatorSession", "Sign out of the dashboard", {
+  op("delete", "/v1/operator_sessions/current", Tags.dashboard, "revokeOperatorSession", "Sign out of the dashboard", {
     security: "none",
     description: "Revokes this browser's operator session and clears the cookie. Safe to call without a session.",
     success: { status: 204, description: "The session is revoked and the cookie cleared." },

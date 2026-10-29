@@ -68,7 +68,7 @@ export async function api<T = any>(method: string, path: string, body?: unknown)
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
     const e = json?.errors?.[0];
-    if (res.status === 401) {
+    if (res.status === 401 && path !== "/operator_sessions/current") {
       // The session expired or was revoked: tell the shell so it can send the operator to /login.
       window.dispatchEvent(
         new CustomEvent<string>("orbitid:unauthorized", { detail: "Your dashboard session ended. Sign in again." }),

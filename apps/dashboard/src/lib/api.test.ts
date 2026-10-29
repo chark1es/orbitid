@@ -2,6 +2,18 @@ import { describe, expect, it, vi } from "vitest";
 import { api, apiInit, getApiUrl, isSameOrigin, setApiUrl } from "./api";
 
 describe("api 401 handling", () => {
+  it("does not announce an expired session during the initial session check", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 401 }));
+    const listener = vi.fn();
+    window.addEventListener("orbitid:unauthorized", listener);
+    try {
+      await expect(api("GET", "/operator_sessions/current")).rejects.toMatchObject({ status: 401 });
+      expect(listener).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("orbitid:unauthorized", listener);
+    }
+  });
+
   it("signals the guard globally so it can send the operator to /login", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ errors: [{ code: "authentication_invalid", message: "Session ended" }] }), {

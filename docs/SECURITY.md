@@ -63,11 +63,12 @@ cookie** must therefore prove where it came from (`packages/server/src/lib/secur
 - Requests without the `__client` cookie (bearer tokens, unauthenticated callers, server-side SDKs) are not
   affected, because a bearer token is not an ambient credential.
 
-The dashboard's operator cookie is a Backend API credential too, so a state-changing `/v1` request that carries
-`__orbit_operator` is held to the stricter rule: its `Origin` (or `Referer`) must be this instance's own base
-URL, `Sec-Fetch-Site` must not be `cross-site`, and a literal `Origin: null` is refused. Another application
-origin in `allowedOrigins` does not earn access to the operator cookie (`csrfProtection` in
-`packages/server/src/lib/security.ts`).
+The Backend API checks the dashboard's operator cookie on reads and writes. Its `Origin` (or `Referer` when
+`Origin` is absent) must be this instance's own origin. `Sec-Fetch-Site` must be `same-origin`, `none` or absent,
+and a literal `Origin: null` is refused. Another application origin in `allowedOrigins` does not earn operator
+access (`requireSecretKey` in `packages/server/src/middleware.ts`). The operator-session endpoints apply the
+same rule. Frontend API requests and federation callbacks ignore this cookie and keep their own authentication
+rules, so being signed into the dashboard does not prevent an operator from using their application.
 
 Cookies are audited in one place each: `__client` is `HttpOnly`, `SameSite=Lax`, `Path=/`, one year, and
 `Secure` whenever the base URL is https. The dashboard's `__orbit_operator` is `HttpOnly`, `SameSite=Strict`,
@@ -274,7 +275,7 @@ operator while the session is live but cannot exfiltrate the secret key.
   be `same-origin`, `none` or absent; an explicit `Origin` is authoritative, so `null`, a malformed value or another
   host is refused and `Referer` is never consulted in its place; `Referer` is used only when no `Origin` was sent.
   Another application origin in `allowedOrigins` does not qualify, and `SameSite=Strict` means a cross-site request
-  never carries the cookie anyway. The Frontend API's cookie-CSRF guard covers state-changing `/v1` routes.
+  never carries the cookie anyway. The Frontend API's separate CSRF guard checks its own client cookie.
 - The dashboard's CSP allows scripts only from its own origin plus one nonce-tagged bootstrap script, with no
   inline handlers and no `eval`; the app renders every server string through React text nodes (there is no
   `dangerouslySetInnerHTML` anywhere in it); and the page is served with `frame-ancestors 'none'` and `no-store`.
