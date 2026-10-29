@@ -28,7 +28,7 @@ The publishable key carries the Frontend API URL, so `ORBITID_API_URL` is option
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `NEXT_PUBLIC_ORBITID_PUBLISHABLE_KEY` | yes | Frontend API key. Its decoded host is the instance URL. |
-| `ORBITID_SECRET_KEY` | no | Backend API key. Unlocks seed data, webhook endpoint registration and deliveries, and session settings in the matrix. |
+| `ORBITID_SECRET_KEY` | no | Backend API key. Unlocks seed data, webhook endpoint registration and deliveries, session and provider settings in the matrix, and the OAuth application used by the device flow. |
 | `ORBITID_API_URL` | no | Overrides the API host decoded from the key. |
 | `ORBITID_WEBHOOK_SECRET` | no | Endpoint secret used by the webhook receiver. Without it, register the receiver on the Webhooks page or paste the secret there. |
 | `NEXT_PUBLIC_ORBITID_SIGN_IN_URL` | no | Defaults to `/sign-in`. |
@@ -42,18 +42,20 @@ The publishable key carries the Frontend API URL, so `ORBITID_API_URL` is option
 
 | Page | What it exercises |
 | --- | --- |
-| `/` | Connection state and a feature matrix built from `GET /v1/client/environment`. Social providers start a real sign-in. |
+| `/` | Connection state and a feature matrix built from `GET /v1/client/environment`, plus mail, OIDC provider, trusted-device, guest and handshake rows read with the secret key. Social providers start a real sign-in. |
 | `/sign-in`, `/sign-up` | Prebuilt `SignIn` and `SignUp` with path routing. A `__orbit_ticket` query parameter signs in as the ticket's user. |
-| `/account` | Prebuilt `UserProfile`: profile, emails, connected accounts, password, passkeys, MFA, sessions. |
+| `/guest` | `signUp.createAnonymous()` makes a guest session, `useUser().isAnonymous` and the `anonymous` claim are read back, and the same account is upgraded in place by verifying an email address. |
+| `/device` | Device authorization grant (RFC 8628): registers or picks an OAuth application through the Backend API, starts `POST /oauth/device_authorization` from the server, shows the code and link, and polls the token endpoint. |
+| `/account` | Prebuilt `UserProfile`: profile, emails, connected accounts, password, passkeys, MFA, sessions and trusted devices. |
 | `/organizations` | `OrganizationList`, `OrganizationSwitcher`, `OrganizationProfile` and `CreateOrganization`. |
 | `/api-keys` | `APIKeys` for the user and the active organization. |
 | `/waitlist` | `Waitlist`. |
-| `/inspector` | `useAuth`, `useUser`, `useSession`, the decoded session JWT with a countdown, `getToken({ template })`, a `has()` tester, sessions and an activity board. |
-| `/api-lab` | Calls `/api/public`, `/api/whoami` and `/api/admin` with and without a bearer token and shows status, headers and body. |
+| `/inspector` | `useAuth`, `useUser`, `useSession`, the decoded session JWT with a countdown, `getToken({ template })`, a `has()` tester, sessions, trusted devices and an activity board. Sessions that skipped their second factor on a trusted device are marked. |
+| `/api-lab` | Calls `/api/public`, `/api/whoami` and `/api/admin` with and without a bearer token, plus `/api/handshake`, `/api/device` (discovery, probe, start) and `/api/email-test`. Shows status, headers and body. |
 | `/webhooks` | Svix signature verification, the last 100 received events, endpoint registration, a test event, deliveries. |
 | `/seed` | Creates users and an organization through the Backend API, creates sign-in links, lists and deletes the users it made. |
 
-The middleware protects `/account`, `/organizations`, `/api-keys` and `/inspector`. `/`, `/sign-in`, `/sign-up` and the lab pages stay public so a signed-out test is possible.
+The middleware protects `/account`, `/organizations`, `/api-keys` and `/inspector`. `/`, `/sign-in`, `/sign-up`, `/guest`, `/device` and the lab pages stay public so a signed-out test is possible.
 
 ## Tests and checks
 
@@ -64,4 +66,4 @@ cd playground
 ../node_modules/.bin/vitest run
 ```
 
-The unit tests cover the feature matrix builder against an `EnvironmentJSON` fixture, the JWT decoder and countdown, and the `has()` probe helpers.
+The unit tests cover the feature matrix builder against an `EnvironmentJSON` fixture, the mail transport resolution, the device-flow response and poll parsing, the raw session skip marker, the JWT decoder and countdown, and the `has()` probe helpers.

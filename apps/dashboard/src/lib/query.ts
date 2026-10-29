@@ -6,6 +6,8 @@ export interface UsersQuery {
   banned?: boolean;
   locked?: boolean;
   mfa?: boolean;
+  /** `true` lists guest accounts only, `false` registered accounts only. */
+  isAnonymous?: boolean;
   createdAfter?: number;
   createdBefore?: number;
 }
@@ -48,6 +50,8 @@ export function usersListPath(input: UsersQuery): string {
       banned: input.banned,
       locked: input.locked,
       mfa: input.mfa,
+      // Sent as a string because `buildListPath` drops `false` as "no filter".
+      is_anonymous: input.isAnonymous === undefined ? undefined : String(input.isAnonymous),
       created_at_after: input.createdAfter,
       created_at_before: input.createdBefore,
     },

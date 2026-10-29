@@ -5,6 +5,7 @@ import Link from "next/link";
 import { RefreshCw } from "lucide-react";
 import { ActivityBoard, Button, Input, type ActivityRow } from "@orbitid/ui";
 import { useAuth, useSession, useSessionList, useUser } from "@orbitid/react";
+import type { TrustedDeviceResource } from "@orbitid/react";
 import { CopyButton } from "./copy-button";
 import { StatusChip } from "./status-chip";
 import { useClientActivity, type ClientActivityEvent, type ClientActivityInput } from "./inspector/use-client-activity";
@@ -18,6 +19,8 @@ import {
   tokenExpiry,
 } from "@/lib/jwt";
 import { formatDateTime } from "@/lib/format";
+import { frontendApiUrl } from "@/lib/client-env";
+import { rawSessionsFrom, skipMarkerFor, type SkipMarker } from "@/lib/session-markers";
 
 function DataRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -32,11 +35,63 @@ function Mono({ children }: { children: React.ReactNode }) {
   return <span className="font-data text-xs">{children}</span>;
 }
 
+/**
+ * Reads the skip marker from the raw Frontend API list: the SDK's `Session` resource does not copy
+ * `second_factor_skipped_by_trusted_device`, so `useSession()` cannot answer this.
+ */
+function useSkipMarker(sessionId: string | null | undefined, signedIn: boolean | undefined) {
+  const [marker, setMarker] = React.useState<SkipMarker>("unknown");
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!signedIn || !sessionId) {
+      setMarker("unknown");
+      setError(null);
+      return;
+    }
+    const apiUrl = frontendApiUrl();
+    if (!apiUrl) {
+      setError("The publishable key is not readable in the browser.");
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(`${apiUrl}/v1/client/sessions`, {
+          credentials: "include",
+          cache: "no-store",
+          headers: { Accept: "application/json" },
+        });
+        const body: unknown = await response.json().catch(() => null);
+        if (cancelled) return;
+        if (!response.ok) {
+          setError(`GET /v1/client/sessions answered ${response.status}.`);
+          setMarker("unknown");
+          return;
+        }
+        setError(null);
+        setMarker(skipMarkerFor(rawSessionsFrom(body), sessionId));
+      } catch (cause) {
+        if (!cancelled) {
+          setMarker("unknown");
+          setError(cause instanceof Error ? cause.message : "The session list could not be read.");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, signedIn]);
+
+  return { marker, error };
+}
+
 function SessionState() {
   const auth = useAuth({ treatPendingAsSignedOut: false });
-  const { user } = useUser();
+  const { user, isAnonymous } = useUser();
   const { session } = useSession();
   const permissions = auth.orgPermissions ?? [];
+  const skip = useSkipMarker(auth.sessionId, auth.isSignedIn);
 
   return (
     <section aria-labelledby="state-title" className="border">
@@ -119,6 +174,44 @@ function SessionState() {
             <Mono>{formatDateTime(session.expireAt)}</Mono>
           ) : (
             <span className="text-muted-foreground">Not reported by the session resource</span>
+          )}
+        </DataRow>
+        <DataRow label="isAnonymous">
+          {auth.isSignedIn ? (
+            <span className="flex flex-wrap items-center gap-2">
+              <StatusChip kind={isAnonymous ? "enabled" : "off"} label={String(isAnonymous)} />
+              <span className="text-xs text-muted-foreground">
+                {isAnonymous
+                  ? "Guest account: no identifier yet. Signing in again is impossible until it gains one."
+                  : "The account has at least one way to sign in."}
+              </span>
+            </span>
+          ) : (
+            <span className="text-muted-foreground">No session</span>
+          )}
+        </DataRow>
+        <DataRow label="second factor">
+          {skip.marker === "skipped" ? (
+            <span className="flex flex-wrap items-center gap-2">
+              <StatusChip kind="needs-config" label="Skipped: trusted device" />
+              <span className="text-xs text-muted-foreground">
+                This session was created without a second factor because the browser held a trusted-device token.
+              </span>
+            </span>
+          ) : skip.marker === "not-skipped" ? (
+            <span className="flex flex-wrap items-center gap-2">
+              <StatusChip kind="off" label="Not skipped" />
+              <span className="text-xs text-muted-foreground">
+                The instance reports no trusted-device skip for this session.
+              </span>
+            </span>
+          ) : (
+            <span className="flex flex-wrap items-center gap-2">
+              <StatusChip kind="pending" label="Not reported" />
+              <span className="text-xs text-muted-foreground">
+                {skip.error ?? (auth.isSignedIn ? "The session is not in the list yet." : "No session.")}
+              </span>
+            </span>
           )}
         </DataRow>
         <DataRow label="isLoaded">
@@ -620,6 +713,150 @@ function ActivitySection({
   );
 }
 
+function TrustedDevicesSection() {
+  const { user } = useUser();
+  const { isSignedIn, sessionId } = useAuth();
+  const skip = useSkipMarker(sessionId, isSignedIn);
+  const [devices, setDevices] = React.useState<TrustedDeviceResource[] | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [revoking, setRevoking] = React.useState<string | null>(null);
+
+  const load = React.useCallback(async () => {
+    if (!user?.getTrustedDevices) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      setDevices(await user.getTrustedDevices());
+      setError(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The trusted-device request failed.");
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
+
+  React.useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function revoke(deviceId: string) {
+    if (!user?.revokeTrustedDevice) return;
+    setRevoking(deviceId);
+    try {
+      await user.revokeTrustedDevice(deviceId);
+      await load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The device could not be revoked.");
+    } finally {
+      setRevoking(null);
+    }
+  }
+
+  const skipped = skip.marker === "skipped";
+
+  return (
+    <section aria-labelledby="trusted-devices-title" className="border">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
+        <div>
+          <h2 id="trusted-devices-title" className="text-base">
+            Trusted devices
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            Browsers remembered for skipping the second factor. The token is an HttpOnly cookie, so it is never shown
+            here.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <StatusChip kind={skipped ? "needs-config" : "off"} label={skipped ? "This session skipped the second factor" : "No skip on this session"} />
+          <Button type="button" variant="outline" size="xs" onClick={() => void load()} disabled={!isSignedIn || loading}>
+            <RefreshCw aria-hidden="true" className={loading ? "animate-spin" : undefined} />
+            Reload
+          </Button>
+        </div>
+      </div>
+
+      {!isSignedIn ? (
+        <p className="px-4 py-4 text-sm text-muted-foreground">
+          Sign in to list the browsers remembered for this account.
+        </p>
+      ) : error ? (
+        <div role="alert" className="px-4 py-4">
+          <StatusChip kind="failed" label="Could not read trusted devices" />
+          <p className="mt-1 text-sm text-signal">{error}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            The list needs the trusted devices feature to be on. Turn it on under Sessions in the dashboard.
+          </p>
+        </div>
+      ) : loading && !devices ? (
+        <div className="space-y-2 px-4 py-3" aria-busy="true">
+          <div className="h-3 w-40 animate-pulse rounded-sm bg-muted" />
+          <div className="h-10 w-full animate-pulse rounded-sm bg-muted/70" />
+        </div>
+      ) : !devices || devices.length === 0 ? (
+        <p className="px-4 py-4 text-sm text-muted-foreground">
+          No trusted devices. Tick “Trust this browser” on a second-factor sign-in to create one.
+        </p>
+      ) : (
+        <table className="w-full text-sm">
+          <caption className="sr-only">Trusted devices for the signed-in user</caption>
+          <thead>
+            <tr className="border-b text-left">
+              <th scope="col" className="px-4 py-2 text-[0.6875rem] font-semibold tracking-[0.04em] text-muted-foreground uppercase">
+                Device
+              </th>
+              <th scope="col" className="hidden px-4 py-2 text-[0.6875rem] font-semibold tracking-[0.04em] text-muted-foreground uppercase sm:table-cell">
+                Address
+              </th>
+              <th scope="col" className="hidden px-4 py-2 text-[0.6875rem] font-semibold tracking-[0.04em] text-muted-foreground uppercase md:table-cell">
+                Last used
+              </th>
+              <th scope="col" className="px-4 py-2 text-[0.6875rem] font-semibold tracking-[0.04em] text-muted-foreground uppercase">
+                Expires
+              </th>
+              <th scope="col" className="w-10 px-4 py-2 text-right">
+                <span className="sr-only">Actions</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {devices.map((device) => (
+              <tr key={device.id}>
+                <td className="px-4 py-2">
+                  <p className="text-sm">{device.label ?? "Trusted browser"}</p>
+                  <span className="font-data text-[0.6875rem] text-muted-foreground">{device.id}</span>
+                </td>
+                <td className="font-data hidden px-4 py-2 text-xs text-muted-foreground sm:table-cell">
+                  {device.ipAddress ?? "Unknown"}
+                </td>
+                <td className="font-data hidden px-4 py-2 text-xs text-muted-foreground md:table-cell">
+                  {device.lastUsedAt ? formatDateTime(device.lastUsedAt) : "Never used"}
+                </td>
+                <td className="font-data px-4 py-2 text-xs text-muted-foreground">
+                  {device.expiresAt ? formatDateTime(device.expiresAt) : "Unknown"}
+                </td>
+                <td className="px-4 py-2 text-right">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    disabled={revoking !== null}
+                    onClick={() => void revoke(device.id)}
+                  >
+                    {revoking === device.id ? "Revoking" : "Revoke"}
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  );
+}
+
 export function Inspector() {
   const { events, record, clear } = useClientActivity();
   const { isLoaded } = useAuth({ treatPendingAsSignedOut: false });
@@ -636,6 +873,7 @@ export function Inspector() {
       <TemplatePanel record={record} />
       <HasTester record={record} />
       <SessionsTable />
+      <TrustedDevicesSection />
       <ActivitySection record={record} events={events} clear={clear} />
     </div>
   );

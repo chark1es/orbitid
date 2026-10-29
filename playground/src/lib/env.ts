@@ -177,21 +177,54 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
 
-/** Session and MFA settings come from the Backend API and need the secret key. */
+/** Session, mail and OIDC provider settings come from the Backend API and need the secret key. */
 export async function loadInstanceSnapshot(): Promise<InstanceSnapshot | undefined> {
   if (!readSecretKey()) return undefined;
   try {
     const instance = asRecord(await createBackend().instance.getInstance());
     const session = asRecord(instance?.session);
     const mfa = asRecord(instance?.mfa);
+    const anonymous = asRecord(instance?.anonymous);
+    const email = asRecord(instance?.email);
+    const oidc = asRecord(instance?.oidcProvider);
+    const attributes = asRecord(instance?.attributes);
+    const emailAddress = asRecord(attributes?.emailAddress);
+    // Secrets arrive masked; only the `<field>Set` markers are read, so a key never reaches the page.
     return {
       session: {
         lifetimeSeconds: typeof session?.lifetimeSeconds === "number" ? session.lifetimeSeconds : undefined,
         tokenLifetimeSeconds:
           typeof session?.tokenLifetimeSeconds === "number" ? session.tokenLifetimeSeconds : undefined,
         multiSession: typeof session?.multiSession === "boolean" ? session.multiSession : undefined,
+        trustedDevicesEnabled:
+          typeof session?.trustedDevicesEnabled === "boolean" ? session.trustedDevicesEnabled : undefined,
+        trustedDeviceDays: typeof session?.trustedDeviceDays === "number" ? session.trustedDeviceDays : undefined,
       },
       mfa: { required: typeof mfa?.required === "boolean" ? mfa.required : undefined },
+      anonymous: {
+        enabled: typeof anonymous?.enabled === "boolean" ? anonymous.enabled : undefined,
+        retentionSeconds: typeof anonymous?.retentionSeconds === "number" ? anonymous.retentionSeconds : undefined,
+      },
+      email: {
+        provider: typeof email?.provider === "string" ? email.provider : undefined,
+        resendApiKeySet: email?.resendApiKeySet === true,
+        smtpUrlSet: email?.smtpUrlSet === true,
+      },
+      oidcProvider: {
+        accessTokenFormat: typeof oidc?.accessTokenFormat === "string" ? oidc.accessTokenFormat : undefined,
+        deviceAuthorizationEnabled:
+          typeof oidc?.deviceAuthorizationEnabled === "boolean" ? oidc.deviceAuthorizationEnabled : undefined,
+        deviceCodeLifetimeSeconds:
+          typeof oidc?.deviceCodeLifetimeSeconds === "number" ? oidc.deviceCodeLifetimeSeconds : undefined,
+        deviceCodeIntervalSeconds:
+          typeof oidc?.deviceCodeIntervalSeconds === "number" ? oidc.deviceCodeIntervalSeconds : undefined,
+      },
+      attributes: {
+        emailAddress: {
+          usedForSecondFactor:
+            typeof emailAddress?.usedForSecondFactor === "boolean" ? emailAddress.usedForSecondFactor : undefined,
+        },
+      },
     };
   } catch {
     return undefined;

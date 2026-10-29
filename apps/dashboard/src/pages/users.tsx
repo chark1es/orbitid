@@ -31,7 +31,13 @@ import { ConfirmDialog } from "../components/shared/confirm-dialog";
 import { CreateUserDialog } from "../components/users/create-user-dialog";
 import { UserRowActions } from "../components/users/user-row-actions";
 
-const LIST_KEYS = ["banned", "locked", "mfa", "created_after", "created_before"];
+const LIST_KEYS = ["banned", "locked", "mfa", "is_anonymous", "created_after", "created_before"];
+
+const ACCOUNT_TYPES = [
+  { value: "all", label: "All" },
+  { value: "registered", label: "Registered" },
+  { value: "guests", label: "Guests" },
+] as const;
 
 function toDateInput(ms: string): string {
   if (!ms) return "";
@@ -66,6 +72,12 @@ export default function UsersPage() {
 
   const status = table.filter("banned") === "true" ? "banned" : table.filter("locked") === "true" ? "locked" : "all";
   const mfa = table.filter("mfa") === "true" ? "mfa" : "any";
+  const accountType =
+    table.filter("is_anonymous") === "true"
+      ? "guests"
+      : table.filter("is_anonymous") === "false"
+        ? "registered"
+        : "all";
 
   const path = usersListPath({
     page: table.page,
@@ -75,6 +87,7 @@ export default function UsersPage() {
     banned: status === "banned",
     locked: status === "locked",
     mfa: mfa === "mfa",
+    isAnonymous: accountType === "all" ? undefined : accountType === "guests",
     createdAfter: table.filter("created_after") ? Number(table.filter("created_after")) : undefined,
     createdBefore: table.filter("created_before") ? Number(table.filter("created_before")) : undefined,
   });
@@ -198,7 +211,8 @@ export default function UsersPage() {
           {user.banned ? <StatusBadge status="banned" /> : null}
           {user.locked ? <StatusBadge status="locked" /> : null}
           {user.two_factor_enabled ? <StatusBadge status="enabled" label="MFA" /> : null}
-          {!user.banned && !user.locked && !user.two_factor_enabled ? (
+          {user.is_anonymous ? <StatusBadge status="guest" tone="info" label="Guest" /> : null}
+          {!user.banned && !user.locked && !user.two_factor_enabled && !user.is_anonymous ? (
             <StatusBadge status="active" tone="neutral" />
           ) : null}
         </div>
@@ -273,6 +287,23 @@ export default function UsersPage() {
           <SelectContent>
             <SelectItem value="any">Any MFA</SelectItem>
             <SelectItem value="mfa">Has MFA</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select
+          value={accountType}
+          onValueChange={(value) =>
+            table.setFilter("is_anonymous", value === "guests" ? "true" : value === "registered" ? "false" : null)
+          }
+        >
+          <SelectTrigger className="h-[34px] w-[164px]" aria-label="Filter users by account type">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {ACCOUNT_TYPES.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
         <div className="flex items-end gap-1">
