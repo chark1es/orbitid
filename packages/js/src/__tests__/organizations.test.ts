@@ -160,7 +160,18 @@ describe("organizations", () => {
       if (key === "GET /v1/client/me/organization_memberships") return { body: { response: { data: [membershipJSON()], total_count: 2 } } };
       if (key === "DELETE /v1/client/me/organization_memberships/org_1") return { body: { response: { object: "organization_membership", id: "orgmem_1", deleted: true } } };
       if (key === "GET /v1/client/me/organization_invitations") {
-        return { body: { response: [invitationJSON({ organization: organizationJSON() })] } };
+        return {
+          body: {
+            response: [
+              invitationJSON({
+                organization: organizationJSON(),
+                organization_name: "Acme",
+                organization_image_url: "https://img.test/acme.png",
+              }),
+              invitationJSON({ id: "orginv_2", organization: organizationJSON() }),
+            ],
+          },
+        };
       }
       if (key === "POST /v1/client/me/organization_invitations/orginv_1/accept") return { body: { response: invitationJSON({ status: "accepted" }) } };
       if (key === "GET /v1/client/me/organization_suggestions") return { body: { response: [suggestionJSON()] } };
@@ -285,6 +296,10 @@ describe("organizations", () => {
 
     const invitations = await user.getOrganizationInvitations();
     expect(invitations[0]?.organization?.id).toBe("org_1");
+    expect(invitations[0]?.organizationName).toBe("Acme");
+    expect(invitations[0]?.organizationImageUrl).toBe("https://img.test/acme.png");
+    // Servers that only embed `organization` still get a label.
+    expect(invitations[1]?.organizationName).toBe("Acme");
     await invitations[0]!.accept();
     expect(invitations[0]?.status).toBe("accepted");
 

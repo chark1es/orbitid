@@ -70,6 +70,8 @@ export interface NormalizedUser {
   totp_enabled: boolean;
   backup_code_enabled: boolean;
   two_factor_enabled: boolean;
+  /** Guest account with no identifier yet. */
+  is_anonymous: boolean;
   delete_self_enabled: boolean;
   email_addresses: NormalizedEmailAddress[];
   phone_numbers: NormalizedPhoneNumber[];
@@ -299,6 +301,8 @@ const USER_METHODS = [
   "getSessions",
   "revokeSession",
   "getEnterpriseAccounts",
+  "getTrustedDevices",
+  "revokeTrustedDevice",
 ] as const;
 
 export function normalizeUser(raw: unknown): NormalizedUser | null {
@@ -331,6 +335,7 @@ export function normalizeUser(raw: unknown): NormalizedUser | null {
       totp_enabled: bool(raw, "totp_enabled", "totpEnabled"),
       backup_code_enabled: bool(raw, "backup_code_enabled", "backupCodeEnabled"),
       two_factor_enabled: bool(raw, "two_factor_enabled", "twoFactorEnabled"),
+      is_anonymous: bool(raw, "is_anonymous", "isAnonymous"),
       delete_self_enabled: bool(raw, "delete_self_enabled", "deleteSelfEnabled", true),
       email_addresses: emails,
       phone_numbers: phones,

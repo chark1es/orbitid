@@ -1,10 +1,11 @@
 // Sign-up gating (mode/allowlist/blocklist/waitlist/invitations) + one-time tickets.
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, or } from "drizzle-orm";
 import { ErrorCodes, OrbitError, type InvitationJSON } from "@orbitid/shared";
 import { sha256 } from "../lib/crypto";
 import * as s from "../db/schema";
 import type { AppContext } from "../context";
 import { emitEvent } from "./webhooks";
+import { first } from "../lib/db";
 
 export interface IdentifiersToCheck { emails?: string[]; phones?: string[]; invitationTicket?: string | null }
 
@@ -44,13 +45,13 @@ function identifierMatches(identifier: string, email: string | null, phone: stri
   return false;
 }
 
-function allowlistMatches(ctx: AppContext, emails: string[], phones: string[]): boolean {
-  const rows = ctx.db.select().from(s.allowlistIdentifiers).all();
+async function allowlistMatches(ctx: AppContext, emails: string[], phones: string[]): Promise<boolean> {
+  const rows = (await ctx.db.select().from(s.allowlistIdentifiers));
   return rows.some((row) => emails.some((e) => identifierMatches(row.identifier, e, null)) || phones.some((p) => identifierMatches(row.identifier, null, p)));
 }
 
-function blocklistMatches(ctx: AppContext, emails: string[], phones: string[]): string | null {
-  const rows = ctx.db.select().from(s.blocklistIdentifiers).all();
+async function blocklistMatches(ctx: AppContext, emails: string[], phones: string[]): Promise<string | null> {
+  const rows = (await ctx.db.select().from(s.blocklistIdentifiers));
   for (const row of rows) {
     if (emails.some((e) => identifierMatches(row.identifier, e, null))) return row.identifier;
     if (phones.some((p) => identifierMatches(row.identifier, null, p))) return row.identifier;
@@ -59,13 +60,12 @@ function blocklistMatches(ctx: AppContext, emails: string[], phones: string[]): 
 }
 
 /** Pending, unexpired instance invitation for `email` (lowercased comparison). */
-export function pendingInvitationFor(ctx: AppContext, email: string): typeof s.invitations.$inferSelect | undefined {
+export async function pendingInvitationFor(ctx: AppContext, email: string): Promise<typeof s.invitations.$inferSelect | undefined> {
   const normalized = normalizeEmail(email);
-  return ctx.db
-    .select()
-    .from(s.invitations)
-    .where(and(eq(s.invitations.email, normalized), eq(s.invitations.status, "pending")))
-    .all()
+  return (await ctx.db
+      .select()
+      .from(s.invitations)
+      .where(and(eq(s.invitations.email, normalized), eq(s.invitations.status, "pending"))))
     .find((row) => row.expiresAt === null || row.expiresAt > Date.now());
 }
 
@@ -84,18 +84,18 @@ export function serializeInvitation(row: typeof s.invitations.$inferSelect): Inv
 }
 
 /** Validates a one-time ticket without consuming it (used while screening sign-ups). */
-export function validateTicket(ctx: AppContext, ticket: string): TicketGrant {
+export async function validateTicket(ctx: AppContext, ticket: string): Promise<TicketGrant> {
   const tokenHash = sha256(ticket);
   const now = Date.now();
 
-  const signInToken = ctx.db.select().from(s.signInTokens).where(eq(s.signInTokens.tokenHash, tokenHash)).get();
+  const signInToken = first(await ctx.db.select().from(s.signInTokens).where(eq(s.signInTokens.tokenHash, tokenHash)));
   if (signInToken) {
     if (signInToken.status !== "pending") throw new OrbitError(422, ErrorCodes.ticket_invalid, "This sign-in ticket has already been used or revoked.");
     if (signInToken.expiresAt <= now) throw new OrbitError(422, ErrorCodes.ticket_expired, "This sign-in ticket has expired.");
     return { kind: "sign_in_token", userId: signInToken.userId };
   }
 
-  const actorToken = ctx.db.select().from(s.actorTokens).where(eq(s.actorTokens.tokenHash, tokenHash)).get();
+  const actorToken = first(await ctx.db.select().from(s.actorTokens).where(eq(s.actorTokens.tokenHash, tokenHash)));
   if (actorToken) {
     if (actorToken.status !== "pending") throw new OrbitError(422, ErrorCodes.ticket_invalid, "This actor ticket has already been used or revoked.");
     if (actorToken.expiresAt <= now) throw new OrbitError(422, ErrorCodes.ticket_expired, "This actor ticket has expired.");
@@ -107,7 +107,7 @@ export function validateTicket(ctx: AppContext, ticket: string): TicketGrant {
     };
   }
 
-  const invitation = ctx.db.select().from(s.invitations).where(eq(s.invitations.tokenHash, tokenHash)).get();
+  const invitation = first(await ctx.db.select().from(s.invitations).where(eq(s.invitations.tokenHash, tokenHash)));
   if (invitation) {
     if (invitation.status !== "pending") throw new OrbitError(422, ErrorCodes.ticket_invalid, "This invitation has already been used or revoked.");
     if (invitation.expiresAt !== null && invitation.expiresAt <= now) throw new OrbitError(422, ErrorCodes.ticket_expired, "This invitation has expired.");
@@ -132,13 +132,13 @@ export async function assertIdentifiersAllowed(
   if (!emails.length && !phones.length) return {};
 
   // Blocked identifiers never get in — neither via sign-up nor (when the caller opts in) sign-in.
-  const blocked = settings.restrictions.blocklistEnabled ? blocklistMatches(ctx, emails, phones) : null;
+  const blocked = settings.restrictions.blocklistEnabled ? await blocklistMatches(ctx, emails, phones) : null;
   if (blocked) {
     throw new OrbitError(422, ErrorCodes.not_allowed_access, `Access denied for ${blocked}.`, { param_name: "identifier" });
   }
   if (settings.restrictions.blockEmailSubaddresses) {
     const bases = emails.filter((e) => e.includes("+")).map((e) => `${e.slice(0, e.indexOf("+"))}@${emailDomain(e)}`);
-    if (bases.length && blocklistMatches(ctx, bases, [])) {
+    if (bases.length && await blocklistMatches(ctx, bases, [])) {
       throw new OrbitError(422, ErrorCodes.not_allowed_access, "Access denied: this email address is blocked.", { param_name: "email_address" });
     }
   }
@@ -150,27 +150,32 @@ export async function assertIdentifiersAllowed(
 
   // A valid ticket proves the user was invited (or is being impersonated) and bypasses every sign-up restriction.
   if (_ids.invitationTicket) {
-    const grant = validateTicket(ctx, _ids.invitationTicket);
+    const grant = await validateTicket(ctx, _ids.invitationTicket);
     return grant.kind === "invitation" ? { invitationId: grant.invitationId } : {};
   }
 
   const mode = settings.signUp.mode;
-  if (mode === "public") return {};
+  // The allowlist is a restriction in its own right: when it is on, only listed identifiers (or invited ones) get in,
+  // whatever the sign-up mode says.
+  if (mode === "public" && !settings.restrictions.allowlistEnabled) return {};
 
-  const invitation = emails.map((email) => pendingInvitationFor(ctx, email)).find(Boolean);
-  const allowlisted = settings.restrictions.allowlistEnabled && allowlistMatches(ctx, emails, phones);
+  let invitation: Awaited<ReturnType<typeof pendingInvitationFor>>;
+  for (const email of emails) {
+    invitation = await pendingInvitationFor(ctx, email);
+    if (invitation) break;
+  }
+  const allowlisted = settings.restrictions.allowlistEnabled && await allowlistMatches(ctx, emails, phones);
 
-  if (mode === "restricted") {
+  if (mode === "restricted" || mode === "public") {
     if (allowlisted || invitation) return { invitationId: invitation?.id };
     throw new OrbitError(422, ErrorCodes.sign_up_restricted, "Sign-ups are restricted to invited users on this application.");
   }
 
   const waitlistApproved = emails.length
-    ? ctx.db
-        .select()
-        .from(s.waitlistEntries)
-        .where(inArray(s.waitlistEntries.email, emails))
-        .all()
+    ? (await ctx.db
+              .select()
+              .from(s.waitlistEntries)
+              .where(inArray(s.waitlistEntries.email, emails)))
         .some((row) => row.status === "invited" || row.status === "completed")
     : false;
   if (allowlisted || invitation || waitlistApproved) return { invitationId: invitation?.id };
@@ -182,27 +187,42 @@ export async function redeemTicket(
   ctx: AppContext,
   _ticket: string,
 ): Promise<{ kind: "sign_in_token" | "actor_token"; userId: string; actor?: Record<string, unknown>; sessionMaxDurationSeconds?: number } | { kind: "invitation"; invitationId: string; email: string; publicMetadata: Record<string, unknown> }> {
-  const grant = validateTicket(ctx, _ticket);
-  if (grant.kind === "sign_in_token") {
-    ctx.db.update(s.signInTokens).set({ status: "accepted" }).where(eq(s.signInTokens.tokenHash, sha256(_ticket))).run();
-    return { kind: "sign_in_token", userId: grant.userId };
+  const tokenHash = sha256(_ticket);
+  const now = Date.now();
+  // Redeeming is the single statement that decides the winner; a loser gets the same errors as a reused ticket.
+  const signInToken = first(await ctx.db.update(s.signInTokens).set({ status: "accepted" })
+    .where(and(eq(s.signInTokens.tokenHash, tokenHash), eq(s.signInTokens.status, "pending"), gt(s.signInTokens.expiresAt, now)))
+    .returning());
+  if (signInToken) return { kind: "sign_in_token", userId: signInToken.userId };
+  const actorToken = first(await ctx.db.update(s.actorTokens).set({ status: "accepted" })
+    .where(and(eq(s.actorTokens.tokenHash, tokenHash), eq(s.actorTokens.status, "pending"), gt(s.actorTokens.expiresAt, now)))
+    .returning());
+  if (actorToken) {
+    return {
+      kind: "actor_token",
+      userId: actorToken.userId,
+      actor: (actorToken.actor ?? {}) as Record<string, unknown>,
+      sessionMaxDurationSeconds: actorToken.sessionMaxDurationSeconds,
+    };
   }
-  if (grant.kind === "actor_token") {
-    ctx.db.update(s.actorTokens).set({ status: "accepted" }).where(eq(s.actorTokens.tokenHash, sha256(_ticket))).run();
-    return { kind: "actor_token", userId: grant.userId, actor: grant.actor, sessionMaxDurationSeconds: grant.sessionMaxDurationSeconds };
-  }
-  // Invitations stay `pending` until the sign-up completes (markInvitationAccepted), like Clerk.
+  // Only an invitation can still be live here; validateTicket raises the exact error otherwise.
+  const grant = await validateTicket(ctx, _ticket);
+  if (grant.kind !== "invitation") throw new OrbitError(422, ErrorCodes.ticket_invalid, "This ticket has already been used or revoked.");
+  // Invitations stay `pending` until the sign-up completes (markInvitationAccepted).
   return { kind: "invitation", invitationId: grant.invitationId, email: grant.email, publicMetadata: grant.publicMetadata };
 }
 
 /** Mark an invitation accepted & waitlist entry completed after a successful sign-up. */
 export async function markInvitationAccepted(ctx: AppContext, _invitationId: string, _userId: string): Promise<void> {
-  const invitation = ctx.db.select().from(s.invitations).where(eq(s.invitations.id, _invitationId)).get();
-  if (!invitation) return;
   const now = Date.now();
-  if (invitation.status === "pending") {
-    ctx.db.update(s.invitations).set({ status: "accepted", updatedAt: now }).where(eq(s.invitations.id, invitation.id)).run();
-  }
-  ctx.db.update(s.waitlistEntries).set({ status: "completed", updatedAt: now }).where(eq(s.waitlistEntries.invitationId, invitation.id)).run();
-  await emitEvent(ctx, "invitation.accepted", { ...serializeInvitation(invitation), status: "accepted", user_id: _userId, updated_at: now });
+  const accepted = first(await ctx.db.update(s.invitations).set({ status: "accepted", updatedAt: now })
+    .where(and(
+      eq(s.invitations.id, _invitationId),
+      eq(s.invitations.status, "pending"),
+      or(isNull(s.invitations.expiresAt), gt(s.invitations.expiresAt, now)),
+    ))
+    .returning());
+  if (!accepted) return;
+  await ctx.db.update(s.waitlistEntries).set({ status: "completed", updatedAt: now }).where(eq(s.waitlistEntries.invitationId, accepted.id));
+  await emitEvent(ctx, "invitation.accepted", { ...serializeInvitation(accepted), status: "accepted", user_id: _userId, updated_at: now });
 }

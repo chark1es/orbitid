@@ -32,6 +32,8 @@ export interface FakeOrg {
   id: string;
   name: string;
   slug: string;
+  /** `created_by` of the organization; defaults to the fake signed-in user. */
+  createdBy?: string | null;
   hasImage?: boolean;
   maxAllowedMemberships?: number;
   adminDeleteEnabled?: boolean;
@@ -53,6 +55,9 @@ export interface FakeInvitation {
   organizationId: string;
   role: string;
   createdAt?: number;
+  /** Denormalized label the server adds to `GET /me/organization_invitations`. */
+  organizationName?: string;
+  organizationImageUrl?: string;
 }
 
 export interface FakeDomain {
@@ -344,6 +349,7 @@ export function createFakeInstance(providedBackend?: Partial<FakeBackend>): Fake
       imageUrl: `https://img.test/${org.id}.png`,
       hasImage: Boolean(org.hasImage),
       membersCount: own().length,
+      createdBy: org.createdBy ?? backend.self.id,
       maxAllowedMemberships: org.maxAllowedMemberships ?? 5,
       adminDeleteEnabled: org.adminDeleteEnabled ?? true,
       createdAt: Date.now(),
@@ -504,6 +510,8 @@ export function createFakeInstance(providedBackend?: Partial<FakeBackend>): Fake
     id: invitation.id,
     emailAddress: invitation.emailAddress,
     organizationId: invitation.organizationId,
+    organizationName: invitation.organizationName,
+    organizationImageUrl: invitation.organizationImageUrl,
     role: invitation.role,
     roleName: roleName(invitation.role),
     status: "pending",

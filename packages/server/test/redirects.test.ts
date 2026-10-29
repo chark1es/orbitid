@@ -4,7 +4,7 @@ import { createContext } from "../src/bootstrap";
 import { validateRedirectUrl } from "../src/modules/auth/redirects";
 
 async function ctx() {
-  const c = await createContext({ databasePath: ":memory:", secretKey: "sk_test_x", baseUrl: "http://localhost:4000" });
+  const c = await createContext({ databaseUrl: ":memory:", secretKey: "sk_test_x", baseUrl: "http://localhost:4000" });
   await c.settings.update({ application: { homeUrl: "https://app.example.com", allowedOrigins: ["https://app.example.com"], developmentMode: false } });
   return c;
 }

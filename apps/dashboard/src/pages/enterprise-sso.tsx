@@ -1,31 +1,14 @@
 import { useState } from "react";
 import type { EnterpriseConnectionJSON, PaginatedList } from "@orbitid/shared";
 import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-  Badge,
   Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
   Input,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
   Switch,
-  Table,
   TableBody,
   TableCell,
   TableHead,
@@ -49,16 +32,20 @@ import {
 import {
   ConfirmDialog,
   CopyButton,
+  DetailSheet,
   EmptyState,
   EndpointRow,
   ErrorAlert,
   Field,
   JsonEditor,
+  MetaChip,
   PageHeader,
-  SectionCard,
+  RuledTable,
+  StatusBadge,
   StringListEditor,
   SwitchRow,
   TableSkeleton,
+  ValidationSummary,
 } from "./_config/ui";
 
 type Protocol = "saml" | "oidc";
@@ -113,7 +100,7 @@ export default function Page() {
   const apiBase = getApiUrl();
   const query = useApi<PaginatedList<EnterpriseConnectionJSON>>(["enterprise_connections"], "/enterprise_connections?limit=100");
   const connections = unwrapList<EnterpriseConnectionJSON>(query.data);
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<SsoForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
@@ -121,11 +108,12 @@ export default function Page() {
   const [selected, setSelected] = useState<EnterpriseConnectionJSON | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [updatingAdvanced, setUpdatingAdvanced] = useState(false);
+  const [replacementSecret, setReplacementSecret] = useState("");
 
   const openWizard = () => {
     setForm(EMPTY_FORM);
     setStep(0);
-    setDialogOpen(true);
+    setWizardOpen(true);
   };
 
   const domains = form.domains.map((domain) => normalizeDomain(domain)).filter(Boolean);
@@ -173,8 +161,8 @@ export default function Page() {
       }
       await api("POST", "/enterprise_connections", body);
       await query.refetch();
-      toast.success("Enterprise connection created", { description: "Activate it after verifying the IdP configuration." });
-      setDialogOpen(false);
+      toast.success("Enterprise connection created", { description: "Activate it after you verify the IdP configuration." });
+      setWizardOpen(false);
     } catch (error) {
       toast.error("Could not create connection", { description: errorMessage(error) });
     } finally {
@@ -204,6 +192,21 @@ export default function Page() {
       toast.success("Connection updated");
     } catch (error) {
       toast.error("Could not update connection", { description: errorMessage(error) });
+    } finally {
+      setUpdatingAdvanced(false);
+    }
+  };
+
+  /** The OIDC client secret is write-only: it is sent alone, never echoed back with the rest of the connection. */
+  const replaceOidcSecret = async () => {
+    if (!detail || !replacementSecret.trim()) return;
+    setUpdatingAdvanced(true);
+    try {
+      await api("PATCH", `/enterprise_connections/${detail.id}`, { client_secret: replacementSecret });
+      setReplacementSecret("");
+      toast.success("Client secret replaced", { description: "The previous secret stops working immediately." });
+    } catch (error) {
+      toast.error("Could not replace client secret", { description: errorMessage(error) });
     } finally {
       setUpdatingAdvanced(false);
     }
@@ -251,244 +254,89 @@ export default function Page() {
       <PageHeader
         title="Enterprise SSO"
         description="Domain-routed SAML 2.0 and OpenID Connect connections. Users with a matching email domain are sent to the identity provider."
+        badge={<MetaChip>{connections.length} {connections.length === 1 ? "connection" : "connections"}</MetaChip>}
         actions={
           <Button size="sm" onClick={openWizard}>
-            <Plus className="size-4" /> Connect SSO
+            <Plus className="size-4" aria-hidden /> Connect SSO
           </Button>
         }
       />
 
       {query.error ? <ErrorAlert error={errorMessage(query.error)} onRetry={() => void query.refetch()} /> : null}
 
-      <SectionCard title="Connections" description="Only active connections participate in domain-based sign-in routing.">
+      <section className="space-y-3">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 className="text-sm font-semibold">Connections</h2>
+          <p className="text-xs text-muted-foreground">Only active connections take part in domain routing.</p>
+        </div>
         {query.isLoading ? (
           <TableSkeleton />
         ) : connections.length === 0 ? (
           <EmptyState
             title="No enterprise connections"
-            description="Connect Okta, Entra ID, Google Workspace, or any SAML/OIDC identity provider."
-            icon={<Building2 className="size-6" />}
+            description="Connect any SAML 2.0 or OpenID Connect identity provider your organization already uses."
+            icon={<Building2 className="size-5" />}
             action={
               <Button size="sm" onClick={openWizard}>
-                <Plus className="size-4" /> Connect SSO
+                <Plus className="size-4" aria-hidden /> Connect SSO
               </Button>
             }
           />
         ) : (
-          <div className="rounded-lg border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Connection</TableHead>
-                  <TableHead>Protocol</TableHead>
-                  <TableHead>Domains</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead className="w-24" />
+          <RuledTable>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Connection</TableHead>
+                <TableHead>Protocol</TableHead>
+                <TableHead>Domains</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Created</TableHead>
+                <TableHead className="w-24 text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {connections.map((connection) => (
+                <TableRow key={connection.id}>
+                  <TableCell className="text-sm font-medium">{connection.name}</TableCell>
+                  <TableCell className="font-data text-xs uppercase">{connection.protocol}</TableCell>
+                  <TableCell>
+                    <span className="block max-w-[22rem] truncate text-xs text-muted-foreground">{connection.domains.join(", ")}</span>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2.5">
+                      <Switch checked={connection.active} onCheckedChange={() => void toggleActive(connection)} aria-label="Connection active" />
+                      <StatusBadge status={connection.active ? "active" : "disabled"} />
+                    </div>
+                  </TableCell>
+                  <TableCell className="font-data text-xs text-muted-foreground">{formatDate(connection.created_at)}</TableCell>
+                  <TableCell>
+                    <div className="flex items-center justify-end gap-1">
+                      <Button variant="ghost" size="icon-sm" onClick={() => setDetail(connection)} title="Details">
+                        <Eye className="size-4" aria-hidden />
+                        <span className="sr-only">Details for {connection.name}</span>
+                      </Button>
+                      <Button variant="ghost" size="icon-sm" className="text-destructive" onClick={() => setSelected(connection)} title="Delete">
+                        <Trash2 className="size-4" aria-hidden />
+                        <span className="sr-only">Delete {connection.name}</span>
+                      </Button>
+                    </div>
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {connections.map((connection) => (
-                  <TableRow key={connection.id}>
-                    <TableCell className="font-medium">{connection.name}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="uppercase">
-                        {connection.protocol}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        {connection.domains.map((domain) => (
-                          <Badge key={domain} variant="secondary">
-                            {domain}
-                          </Badge>
-                        ))}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Switch checked={connection.active} onCheckedChange={() => void toggleActive(connection)} aria-label="Connection active" />
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{formatDate(connection.created_at)}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1">
-                        <Button variant="ghost" size="icon-sm" onClick={() => setDetail(connection)} title="Details">
-                          <Eye className="size-4" />
-                          <span className="sr-only">Details</span>
-                        </Button>
-                        <Button variant="ghost" size="icon-sm" className="text-destructive" onClick={() => setSelected(connection)} title="Delete">
-                          <Trash2 className="size-4" />
-                          <span className="sr-only">Delete</span>
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
-      </SectionCard>
-
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>Connect enterprise SSO</DialogTitle>
-            <DialogDescription>Step {step + 1} of 3 — {step === 0 ? "protocol and domains" : step === 1 ? "identity provider" : "review"}</DialogDescription>
-          </DialogHeader>
-          <div className="mb-2 flex gap-1">
-            {[0, 1, 2].map((index) => (
-              <div key={index} className={`h-1 flex-1 rounded-full ${index <= step ? "bg-primary" : "bg-muted"}`} />
-            ))}
-          </div>
-          {step === 0 ? (
-            <div className="space-y-3">
-              <Field label="Connection name" htmlFor="sso-name" required>
-                <Input id="sso-name" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} placeholder="Okta production" />
-              </Field>
-              <Field label="Protocol" htmlFor="sso-protocol">
-                <Select value={form.protocol} onValueChange={(protocol) => setForm((current) => ({ ...current, protocol: protocol as Protocol }))}>
-                  <SelectTrigger id="sso-protocol" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="saml">SAML 2.0</SelectItem>
-                    <SelectItem value="oidc">OpenID Connect</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field label="Email domains" required description="Sign-ins with these email domains route to this connection.">
-                <StringListEditor
-                  values={form.domains}
-                  onChange={(domains) => setForm((current) => ({ ...current, domains }))}
-                  placeholder="example.com"
-                  addLabel="Add domain"
-                  inputType="text"
-                />
-              </Field>
-            </div>
-          ) : step === 1 ? (
-            <div className="space-y-3">
-              {form.protocol === "saml" ? (
-                <>
-                  <Field label="IdP entity ID" htmlFor="sso-idp-entity" required>
-                    <Input
-                      id="sso-idp-entity"
-                      value={form.idpEntityId}
-                      onChange={(event) => setForm((current) => ({ ...current, idpEntityId: event.target.value }))}
-                      placeholder="http://www.okta.com/exk…"
-                    />
-                  </Field>
-                  <Field label="IdP SSO URL" htmlFor="sso-idp-sso" required>
-                    <Input
-                      id="sso-idp-sso"
-                      value={form.idpSsoUrl}
-                      onChange={(event) => setForm((current) => ({ ...current, idpSsoUrl: event.target.value }))}
-                      placeholder="https://example.okta.com/app/…/sso/saml"
-                    />
-                  </Field>
-                  <Field label="IdP signing certificate" htmlFor="sso-idp-cert" required description="PEM or Base64 X.509 certificate.">
-                    <Textarea
-                      id="sso-idp-cert"
-                      rows={5}
-                      value={form.idpCertificate}
-                      onChange={(event) => setForm((current) => ({ ...current, idpCertificate: event.target.value }))}
-                      className="font-mono text-xs"
-                      placeholder="-----BEGIN CERTIFICATE-----"
-                    />
-                  </Field>
-                  <Field label="Attribute mapping (JSON)" error={mapping.error}>
-                    <JsonEditor
-                      value={form.attributeMappingText}
-                      onChange={(attributeMappingText) => setForm((current) => ({ ...current, attributeMappingText }))}
-                      rows={6}
-                      error={mapping.error}
-                    />
-                  </Field>
-                </>
-              ) : (
-                <>
-                  <Field label="Discovery URL" htmlFor="sso-oidc-discovery" required>
-                    <Input
-                      id="sso-oidc-discovery"
-                      value={form.discoveryUrl}
-                      onChange={(event) => setForm((current) => ({ ...current, discoveryUrl: event.target.value }))}
-                      placeholder="https://auth.example.com/.well-known/openid-configuration"
-                    />
-                  </Field>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label="Client ID" htmlFor="sso-oidc-client-id" required>
-                      <Input id="sso-oidc-client-id" value={form.clientId} onChange={(event) => setForm((current) => ({ ...current, clientId: event.target.value }))} />
-                    </Field>
-                    <Field label="Client secret" htmlFor="sso-oidc-client-secret" required>
-                      <Input
-                        id="sso-oidc-client-secret"
-                        type="password"
-                        autoComplete="new-password"
-                        value={form.clientSecret}
-                        onChange={(event) => setForm((current) => ({ ...current, clientSecret: event.target.value }))}
-                      />
-                    </Field>
-                  </div>
-                </>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <div className="grid gap-2 sm:grid-cols-2">
-                <div className="rounded-lg border px-3 py-2">
-                  <p className="text-xs text-muted-foreground">Name</p>
-                  <p className="text-sm font-medium">{form.name || "—"}</p>
-                </div>
-                <div className="rounded-lg border px-3 py-2">
-                  <p className="text-xs text-muted-foreground">Protocol</p>
-                  <p className="text-sm font-medium uppercase">{form.protocol}</p>
-                </div>
-                <div className="rounded-lg border px-3 py-2 sm:col-span-2">
-                  <p className="text-xs text-muted-foreground">Domains</p>
-                  <p className="text-sm font-medium">{domains.join(", ") || "—"}</p>
-                </div>
-              </div>
-              {form.protocol === "saml" ? (
-                <div className="space-y-2 rounded-lg border p-3">
-                  <p className="text-sm font-medium">Service provider details</p>
-                  <p className="text-xs text-muted-foreground">The connection is created inactive. Copy these values into your IdP.</p>
-                  <EndpointRow label="ACS URL" url={`${apiBase}/v1/saml/pending/acs`} />
-                  <EndpointRow label="SP entity ID" url={`${apiBase}/v1/saml/pending`} />
-                  <EndpointRow label="Metadata URL" url={`${apiBase}/v1/saml/pending/metadata`} />
-                  <p className="text-xs text-muted-foreground">The final connection ID is assigned after creation; open the connection to copy the real values.</p>
-                </div>
-              ) : null}
-              <SwitchRow
-                label="Allow subdomains"
-                description="Match users in subdomains of the configured domains."
-                checked={form.allowSubdomains}
-                onCheckedChange={(allowSubdomains) => setForm((current) => ({ ...current, allowSubdomains }))}
-              />
-              <SwitchRow
-                label="Allow IdP-initiated sign-in"
-                description="Accept unsolicited SAML responses from the identity provider."
-                checked={form.allowIdpInitiated}
-                onCheckedChange={(allowIdpInitiated) => setForm((current) => ({ ...current, allowIdpInitiated }))}
-              />
-              <SwitchRow
-                label="Sync user attributes"
-                description="Update first name, last name, and image from IDP claims on each sign-in."
-                checked={form.syncUserAttributes}
-                onCheckedChange={(syncUserAttributes) => setForm((current) => ({ ...current, syncUserAttributes }))}
-              />
-            </div>
-          )}
-          {allErrors.length > 0 ? (
-            <ul className="list-disc space-y-0.5 pl-5 text-xs text-destructive">
-              {allErrors.map((error) => (
-                <li key={error}>{error}</li>
               ))}
-            </ul>
-          ) : null}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={saving}>
+            </TableBody>
+          </RuledTable>
+        )}
+      </section>
+
+      <DetailSheet
+        open={wizardOpen}
+        onOpenChange={setWizardOpen}
+        size="lg"
+        title="Connect enterprise SSO"
+        description={`Step ${step + 1} of 3: ${step === 0 ? "name and domains" : step === 1 ? "identity provider" : "review"}`}
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setWizardOpen(false)} disabled={saving}>
               Cancel
             </Button>
             {step > 0 ? (
@@ -508,109 +356,285 @@ export default function Page() {
                 {saving ? "Creating…" : "Create connection"}
               </Button>
             )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Sheet open={detail !== null} onOpenChange={(open) => !open && setDetail(null)}>
-        <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-2xl">
-          <SheetHeader>
-            <SheetTitle className="flex items-center gap-2">
-              {detail?.name}
-              {detail ? <Badge variant={detail.active ? "default" : "secondary"}>{detail.active ? "Active" : "Inactive"}</Badge> : null}
-            </SheetTitle>
-            <SheetDescription className="uppercase">{detail?.protocol} connection</SheetDescription>
-          </SheetHeader>
-          {detail ? (
-            <div className="space-y-4 px-4 pb-4">
-              <SwitchRow
-                label="Active"
-                description="Route sign-ins for these domains to this identity provider."
-                checked={detail.active}
-                onCheckedChange={() => void toggleActive(detail)}
+          </>
+        }
+      >
+        <div className="mb-4 flex gap-1" aria-hidden>
+          {[0, 1, 2].map((index) => (
+            <span key={index} className={`h-0.5 flex-1 ${index <= step ? "bg-foreground" : "bg-border"}`} />
+          ))}
+        </div>
+        {step === 0 ? (
+          <div className="space-y-4">
+            <Field label="Connection name" htmlFor="sso-name" required>
+              <Input id="sso-name" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} placeholder="Corporate identity provider" />
+            </Field>
+            <Field label="Protocol" htmlFor="sso-protocol">
+              <Select value={form.protocol} onValueChange={(protocol) => setForm((current) => ({ ...current, protocol: protocol as Protocol }))}>
+                <SelectTrigger id="sso-protocol" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="saml">SAML 2.0</SelectItem>
+                  <SelectItem value="oidc">OpenID Connect</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Email domains" required description="Sign-ins with these email domains route to this connection.">
+              <StringListEditor
+                values={form.domains}
+                onChange={(nextDomains) => setForm((current) => ({ ...current, domains: nextDomains }))}
+                placeholder="example.com"
+                addLabel="Add domain"
+                inputType="text"
               />
-              <div className="flex flex-wrap gap-1">
-                {detail.domains.map((domain) => (
-                  <Badge key={domain} variant="secondary">
-                    {domain}
-                  </Badge>
-                ))}
+            </Field>
+            <ValidationSummary errors={step0Errors} title="Fix these to continue" />
+          </div>
+        ) : step === 1 ? (
+          <div className="space-y-4">
+            {form.protocol === "saml" ? (
+              <>
+                <Field label="IdP entity ID" htmlFor="sso-idp-entity" required>
+                  <Input
+                    id="sso-idp-entity"
+                    value={form.idpEntityId}
+                    onChange={(event) => setForm((current) => ({ ...current, idpEntityId: event.target.value }))}
+                    placeholder="https://idp.example.com/entity"
+                    className="font-data text-xs"
+                  />
+                </Field>
+                <Field label="IdP SSO URL" htmlFor="sso-idp-sso" required>
+                  <Input
+                    id="sso-idp-sso"
+                    value={form.idpSsoUrl}
+                    onChange={(event) => setForm((current) => ({ ...current, idpSsoUrl: event.target.value }))}
+                    placeholder="https://idp.example.com/app/sso/saml"
+                    className="font-data text-xs"
+                  />
+                </Field>
+                <Field label="IdP signing certificate" htmlFor="sso-idp-cert" required description="PEM or Base64 X.509 certificate.">
+                  <Textarea
+                    id="sso-idp-cert"
+                    rows={5}
+                    value={form.idpCertificate}
+                    onChange={(event) => setForm((current) => ({ ...current, idpCertificate: event.target.value }))}
+                    className="font-data text-xs"
+                    placeholder="-----BEGIN CERTIFICATE-----"
+                  />
+                </Field>
+                <Field label="Attribute mapping (JSON)" error={mapping.error}>
+                  <JsonEditor
+                    value={form.attributeMappingText}
+                    onChange={(attributeMappingText) => setForm((current) => ({ ...current, attributeMappingText }))}
+                    rows={6}
+                    error={mapping.error}
+                    aria-label="Attribute mapping"
+                  />
+                </Field>
+              </>
+            ) : (
+              <>
+                <Field label="Discovery URL" htmlFor="sso-oidc-discovery" required>
+                  <Input
+                    id="sso-oidc-discovery"
+                    value={form.discoveryUrl}
+                    onChange={(event) => setForm((current) => ({ ...current, discoveryUrl: event.target.value }))}
+                    placeholder="https://auth.example.com/.well-known/openid-configuration"
+                    className="font-data text-xs"
+                  />
+                </Field>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="Client ID" htmlFor="sso-oidc-client-id" required>
+                    <Input
+                      id="sso-oidc-client-id"
+                      value={form.clientId}
+                      onChange={(event) => setForm((current) => ({ ...current, clientId: event.target.value }))}
+                      className="font-data text-xs"
+                    />
+                  </Field>
+                  <Field label="Client secret" htmlFor="sso-oidc-client-secret" required>
+                    <Input
+                      id="sso-oidc-client-secret"
+                      type="password"
+                      autoComplete="new-password"
+                      value={form.clientSecret}
+                      onChange={(event) => setForm((current) => ({ ...current, clientSecret: event.target.value }))}
+                    />
+                  </Field>
+                </div>
+              </>
+            )}
+            <ValidationSummary errors={step1Errors} title="Fix these to continue" />
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <dl className="divide-y divide-border border-y border-border">
+              <div className="flex items-baseline justify-between gap-4 py-2">
+                <dt className="text-xs text-muted-foreground">Name</dt>
+                <dd className="text-sm font-medium">{form.name || "Not set"}</dd>
               </div>
-              {detail.protocol === "saml" ? (
-                <div className="space-y-2">
-                  <p className="text-sm font-medium">Service provider details</p>
-                  <p className="text-xs text-muted-foreground">Use these values in your IdP's SAML application.</p>
-                  <EndpointRow label="ACS URL" url={samlSpDetails(detail, apiBase).acsUrl} />
-                  <EndpointRow label="SP entity ID" url={samlSpDetails(detail, apiBase).entityId} />
-                  <EndpointRow label="Metadata URL" url={samlSpDetails(detail, apiBase).metadataUrl} />
-                  <Button variant="outline" size="sm" onClick={() => void downloadMetadata(detail)}>
-                    <Download className="size-4" /> Download metadata XML
-                  </Button>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <p className="text-sm font-medium">OpenID Connect</p>
-                  <EndpointRow label="Discovery URL" url={detail.oidc?.discovery_url ?? "—"} />
-                  {detail.oidc?.client_id ? (
-                    <div className="flex items-center justify-between gap-2 rounded-lg border px-3 py-2">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium">Client ID</p>
-                        <code className="block truncate text-xs text-muted-foreground">{detail.oidc.client_id}</code>
-                      </div>
-                      <CopyButton value={detail.oidc.client_id} size="icon-sm" variant="outline" />
-                    </div>
-                  ) : null}
-                </div>
-              )}
+              <div className="flex items-baseline justify-between gap-4 py-2">
+                <dt className="text-xs text-muted-foreground">Protocol</dt>
+                <dd className="font-data text-xs uppercase">{form.protocol}</dd>
+              </div>
+              <div className="flex items-baseline justify-between gap-4 py-2">
+                <dt className="text-xs text-muted-foreground">Domains</dt>
+                <dd className="text-sm font-medium">{domains.join(", ") || "Not set"}</dd>
+              </div>
+            </dl>
+            {form.protocol === "saml" ? (
               <div className="space-y-2">
-                <p className="text-sm font-medium">Advanced</p>
-                <SwitchRow
-                  label="Allow subdomains"
-                  checked={detail.allow_subdomains}
-                  disabled={updatingAdvanced}
-                  onCheckedChange={(allow_subdomains) => void updateAdvanced({ allow_subdomains })}
-                />
-                <SwitchRow
-                  label="Allow IdP-initiated sign-in"
-                  checked={detail.allow_idp_initiated}
-                  disabled={updatingAdvanced}
-                  onCheckedChange={(allow_idp_initiated) => void updateAdvanced({ allow_idp_initiated })}
-                />
-                <SwitchRow
-                  label="Sync user attributes"
-                  checked={detail.sync_user_attributes}
-                  disabled={updatingAdvanced}
-                  onCheckedChange={(sync_user_attributes) => void updateAdvanced({ sync_user_attributes })}
-                />
-                <SwitchRow
-                  label="Disable additional identifications"
-                  description="Prevent users from adding email addresses outside this IdP's domains."
-                  checked={detail.disable_additional_identifications}
-                  disabled={updatingAdvanced}
-                  onCheckedChange={(disable_additional_identifications) => void updateAdvanced({ disable_additional_identifications })}
-                />
+                <p className="text-sm font-medium">Service provider details</p>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  The connection is created inactive. Your IdP needs these values, but the connection ID is assigned on creation. Open the
+                  connection afterward to copy the final values.
+                </p>
+                <EndpointRow label="ACS URL" url={`${apiBase}/v1/saml/pending/acs`} />
+                <EndpointRow label="SP entity ID" url={`${apiBase}/v1/saml/pending`} />
+                <EndpointRow label="Metadata URL" url={`${apiBase}/v1/saml/pending/metadata`} />
               </div>
-              <Alert>
-                <AlertTitle>Domain routing</AlertTitle>
-                <AlertDescription>
-                  Sign-ins with an email at {detail.domains.join(", ")} return the enterprise SSO factor. Deactivating this
-                  connection falls back to your other sign-in methods.
-                </AlertDescription>
-              </Alert>
-            </div>
-          ) : null}
-          <SheetFooter>
+            ) : null}
+            <SwitchRow
+              label="Allow subdomains"
+              description="Match users in subdomains of the configured domains."
+              checked={form.allowSubdomains}
+              onCheckedChange={(allowSubdomains) => setForm((current) => ({ ...current, allowSubdomains }))}
+            />
+            <SwitchRow
+              label="Allow IdP-initiated sign-in"
+              description="Accept unsolicited SAML responses from the identity provider."
+              checked={form.allowIdpInitiated}
+              onCheckedChange={(allowIdpInitiated) => setForm((current) => ({ ...current, allowIdpInitiated }))}
+            />
+            <SwitchRow
+              label="Sync user attributes"
+              description="Update first name, last name, and image from IdP claims on each sign-in."
+              checked={form.syncUserAttributes}
+              onCheckedChange={(syncUserAttributes) => setForm((current) => ({ ...current, syncUserAttributes }))}
+            />
+            <ValidationSummary errors={allErrors} title="Fix these before creating the connection" />
+          </div>
+        )}
+      </DetailSheet>
+
+      <DetailSheet
+        open={detail !== null}
+        onOpenChange={(open) => !open && setDetail(null)}
+        size="lg"
+        title={detail?.name ?? "Connection"}
+        description={detail ? `${detail.protocol.toUpperCase()} connection` : undefined}
+        footer={
+          <>
             <Button variant="outline" onClick={() => setDetail(null)}>
               Close
             </Button>
             {detail ? (
               <Button variant="destructive" onClick={() => setSelected(detail)}>
-                <Trash2 className="size-4" /> Delete
+                <Trash2 className="size-4" aria-hidden /> Delete
               </Button>
             ) : null}
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
+          </>
+        }
+      >
+        {detail ? (
+          <div className="space-y-5">
+            <SwitchRow
+              label="Active"
+              description="Route sign-ins for these domains to this identity provider."
+              checked={detail.active}
+              onCheckedChange={() => void toggleActive(detail)}
+            />
+            <div className="flex flex-wrap gap-1">
+              {detail.domains.map((domain) => (
+                <span key={domain} className="border border-border px-1.5 py-0.5 font-data text-xs text-muted-foreground">
+                  {domain}
+                </span>
+              ))}
+            </div>
+            {detail.protocol === "saml" ? (
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Service provider details</p>
+                <p className="text-xs leading-relaxed text-muted-foreground">Use these values in the SAML application at your IdP.</p>
+                <EndpointRow label="ACS URL" url={samlSpDetails(detail, apiBase).acsUrl} />
+                <EndpointRow label="SP entity ID" url={samlSpDetails(detail, apiBase).entityId} />
+                <EndpointRow label="Metadata URL" url={samlSpDetails(detail, apiBase).metadataUrl} />
+                <Button variant="outline" size="sm" onClick={() => void downloadMetadata(detail)}>
+                  <Download className="size-4" aria-hidden /> Download metadata XML
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-sm font-medium">OpenID Connect</p>
+                <EndpointRow label="Discovery URL" url={detail.oidc?.discovery_url ?? "Not set"} />
+                {detail.oidc?.client_id ? (
+                  <div className="flex items-center justify-between gap-3 border-b border-border py-2">
+                    <div className="min-w-0">
+                      <p className="text-[0.8125rem] font-medium">Client ID</p>
+                      <code className="block truncate font-data text-xs text-muted-foreground">{detail.oidc.client_id}</code>
+                    </div>
+                    <CopyButton value={detail.oidc.client_id} size="icon-sm" variant="outline" />
+                  </div>
+                ) : null}
+                <Field
+                  label="Replace client secret"
+                  htmlFor="sso-oidc-replace-secret"
+                  description="The stored secret is never returned by the API. Leave blank to keep it; type a new value to replace it."
+                >
+                  <Input
+                    id="sso-oidc-replace-secret"
+                    type="password"
+                    autoComplete="new-password"
+                    value={replacementSecret}
+                    onChange={(event) => setReplacementSecret(event.target.value)}
+                    placeholder="Leave blank to keep the stored secret"
+                  />
+                </Field>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!replacementSecret.trim() || updatingAdvanced}
+                  onClick={() => void replaceOidcSecret()}
+                >
+                  Replace secret
+                </Button>
+              </div>
+            )}
+            <div>
+              <p className="pb-1 text-sm font-medium">Advanced</p>
+              <SwitchRow
+                label="Allow subdomains"
+                checked={detail.allow_subdomains}
+                disabled={updatingAdvanced}
+                onCheckedChange={(allow_subdomains) => void updateAdvanced({ allow_subdomains })}
+              />
+              <SwitchRow
+                label="Allow IdP-initiated sign-in"
+                checked={detail.allow_idp_initiated}
+                disabled={updatingAdvanced}
+                onCheckedChange={(allow_idp_initiated) => void updateAdvanced({ allow_idp_initiated })}
+              />
+              <SwitchRow
+                label="Sync user attributes"
+                checked={detail.sync_user_attributes}
+                disabled={updatingAdvanced}
+                onCheckedChange={(sync_user_attributes) => void updateAdvanced({ sync_user_attributes })}
+              />
+              <SwitchRow
+                label="Disable additional identifications"
+                description="Prevent users from adding email addresses outside this IdP's domains."
+                checked={detail.disable_additional_identifications}
+                disabled={updatingAdvanced}
+                onCheckedChange={(disable_additional_identifications) => void updateAdvanced({ disable_additional_identifications })}
+              />
+            </div>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Sign-ins with an email at {detail.domains.join(", ")} return the enterprise SSO factor. Deactivating the connection falls back
+              to the other sign-in methods.
+            </p>
+          </div>
+        ) : null}
+      </DetailSheet>
 
       <ConfirmDialog
         open={selected !== null}
@@ -618,7 +642,7 @@ export default function Page() {
         title="Delete enterprise connection?"
         description={
           <span>
-            Users at <strong>{selected?.domains.join(", ")}</strong> will no longer be routed to this identity provider.
+            Users at <strong>{selected?.domains.join(", ")}</strong> are no longer routed to this identity provider.
           </span>
         }
         confirmLabel="Delete connection"

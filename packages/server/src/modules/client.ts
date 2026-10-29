@@ -20,6 +20,7 @@ import { sendEmail, sendSms } from "../services/mail";
 import { clientAzp, clearClientCookie, getOrCreateClient, serializeClient } from "./auth/client-auth";
 import { verificationAges } from "./auth/reverification";
 import { checkCode, getVerification, issueVerification, verificationJSON } from "./auth/verifications";
+import { first } from "../lib/db";
 
 const touchSchema = z.object({ active_organization_id: z.string().nullish() });
 const tokenSchema = z.object({ template: z.string().nullish(), skip_cache: z.boolean().optional() });
@@ -37,14 +38,14 @@ const attemptFirstSchema = z.object({
 const prepareSecondSchema = z.object({ strategy: z.enum(["totp", "phone_code", "backup_code"]), phone_number_id: z.string().optional() });
 const attemptSecondSchema = z.object({ strategy: z.enum(["totp", "phone_code", "backup_code"]), code: z.string().min(1) });
 
-const sessionVerification = (ctx: AppContext, sessionId: string): VerificationJSON | null => {
-  const row = getVerification(ctx, "reverify_first_factor", sessionId) ?? getVerification(ctx, "reverify_second_factor", sessionId);
+const sessionVerification = async (ctx: AppContext, sessionId: string): Promise<VerificationJSON | null> => {
+  const row = await getVerification(ctx, "reverify_first_factor", sessionId) ?? await getVerification(ctx, "reverify_second_factor", sessionId);
   return verificationJSON(row);
 };
 
-const withVerification = (ctx: AppContext, session: SessionJSON, extra?: VerificationJSON | null): SessionJSON & { verification: VerificationJSON | null } => ({
+const withVerification = async (ctx: AppContext, session: SessionJSON, extra?: VerificationJSON | null): Promise<SessionJSON & { verification: VerificationJSON | null }> => ({
   ...session,
-  verification: extra ?? sessionVerification(ctx, session.id),
+  verification: extra ?? await sessionVerification(ctx, session.id),
 });
 
 /** Maps a file extension to a content type (uploads only ever get image types). */
@@ -54,64 +55,64 @@ export default function routes(ctx: AppContext) {
   const app = new Hono();
 
   app.get("/", async (c) => {
-    const client = getOrCreateClient(ctx, c);
+    const client = await getOrCreateClient(ctx, c);
     const json = await serializeClient(ctx, client, { azp: clientAzp(c) });
     return c.json({ response: json, client: json });
   });
 
   app.delete("/", async (c) => {
-    const client = getOrCreateClient(ctx, c);
-    const rows = ctx.db.select().from(s.sessions).where(eq(s.sessions.clientId, client.id)).all();
+    const client = await getOrCreateClient(ctx, c);
+    const rows = (await ctx.db.select().from(s.sessions).where(eq(s.sessions.clientId, client.id)));
     for (const row of rows) {
       if (row.status === "active" || row.status === "pending") await endSession(ctx, row, "removed");
     }
-    ctx.db.update(s.clients).set({ lastActiveSessionId: null, updatedAt: Date.now() }).where(eq(s.clients.id, client.id)).run();
+    await ctx.db.update(s.clients).set({ lastActiveSessionId: null, updatedAt: Date.now() }).where(eq(s.clients.id, client.id));
     clearClientCookie(c, ctx);
-    const fresh = ctx.db.select().from(s.clients).where(eq(s.clients.id, client.id)).get()!;
+    const fresh = first(await ctx.db.select().from(s.clients).where(eq(s.clients.id, client.id)))!;
     const json = await serializeClient(ctx, fresh, { azp: clientAzp(c) });
     return c.json({ response: json, client: json });
   });
 
   app.get("/sessions", async (c) => {
-    const client = requireClientRow(ctx, c);
-    const rows = ctx.db.select().from(s.sessions).where(eq(s.sessions.clientId, client.id)).orderBy(desc(s.sessions.createdAt)).all();
+    const client = await requireClientRow(ctx, c);
+    const rows = (await ctx.db.select().from(s.sessions).where(eq(s.sessions.clientId, client.id)).orderBy(desc(s.sessions.createdAt)));
     const response: SessionJSON[] = [];
     for (const stored of rows) {
-      const status = evaluateSessionStatus(ctx, stored);
+      const status = await evaluateSessionStatus(ctx, stored);
       if (status === "expired") continue;
       const row = { ...stored, status };
       let token: string | null = null;
       if (status === "active" || status === "pending") {
         try { token = await signSessionToken(ctx, row.id, { azp: clientAzp(c) }); } catch { token = null; }
       }
-      response.push(serializeSession(ctx, row, { withUser: true, lastToken: token }));
+      response.push(await serializeSession(ctx, row, { withUser: true, lastToken: token }));
     }
     return c.json({ response });
   });
 
   app.post("/sessions/:id/touch", async (c) => {
-    const client = requireClientRow(ctx, c);
-    const row = requireSession(ctx, client.id, sessionParam(c));
+    const client = await requireClientRow(ctx, c);
+    const row = await requireSession(ctx, client.id, sessionParam(c));
     const body = await parseBody(c, touchSchema);
     const updated = await touchSession(ctx, row, { organizationId: body.active_organization_id });
     const json = await serializeClient(ctx, client, { azp: clientAzp(c) });
-    return c.json({ response: serializeSession(ctx, updated, { withUser: true }), client: json });
+    return c.json({ response: await serializeSession(ctx, updated, { withUser: true }), client: json });
   });
 
   const end = (status: "ended" | "removed") => async (c: Context) => {
-    const client = requireClientRow(ctx, c);
-    const row = requireSession(ctx, client.id, sessionParam(c));
+    const client = await requireClientRow(ctx, c);
+    const row = await requireSession(ctx, client.id, sessionParam(c));
     const updated = await endSession(ctx, row, status);
     const json = await serializeClient(ctx, client, { azp: clientAzp(c) });
-    return c.json({ response: serializeSession(ctx, updated, { withUser: true }), client: json });
+    return c.json({ response: await serializeSession(ctx, updated, { withUser: true }), client: json });
   };
   app.post("/sessions/:id/end", end("ended"));
   app.post("/sessions/:id/remove", end("removed"));
 
   const mintToken = async (c: Context, template?: string) => {
-    const client = requireClientRow(ctx, c);
-    const row = requireSession(ctx, client.id, sessionParam(c));
-    hit(ctx, `session_token:${client.id}`, 300, 60_000);
+    const client = await requireClientRow(ctx, c);
+    const row = await requireSession(ctx, client.id, sessionParam(c));
+    await hit(ctx, `session_token:${client.id}`, 300, 60_000);
     const jwt = await signSessionToken(ctx, row.id, { template, azp: clientAzp(c) });
     return c.json({ jwt });
   };
@@ -123,36 +124,36 @@ export default function routes(ctx: AppContext) {
 
   // ───────────── session reverification ─────────────
   app.post("/sessions/:id/verify", async (c) => {
-    const client = requireClientRow(ctx, c);
-    const row = requireSession(ctx, client.id, sessionParam(c));
+    const client = await requireClientRow(ctx, c);
+    const row = await requireSession(ctx, client.id, sessionParam(c));
     await parseBody(c, verifySchema);
     const clientJson = await serializeClient(ctx, client, { azp: clientAzp(c) });
     return c.json({
-      response: withVerification(ctx, serializeSession(ctx, row, { withUser: true }), { status: "unverified", strategy: "first_factor", attempts: null, expire_at: null }),
+      response: await withVerification(ctx, await serializeSession(ctx, row, { withUser: true }), { status: "unverified", strategy: "first_factor", attempts: null, expire_at: null }),
       client: clientJson,
     });
   });
 
   app.post("/sessions/:id/verify/prepare_first_factor", async (c) => {
-    const client = requireClientRow(ctx, c);
-    const row = requireSession(ctx, client.id, sessionParam(c));
+    const client = await requireClientRow(ctx, c);
+    const row = await requireSession(ctx, client.id, sessionParam(c));
     const body = await parseBody(c, prepareFirstSchema);
-    hit(ctx, `reverify_prepare:${client.id}`, 30, 60_000);
-    const user = userOfSession(ctx, row);
+    await hit(ctx, `reverify_prepare:${client.id}`, 30, 60_000);
+    const user = await userOfSession(ctx, row);
     const strategy = body.strategy ?? "email_code";
-    const emails = ctx.db.select().from(s.emailAddresses).where(and(eq(s.emailAddresses.userId, user.id), eq(s.emailAddresses.verified, true))).all();
-    const phones = verifiedSecondFactorPhones(ctx, user);
+    const emails = (await ctx.db.select().from(s.emailAddresses).where(and(eq(s.emailAddresses.userId, user.id), eq(s.emailAddresses.verified, true))));
+    const phones = await verifiedSecondFactorPhones(ctx, user);
     let verification: VerificationJSON | null = null;
     if (strategy === "email_code") {
       const email = body.email_address_id ? emails.find((e) => e.id === body.email_address_id) : emails[0];
       if (!email) throw new OrbitError(400, ErrorCodes.strategy_for_user_invalid, "This user has no verified email address");
-      const issued = issueVerification(ctx, { purpose: "reverify_first_factor", strategy: "email_code", identifier: email.email, ownerId: row.id, lifetimeSeconds: ctx.settings.get().email.codeLifetimeSeconds });
+      const issued = await issueVerification(ctx, { purpose: "reverify_first_factor", strategy: "email_code", identifier: email.email, ownerId: row.id, lifetimeSeconds: ctx.settings.get().email.codeLifetimeSeconds });
       await sendEmail(ctx, { to: email.email, template: "verification_code", vars: { code: issued.code, expires_in_minutes: Math.round(ctx.settings.get().email.codeLifetimeSeconds / 60) } });
       verification = verificationJSON(issued.row);
     } else if (strategy === "phone_code") {
       const phone = body.phone_number_id ? phones.find((p) => p.id === body.phone_number_id) : phones[0];
       if (!phone) throw new OrbitError(400, ErrorCodes.strategy_for_user_invalid, "This user has no verified phone number");
-      const issued = issueVerification(ctx, { purpose: "reverify_first_factor", strategy: "phone_code", identifier: phone.phone, ownerId: row.id, lifetimeSeconds: ctx.settings.get().email.codeLifetimeSeconds });
+      const issued = await issueVerification(ctx, { purpose: "reverify_first_factor", strategy: "phone_code", identifier: phone.phone, ownerId: row.id, lifetimeSeconds: ctx.settings.get().email.codeLifetimeSeconds });
       await sendSms(ctx, phone.phone, `Your ${ctx.settings.get().application.name} verification code is ${issued.code}`);
       verification = verificationJSON(issued.row);
     } else {
@@ -164,43 +165,43 @@ export default function routes(ctx: AppContext) {
   });
 
   app.post("/sessions/:id/verify/attempt_first_factor", async (c) => {
-    const client = requireClientRow(ctx, c);
-    const row = requireSession(ctx, client.id, sessionParam(c));
+    const client = await requireClientRow(ctx, c);
+    const row = await requireSession(ctx, client.id, sessionParam(c));
     const body = await parseBody(c, attemptFirstSchema);
-    hit(ctx, `reverify_attempt:${client.id}`, 60, 60_000);
-    const user = userOfSession(ctx, row);
+    await hit(ctx, `reverify_attempt:${client.id}`, 60, 60_000);
+    const user = await userOfSession(ctx, row);
     const strategy = body.strategy ?? "email_code";
     if (strategy === "password") {
       if (!user.passwordHash || !body.password || !(await verifyPassword(user.passwordHash, body.password))) {
-        recordFailedAttempt(ctx, user.id);
+        await recordFailedAttempt(ctx, user.id);
         throw new OrbitError(422, ErrorCodes.form_password_incorrect, "Password is incorrect", { param_name: "password" });
       }
-      resetFailedAttempts(ctx, user.id);
+      await resetFailedAttempts(ctx, user.id);
     } else {
-      const verification = getVerification(ctx, "reverify_first_factor", row.id);
+      const verification = await getVerification(ctx, "reverify_first_factor", row.id);
       if (verification && verification.strategy !== strategy) throw new OrbitError(422, ErrorCodes.form_code_incorrect, "That verification code is incorrect", { param_name: "code" });
-      checkCode(ctx, verification, body.code);
+      await checkCode(ctx, verification, body.code);
     }
-    markSessionReverified(ctx, row.id, "first_factor");
+    await markSessionReverified(ctx, row.id, "first_factor");
     const verification = strategy === "password"
       ? { status: "verified" as const, strategy: "password", attempts: null, expire_at: null }
-      : verificationJSON(getVerification(ctx, "reverify_first_factor", row.id));
+      : verificationJSON(await getVerification(ctx, "reverify_first_factor", row.id));
     const clientJson = await serializeClient(ctx, client, { azp: clientAzp(c) });
     return c.json({ response: verification, client: clientJson });
   });
 
   app.post("/sessions/:id/verify/prepare_second_factor", async (c) => {
-    const client = requireClientRow(ctx, c);
-    const row = requireSession(ctx, client.id, sessionParam(c));
+    const client = await requireClientRow(ctx, c);
+    const row = await requireSession(ctx, client.id, sessionParam(c));
     const body = await parseBody(c, prepareSecondSchema);
-    const user = userOfSession(ctx, row);
-    if (!userHasMfa(ctx, user)) throw new OrbitError(400, ErrorCodes.mfa_not_enabled, "This user has not enabled MFA");
+    const user = await userOfSession(ctx, row);
+    if (!await userHasMfa(ctx, user)) throw new OrbitError(400, ErrorCodes.mfa_not_enabled, "This user has not enabled MFA");
     let verification: VerificationJSON | null = { status: "unverified", strategy: body.strategy, attempts: null, expire_at: null };
     if (body.strategy === "phone_code") {
-      const phones = verifiedSecondFactorPhones(ctx, user);
+      const phones = await verifiedSecondFactorPhones(ctx, user);
       const phone = body.phone_number_id ? phones.find((p) => p.id === body.phone_number_id) : phones.find((p) => p.defaultSecondFactor) ?? phones[0];
       if (!phone) throw new OrbitError(400, ErrorCodes.strategy_for_user_invalid, "This user has no verified second-factor phone number");
-      const issued = issueVerification(ctx, { purpose: "reverify_second_factor", strategy: "phone_code", identifier: phone.phone, ownerId: row.id, lifetimeSeconds: ctx.settings.get().email.codeLifetimeSeconds });
+      const issued = await issueVerification(ctx, { purpose: "reverify_second_factor", strategy: "phone_code", identifier: phone.phone, ownerId: row.id, lifetimeSeconds: ctx.settings.get().email.codeLifetimeSeconds });
       await sendSms(ctx, phone.phone, `Your ${ctx.settings.get().application.name} verification code is ${issued.code}`);
       verification = verificationJSON(issued.row);
     } else if (body.strategy === "totp" && !user.totpVerified) {
@@ -213,24 +214,24 @@ export default function routes(ctx: AppContext) {
   });
 
   app.post("/sessions/:id/verify/attempt_second_factor", async (c) => {
-    const client = requireClientRow(ctx, c);
-    const row = requireSession(ctx, client.id, sessionParam(c));
+    const client = await requireClientRow(ctx, c);
+    const row = await requireSession(ctx, client.id, sessionParam(c));
     const body = await parseBody(c, attemptSecondSchema);
-    hit(ctx, `reverify_2fa:${client.id}`, 60, 60_000);
-    const user = userOfSession(ctx, row);
+    await hit(ctx, `reverify_2fa:${client.id}`, 60, 60_000);
+    const user = await userOfSession(ctx, row);
     if (body.strategy === "totp") {
       if (!verifyTotp(ctx, user, body.code)) throw new OrbitError(422, ErrorCodes.form_code_incorrect, "That verification code is incorrect", { param_name: "code" });
     } else if (body.strategy === "backup_code") {
-      if (!consumeBackupCode(ctx, user, body.code)) throw new OrbitError(422, ErrorCodes.form_code_incorrect, "That backup code is incorrect or already used", { param_name: "code" });
+      if (!await consumeBackupCode(ctx, user, body.code)) throw new OrbitError(422, ErrorCodes.form_code_incorrect, "That backup code is incorrect or already used", { param_name: "code" });
     } else {
-      const verification = getVerification(ctx, "reverify_second_factor", row.id);
-      const eligible = verification && verifiedSecondFactorPhones(ctx, user).some((phone) => phone.phone === verification.identifier);
+      const verification = await getVerification(ctx, "reverify_second_factor", row.id);
+      const eligible = verification && (await verifiedSecondFactorPhones(ctx, user)).some((phone) => phone.phone === verification.identifier);
       if (!eligible) throw new OrbitError(422, ErrorCodes.form_code_incorrect, "That verification code is incorrect", { param_name: "code" });
-      checkCode(ctx, verification, body.code);
+      await checkCode(ctx, verification, body.code);
     }
-    markSessionReverified(ctx, row.id, "second_factor");
+    await markSessionReverified(ctx, row.id, "second_factor");
     const verification = body.strategy === "phone_code"
-      ? verificationJSON(getVerification(ctx, "reverify_second_factor", row.id))
+      ? verificationJSON(await getVerification(ctx, "reverify_second_factor", row.id))
       : { status: "verified" as const, strategy: body.strategy, attempts: null, expire_at: null };
     const clientJson = await serializeClient(ctx, client, { azp: clientAzp(c) });
     return c.json({ response: verification, client: clientJson });
@@ -251,14 +252,15 @@ export default function routes(ctx: AppContext) {
     }
     c.header("Content-Type", type);
     c.header("X-Content-Type-Options", "nosniff");
+    c.header("Content-Security-Policy", "sandbox");
     c.header("Cache-Control", "public, max-age=31536000, immutable");
     return c.body(new Uint8Array(data).buffer);
   });
 
   /** Verification ages for the session (used by `<UserProfile>` / `useReverification`). */
-  app.get("/sessions/:id/verification", (c) => {
-    const client = requireClientRow(ctx, c);
-    const row = requireSession(ctx, client.id, sessionParam(c));
+  app.get("/sessions/:id/verification", async (c) => {
+    const client = await requireClientRow(ctx, c);
+    const row = await requireSession(ctx, client.id, sessionParam(c));
     return c.json({ response: verificationAges(row) });
   });
 
@@ -277,8 +279,8 @@ function sessionParam(c: Context): string {
 }
 
 /** User of a session row (with usability checks). */
-function userOfSession(ctx: AppContext, row: typeof s.sessions.$inferSelect) {
-  const user = getUserById(ctx, row.userId);
+async function userOfSession(ctx: AppContext, row: typeof s.sessions.$inferSelect) {
+  const user = await getUserById(ctx, row.userId);
   if (!user) throw new OrbitError(401, ErrorCodes.authentication_invalid, "Not signed in");
   if (user.banned) throw new OrbitError(403, ErrorCodes.user_banned, "This user has been banned");
   return user;

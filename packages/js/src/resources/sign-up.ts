@@ -10,7 +10,7 @@ export interface SignUpCreateParams {
   password?: string;
   firstName?: string;
   lastName?: string;
-  /** OAuth / SSO / enterprise strategy, e.g. `oauth_google`. */
+  /** OAuth / SSO / enterprise strategy, e.g. `oauth_google`, or `anonymous` for a guest account. */
   strategy?: string;
   redirectUrl?: string;
   actionCompleteRedirectUrl?: string;
@@ -104,7 +104,7 @@ export class SignUp {
     return new SignUp(fapi, json);
   }
 
-  /** All verification resources keyed like Clerk (`verifications.emailAddress`, …). */
+  /** All verification resources keyed by identifier (`verifications.emailAddress`, …). */
   get verifications(): Record<"emailAddress" | "phoneNumber" | "externalAccount" | "web3Wallet", Verification | null> {
     return {
       emailAddress: this.emailAddressVerification,
@@ -171,6 +171,15 @@ export class SignUp {
       },
     });
     return this.applyJSON(json);
+  }
+
+  /**
+   * Creates a guest account: a user with no identifiers (and no password) plus an active session.
+   * The account upgrades in place as soon as it gains a verified identifier or a password.
+   * Requires `anonymous.enabled` on the instance; otherwise the server answers `sign_up_restricted`.
+   */
+  async createAnonymous(params: { unsafeMetadata?: Metadata; legalAccepted?: boolean } = {}): Promise<this> {
+    return this.create({ strategy: "anonymous", unsafeMetadata: params.unsafeMetadata, legalAccepted: params.legalAccepted });
   }
 
   /** PATCHes the in-progress sign-up (add/update identifier or profile fields). */

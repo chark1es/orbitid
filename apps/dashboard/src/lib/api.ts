@@ -1,6 +1,16 @@
 import { useQuery, useMutation, useQueryClient, type UseQueryOptions } from "@tanstack/react-query";
 
-export const DEFAULT_API_URL: string = (import.meta as any).env?.VITE_ORBITID_API_URL ?? "http://localhost:4000";
+declare global {
+  interface Window {
+    /** Injected by the OrbitID server into the dashboard it serves. */
+    __ORBITID__?: { apiUrl?: string; publishableKey?: string; database?: string };
+  }
+}
+
+/** The server that served this page, else VITE_ORBITID_API_URL (dev server), else the default local port. */
+export const DEFAULT_API_URL: string = (typeof window !== "undefined" ? window.__ORBITID__?.apiUrl : undefined)
+  ?? (import.meta as any).env?.VITE_ORBITID_API_URL
+  ?? "http://localhost:4000";
 /** Default API origin; prefer `getApiUrl()` — the operator can point the dashboard at another instance. */
 export const API_URL: string = DEFAULT_API_URL;
 const KEY = "orbitid.secretKey";

@@ -1,11 +1,6 @@
 import { useState } from "react";
 import {
-  Badge,
   Button,
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -36,6 +31,7 @@ import { StatusBadge } from "../shared/status-badge";
 import { CopyButton } from "../shared/copy-button";
 import { ConfirmDialog } from "../shared/confirm-dialog";
 import { SecretReveal } from "../shared/secret-reveal";
+import { Section } from "../shared/section";
 
 const STATUSES = ["all", "pending", "accepted", "revoked", "expired"];
 
@@ -111,7 +107,7 @@ function InviteDialog({
             </Select>
           </div>
           {error ? (
-            <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <p role="alert" className="rounded-[3px] border border-signal/40 bg-signal/10 px-3 py-2 text-sm text-signal">
               {error}
             </p>
           ) : null}
@@ -173,12 +169,12 @@ export function OrganizationInvitationsTab({ org, onChanged }: { org: Organizati
     {
       id: "email",
       header: "Email",
-      cell: (invitation) => <span className="font-mono text-sm">{invitation.email_address}</span>,
+      cell: (invitation) => <span className="font-data text-xs">{invitation.email_address}</span>,
     },
     {
       id: "role",
       header: "Role",
-      cell: (invitation) => <Badge variant="outline">{invitation.role_name || roleLabel(invitation.role)}</Badge>,
+      cell: (invitation) => <span className="text-sm">{invitation.role_name || roleLabel(invitation.role)}</span>,
     },
     {
       id: "status",
@@ -188,17 +184,19 @@ export function OrganizationInvitationsTab({ org, onChanged }: { org: Organizati
     {
       id: "created",
       header: "Sent",
-      cell: (invitation) => <span className="text-sm text-muted-foreground">{formatDate(invitation.created_at)}</span>,
+      cell: (invitation) => (
+        <span className="font-data text-xs text-muted-foreground">{formatDate(invitation.created_at)}</span>
+      ),
     },
     {
       id: "actions",
       header: <span className="sr-only">Actions</span>,
-      className: "w-24 text-right",
+      className: "w-32 text-right",
       cell: (invitation) => (
         <div className="flex justify-end gap-1">
           {invitation.url ? <CopyButton value={invitation.url} label="Copy invitation URL" /> : null}
           <Button
-            size="xs"
+            size="sm"
             variant="outline"
             disabled={invitation.status !== "pending" || pending}
             onClick={() => setRevoking(invitation)}
@@ -211,10 +209,11 @@ export function OrganizationInvitationsTab({ org, onChanged }: { org: Organizati
   ];
 
   return (
-    <Card>
-      <CardHeader className="flex-row flex-wrap items-start justify-between gap-2">
-        <CardTitle>Invitations</CardTitle>
-        <div className="flex flex-wrap items-center gap-2">
+    <Section
+      title="Invitations"
+      description="Invite people by email and track each invitation's status."
+      actions={
+        <>
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
             <Input
@@ -249,9 +248,10 @@ export function OrganizationInvitationsTab({ org, onChanged }: { org: Organizati
           <Button size="sm" onClick={() => setInviteOpen(true)}>
             <MailPlus aria-hidden /> Invite
           </Button>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-3">
+        </>
+      }
+    >
+      <div className="space-y-3">
         <DataTable
           columns={columns}
           rows={rows}
@@ -279,7 +279,7 @@ export function OrganizationInvitationsTab({ org, onChanged }: { org: Organizati
           }}
           disabled={invitations.isFetching}
         />
-      </CardContent>
+      </div>
 
       <InviteDialog
         org={org}
@@ -312,6 +312,6 @@ export function OrganizationInvitationsTab({ org, onChanged }: { org: Organizati
         pending={pending}
         onConfirm={() => void revoke()}
       />
-    </Card>
+    </Section>
   );
 }

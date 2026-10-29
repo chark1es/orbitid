@@ -21,7 +21,7 @@ export interface HasContext {
   factorVerificationAge: [number, number] | null;
 }
 
-/** Clerk's reverification presets, in minutes since the factor was last verified. */
+/** Reverification presets, in minutes since the factor was last verified. */
 const REVERIFICATION_PRESETS = {
   strict_mfa: { level: "multi_factor", afterMinutes: 10 },
   strict: { level: "first_factor", afterMinutes: 10 },
@@ -52,7 +52,7 @@ function checkReverification(
 }
 
 /**
- * Clerk-compatible `has()`:
+ * `has()`:
  * `has({ role })`, `has({ permission })`, `has({ feature })`, `has({ reverification })`,
  * `has({ condition })` — exactly one key, signed-out → `false`.
  */
@@ -139,7 +139,7 @@ export interface AuthStateInput {
   initialState?: OrbitIDInitialState;
   instance: OrbitIDInstance | null;
   afterSignOutUrl?: string;
-  /** Default `true`, matching Clerk. */
+  /** Default `true`. */
   treatPendingAsSignedOut?: boolean;
 }
 
@@ -205,7 +205,7 @@ export function buildSnapshot(
   initialState: OrbitIDInitialState | undefined,
 ): OrbitIDSnapshot {
   if (instance?.loaded) {
-    // Clerk-compatible camelCase aliases on the wire-shaped `publicUserData` (idempotent).
+    // camelCase aliases on the wire-shaped `publicUserData` (idempotent).
     if (instance.session) withPublicUserDataAliases(instance.session);
     return {
       loaded: true,

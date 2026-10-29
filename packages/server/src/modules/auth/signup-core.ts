@@ -1,4 +1,5 @@
 // Sign-up requirement computation, serialization and completion.
+import { authMethodOf } from "../../lib/auth-method";
 import { and, eq } from "drizzle-orm";
 import {
   ErrorCodes, OrbitError,
@@ -13,6 +14,7 @@ import { createUser, findEmail, normalizeEmail, type UserRow } from "../../servi
 import { markInvitationAccepted, assertIdentifiersAllowed } from "../../services/restrictions";
 import type { ExternalProfile } from "../../services/external-identity";
 import { getVerificationById, verificationJSON } from "./verifications";
+import { first } from "../../lib/db";
 
 export type SignUpRow = typeof s.signUps.$inferSelect;
 
@@ -40,6 +42,8 @@ export interface SignUpFields {
   externalId?: string | null;
   legalAcceptedAt?: number | null;
   externalAccount?: StashedExternalAccount;
+  /** Guest sign-up: creates a user with no identifiers at all. */
+  anonymous?: boolean;
 }
 
 export interface VerificationSnapshot {
@@ -63,10 +67,10 @@ const asRecord = (v: unknown): Record<string, unknown> => (v && typeof v === "ob
 export const asSignUpFields = (row: SignUpRow): SignUpFields => asRecord(row.fields) as SignUpFields;
 export const asSignUpVerifications = (row: SignUpRow): SignUpVerifications => asRecord(row.verifications) as SignUpVerifications;
 
-export function snapshotJSON(ctx: AppContext, snapshot: VerificationSnapshot | undefined): VerificationJSON | null {
+export async function snapshotJSON(ctx: AppContext, snapshot: VerificationSnapshot | undefined): Promise<VerificationJSON | null> {
   if (!snapshot) return null;
   if (snapshot.verificationId) {
-    const json = verificationJSON(getVerificationById(ctx, snapshot.verificationId));
+    const json = verificationJSON(await getVerificationById(ctx, snapshot.verificationId));
     if (json) return { ...json, strategy: snapshot.strategy };
   }
   return {
@@ -100,7 +104,7 @@ export interface SignUpRequirements {
   unverified_fields: string[];
 }
 
-/** Computes Clerk-style required/optional/missing/unverified field lists from instance settings. */
+/** Computes required/optional/missing/unverified field lists from instance settings. */
 export function computeRequirements(ctx: AppContext, fields: SignUpFields, verifications: SignUpVerifications): SignUpRequirements {
   const st = ctx.settings.get();
   const attrs = st.attributes;
@@ -148,7 +152,7 @@ export function emailIsVerified(fields: SignUpFields, verifications: SignUpVerif
   return snapshot?.status === "verified" && !!fields.emailAddress && snapshot.identifier === fields.emailAddress;
 }
 
-export function buildSignUpJSON(ctx: AppContext, row: SignUpRow): SignUpJSON {
+export async function buildSignUpJSON(ctx: AppContext, row: SignUpRow): Promise<SignUpJSON> {
   const fields = asSignUpFields(row);
   const verifications = asSignUpVerifications(row);
   const req = computeRequirements(ctx, fields, verifications);
@@ -161,10 +165,10 @@ export function buildSignUpJSON(ctx: AppContext, row: SignUpRow): SignUpJSON {
     missing_fields: req.missing_fields,
     unverified_fields: req.unverified_fields,
     verifications: {
-      email_address: snapshotJSON(ctx, verifications.email_address),
-      phone_number: snapshotJSON(ctx, verifications.phone_number),
-      external_account: snapshotJSON(ctx, verifications.external_account),
-      web3_wallet: snapshotJSON(ctx, verifications.web3_wallet),
+      email_address: await snapshotJSON(ctx, verifications.email_address),
+      phone_number: await snapshotJSON(ctx, verifications.phone_number),
+      external_account: await snapshotJSON(ctx, verifications.external_account),
+      web3_wallet: await snapshotJSON(ctx, verifications.web3_wallet),
     },
     username: fields.username ?? null,
     email_address: fields.emailAddress ?? null,
@@ -183,7 +187,7 @@ export function buildSignUpJSON(ctx: AppContext, row: SignUpRow): SignUpJSON {
   };
 }
 
-export function saveSignUp(ctx: AppContext, row: SignUpRow, patch: Partial<{ fields: SignUpFields; verifications: SignUpVerifications; status: string; unsafeMetadata: Record<string, unknown>; invitationId: string | null; orgInvitationId: string | null }>) {
+export async function saveSignUp(ctx: AppContext, row: SignUpRow, patch: Partial<{ fields: SignUpFields; verifications: SignUpVerifications; status: string; unsafeMetadata: Record<string, unknown>; invitationId: string | null; orgInvitationId: string | null }>) {
   const set: Partial<typeof s.signUps.$inferInsert> = { updatedAt: Date.now() };
   if (patch.fields) set.fields = patch.fields as Record<string, unknown>;
   if (patch.verifications) set.verifications = patch.verifications as Record<string, unknown>;
@@ -191,8 +195,8 @@ export function saveSignUp(ctx: AppContext, row: SignUpRow, patch: Partial<{ fie
   if (patch.unsafeMetadata) set.unsafeMetadata = patch.unsafeMetadata;
   if (patch.invitationId !== undefined) set.invitationId = patch.invitationId;
   if (patch.orgInvitationId !== undefined) set.orgInvitationId = patch.orgInvitationId;
-  ctx.db.update(s.signUps).set(set).where(eq(s.signUps.id, row.id)).run();
-  return ctx.db.select().from(s.signUps).where(eq(s.signUps.id, row.id)).get()!;
+  await ctx.db.update(s.signUps).set(set).where(eq(s.signUps.id, row.id));
+  return first(await ctx.db.select().from(s.signUps).where(eq(s.signUps.id, row.id)))!;
 }
 
 const matchesDomainPattern = (identifier: string, pattern: string) => {
@@ -203,7 +207,7 @@ const matchesDomainPattern = (identifier: string, pattern: string) => {
 };
 
 /** Rejects identifiers already claimed by another account or blocked by instance restrictions. */
-export async function assertSignUpIdentifiers(ctx: AppContext, fields: SignUpFields, opts: { ticket?: boolean; invitationTicket?: string } = {}) {
+export async function assertSignUpIdentifiers(ctx: AppContext, fields: SignUpFields, opts: { ticket?: boolean; invitationTicket?: string; verifiedEmail?: boolean } = {}) {
   const st = ctx.settings.get();
   const email = fields.emailAddress ? normalizeEmail(fields.emailAddress) : undefined;
   if (fields.phoneNumber && !st.attributes.phoneNumber.enabled) {
@@ -213,7 +217,12 @@ export async function assertSignUpIdentifiers(ctx: AppContext, fields: SignUpFie
     throw new OrbitError(422, ErrorCodes.form_param_unknown, "Usernames are disabled for this instance", { param_name: "username" });
   }
   if (email) {
-    if (findEmail(ctx, email)) {
+    // A verified address is taken. An unverified claim on someone's mailbox must not lock them out of signing up, but
+    // when this sign-up will not verify the address either, two unproven accounts cannot share it.
+    const holder = await findEmail(ctx, email);
+    // This attempt proves the mailbox when the instance verifies at sign-up, or when an identity provider already did.
+    const willVerify = st.attributes.emailAddress.verifyAtSignUp || opts.verifiedEmail === true;
+    if (holder?.verified || (!willVerify && holder?.userId)) {
       throw new OrbitError(422, ErrorCodes.form_identifier_exists, "That email address is already in use", { param_name: "email_address" });
     }
     if (!st.attributes.emailAddress.enabled) {
@@ -222,9 +231,9 @@ export async function assertSignUpIdentifiers(ctx: AppContext, fields: SignUpFie
     if (st.restrictions.blockEmailSubaddresses && /\+[^@]*@/.test(email)) {
       throw new OrbitError(422, ErrorCodes.identifier_not_allowed, "Email subaddresses are not allowed", { param_name: "email_address" });
     }
-    const blocked = ctx.db.select().from(s.blocklistIdentifiers).all().some((row) => matchesDomainPattern(email, row.identifier));
+    const blocked = (await ctx.db.select().from(s.blocklistIdentifiers)).some((row) => matchesDomainPattern(email, row.identifier));
     if (blocked) throw new OrbitError(422, ErrorCodes.identifier_not_allowed, "This identifier is not allowed", { param_name: "email_address" });
-    const allowlisted = ctx.db.select().from(s.allowlistIdentifiers).all().some((row) => matchesDomainPattern(email, row.identifier));
+    const allowlisted = (await ctx.db.select().from(s.allowlistIdentifiers)).some((row) => matchesDomainPattern(email, row.identifier));
     if (!opts.ticket) {
       if (st.restrictions.allowlistEnabled && !allowlisted) {
         throw new OrbitError(422, ErrorCodes.sign_up_restricted, "Sign-ups are restricted to allowlisted identifiers", { param_name: "email_address" });
@@ -244,7 +253,7 @@ export async function assertSignUpIdentifiers(ctx: AppContext, fields: SignUpFie
   );
 }
 
-export interface CompleteSignUpOptions { ip?: string; userAgent?: string }
+export interface CompleteSignUpOptions { ip?: string; userAgent?: string; rotateClientToken?: () => Promise<void> }
 
 /** Creates the user (and session) and marks the sign-up complete. */
 export async function completeSignUp(ctx: AppContext, row: SignUpRow, opts: CompleteSignUpOptions = {}): Promise<{ userId: string; sessionId: string; user: UserRow }> {
@@ -265,22 +274,23 @@ export async function completeSignUp(ctx: AppContext, row: SignUpRow, opts: Comp
       legalAcceptedAt: fields.legalAcceptedAt ?? null,
       emailVerified,
       phoneVerified,
+      isAnonymous: !!fields.anonymous,
     emailVerifiedStrategy: verifications.email_address?.strategy ?? verifications.external_account?.strategy ?? "email_code",
   });
 
   if (fields.externalAccount) {
     const ext = fields.externalAccount;
-    const existing = ctx.db.select().from(s.externalAccounts)
-      .where(and(eq(s.externalAccounts.provider, ext.provider), eq(s.externalAccounts.providerUserId, ext.providerUserId))).get();
+    const existing = first(await ctx.db.select().from(s.externalAccounts)
+          .where(and(eq(s.externalAccounts.provider, ext.provider), eq(s.externalAccounts.providerUserId, ext.providerUserId))));
     if (!existing) {
       const now = Date.now();
-      ctx.db.insert(s.externalAccounts).values({
-        id: newId("eac"), userId: user.id, provider: ext.provider, providerUserId: ext.providerUserId,
-        emailAddress: ext.emailAddress, firstName: ext.firstName, lastName: ext.lastName, username: ext.username,
-        imageUrl: ext.imageUrl, approvedScopes: ext.approvedScopes, accessTokenEnc: ext.accessTokenEnc ?? null,
-        refreshTokenEnc: ext.refreshTokenEnc ?? null, tokenExpiresAt: ext.tokenExpiresAt ?? null,
-        createdAt: now, updatedAt: now,
-      }).run();
+      await ctx.db.insert(s.externalAccounts).values({
+                        id: newId("eac"), userId: user.id, provider: ext.provider, providerUserId: ext.providerUserId,
+                        emailAddress: ext.emailAddress, firstName: ext.firstName, lastName: ext.lastName, username: ext.username,
+                        imageUrl: ext.imageUrl, approvedScopes: ext.approvedScopes, accessTokenEnc: ext.accessTokenEnc ?? null,
+                        refreshTokenEnc: ext.refreshTokenEnc ?? null, tokenExpiresAt: ext.tokenExpiresAt ?? null,
+                        createdAt: now, updatedAt: now,
+                      });
     }
   }
 
@@ -294,17 +304,19 @@ export async function completeSignUp(ctx: AppContext, row: SignUpRow, opts: Comp
     ip: opts.ip,
     userAgent: opts.userAgent,
     firstFactor: true,
+    method: fields.externalAccount ? "oauth" : authMethodOf(verifications.email_address?.strategy ?? verifications.phone_number?.strategy) ?? "password",
+    rotateClientToken: opts.rotateClientToken,
   });
-  ctx.db.update(s.signUps).set({ status: "complete", createdUserId: user.id, createdSessionId: sessionId, updatedAt: Date.now() }).where(eq(s.signUps.id, row.id)).run();
+  await ctx.db.update(s.signUps).set({ status: "complete", createdUserId: user.id, createdSessionId: sessionId, updatedAt: Date.now() }).where(eq(s.signUps.id, row.id));
   // The client is signed in: hide any other in-flight attempts.
-  for (const signIn of ctx.db.select().from(s.signIns).where(eq(s.signIns.clientId, row.clientId)).all()) {
+  for (const signIn of (await ctx.db.select().from(s.signIns).where(eq(s.signIns.clientId, row.clientId)))) {
     if (signIn.status !== "complete" && signIn.status !== "abandoned") {
-      ctx.db.update(s.signIns).set({ status: "abandoned", updatedAt: Date.now() }).where(eq(s.signIns.id, signIn.id)).run();
+      await ctx.db.update(s.signIns).set({ status: "abandoned", updatedAt: Date.now() }).where(eq(s.signIns.id, signIn.id));
     }
   }
-  for (const other of ctx.db.select().from(s.signUps).where(eq(s.signUps.clientId, row.clientId)).all()) {
+  for (const other of (await ctx.db.select().from(s.signUps).where(eq(s.signUps.clientId, row.clientId)))) {
     if (other.id !== row.id && other.status !== "complete" && other.status !== "abandoned") {
-      ctx.db.update(s.signUps).set({ status: "abandoned", updatedAt: Date.now() }).where(eq(s.signUps.id, other.id)).run();
+      await ctx.db.update(s.signUps).set({ status: "abandoned", updatedAt: Date.now() }).where(eq(s.signUps.id, other.id));
     }
   }
   return { userId: user.id, sessionId, user };
@@ -318,7 +330,7 @@ export async function maybeCompleteSignUp(ctx: AppContext, row: SignUpRow, opts:
   if (req.missing_fields.length === 0 && req.unverified_fields.length === 0) {
     return completeSignUp(ctx, row, opts);
   }
-  saveSignUp(ctx, row, { status: "missing_requirements" });
+  await saveSignUp(ctx, row, { status: "missing_requirements" });
   return null;
 }
 

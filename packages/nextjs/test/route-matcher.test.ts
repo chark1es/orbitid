@@ -4,7 +4,7 @@ import { compileRoutePattern, createRouteMatcher } from "../src/route-matcher";
 const request = (url: string) => ({ url: `https://app.test${url}` });
 
 describe("compileRoutePattern", () => {
-  it("supports Clerk-style inline groups", () => {
+  it("supports inline groups", () => {
     const matcher = createRouteMatcher(["/dashboard(.*)"]);
     expect(matcher(request("/dashboard"))).toBe(true);
     expect(matcher(request("/dashboard/settings"))).toBe(true);

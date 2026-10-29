@@ -26,7 +26,7 @@ import { api, backend, errorCode, seedAuth, seedUser, setup } from "./helpers";
 describe("Backend API organizations", () => {
   it("creates, queries, updates and deletes organizations", async () => {
     const { ctx, app } = await setup();
-    const owner = seedUser(ctx, { email: "owner@acme.test" });
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
 
     const created = await backend<OrganizationJSON>(app, "POST", "/v1/organizations", {
       name: "Acme Corp", created_by: owner.id, max_allowed_memberships: 12,
@@ -78,8 +78,8 @@ describe("Backend API organizations", () => {
 
   it("manages memberships with metadata merge, quota and last-admin guards", async () => {
     const { ctx, app } = await setup();
-    const owner = seedUser(ctx, { email: "owner@acme.test" });
-    const member = seedUser(ctx, { email: "member@acme.test" });
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const member = await seedUser(ctx, { email: "member@acme.test" });
     const created = await backend<OrganizationJSON>(app, "POST", "/v1/organizations", { name: "Acme", created_by: owner.id, max_allowed_memberships: 2 });
 
     const added = await backend<OrganizationMembershipJSON>(app, "POST", `/v1/organizations/${created.body.id}/memberships`, {
@@ -94,7 +94,7 @@ describe("Backend API organizations", () => {
     expect(errorCode(duplicate.body)).toBe("duplicate_record");
 
     // quota: 2 of 2 seats used
-    const third = seedUser(ctx, { email: "third@acme.test" });
+    const third = await seedUser(ctx, { email: "third@acme.test" });
     const overQuota = await backend(app, "POST", `/v1/organizations/${created.body.id}/memberships`, { user_id: third.id });
     expect(overQuota.status).toBe(403);
     expect(errorCode(overQuota.body)).toBe("organization_membership_quota_exceeded");
@@ -132,7 +132,7 @@ describe("Backend API organizations", () => {
 
   it("manages invitations including bulk creation and the no-email url flow", async () => {
     const { ctx, app } = await setup();
-    const owner = seedUser(ctx, { email: "owner@acme.test" });
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
     const org = await backend<OrganizationJSON>(app, "POST", "/v1/organizations", { name: "Acme", created_by: owner.id });
 
     const single = await backend<OrganizationInvitationJSON>(app, "POST", `/v1/organizations/${org.body.id}/invitations`, {
@@ -168,7 +168,7 @@ describe("Backend API organizations", () => {
 
   it("manages domains", async () => {
     const { ctx, app } = await setup();
-    const owner = seedUser(ctx, { email: "owner@acme.test" });
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
     const org = await backend<OrganizationJSON>(app, "POST", "/v1/organizations", { name: "Acme", created_by: owner.id });
 
     const created = await backend<OrganizationDomainJSON>(app, "POST", `/v1/organizations/${org.body.id}/domains`, { name: "acme.test", enrollment_mode: "automatic_suggestion" });
@@ -191,8 +191,8 @@ describe("Backend API organizations", () => {
 
   it("manages membership requests", async () => {
     const { ctx, app } = await setup();
-    const owner = seedUser(ctx, { email: "owner@acme.test" });
-    const applicant = seedUser(ctx, { email: "applicant@acme.test" });
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const applicant = await seedUser(ctx, { email: "applicant@acme.test" });
     const org = await backend<OrganizationJSON>(app, "POST", "/v1/organizations", { name: "Acme", created_by: owner.id });
 
     const request = await backend<OrganizationMembershipRequestJSON>(app, "POST", `/v1/organizations/${org.body.id}/membership_requests`, { user_id: applicant.id });
@@ -209,8 +209,8 @@ describe("Backend API organizations", () => {
 
   it("manages roles and permissions with system guards", async () => {
     const { ctx, app } = await setup();
-    const owner = seedUser(ctx, { email: "owner@acme.test" });
-    const member = seedUser(ctx, { email: "member@acme.test" });
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const member = await seedUser(ctx, { email: "member@acme.test" });
     const org = await backend<OrganizationJSON>(app, "POST", "/v1/organizations", { name: "Acme", created_by: owner.id, max_allowed_memberships: 10 });
 
     const invalidKey = await backend(app, "POST", "/v1/roles", { key: "support", name: "Support" });
@@ -278,9 +278,9 @@ describe("Backend API organizations", () => {
     expect(res.status).toBe(401);
     expect(errorCode(res.body)).toBe("secret_key_invalid");
 
-    const owner = seedUser(ctx, { email: "owner@acme.test" });
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
     const org = await backend<OrganizationJSON>(app, "POST", "/v1/organizations", { name: "Acme", created_by: owner.id });
-    const auth = seedAuth(ctx, owner.id);
+    const auth = await seedAuth(ctx, owner.id);
     // Backend-created organization is visible in the Frontend API only to its members
     expect((await api(app, "GET", `/v1/client/organizations/${org.body.id}`, { cookie: auth.cookie })).status).toBe(200);
   });

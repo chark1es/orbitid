@@ -56,8 +56,8 @@ async function verifyDomain(
 describe("organization domains", () => {
   it("adds a domain, sends and verifies the affiliation code", async () => {
     const { ctx, app } = await setup();
-    const owner = seedUser(ctx, { email: "owner@acme.test" });
-    const ownerAuth = seedAuth(ctx, owner.id);
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const ownerAuth = await seedAuth(ctx, owner.id);
     const org = await createOrg(app, ownerAuth.cookie, "Acme");
     const domain = await addDomain(app, ownerAuth.cookie, org.id, "Acme-Test.com", "manual_invitation");
     expect(domain.name).toBe("acme-test.com");
@@ -105,12 +105,12 @@ describe("organization domains", () => {
 
   it("auto-joins existing and future users for automatic_invitation domains", async () => {
     const { ctx, app } = await setup();
-    const owner = seedUser(ctx, { email: "owner@acme.test" });
-    const ownerAuth = seedAuth(ctx, owner.id);
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const ownerAuth = await seedAuth(ctx, owner.id);
     const org = await createOrg(app, ownerAuth.cookie, "Acme");
 
-    const existing = seedUser(ctx, { email: "existing@auto.test", verified: true });
-    seedUser(ctx, { email: "unverified@auto.test", verified: false });
+    const existing = await seedUser(ctx, { email: "existing@auto.test", verified: true });
+    await seedUser(ctx, { email: "unverified@auto.test", verified: false });
     const domain = await addDomain(app, ownerAuth.cookie, org.id, "auto.test", "automatic_invitation");
     await verifyDomain(app, ownerAuth.cookie, org.id, domain);
 
@@ -118,20 +118,20 @@ describe("organization domains", () => {
     expect(list.some((m) => m.public_user_data.user_id === existing.id)).toBe(true);
     expect(list).toHaveLength(2); // creator + existing verified user (unverified email does not qualify)
 
-    const newcomer = seedUser(ctx, { email: "newcomer@auto.test", verified: true });
+    const newcomer = await seedUser(ctx, { email: "newcomer@auto.test", verified: true });
     await onUserEmailVerified(ctx, newcomer.id, "newcomer@auto.test");
     expect((await memberships(app, ownerAuth.cookie, org.id)).some((m) => m.public_user_data.user_id === newcomer.id)).toBe(true);
   });
 
   it("does not auto-join for manual_invitation domains", async () => {
     const { ctx, app } = await setup();
-    const owner = seedUser(ctx, { email: "owner@acme.test" });
-    const ownerAuth = seedAuth(ctx, owner.id);
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const ownerAuth = await seedAuth(ctx, owner.id);
     const org = await createOrg(app, ownerAuth.cookie, "Acme");
     const domain = await addDomain(app, ownerAuth.cookie, org.id, "manual.test", "manual_invitation");
     await verifyDomain(app, ownerAuth.cookie, org.id, domain);
 
-    const user = seedUser(ctx, { email: "person@manual.test", verified: true });
+    const user = await seedUser(ctx, { email: "person@manual.test", verified: true });
     await onUserEmailVerified(ctx, user.id, "person@manual.test");
     const list = await memberships(app, ownerAuth.cookie, org.id);
     expect(list.some((m) => m.public_user_data.user_id === user.id)).toBe(false);
@@ -139,14 +139,14 @@ describe("organization domains", () => {
 
   it("offers suggestions for automatic_suggestion domains and lets users join", async () => {
     const { ctx, app } = await setup();
-    const owner = seedUser(ctx, { email: "owner@acme.test" });
-    const ownerAuth = seedAuth(ctx, owner.id);
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const ownerAuth = await seedAuth(ctx, owner.id);
     const org = await createOrg(app, ownerAuth.cookie, "Suggestion Inc");
     const domain = await addDomain(app, ownerAuth.cookie, org.id, "suggest.test", "automatic_suggestion");
     await verifyDomain(app, ownerAuth.cookie, org.id, domain);
 
-    const user = seedUser(ctx, { email: "person@suggest.test", verified: true });
-    const userAuth = seedAuth(ctx, user.id);
+    const user = await seedUser(ctx, { email: "person@suggest.test", verified: true });
+    const userAuth = await seedAuth(ctx, user.id);
 
     const suggestions = await api<{ response: OrganizationSuggestionJSON[] }>(app, "GET", "/v1/client/me/organization_suggestions", { cookie: userAuth.cookie });
     expect(suggestions.body.response).toHaveLength(1);
@@ -161,8 +161,8 @@ describe("organization domains", () => {
     expect(after.body.response).toHaveLength(0);
 
     // joining a suggested organization through /me/organization_memberships
-    const colleague = seedUser(ctx, { email: "colleague@suggest.test", verified: true });
-    const colleagueAuth = seedAuth(ctx, colleague.id);
+    const colleague = await seedUser(ctx, { email: "colleague@suggest.test", verified: true });
+    const colleagueAuth = await seedAuth(ctx, colleague.id);
     const joined = await api<{ response: OrganizationMembershipJSON }>(app, "POST", "/v1/client/me/organization_memberships", { cookie: colleagueAuth.cookie, body: { organization_id: org.id } });
     expect(joined.status).toBe(200);
     expect(joined.body.response.organization.id).toBe(org.id);
@@ -172,14 +172,14 @@ describe("organization domains", () => {
 
   it("handles membership requests from suggestion domains", async () => {
     const { ctx, app } = await setup();
-    const owner = seedUser(ctx, { email: "owner@acme.test" });
-    const ownerAuth = seedAuth(ctx, owner.id);
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const ownerAuth = await seedAuth(ctx, owner.id);
     const org = await createOrg(app, ownerAuth.cookie, "Requests Inc");
     const domain = await addDomain(app, ownerAuth.cookie, org.id, "requests.test", "automatic_suggestion");
     await verifyDomain(app, ownerAuth.cookie, org.id, domain);
 
-    const applicant = seedUser(ctx, { email: "applicant@requests.test", verified: true });
-    const applicantAuth = seedAuth(ctx, applicant.id);
+    const applicant = await seedUser(ctx, { email: "applicant@requests.test", verified: true });
+    const applicantAuth = await seedAuth(ctx, applicant.id);
     const request = await api<{ response: OrganizationMembershipRequestJSON }>(app, "POST", `/v1/client/organizations/${org.id}/membership_requests`, { cookie: applicantAuth.cookie });
     expect(request.status).toBe(200);
     expect(request.body.response.status).toBe("pending");
@@ -197,14 +197,14 @@ describe("organization domains", () => {
     expect((await memberships(app, ownerAuth.cookie, org.id)).some((m) => m.public_user_data.user_id === applicant.id)).toBe(true);
 
     // a user from an unrelated domain cannot request membership
-    const outsider = seedUser(ctx, { email: "outsider@elsewhere.test", verified: true });
-    const outsiderAuth = seedAuth(ctx, outsider.id);
+    const outsider = await seedUser(ctx, { email: "outsider@elsewhere.test", verified: true });
+    const outsiderAuth = await seedAuth(ctx, outsider.id);
     const blocked = await api(app, "POST", `/v1/client/organizations/${org.id}/membership_requests`, { cookie: outsiderAuth.cookie });
     expect(blocked.status).toBe(403);
 
     // rejection path
-    const rejectee = seedUser(ctx, { email: "rejectee@requests.test", verified: true });
-    const rejecteeAuth = seedAuth(ctx, rejectee.id);
+    const rejectee = await seedUser(ctx, { email: "rejectee@requests.test", verified: true });
+    const rejecteeAuth = await seedAuth(ctx, rejectee.id);
     const toReject = await api<{ response: OrganizationMembershipRequestJSON }>(app, "POST", `/v1/client/organizations/${org.id}/membership_requests`, { cookie: rejecteeAuth.cookie });
     const rejected = await api<{ response: OrganizationMembershipRequestJSON }>(app, "POST", `/v1/client/organizations/${org.id}/membership_requests/${toReject.body.response.id}/reject`, { cookie: ownerAuth.cookie });
     expect(rejected.body.response.status).toBe("rejected");
@@ -213,13 +213,13 @@ describe("organization domains", () => {
 
   it("changes enrollment mode and deletes pending invitations on request", async () => {
     const { ctx, app } = await setup();
-    const owner = seedUser(ctx, { email: "owner@acme.test" });
-    const ownerAuth = seedAuth(ctx, owner.id);
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const ownerAuth = await seedAuth(ctx, owner.id);
     const org = await createOrg(app, ownerAuth.cookie, "Switch Inc");
     const domain = await addDomain(app, ownerAuth.cookie, org.id, "switch.test", "manual_invitation");
     await verifyDomain(app, ownerAuth.cookie, org.id, domain);
 
-    const member = seedUser(ctx, { email: "member@switch.test", verified: true });
+    const member = await seedUser(ctx, { email: "member@switch.test", verified: true });
     const invitation = await invite(app, ownerAuth.cookie, org.id, "pending@switch.test");
     expect(invitation.status).toBe("pending");
 
@@ -236,8 +236,8 @@ describe("organization domains", () => {
 
   it("is gated by settings.organizations.domainsEnabled", async () => {
     const { ctx, app } = await setup({ organizations: { domainsEnabled: false } });
-    const owner = seedUser(ctx, { email: "owner@acme.test" });
-    const ownerAuth = seedAuth(ctx, owner.id);
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const ownerAuth = await seedAuth(ctx, owner.id);
     const org = await createOrg(app, ownerAuth.cookie, "Acme");
     const res = await api(app, "POST", `/v1/client/organizations/${org.id}/domains`, { cookie: ownerAuth.cookie, body: { name: "acme.test" } });
     expect(res.status).toBe(403);

@@ -2,7 +2,7 @@
 
 Next.js 14 App Router demo for the whole OrbitID stack: `@orbitid/nextjs` middleware, server
 `auth()`, `currentUser()`, SSR-hydrated React components, organizations, a server action, a protected
-route handler and a Svix-verified webhook endpoint.
+route handler and a signature-verified webhook endpoint.
 
 ## Run
 

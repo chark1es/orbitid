@@ -129,6 +129,7 @@ export function userJSON(overrides: Partial<UserJSON> = {}): UserJSON {
     external_accounts: [],
     public_metadata: {},
     unsafe_metadata: {},
+    is_anonymous: false,
     banned: false,
     locked: false,
     lockout_expires_in_seconds: null,
@@ -153,6 +154,7 @@ export function sessionJSON(
     object: "session",
     id: "sess_1",
     status: "active",
+    sign_in_method: null,
     expire_at: now + 86_400_000,
     abandon_at: now + 86_400_000,
     last_active_at: now,
@@ -282,6 +284,8 @@ export function environmentJSON(overrides: Partial<EnvironmentJSON> = {}): Envir
       single_session_mode: false,
       sign_up_mode: "public",
       legal_consent_required: false,
+      trusted_devices: { enabled: false, days: 30 },
+      anonymous: { enabled: false },
     },
     user_settings: {
       attributes: {
@@ -303,6 +307,7 @@ export function environmentJSON(overrides: Partial<EnvironmentJSON> = {}): Envir
     organization_settings: {
       enabled: true,
       max_allowed_memberships: 5,
+      max_created_organizations_per_user: 3,
       creation_enabled: true,
       domains_enabled: true,
       membership_requests_enabled: true,

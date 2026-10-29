@@ -23,8 +23,8 @@ export function UserMetadataTab({ user, onUpdated }: { user: UserJSON; onUpdated
 
   return (
     <MetadataEditors
-      title="User metadata"
-      description="Deep-merged server-side: nested objects are preserved, `null` removes a key. Private metadata never reaches the Frontend API."
+      title="Metadata"
+      description="Merged into the stored object: nested objects are preserved, and a key set to null is removed. Private metadata never reaches the client."
       pending={pending}
       fields={[
         {

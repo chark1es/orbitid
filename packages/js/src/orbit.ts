@@ -87,7 +87,7 @@ export interface HandleRedirectCallbackResult {
 }
 
 /**
- * Framework-agnostic OrbitID client (clerk-js equivalent).
+ * Framework-agnostic OrbitID client.
  * All state updates flow through the `{ response, client }` envelope: every response carrying `client`
  * rebuilds resources and notifies listeners, so React consumers always observe fresh references.
  */
@@ -187,7 +187,7 @@ export class OrbitID {
     };
   }
 
-  /** Clerk-compatible alias for `addListener`. */
+  /** Alias for `addListener`. */
   on = this.addListener;
 
   private emit(): void {
@@ -289,13 +289,22 @@ export class OrbitID {
       clearAuthCookies(this.cookieOptions);
       return;
     }
+    // `__client_uat` first: middleware uses it to decide whether a handshake can refresh a missing
+    // `__session`, so a token request that fails must not leave the browser looking signed out.
+    this.writeClientUat();
+    const session = this._session;
     try {
-      const token = await this._session.getToken();
-      setSessionCookie(token, this.cookieOptions);
-      this.writeClientUat();
+      const token = await session.getToken();
+      // The user may have signed out or switched session while the request was in flight.
+      if (this.isCurrentActiveSession(session)) setSessionCookie(token, this.cookieOptions);
     } catch {
-      /* leave existing cookies untouched: the server is authoritative */
+      /* leave the existing `__session` untouched: the next refresh retries */
     }
+  }
+
+  /** True while `session` is still the active session of this instance. */
+  private isCurrentActiveSession(session: Session): boolean {
+    return this._session === session && session.status === "active";
   }
 
   private startTokenRefresh(): void {
@@ -311,6 +320,8 @@ export class OrbitID {
     if (!session || session.status !== "active") return;
     try {
       const token = await session.getToken({ skipCache: true });
+      // A response that lands after sign-out or a session switch must not bring the old session back.
+      if (!this.isCurrentActiveSession(session)) return;
       setSessionCookie(token, this.cookieOptions);
       this.writeClientUat();
     } catch {
@@ -575,7 +586,7 @@ export class OrbitID {
     this.listeners.clear();
   }
 
-  /** Returns the email-link flow helper for the pending sign-in (Clerk-compatible). */
+  /** Returns the email-link flow helper for the pending sign-in. */
   createSignInEmailLinkFlow(options?: EmailLinkFlowOptions): EmailLinkFlow {
     return this.signIn.createEmailLinkFlow(options);
   }

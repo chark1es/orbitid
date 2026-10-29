@@ -11,6 +11,7 @@ import {
 } from "@orbitid/ui";
 import { Loader2 } from "lucide-react";
 
+/** Destructive confirmation: name the object, say what happens, one destructive button. */
 export function ConfirmDialog({
   open,
   onOpenChange,
@@ -34,10 +35,14 @@ export function ConfirmDialog({
 }) {
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
+      <AlertDialogContent className="rounded-[6px] border-border">
         <AlertDialogHeader>
-          <AlertDialogTitle>{title}</AlertDialogTitle>
-          {description ? <AlertDialogDescription>{description}</AlertDialogDescription> : null}
+          <AlertDialogTitle className="text-base font-[650] tracking-[-0.01em]">{title}</AlertDialogTitle>
+          {description ? (
+            <AlertDialogDescription className="text-sm leading-6 text-muted-foreground">
+              {description}
+            </AlertDialogDescription>
+          ) : null}
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel disabled={pending}>{cancelLabel}</AlertDialogCancel>

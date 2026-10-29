@@ -2,15 +2,8 @@ import { useRef, useState, type ChangeEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Button,
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
   Input,
   Label,
-  Separator,
   Switch,
 } from "@orbitid/ui";
 import { ImagePlus, Loader2, Save, Trash2 } from "lucide-react";
@@ -21,6 +14,7 @@ import { errorMessage } from "../../lib/errors";
 import { uploadOrganizationLogo } from "../../lib/uploads";
 import { UserAvatar } from "../shared/user-avatar";
 import { ConfirmDialog } from "../shared/confirm-dialog";
+import { Panel, Section } from "../shared/section";
 
 export function OrganizationSettingsTab({ org, onChanged }: { org: OrganizationJSON; onChanged: () => void }) {
   const navigate = useNavigate();
@@ -86,80 +80,90 @@ export function OrganizationSettingsTab({ org, onChanged }: { org: OrganizationJ
   }
 
   return (
-    <div className="grid gap-4 lg:grid-cols-3">
-      <Card className="lg:col-span-2">
-        <CardHeader>
-          <CardTitle>General</CardTitle>
-          <CardDescription>Name, slug and capacity for this organization.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="org-settings-name">Name</Label>
-              <Input id="org-settings-name" value={name} onChange={(event) => setName(event.target.value)} />
+    <div className="space-y-8">
+      <Section title="Settings" description="Name, slug, capacity and logo for this organization.">
+        <Panel className="p-4">
+          <div className="space-y-5">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="org-settings-name">Name</Label>
+                <Input id="org-settings-name" value={name} onChange={(event) => setName(event.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="org-settings-slug">Slug</Label>
+                <Input id="org-settings-slug" value={slug} onChange={(event) => setSlug(event.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="org-settings-max">Max memberships</Label>
+                <Input
+                  id="org-settings-max"
+                  type="number"
+                  min={1}
+                  value={maxMemberships}
+                  onChange={(event) => setMaxMemberships(event.target.value)}
+                />
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="org-settings-slug">Slug</Label>
-              <Input id="org-settings-slug" value={slug} onChange={(event) => setSlug(event.target.value)} />
+
+            <div className="flex items-center justify-between gap-3 rounded-[3px] border border-border p-3">
+              <div className="space-y-0.5">
+                <Label htmlFor="org-settings-admin-delete">Admins can delete</Label>
+                <p className="text-xs leading-5 text-muted-foreground">
+                  Allow <code className="font-data">org:admin</code> members to delete this organization.
+                </p>
+              </div>
+              <Switch id="org-settings-admin-delete" checked={adminDelete} onCheckedChange={setAdminDelete} />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="org-settings-max">Max memberships</Label>
-              <Input
-                id="org-settings-max"
-                type="number"
-                min={1}
-                value={maxMemberships}
-                onChange={(event) => setMaxMemberships(event.target.value)}
-              />
+
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+              <div className="flex min-w-0 items-center gap-3">
+                <UserAvatar name={org.name} imageUrl={org.image_url} size="lg" className="size-12" />
+                <div className="min-w-0 space-y-0.5">
+                  <h3 className="text-sm font-medium">Logo</h3>
+                  <p className="text-xs leading-5 text-muted-foreground">Shown in the organization switcher and profile.</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <input ref={fileInput} type="file" accept="image/*" className="hidden" onChange={(e) => void onLogoChange(e)} />
+                <Button size="sm" variant="outline" disabled={uploading} onClick={() => fileInput.current?.click()}>
+                  {uploading ? <Loader2 className="animate-spin" aria-hidden /> : <ImagePlus aria-hidden />}
+                  {uploading ? "Uploading…" : "Upload logo"}
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+              <p className="text-xs text-muted-foreground">
+                Created <span className="font-data">{new Date(org.created_at).toLocaleString()}</span> · Updated{" "}
+                <span className="font-data">{new Date(org.updated_at).toLocaleString()}</span>
+              </p>
+              <Button onClick={() => void save()} disabled={!dirty || saving}>
+                {saving ? <Loader2 className="animate-spin" aria-hidden /> : <Save aria-hidden />}
+                Save changes
+              </Button>
             </div>
           </div>
-          <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
-            <div className="space-y-0.5">
-              <Label htmlFor="org-settings-admin-delete">Admins can delete</Label>
-              <p className="text-xs text-muted-foreground">Allow `org:admin` members to delete this organization.</p>
+        </Panel>
+      </Section>
+
+      <Section
+        title="Danger zone"
+        description="Deleting an organization removes memberships, invitations and domains permanently."
+      >
+        <Panel className="border-signal/40 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Delete {org.name}</p>
+              <p className="max-w-[60ch] text-sm leading-6 text-muted-foreground">
+                Members lose every role granted here, and the name and slug are released for reuse.
+              </p>
             </div>
-            <Switch id="org-settings-admin-delete" checked={adminDelete} onCheckedChange={setAdminDelete} />
+            <Button variant="destructive" onClick={() => setConfirmDelete(true)}>
+              <Trash2 aria-hidden /> Delete organization
+            </Button>
           </div>
-        </CardContent>
-        <CardFooter className="justify-end">
-          <Button onClick={() => void save()} disabled={!dirty || saving}>
-            {saving ? <Loader2 className="animate-spin" aria-hidden /> : <Save aria-hidden />}
-            Save changes
-          </Button>
-        </CardFooter>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Logo</CardTitle>
-          <CardDescription>Shown in the organization switcher and profile.</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col items-center gap-3">
-          <UserAvatar name={org.name} imageUrl={org.image_url} size="lg" className="size-20" />
-          <input ref={fileInput} type="file" accept="image/*" className="hidden" onChange={(e) => void onLogoChange(e)} />
-          <Button variant="outline" className="w-full" disabled={uploading} onClick={() => fileInput.current?.click()}>
-            {uploading ? <Loader2 className="animate-spin" aria-hidden /> : <ImagePlus aria-hidden />}
-            {uploading ? "Uploading…" : "Upload logo"}
-          </Button>
-        </CardContent>
-      </Card>
-
-      <Card className="border-destructive/40 lg:col-span-3">
-        <CardHeader>
-          <CardTitle className="text-destructive">Danger zone</CardTitle>
-          <CardDescription>Deleting an organization removes memberships, invitations and domains permanently.</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-muted-foreground">Members lose all roles granted by this organization.</p>
-          <Button variant="destructive" onClick={() => setConfirmDelete(true)}>
-            <Trash2 aria-hidden /> Delete organization
-          </Button>
-        </CardContent>
-        <Separator />
-        <CardFooter className="pt-4 text-xs text-muted-foreground">
-          Created {new Date(org.created_at).toLocaleString()} · Updated {new Date(org.updated_at).toLocaleString()}
-        </CardFooter>
-      </Card>
+        </Panel>
+      </Section>
 
       <ConfirmDialog
         open={confirmDelete}

@@ -53,7 +53,7 @@ describe("users", () => {
     expect(user.username).toBe("alice");
     expect(user.external_id).toBe("crm_1");
 
-    const row = ctx.db.select().from(s.users).all()[0]!;
+    const row = (await ctx.db.select().from(s.users))[0]!;
     expect(row.passwordHash).not.toBe("Sup3r-secret!");
     expect(row.passwordHash!.startsWith("$argon2id$")).toBe(true);
     expect(row.backupCodes).toHaveLength(1);
@@ -129,12 +129,12 @@ describe("users", () => {
     expect(await json<UserJSON[]>(await api("GET", "/v1/users?email_address=nobody@example.com"))).toEqual([]);
 
     const orgId = newId("org");
-    ctx.db.insert(s.organizations).values({ id: orgId, name: "Acme" }).run();
-    ctx.db.insert(s.organizationMemberships).values({ id: newId(ID_PREFIX.membership), organizationId: orgId, userId: b.id, roleKey: "org:member" }).run();
+    await ctx.db.insert(s.organizations).values({ id: orgId, name: "Acme" });
+    await ctx.db.insert(s.organizationMemberships).values({ id: newId(ID_PREFIX.membership), organizationId: orgId, userId: b.id, roleKey: "org:member" });
     expect((await json<UserJSON[]>(await api("GET", `/v1/users?organization_id=${orgId}`))).map((u) => u.id)).toEqual([b.id]);
 
     expect(await json<UserJSON[]>(await api("GET", "/v1/users?banned=true"))).toEqual([]);
-    ctx.raw.prepare("UPDATE users SET last_active_at = 5000").run();
+    await ctx.db.update(s.users).set({ lastActiveAt: 5000 });
     expect(await json<UserJSON[]>(await api("GET", "/v1/users?last_active_at_since=4000"))).toHaveLength(3);
     expect(await json<UserJSON[]>(await api("GET", "/v1/users?last_active_at_since=6000"))).toEqual([]);
   });
@@ -163,11 +163,11 @@ describe("users", () => {
     const { api, ctx } = await testApp();
     const secret = authenticator.generateSecret();
     const user = await createUser(api, { password: "Sup3r-secret!", totp_secret: secret });
-    const { sessionId } = createSessionFixture(ctx, user.id);
+    const { sessionId } = await createSessionFixture(ctx, user.id);
 
     const banned = await json<UserJSON>(await api("POST", `/v1/users/${user.id}/ban`));
     expect(banned.banned).toBe(true);
-    const sessionRow = ctx.db.select().from(s.sessions).all().find((row) => row.id === sessionId)!;
+    const sessionRow = (await ctx.db.select().from(s.sessions)).find((row) => row.id === sessionId)!;
     expect(sessionRow.status).toBe("revoked");
     expect((await json<UserJSON[]>(await api("GET", "/v1/users?banned=true"))).map((u) => u.id)).toEqual([user.id]);
 
@@ -224,8 +224,8 @@ describe("users", () => {
 
     // Verifying an address another account already verified is rejected instead of hitting the unique index.
     const clashUser = await createUser(api, { email_address: ["shared@example.com"] });
-    ctx.db.insert(s.emailAddresses).values({ id: newId(ID_PREFIX.email), userId: clashUser.id, email: "first@example.com", verified: false }).run();
-    const pendingRow = ctx.db.select().from(s.emailAddresses).all().find((row) => row.userId === clashUser.id && row.email === "first@example.com")!;
+    await ctx.db.insert(s.emailAddresses).values({ id: newId(ID_PREFIX.email), userId: clashUser.id, email: "first@example.com", verified: false });
+    const pendingRow = (await ctx.db.select().from(s.emailAddresses)).find((row) => row.userId === clashUser.id && row.email === "first@example.com")!;
     expect((await api("PATCH", `/v1/email_addresses/${pendingRow.id}`, { verified: true })).status).toBe(422);
 
     const phone = await json<PhoneNumberJSON>(await api("POST", "/v1/phone_numbers", { user_id: user.id, phone_number: "+15557654321", primary: true, default_second_factor: true }));
@@ -251,23 +251,37 @@ describe("users", () => {
     expect(cleared.has_image).toBe(false);
     expect(cleared.image_url).not.toBe(dataUrl);
 
-    ctx.db
-      .insert(s.externalAccounts)
-      .values({
-        id: newId(ID_PREFIX.external),
-        userId: user.id,
-        provider: "google",
-        providerUserId: "google-1",
-        emailAddress: "g@example.com",
-        approvedScopes: "email profile",
-        accessTokenEnc: encrypt(ctx.env.encryptionKey, "tok_live_123"),
-        tokenExpiresAt: 999,
-      })
-      .run();
+    await ctx.db
+                  .insert(s.externalAccounts)
+                  .values({
+                    id: newId(ID_PREFIX.external),
+                    userId: user.id,
+                    provider: "google",
+                    providerUserId: "google-1",
+                    emailAddress: "g@example.com",
+                    approvedScopes: "email profile",
+                    accessTokenEnc: encrypt(ctx.env.encryptionKey, "tok_live_123"),
+                    tokenExpiresAt: 999,
+                  });
     const tokens = await json<OAuthTokenRow[]>(await api("GET", `/v1/users/${user.id}/oauth_access_tokens/google`));
     expect(tokens).toEqual([
       { object: "oauth_access_token", external_account_id: expect.any(String), provider: "google", token: "tok_live_123", scopes: "email profile", expires_at: 999 },
     ]);
     expect((await api("GET", `/v1/users/${user.id}/oauth_access_tokens/github`)).status).toBe(404);
+  });
+});
+
+describe("user search", () => {
+  it("matches names, emails and ids case-insensitively and treats % and _ literally", async () => {
+    const { api } = await testApp();
+    const ada = await createUser(api, { email_address: ["Ada.Lovelace@Example.com"], first_name: "Ada", last_name: "Lovelace" });
+    await createUser(api, { email_address: ["grace@example.com"], first_name: "Grace", last_name: "Hopper" });
+
+    const ids = async (q: string) => (await json<UserJSON[]>(await api("GET", `/v1/users?query=${encodeURIComponent(q)}`))).map((u) => u.id);
+    expect(await ids("ADA")).toEqual([ada.id]);
+    expect(await ids("lovelace@EXAMPLE")).toEqual([ada.id]);
+    expect(await ids("ada lovelace")).toEqual([ada.id]);
+    expect(await ids("%")).toEqual([]);
+    expect(await ids("_da")).toEqual([]);
   });
 });

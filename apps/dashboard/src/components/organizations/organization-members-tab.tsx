@@ -2,10 +2,6 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Button,
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -20,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@orbitid/ui";
-import { Search, UserPlus, Users, X } from "lucide-react";
+import { Search, UserPlus, Users } from "lucide-react";
 import { toast } from "sonner";
 import type { OrganizationJSON, OrganizationMembershipJSON, UserJSON } from "@orbitid/shared";
 import { api, useApi } from "../../lib/api";
@@ -35,6 +31,7 @@ import { TablePagination } from "../shared/table-pagination";
 import { EmptyState } from "../shared/empty-state";
 import { UserAvatar } from "../shared/user-avatar";
 import { ConfirmDialog } from "../shared/confirm-dialog";
+import { Section } from "../shared/section";
 import { OrganizationRoleSelect } from "./role-select";
 
 function AddMemberDialog({
@@ -101,7 +98,7 @@ function AddMemberDialog({
               />
             </div>
             {(users.data?.data?.length ?? 0) > 0 ? (
-              <ul className="max-h-48 overflow-y-auto rounded-md border">
+              <ul className="max-h-48 overflow-y-auto rounded-[4px] border border-border">
                 {users.data?.data?.map((user) => (
                   <li key={user.id}>
                     <button
@@ -199,7 +196,7 @@ export function OrganizationMembersTab({ org, onChanged }: { org: OrganizationJS
               <Link to={`/users/${membership.public_user_data.user_id}`} className="truncate text-sm font-medium hover:underline">
                 {name}
               </Link>
-              <p className="truncate text-xs text-muted-foreground">{membership.public_user_data.identifier}</p>
+              <p className="truncate font-data text-xs text-muted-foreground">{membership.public_user_data.identifier}</p>
             </div>
           </div>
         );
@@ -225,7 +222,7 @@ export function OrganizationMembersTab({ org, onChanged }: { org: OrganizationJS
       header: "Joined",
       headerClassName: "hidden sm:table-cell",
       className: "hidden sm:table-cell",
-      cell: (membership) => <span className="text-sm text-muted-foreground">{formatDate(membership.created_at)}</span>,
+      cell: (membership) => <span className="font-data text-xs text-muted-foreground">{formatDate(membership.created_at)}</span>,
     },
     {
       id: "permissions",
@@ -233,31 +230,32 @@ export function OrganizationMembersTab({ org, onChanged }: { org: OrganizationJS
       headerClassName: "hidden xl:table-cell",
       className: "hidden xl:table-cell",
       cell: (membership) => (
-        <span className="text-xs text-muted-foreground">{membership.permissions.length} granted</span>
+        <span className="font-data text-xs text-muted-foreground">{membership.permissions.length} granted</span>
       ),
     },
     {
       id: "actions",
       header: <span className="sr-only">Actions</span>,
-      className: "w-10 text-right",
+      className: "w-24 text-right",
       cell: (membership) => (
         <Button
-          size="icon"
+          size="sm"
           variant="ghost"
-          aria-label="Remove member"
+          aria-label={`Remove ${membership.public_user_data.identifier}`}
           onClick={() => setRemoving(membership)}
         >
-          <X aria-hidden />
+          Remove
         </Button>
       ),
     },
   ];
 
   return (
-    <Card>
-      <CardHeader className="flex-row flex-wrap items-start justify-between gap-2">
-        <CardTitle>Members</CardTitle>
-        <div className="flex flex-wrap items-center gap-2">
+    <Section
+      title="Members"
+      description="People who belong to this organization and the role each one holds."
+      actions={
+        <>
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
             <Input
@@ -274,9 +272,10 @@ export function OrganizationMembersTab({ org, onChanged }: { org: OrganizationJS
           <Button size="sm" onClick={() => setAddOpen(true)}>
             <UserPlus aria-hidden /> Add member
           </Button>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-3">
+        </>
+      }
+    >
+      <div className="space-y-3">
         <DataTable
           columns={columns}
           rows={rows}
@@ -304,7 +303,7 @@ export function OrganizationMembersTab({ org, onChanged }: { org: OrganizationJS
           }}
           disabled={memberships.isFetching}
         />
-      </CardContent>
+      </div>
 
       <AddMemberDialog
         org={org}
@@ -331,6 +330,6 @@ export function OrganizationMembersTab({ org, onChanged }: { org: OrganizationJS
         pending={pending}
         onConfirm={() => void remove()}
       />
-    </Card>
+    </Section>
   );
 }

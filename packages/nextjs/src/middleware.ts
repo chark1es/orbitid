@@ -15,6 +15,13 @@ import {
   type ServerEnvOverrides,
 } from "./env";
 import { resolveRequestAuthState } from "./resolve";
+import {
+  completeHandshake,
+  hasHandshakeMarker,
+  isNavigationRequest,
+  redirectToHandshake,
+  type HandshakeOptions,
+} from "./handshake";
 
 export interface ContentSecurityPolicyOptions {
   directives?: Record<string, string[]> | string[];
@@ -26,10 +33,15 @@ export interface ContentSecurityPolicyOptions {
 export type ContentSecurityPolicy = string | ContentSecurityPolicyOptions;
 
 export interface OrbitIdMiddlewareOptions extends ServerEnvOverrides {
-  /** Accepted for parity with `clerkMiddleware`; consumed by `orbitIdClient()` in server helpers. */
+  /** Consumed by `orbitIdClient()` in server helpers, not by the middleware itself. */
   secretKey?: string;
   debug?: boolean;
   contentSecurityPolicy?: ContentSecurityPolicy;
+  /**
+   * Server-side handshake for hard navigations. Enabled by default; set `{ enabled: false }` to keep
+   * forwarding `handshake` state and let the browser SDK refresh the token instead.
+   */
+  handshake?: HandshakeOptions;
 }
 
 /** Auth object handed to the middleware handler. Redirects return Next responses instead of throwing. */
@@ -97,18 +109,20 @@ function createMiddlewareAuthObject(
 ): MiddlewareAuthObject {
   const claims = state.status === "signed-in" ? state.claims : null;
   const sessionStatus = claims?.sts ?? (state.status === "signed-in" ? "active" : null);
+  // A pending session (required MFA not yet set up) is not a signed-in user, here as in `auth()`.
+  const authenticatedClaims = sessionStatus === "pending" ? null : claims;
 
   const auth: MiddlewareAuthObject = {
-    userId: claims?.sub ?? null,
+    userId: authenticatedClaims?.sub ?? null,
     sessionId: claims?.sid ?? null,
-    orgId: claims?.org_id ?? null,
-    orgRole: claims?.org_role ?? null,
-    orgSlug: claims?.org_slug ?? null,
-    orgPermissions: claims?.org_permissions ?? null,
+    orgId: authenticatedClaims?.org_id ?? null,
+    orgRole: authenticatedClaims?.org_role ?? null,
+    orgSlug: authenticatedClaims?.org_slug ?? null,
+    orgPermissions: authenticatedClaims?.org_permissions ?? null,
     actor: claims?.act ?? null,
     sessionClaims: claims,
     sessionStatus,
-    isAuthenticated: state.status === "signed-in" && claims !== null,
+    isAuthenticated: state.status === "signed-in" && authenticatedClaims !== null,
     getToken: async (opts) =>
       opts?.template ? null : state.token,
     has: createHasChecker(claims, sessionStatus),
@@ -168,7 +182,7 @@ function applyCsp(response: Response, csp: ContentSecurityPolicy | undefined): R
 }
 
 /**
- * Drop-in equivalent of `clerkMiddleware`.
+ * Protects routes and forwards verified auth state to the server helpers.
  *
  * ```ts
  * // middleware.ts
@@ -182,7 +196,7 @@ function applyCsp(response: Response, csp: ContentSecurityPolicy | undefined): R
  *   if (isAdminRoute(req)) await auth.protect({ permission: 'org:sys_memberships:manage' });
  * });
  *
- * export const config = { matcher: ['/((?!_next|.*\\..*).*)'] };
+ * export const config = { matcher: ['/((?!_next|.*\\.(?:svg|png|jpe?g|gif|ico|webp|woff2?|css|js|map|txt|xml)$).*)'] };
  * ```
  */
 export function orbitIdMiddleware(options?: OrbitIdMiddlewareOptions): MiddlewareResult;
@@ -195,6 +209,16 @@ export function orbitIdMiddleware(
 
   return async (req: NextRequest): Promise<Response> => {
     const env = getServerEnv(options);
+    const handshakeOptions = options.handshake ?? {};
+    const handshakeEnabled = handshakeOptions.enabled !== false;
+
+    // A return from the Frontend API handshake carries a token in the URL: verify it, write the SDK
+    // cookies and redirect to the same URL without the parameter before anything else looks at auth.
+    if (handshakeEnabled && req.method === "GET") {
+      const completed = await completeHandshake(req, env, handshakeOptions);
+      if (completed) return applyCsp(completed.response, options.contentSecurityPolicy);
+    }
+
     // Internal auth headers are ours to set; anything the client sent is discarded.
     const incoming = new Headers(req.headers);
     for (const name of Object.values(AUTH_HEADERS)) incoming.delete(name);
@@ -204,14 +228,27 @@ export function orbitIdMiddleware(
       console.debug(`[orbitid] ${req.method} ${req.nextUrl?.pathname ?? req.url} → ${state.status}`, state.reason ?? "");
     }
 
-    if (!handler) {
-      return applyCsp(forwardWithAuthHeaders(req, state), options.contentSecurityPolicy);
+    // Expired/missing `__session` with a live `__client_uat` on a top-level navigation: one handshake
+    // attempt is worth it. A caller with a Bearer token mints its own tokens, so it never gets one.
+    // The marker cookie stops a browser from bouncing when the API keeps failing; with the marker
+    // already set the visitor continues signed out instead of looping.
+    let effectiveState = state;
+    const cookieAuth = !incoming.get("authorization");
+    if (handshakeEnabled && cookieAuth && state.status === "handshake" && isNavigationRequest(req)) {
+      if (!hasHandshakeMarker(req)) {
+        return applyCsp(redirectToHandshake(req, env, handshakeOptions), options.contentSecurityPolicy);
+      }
+      effectiveState = { ...state, status: "signed-out", token: null };
     }
 
-    const auth = createMiddlewareAuthObject(state, req, env);
+    if (!handler) {
+      return applyCsp(forwardWithAuthHeaders(req, effectiveState), options.contentSecurityPolicy);
+    }
+
+    const auth = createMiddlewareAuthObject(effectiveState, req, env);
     try {
       const result = await handler(auth, req);
-      const response = result ?? forwardWithAuthHeaders(req, state);
+      const response = result ?? forwardWithAuthHeaders(req, effectiveState);
       return applyCsp(response, options.contentSecurityPolicy);
     } catch (error) {
       if (error instanceof MiddlewareResponseError) {

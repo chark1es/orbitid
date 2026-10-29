@@ -1,4 +1,5 @@
 // Sign-in state machine helpers shared by the FAPI and OAuth callbacks.
+import { authMethodOf } from "../../lib/auth-method";
 import { desc, eq } from "drizzle-orm";
 import {
   ErrorCodes, OrbitError,
@@ -11,11 +12,13 @@ import { serializeUser } from "../../serializers";
 import { createSession } from "../../services/sessions";
 import { listPasskeys } from "../../services/passkeys";
 import { listEmails, listPhones, primaryEmail, primaryPhone, type UserRow } from "../../services/users";
-import { supportedSecondFactors } from "../../services/mfa";
+import { maskEmail, supportedSecondFactors } from "../../services/mfa";
+import { redeemTrustedDevice } from "../../services/trusted-devices";
 import { listEnabledSocialProviders } from "../../services/oauth-providers";
 import type { ExternalProfile } from "../../services/external-identity";
 import { getVerificationById, verificationJSON } from "./verifications";
 import { redeemTicket } from "../../services/restrictions";
+import { first } from "../../lib/db";
 
 export type SignInRow = typeof s.signIns.$inferSelect;
 
@@ -28,6 +31,8 @@ export interface FactorState {
   nonce?: string;
   error?: { code: string; message: string } | null;
   externalVerificationRedirectUrl?: string;
+  /** Set when a remembered browser satisfied the second factor. */
+  trustedDeviceId?: string;
 }
 
 export interface StashedProfile extends Omit<ExternalProfile, "accessToken" | "refreshToken"> {
@@ -52,15 +57,15 @@ export interface SignInState {
 const asRecord = (v: unknown): Record<string, unknown> => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
 export const asSignInState = (row: SignInRow): SignInState => asRecord(row.state) as SignInState;
 
-export function saveSignInState(ctx: AppContext, row: SignInRow, state: SignInState) {
-  ctx.db.update(s.signIns).set({ state: state as Record<string, unknown>, updatedAt: Date.now() }).where(eq(s.signIns.id, row.id)).run();
+export async function saveSignInState(ctx: AppContext, row: SignInRow, state: SignInState) {
+  await ctx.db.update(s.signIns).set({ state: state as Record<string, unknown>, updatedAt: Date.now() }).where(eq(s.signIns.id, row.id));
   return { ...row, state: state as Record<string, unknown> };
 }
 
-export function factorJSON(ctx: AppContext, state: FactorState | undefined): VerificationJSON | null {
+export async function factorJSON(ctx: AppContext, state: FactorState | undefined): Promise<VerificationJSON | null> {
   if (!state) return null;
   if (state.verificationId) {
-    const row = getVerificationById(ctx, state.verificationId);
+    const row = await getVerificationById(ctx, state.verificationId);
     const json = verificationJSON(row);
     if (json) return { ...json, strategy: state.strategy, nonce: state.nonce ?? json.nonce };
   }
@@ -75,25 +80,23 @@ export function factorJSON(ctx: AppContext, state: FactorState | undefined): Ver
   };
 }
 
-export const maskEmail = (email: string) => {
-  const [local, domain] = email.split("@");
-  if (!domain) return email;
-  return `${(local ?? "").slice(0, 1)}${"*".repeat(Math.max(3, (local ?? "").length - 1))}@${domain}`;
-};
 export const maskPhone = (phone: string) => `${phone.slice(0, phone.length - 4).replace(/\d/g, "*")}${phone.slice(-4)}`;
 
-export function verifiedEmailOf(ctx: AppContext, user: UserRow) {
-  return listEmails(ctx, user.id).find((e) => e.verified);
+/** Re-exported so callers keep one import for factor masking. */
+export { maskEmail };
+
+export async function verifiedEmailOf(ctx: AppContext, user: UserRow) {
+  return (await listEmails(ctx, user.id)).find((e) => e.verified);
 }
-export function verifiedPhoneOf(ctx: AppContext, user: UserRow) {
-  return listPhones(ctx, user.id).find((p) => p.verified);
+export async function verifiedPhoneOf(ctx: AppContext, user: UserRow) {
+  return (await listPhones(ctx, user.id)).find((p) => p.verified);
 }
 
 /** Active enterprise SSO connection whose domain matches the email, if any. */
-export function enterpriseConnectionForEmail(ctx: AppContext, email: string) {
+export async function enterpriseConnectionForEmail(ctx: AppContext, email: string) {
   const domain = email.split("@")[1]?.toLowerCase();
   if (!domain) return undefined;
-  return ctx.db.select().from(s.enterpriseConnections).where(eq(s.enterpriseConnections.active, true)).all()
+  return (await ctx.db.select().from(s.enterpriseConnections).where(eq(s.enterpriseConnections.active, true)))
     .find((conn) => {
       const domains = (conn.domains ?? []).map((d) => d.toLowerCase());
       return domains.includes(domain) || (conn.allowSubdomains && domains.some((d) => domain.endsWith(`.${d}`)));
@@ -102,12 +105,12 @@ export function enterpriseConnectionForEmail(ctx: AppContext, email: string) {
 
 export interface FirstFactorOptions { requestedReset?: boolean; requestedStrategy?: string }
 
-/** Factors this user may use to sign in (Clerk's `supported_first_factors`). */
-export function computeFirstFactors(ctx: AppContext, user: UserRow, opts: FirstFactorOptions = {}): SignInFactor[] {
+/** Factors this user may use to sign in (`supported_first_factors`). */
+export async function computeFirstFactors(ctx: AppContext, user: UserRow, opts: FirstFactorOptions = {}): Promise<SignInFactor[]> {
   const st = ctx.settings.get();
   const factors: SignInFactor[] = [];
-  const email = verifiedEmailOf(ctx, user) ?? primaryEmail(ctx, user);
-  const phone = verifiedPhoneOf(ctx, user) ?? primaryPhone(ctx, user);
+  const email = await verifiedEmailOf(ctx, user) ?? await primaryEmail(ctx, user);
+  const phone = await verifiedPhoneOf(ctx, user) ?? await primaryPhone(ctx, user);
 
   if (st.attributes.emailAddress.enabled && st.attributes.emailAddress.usedForFirstFactor && email?.verified) {
     const strategies = st.attributes.emailAddress.verifications;
@@ -123,13 +126,13 @@ export function computeFirstFactors(ctx: AppContext, user: UserRow, opts: FirstF
   if (st.attributes.phoneNumber.enabled && st.attributes.phoneNumber.usedForFirstFactor && phone?.verified) {
     factors.push({ strategy: "phone_code", phone_number_id: phone.id, safe_identifier: maskPhone(phone.phone), primary: phone.id === user.primaryPhoneNumberId });
   }
-  if (st.attributes.passkey.enabled && listPasskeys(ctx, user.id).length > 0) {
+  if (st.attributes.passkey.enabled && st.attributes.passkey.usedForFirstFactor && (await listPasskeys(ctx, user.id)).length > 0) {
     factors.push({ strategy: "passkey" });
   }
   for (const provider of listEnabledSocialProviders(ctx)) {
     if (provider.authenticatable) factors.push({ strategy: `oauth_${provider.key}` });
   }
-  if (email?.verified && enterpriseConnectionForEmail(ctx, email.email)) factors.push({ strategy: "enterprise_sso" });
+  if (email?.verified && await enterpriseConnectionForEmail(ctx, email.email)) factors.push({ strategy: "enterprise_sso" });
   if (opts.requestedReset) {
     if (email?.verified) factors.push({ strategy: "reset_password_email_code", email_address_id: email.id, safe_identifier: maskEmail(email.email) });
     if (phone?.verified) factors.push({ strategy: "reset_password_phone_code", phone_number_id: phone.id, safe_identifier: maskPhone(phone.phone) });
@@ -146,20 +149,21 @@ export function supportedIdentifiers(ctx: AppContext) {
   return ids;
 }
 
-export function buildSignInJSON(ctx: AppContext, row: SignInRow): SignInJSON {
+export async function buildSignInJSON(ctx: AppContext, row: SignInRow): Promise<SignInJSON> {
   const state = asSignInState(row);
-  const user = row.userId ? ctx.db.select().from(s.users).where(eq(s.users.id, row.userId)).get() : undefined;
-  const json = user ? serializeUser(ctx, user) : null;
+  const user = row.userId ? first(await ctx.db.select().from(s.users).where(eq(s.users.id, row.userId))) : undefined;
+  const json = user ? await serializeUser(ctx, user) : null;
   const requestedReset = !!state.requestedReset || state.first?.strategy.startsWith("reset_password") === true;
   return {
     object: "sign_in",
     id: row.id,
     status: row.status as SignInStatus,
     supported_identifiers: supportedIdentifiers(ctx),
-    supported_first_factors: user ? computeFirstFactors(ctx, user, { requestedReset }) : null,
-    supported_second_factors: user ? supportedSecondFactors(ctx, user) : null,
-    first_factor_verification: factorJSON(ctx, state.first),
-    second_factor_verification: factorJSON(ctx, state.second),
+    supported_first_factors: user ? await computeFirstFactors(ctx, user, { requestedReset }) : null,
+    // A second factor must be a different factor than the first one.
+    supported_second_factors: user ? await supportedSecondFactors(ctx, user, { firstFactorStrategy: state.first?.strategy }) : null,
+    first_factor_verification: await factorJSON(ctx, state.first),
+    second_factor_verification: await factorJSON(ctx, state.second),
     identifier: row.identifier ?? null,
     user_data: json ? { first_name: json.first_name, last_name: json.last_name, image_url: json.image_url, has_image: json.has_image } : null,
     created_session_id: row.createdSessionId ?? null,
@@ -173,6 +177,10 @@ export interface CompleteSignInOptions {
   ip?: string;
   userAgent?: string;
   secondFactor?: boolean;
+  /** Rotates the browser's opaque client token when the session is created. */
+  rotateClientToken?: () => Promise<void>;
+  /** Presented `__orbit_trusted` token; a valid one skips the second factor for this browser. */
+  trustedDeviceToken?: string;
 }
 
 /** Creates the session and marks the sign-in complete. */
@@ -188,28 +196,71 @@ export async function completeSignIn(ctx: AppContext, row: SignInRow, opts: Comp
     maxLifetimeSeconds: opts.maxLifetimeSeconds ?? state.sessionMaxDurationSeconds,
     firstFactor: true,
     secondFactor: opts.secondFactor ?? false,
+    method: state.actor ? "ticket" : authMethodOf(state.first?.strategy),
+    rotateClientToken: opts.rotateClientToken,
   });
   const nextState: SignInState = { ...state, second: opts.secondFactor ? { ...(state.second ?? { strategy: "totp" }), status: "verified" } : state.second };
-  ctx.db.update(s.signIns).set({ status: "complete", createdSessionId: sessionId, state: nextState as Record<string, unknown>, updatedAt: Date.now() }).where(eq(s.signIns.id, row.id)).run();
+  await ctx.db.update(s.signIns).set({ status: "complete", createdSessionId: sessionId, state: nextState as Record<string, unknown>, updatedAt: Date.now() }).where(eq(s.signIns.id, row.id));
   return sessionId;
 }
 
-/** Decides between `needs_second_factor` and a completed session after a first factor succeeded. */
-export async function afterFirstFactor(ctx: AppContext, row: SignInRow, user: UserRow, opts: CompleteSignInOptions = {}): Promise<{ status: "needs_second_factor" | "complete"; sessionId?: string }> {
-  const factors = supportedSecondFactors(ctx, user);
+export interface AfterFirstFactorResult {
+  status: "needs_second_factor" | "complete";
+  sessionId?: string;
+  /** The rotated trusted-device token to put back into the cookie. */
+  trustedDeviceToken?: string;
+  /** Original (non-sliding) expiry of the rotated token. */
+  trustedDeviceExpiresAt?: number;
+  /** The presented token was invalid/expired/revoked: drop the cookie. */
+  clearTrustedDevice?: boolean;
+}
+
+/**
+ * Decides between `needs_second_factor` and a completed session after a first factor succeeded.
+ * A valid trusted-device token for this user skips the second factor (only when `session.trustedDevicesEnabled`,
+ * and — with `mfa.required` — only for users who already enrolled a factor).
+ */
+export async function afterFirstFactor(ctx: AppContext, row: SignInRow, user: UserRow, opts: CompleteSignInOptions = {}): Promise<AfterFirstFactorResult> {
+  const state = asSignInState(row);
+  // A second factor must be a different factor than the first one (never email after an email sign-in).
+  const factors = await supportedSecondFactors(ctx, user, { firstFactorStrategy: state.first?.strategy });
   if (factors.length > 0) {
-    const state = asSignInState(row);
-    const preferred = factors.find((f) => f.default) ?? factors.find((f) => f.strategy === "totp") ?? factors[0]!;
-    saveSignInState(ctx, row, { ...state, second: { strategy: preferred.strategy, phoneId: preferred.phone_number_id, status: "unverified" } });
-    ctx.db.update(s.signIns).set({ status: "needs_second_factor", userId: user.id, updatedAt: Date.now() }).where(eq(s.signIns.id, row.id)).run();
+    const st = ctx.settings.get();
+    if (st.session.trustedDevicesEnabled && opts.trustedDeviceToken) {
+      const enrolled = !!user.totpVerified || (await supportedSecondFactors(ctx, user)).length > 0;
+      const honored = !st.mfa.required || enrolled;
+      const redeemed = honored ? await redeemTrustedDevice(ctx, opts.trustedDeviceToken, user.id) : null;
+      if (redeemed) {
+        await saveSignInState(ctx, row, { ...state, second: { strategy: "trusted_device", status: "verified", trustedDeviceId: redeemed.row.id } });
+        const sessionId = await completeSignIn(ctx, await reloadSignIn(ctx, row.id), { ...opts, secondFactor: true });
+        return { status: "complete", sessionId, trustedDeviceToken: redeemed.token, trustedDeviceExpiresAt: redeemed.row.expiresAt };
+      }
+      if (!honored) {
+        // `mfa.required` with no enrolled factor: the cookie is not a shortcut, but it is not invalid either.
+        await pendingSecondFactor(ctx, row, user, state, factors);
+        return { status: "needs_second_factor" };
+      }
+      await pendingSecondFactor(ctx, row, user, state, factors);
+      return { status: "needs_second_factor", clearTrustedDevice: true };
+    }
+    await pendingSecondFactor(ctx, row, user, state, factors);
     return { status: "needs_second_factor" };
   }
   const sessionId = await completeSignIn(ctx, row, opts);
   return { status: "complete", sessionId };
 }
 
+async function pendingSecondFactor(ctx: AppContext, row: SignInRow, user: UserRow, state: SignInState, factors: SignInFactor[]) {
+  const preferred = factors.find((f) => f.default) ?? factors.find((f) => f.strategy === "totp") ?? factors[0]!;
+  await saveSignInState(ctx, row, { ...state, second: { strategy: preferred.strategy, phoneId: preferred.phone_number_id, status: "unverified" } });
+  await ctx.db.update(s.signIns).set({ status: "needs_second_factor", userId: user.id, updatedAt: Date.now() }).where(eq(s.signIns.id, row.id));
+}
+
+const reloadSignIn = async (ctx: AppContext, id: string) =>
+  first(await ctx.db.select().from(s.signIns).where(eq(s.signIns.id, id)))!;
+
 /** Stores an OAuth profile on the sign-in so the SDK can transfer it to a sign-up. */
-export function stashTransferProfile(ctx: AppContext, row: SignInRow, profile: ExternalProfile, strategy: string) {
+export async function stashTransferProfile(ctx: AppContext, row: SignInRow, profile: ExternalProfile, strategy: string) {
   const state = asSignInState(row);
   const stashed: StashedProfile = {
     provider: profile.provider,
@@ -224,12 +275,12 @@ export function stashTransferProfile(ctx: AppContext, row: SignInRow, profile: E
     accessTokenEnc: profile.accessToken ? encrypt(ctx.env.encryptionKey, profile.accessToken) : undefined,
     refreshTokenEnc: profile.refreshToken ? encrypt(ctx.env.encryptionKey, profile.refreshToken) : undefined,
   };
-  saveSignInState(ctx, row, {
-    ...state,
-    first: { strategy, status: "transferable" },
-    transferProfile: stashed,
-  });
-  ctx.db.update(s.signIns).set({ status: "needs_first_factor", updatedAt: Date.now() }).where(eq(s.signIns.id, row.id)).run();
+  await saveSignInState(ctx, row, {
+        ...state,
+        first: { strategy, status: "transferable" },
+        transferProfile: stashed,
+      });
+  await ctx.db.update(s.signIns).set({ status: "needs_first_factor", updatedAt: Date.now() }).where(eq(s.signIns.id, row.id));
 }
 
 /** Reads + decrypts a stashed OAuth profile. */
@@ -245,9 +296,9 @@ export function readTransferProfile(ctx: AppContext, row: SignInRow): ExternalPr
 }
 
 /** Clears the transferable state once the SDK moved it to a sign-up. */
-export function clearTransferProfile(ctx: AppContext, row: SignInRow) {
+export async function clearTransferProfile(ctx: AppContext, row: SignInRow) {
   const state = asSignInState(row);
-  saveSignInState(ctx, row, { ...state, transferProfile: undefined, first: undefined });
+  await saveSignInState(ctx, row, { ...state, transferProfile: undefined, first: undefined });
 }
 
 export type RedeemTicketResult =
@@ -264,7 +315,7 @@ export async function resolveTicket(ctx: AppContext, ticket: string): Promise<{ 
   return { userId: result.userId, actor: result.actor, sessionMaxDurationSeconds: result.sessionMaxDurationSeconds };
 }
 
-/** Throws when the user is banned/locked (with the Clerk-compatible error codes). */
+/** Throws when the user is banned/locked (with the documented error codes). */
 export function assertSignInAllowed(user: UserRow) {
   if (user.banned) throw new OrbitError(403, ErrorCodes.user_banned, "This user has been banned");
   if (user.locked && (!user.lockoutExpiresAt || user.lockoutExpiresAt > Date.now())) {
@@ -275,11 +326,11 @@ export function assertSignInAllowed(user: UserRow) {
 }
 
 export const signInBelongsToClient = (row: SignInRow, clientId: string) => row.clientId === clientId && row.status !== "abandoned";
-export const latestSignInForClient = (ctx: AppContext, clientId: string) =>
-  ctx.db.select().from(s.signIns).where(eq(s.signIns.clientId, clientId)).orderBy(desc(s.signIns.createdAt)).get();
+export const latestSignInForClient = async (ctx: AppContext, clientId: string) =>
+  first(await ctx.db.select().from(s.signIns).where(eq(s.signIns.clientId, clientId)).orderBy(desc(s.signIns.createdAt)));
 
 /** Latest sign-in that carries a transferable OAuth profile. */
-export function latestTransferableSignIn(ctx: AppContext, clientId: string) {
-  return ctx.db.select().from(s.signIns).where(eq(s.signIns.clientId, clientId)).orderBy(desc(s.signIns.createdAt)).all()
+export async function latestTransferableSignIn(ctx: AppContext, clientId: string) {
+  return (await ctx.db.select().from(s.signIns).where(eq(s.signIns.clientId, clientId)).orderBy(desc(s.signIns.createdAt)))
     .find((row) => !!asSignInState(row).transferProfile);
 }

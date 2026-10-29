@@ -2,7 +2,7 @@ import type { SessionPublicUserData } from "../provider/types";
 
 /**
  * `@orbitid/js` exposes `public_user_data` exactly as the API sends it (snake_case). Components
- * written against Clerk's camelCase resources need both spellings, so add the aliases in place.
+ * written against camelCase resources need both spellings, so add the aliases in place.
  * Additive and idempotent.
  */
 export function withPublicUserDataAliases<T extends { publicUserData?: SessionPublicUserData | null }>(

@@ -1,4 +1,5 @@
 import {
+  Button,
   Pagination,
   PaginationContent,
   PaginationItem,
@@ -7,7 +8,6 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Button,
 } from "@orbitid/ui";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { formatNumber } from "../../lib/format";
@@ -48,15 +48,15 @@ export function TablePagination({
   const end = Math.min(currentPage * limit, total);
 
   return (
-    <div className="flex flex-col-reverse items-center justify-between gap-3 pt-1 sm:flex-row">
-      <p className="text-sm text-muted-foreground">
+    <div className="flex flex-col-reverse items-center justify-between gap-3 sm:flex-row">
+      <p className="text-xs text-muted-foreground tabular-nums">
         {total === 0 ? "No results" : `Showing ${formatNumber(start)}–${formatNumber(end)} of ${formatNumber(total)}`}
       </p>
       <div className="flex flex-wrap items-center justify-center gap-3">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <span className="text-xs text-muted-foreground">Rows</span>
           <Select value={String(limit)} onValueChange={(value) => onLimitChange(Number(value))} disabled={disabled}>
-            <SelectTrigger className="h-8 w-[72px]" aria-label="Rows per page">
+            <SelectTrigger className="h-7 w-[68px] text-xs" aria-label="Rows per page">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -69,13 +69,13 @@ export function TablePagination({
           </Select>
         </div>
         <Pagination className="mx-0 w-auto justify-start">
-          <PaginationContent>
+          <PaginationContent className="gap-1">
             <PaginationItem>
               <Button
                 type="button"
                 variant="outline"
                 size="icon"
-                className="size-8"
+                className="size-7"
                 aria-label="Previous page"
                 disabled={disabled || currentPage <= 1}
                 onClick={() => onPageChange(currentPage - 1)}
@@ -86,7 +86,7 @@ export function TablePagination({
             {pageWindow(currentPage, totalPages).map((entry, index) =>
               entry === "ellipsis" ? (
                 <PaginationItem key={`ellipsis-${index}`}>
-                  <span className="px-2 text-sm text-muted-foreground" aria-hidden>
+                  <span className="px-1 text-xs text-muted-foreground" aria-hidden>
                     …
                   </span>
                 </PaginationItem>
@@ -96,7 +96,7 @@ export function TablePagination({
                     type="button"
                     variant={entry === currentPage ? "default" : "outline"}
                     size="icon"
-                    className="size-8"
+                    className="size-7 text-xs tabular-nums"
                     aria-label={`Page ${entry}`}
                     aria-current={entry === currentPage ? "page" : undefined}
                     disabled={disabled}
@@ -112,7 +112,7 @@ export function TablePagination({
                 type="button"
                 variant="outline"
                 size="icon"
-                className="size-8"
+                className="size-7"
                 aria-label="Next page"
                 disabled={disabled || currentPage >= totalPages}
                 onClick={() => onPageChange(currentPage + 1)}

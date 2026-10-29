@@ -15,6 +15,7 @@ import {
 } from "@orbitid/ui";
 import { CopyIcon, DownloadIcon, KeyRoundIcon, PlusIcon, PrinterIcon, Trash2Icon } from "lucide-react";
 import { currentUser, findPhone, invokeMethod, reloadOrbit } from "../_shared/api";
+import { copyText, downloadText, printText } from "../_shared/clipboard";
 import { normalizeSession } from "../_shared/normalize";
 import { ConfirmDialog } from "../_shared/confirm-dialog";
 import { FormError } from "../_shared/form-error";
@@ -24,6 +25,7 @@ import { PhoneNumberDialog, messageFor } from "./profile-page";
 import { useReverification } from "../../../hooks";
 import { useAuthRuntime } from "../_shared/w6";
 import type { NormalizedSession, OrbitUser } from "../_shared/w6";
+import type { TrustedDeviceResource } from "../../../provider/types";
 import { isRecord } from "../_shared/guards";
 
 interface SectionProps {
@@ -63,7 +65,7 @@ export function SecurityPage({ onNavigate }: { onNavigate: (page: string) => voi
     <div className="flex flex-col gap-6">
       <FormError message={error} />
       {notice ? (
-        <p role="status" className="rounded-md border border-emerald-600/20 bg-emerald-600/10 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-300">
+        <p role="status" className="rounded-md border border-go/20 bg-go/10 px-3 py-2 text-sm text-foreground">
           {notice}
         </p>
       ) : null}
@@ -76,6 +78,8 @@ export function SecurityPage({ onNavigate }: { onNavigate: (page: string) => voi
       <BackupCodesSection {...sectionProps} />
       <Separator />
       <MfaPhonesSection {...sectionProps} />
+      <Separator />
+      <TrustedDevicesSection {...sectionProps} />
       <Separator />
       <DevicesSection {...sectionProps} />
       <Separator />
@@ -552,7 +556,7 @@ function BackupCodesSection({ user, refresh, onError, onNotice }: SectionProps) 
                 <DownloadIcon className="size-4" aria-hidden="true" />
                 {t("common.download")}
               </Button>
-              <Button type="button" variant="outline" size="sm" onClick={() => printCodes((codes ?? []).join("\n"))}>
+              <Button type="button" variant="outline" size="sm" onClick={() => printText((codes ?? []).join("\n"))}>
                 <PrinterIcon className="size-4" aria-hidden="true" />
                 {t("common.print")}
               </Button>
@@ -650,6 +654,79 @@ function MfaPhonesSection({ user, refresh, onError, onNotice }: SectionProps) {
         }}
         onError={onError}
       />
+    </section>
+  );
+}
+
+function TrustedDevicesSection({ user, refresh, onError, onNotice }: SectionProps) {
+  const runtime = useAuthRuntime();
+  const { t, environment } = runtime;
+  const [devices, setDevices] = useState<TrustedDeviceResource[]>([]);
+  const [busy, setBusy] = useState(false);
+  const enabled = environment.trustedDevices.enabled;
+
+  const load = async () => {
+    try {
+      const listDevices = user.getTrustedDevices as (() => Promise<TrustedDeviceResource[]>) | undefined;
+      if (typeof listDevices !== "function") return setDevices([]);
+      const list = await listDevices.call(user);
+      setDevices(Array.isArray(list) ? list : []);
+    } catch (caught) {
+      onError(caught);
+    }
+  };
+
+  useEffect(() => {
+    if (enabled) void load();
+  }, [user, enabled]);
+
+  const revoke = async (deviceId: string) => {
+    setBusy(true);
+    try {
+      const revokeDevice = user.revokeTrustedDevice as ((id: string) => Promise<void>) | undefined;
+      if (typeof revokeDevice !== "function") throw new Error(t("common.internalError"));
+      await revokeDevice.call(user, deviceId);
+      await load();
+      await refresh();
+      onNotice(t("userProfile.trustedDevices.revoked"));
+    } catch (caught) {
+      onError(caught);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!enabled) return null;
+
+  return (
+    <section className="flex flex-col gap-3" data-orbit-section="trusted-devices">
+      <SectionHeader title={t("userProfile.trustedDevices.title")} description={t("userProfile.trustedDevices.description")} />
+      {devices.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{t("userProfile.trustedDevices.none")}</p>
+      ) : (
+        <ul className="flex flex-col divide-y rounded-md border">
+          {devices.map((device) => {
+            const expiresAt = device.expiresAt ?? device.expires_at ?? null;
+            const lastUsedAt = device.lastUsedAt ?? device.last_used_at ?? null;
+            return (
+              <li key={device.id} className="flex flex-wrap items-center gap-2 px-3 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm">{device.label ?? t("userProfile.devices.unknownDevice")}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {lastUsedAt
+                      ? t("userProfile.trustedDevices.lastUsed", { date: formatDate(lastUsedAt) })
+                      : t("userProfile.trustedDevices.neverUsed")}
+                    {expiresAt ? ` · ${t("userProfile.trustedDevices.expires", { date: formatDate(expiresAt) })}` : ""}
+                  </p>
+                </div>
+                <Button type="button" variant="link" size="sm" className="h-auto p-0" disabled={busy} onClick={() => void revoke(device.id)}>
+                  {t("userProfile.trustedDevices.revoke")}
+                </Button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </section>
   );
 }
@@ -829,28 +906,4 @@ function formatDate(value: number | null | undefined): string {
   }
 }
 
-async function copyText(text: string): Promise<void> {
-  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-  }
-}
 
-function downloadText(filename: string, text: string): void {
-  if (typeof document === "undefined" || typeof URL.createObjectURL !== "function") return;
-  const blob = new Blob([text], { type: "text/plain" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
-}
-
-function printCodes(text: string): void {
-  if (typeof window === "undefined") return;
-  const win = window.open("", "_blank", "noopener,noreferrer");
-  if (!win) return;
-  win.document.write(`<pre>${text.replace(/</g, "&lt;")}</pre>`);
-  win.document.close();
-  win.print();
-}

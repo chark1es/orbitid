@@ -1,31 +1,35 @@
-# OrbitID architecture (read fully before coding)
+# OrbitID architecture
 
-OrbitID is a self-hostable, open-source Clerk alternative: a hosted-style auth server + browser SDK + React components (shadcn/ui) + Next.js and backend SDKs + admin dashboard. **Mirror Clerk's concepts, API shapes and naming wherever possible** (`useUser`, `useSignIn`, `<SignIn/>`, `clerkMiddleware` → `orbitIdMiddleware`, `auth()`, `has()`, etc.). If you know how Clerk does it, do it that way.
+OrbitID is open-source authentication and user management you run yourself: an auth server, a browser SDK, React components (shadcn/ui), Next.js and backend SDKs, and an admin dashboard. The server stores everything in your Postgres (SQLite is supported for small setups). This document describes how the pieces fit and the contracts between them. For running an instance, see [SELF_HOSTING.md](SELF_HOSTING.md).
 
-## Monorepo (npm workspaces, TypeScript, ESM, Node 20)
+## Monorepo (bun workspaces, TypeScript, ESM)
 
 | Path | Package | Purpose |
 |---|---|---|
-| `packages/shared` | `@orbitid/shared` | Wire types (snake_case JSON), error codes, settings schema (zod), JWT claim types, webhook event names, key helpers. **Lead-owned. Additive edits only.** |
-| `packages/server` | `@orbitid/server` | Hono + Drizzle(SQLite/better-sqlite3) auth server: Frontend API (`/v1/client/*`), Backend API (`/v1/*`, secret key), OIDC provider, SAML, JWKS |
+| `packages/shared` | `@orbitid/shared` | Wire types (snake_case JSON), error codes, settings schema (zod), JWT claim types, webhook event names, key helpers |
+| `packages/server` | `@orbitid/server` | Hono + Drizzle auth server on Postgres or SQLite: Frontend API (`/v1/client/*`), Backend API (`/v1/*`, secret key), OIDC provider, SAML, JWKS; also serves the built dashboard |
 | `packages/backend` | `@orbitid/backend` | Server-side SDK: `createOrbitIdClient`, `verifyToken`, webhook verification, `authenticateRequest` |
-| `packages/js` | `@orbitid/js` | Framework-agnostic browser client (`OrbitID` class — like clerk-js): resources, state, token refresh, cookies |
-| `packages/ui` | `@orbitid/ui` | **shadcn/ui primitives** (already installed in `src/components/ui`, do not re-add) + `src/styles.css` (Tailwind v4 tokens) |
-| `packages/react` | `@orbitid/react` | `<OrbitIDProvider>`, hooks, control components, **and the prebuilt UI components built from `@orbitid/ui`** |
+| `packages/js` | `@orbitid/js` | Framework-agnostic browser client (`OrbitID` class): resources, state, token refresh, cookies |
+| `packages/ui` | `@orbitid/ui` | shadcn/ui primitives in `src/components/ui`, the activity board, and `src/styles.css` (Tailwind v4 tokens) |
+| `packages/react` | `@orbitid/react` | `<OrbitIDProvider>`, hooks, control components, and the prebuilt UI components built from `@orbitid/ui` |
 | `packages/nextjs` | `@orbitid/nextjs` | Next.js (App Router) integration: middleware, `auth()`, `currentUser()`, provider wrapper |
-| `apps/dashboard` | `@orbitid/dashboard` | Vite + React admin dashboard (shadcn) over the Backend API |
-| `apps/example-next` | `example-next` | Next.js demo app using everything |
+| `apps/dashboard` | `@orbitid/dashboard` | Vite + React admin dashboard over the Backend API |
+| `apps/example-next` | `example-next` | Next.js demo app |
+| `playground` | `orbitid-playground` | Test site that fills itself in from the running instance; not shipped |
 
-Libraries are consumed **as TypeScript source** (`exports` → `./src/index.ts`); there is no build step. Import siblings as `@orbitid/shared` etc.
+Libraries are consumed as TypeScript source (`exports` point at `./src/index.ts`); there is no build step. Import siblings as `@orbitid/shared` and so on.
 
-### Tooling rules (IMPORTANT)
-- **Package manager: bun** (hoisted linker, see `bunfig.toml`; lockfile `bun.lock`). All common deps are pre-installed. If you truly need a new dep: `cd <workspace dir> && bun add <pkg>` (dev: `bun add -d`). Never use npm/yarn/pnpm. Other workers run concurrently; keep installs rare. Scripts: `bun run <script>`.
-- **Runtime stays Node 20 for the server and tests** (`/usr/bin/node`): `better-sqlite3` is a native addon that does not load under Bun's runtime. After any `bun install`/`bun add`, verify with `node -e "require('better-sqlite3')"`; if it fails: `cd node_modules/better-sqlite3 && /usr/bin/node ../prebuild-install/bin.js`.
-- Run binaries from `node_modules/.bin` (`../../node_modules/.bin/vitest run`, `tsc -p tsconfig.json`, `tsx`).
-- Typecheck your package before finishing: `cd <pkg> && ../../node_modules/.bin/tsc -p tsconfig.json`. Tests: vitest. Write real tests for every feature (server tests use `testApp()` from `packages/server/test/boot.test.ts` pattern: in-memory DB, `app.request(...)`).
-- Do **not** touch files owned by another worker. Do **not** git commit/push/stash/checkout/reset; the lead commits. Do not edit `packages/server/src/app.ts` (all module files are already mounted there – just fill your module files).
-- DB schema (`packages/server/src/db/schema.ts`) is lead-owned. If you absolutely need a column/table: make a minimal **additive** edit, then run `cd packages/server && ../../node_modules/.bin/drizzle-kit generate` and mention it in your final report. Prefer storing extra data in the existing JSON columns.
-- No placeholder implementations. No `TODO: implement`. If something is genuinely out of scope, say so in your final report with the reason.
+## Database
+
+One schema definition (`packages/server/src/db/define-schema.ts`) is instantiated for each dialect. The dialect is fixed at startup from `ORBITID_DB_DIALECT` or the scheme of `ORBITID_DATABASE_URL`. Postgres uses `postgres-js` (and PGlite for in-process use); SQLite uses `better-sqlite3`. Timestamps are epoch milliseconds in both dialects. Migrations live in `packages/server/drizzle/postgres` and `packages/server/drizzle/sqlite`; generate them with `bun run db:generate` after a schema change. Everything that must happen once (rate limits, one-time codes, sign-in tickets, OAuth state, backup codes, lockout, webhook claims) is a single atomic statement (`UPDATE … RETURNING`, `DELETE … RETURNING`, `INSERT … ON CONFLICT`), so it holds with several server processes on one database.
+
+## Working in the repo
+
+- Package manager is bun (hoisted linker, see `bunfig.toml`; lockfile `bun.lock`). Run scripts with `bun run <script>`.
+- The server and its tests run on Node 20, because `better-sqlite3` is a native addon that does not load under Bun's runtime. After a `bun install`, check it with `node -e "require('better-sqlite3')"`.
+- `bun run typecheck` checks every workspace; `bun run test` runs every workspace's vitest suite. The server suite runs on SQLite by default and on a real embedded Postgres with `bun run --filter @orbitid/server test:postgres`.
+- Server tests use `testApp()` from `packages/server/test/boot.test.ts`: a throwaway database per test and `app.request(...)`.
+- Change the schema in `packages/server/src/db/define-schema.ts`, then generate both dialects' migrations. Prefer the existing JSON columns for loosely structured data.
 
 ## Conventions
 - IDs: `newId(ID_PREFIX.x)` from `src/lib/ids.ts`. Timestamps: epoch **ms** everywhere (DB + JSON). API JSON is snake_case; SDK-facing objects are camelCase.
@@ -35,7 +39,7 @@ Libraries are consumed **as TypeScript source** (`exports` → `./src/index.ts`)
 - Emit webhooks with `emitEvent(ctx, "user.created", userJSON)` (services/webhooks.ts) on every create/update/delete of user, session, org, membership, invitation, domain, role, permission, waitlist entry, api key.
 - Settings: `ctx.settings.get()` (see `InstanceSettings` in shared/config.ts) drives behaviour (required attributes, enabled strategies, password policy, org features, etc.). UI is rendered from `GET /v1/client/environment`.
 
-## Authentication model (same as Clerk)
+## Authentication model
 - **Client** = a browser/device. Opaque token in httpOnly cookie `__client` (`Secure` when https; `SameSite=Lax`; Path=/; on the API host) or `Authorization: Bearer <client token>` for non-browser. DB stores only `sha256(token)`. A Client has ≥0 **Sessions** (multi-session optional) and at most one in-flight **sign_in** and **sign_up**.
 - **Session JWT** (`__session` cookie written by `@orbitid/js` on the *app's* origin + `__client_uat` timestamp cookie): RS256, 60 s lifetime, refreshed by the SDK every ~50 s via `POST /v1/client/sessions/:id/tokens`. Claims in `shared/claims.ts`. Verified offline with JWKS (`/.well-known/jwks.json`). Custom claims via `settings.session.customClaims` and JWT templates (`POST /v1/client/sessions/:id/tokens/:template`).
 - Sessions: statuses active|ended|expired|removed|abandoned|replaced|revoked|pending; expire after `settings.session.lifetimeSeconds`; `touch` updates activity & active org; reverification via `factor_verification_age` (+ `has({reverification})`).
@@ -65,8 +69,8 @@ organizations: see below.   POST /waitlist {email_address}
 ```
 Responses: `{ response: <resource>, client: ClientJSON }` for sign-in/up/session mutations (the SDK reads `client` to refresh state); plain resource JSON `{ response: ... }` for `me` sub-resources. Lists `{ response: [...] }`.
 
-**Sign-in state machine** (identical semantics to Clerk): `POST /sign_ins {identifier?, strategy?, password?, redirect_url?, ticket?}` → status `needs_identifier` | `needs_first_factor` (with `supported_first_factors` for the user: password, email_code, email_link, phone_code, passkey, oauth_*, enterprise_sso, reset_password_email_code) | `needs_second_factor` (totp, phone_code, backup_code; required when user has MFA or `settings.mfa.required`) | `needs_new_password` | `complete` (`created_session_id`). `prepare_first_factor` sends the code/link; `attempt_first_factor` verifies. Unknown identifiers return `form_identifier_not_found` (unless `enumerationProtection`). Failed attempts increment `users.failedAttempts`; lock the user when exceeding `settings.mfa.maxAttempts`... (use `lockoutDurationSeconds`). Banned/locked users are rejected (`user_banned`, `user_locked`).
-**Sign-up state machine**: `POST /sign_ups {email_address,password,username,first_name,last_name,phone_number,strategy?,redirect_url?,ticket?,unsafe_metadata,legal_accepted}` → `status: missing_requirements` + `missing_fields`/`unverified_fields` computed from `settings.attributes.*.required/verifyAtSignUp`; `PATCH` to add fields; `prepare_verification {strategy: email_code|email_link|phone_code}`, `attempt_verification {strategy, code}`; completes (`status: complete`, user+session created) when nothing is missing/unverified. Sign-up is gated by `services/restrictions.assertIdentifiersAllowed` (mode public/restricted/waitlist, allowlist, blocklist, invitation tickets). OAuth sign-ups are "transferable" between sign-in and sign-up like Clerk (`sign_in.firstFactorVerification.status === "transferable"` → `signUp.create({transfer:true})`).
+**Sign-in state machine** : `POST /sign_ins {identifier?, strategy?, password?, redirect_url?, ticket?}` → status `needs_identifier` | `needs_first_factor` (with `supported_first_factors` for the user: password, email_code, email_link, phone_code, passkey, oauth_*, enterprise_sso, reset_password_email_code) | `needs_second_factor` (totp, phone_code, backup_code; required when user has MFA or `settings.mfa.required`) | `needs_new_password` | `complete` (`created_session_id`). `prepare_first_factor` sends the code/link; `attempt_first_factor` verifies. Unknown identifiers return `form_identifier_not_found` (unless `enumerationProtection`). Failed attempts increment `users.failedAttempts`; lock the user when exceeding `settings.mfa.maxAttempts`... (use `lockoutDurationSeconds`). Banned/locked users are rejected (`user_banned`, `user_locked`).
+**Sign-up state machine**: `POST /sign_ups {email_address,password,username,first_name,last_name,phone_number,strategy?,redirect_url?,ticket?,unsafe_metadata,legal_accepted}` → `status: missing_requirements` + `missing_fields`/`unverified_fields` computed from `settings.attributes.*.required/verifyAtSignUp`; `PATCH` to add fields; `prepare_verification {strategy: email_code|email_link|phone_code}`, `attempt_verification {strategy, code}`; completes (`status: complete`, user+session created) when nothing is missing/unverified. Sign-up is gated by `services/restrictions.assertIdentifiersAllowed` (mode public/restricted/waitlist, allowlist, blocklist, invitation tickets). OAuth sign-ups are "transferable" between sign-in and sign-up (`sign_in.firstFactorVerification.status === "transferable"` → `signUp.create({transfer:true})`).
 **OAuth**: `strategy: "oauth_google"` at `POST /sign_ins` or `/sign_ups` returns `first_factor_verification.external_verification_redirect_url` (browser navigates there) → provider → `/v1/oauth_callback/:provider` → `services/external-identity.handleExternalIdentity` → 302 back to `redirect_url`/`action_complete_redirect_url` with client cookie set. Use `arctic` (providers: google, github, gitlab, discord, microsoft, apple, facebook, twitter/x, linkedin_oidc, slack, twitch, spotify, bitbucket, dropbox, notion, hubspot, tiktok, coinbase, line, linear, huggingface, box, atlassian, xero) **plus** generic OIDC `custom_<key>` providers using `discoveryUrl`. PKCE + state stored in `oauth_states`.
 **Other factors**: TOTP (otplib, secret encrypted at rest, QR via `qrcode` data URL + `otpauth://` uri), backup codes (10 × 8 chars, hashed, single-use), passkeys (`@simplewebauthn/server` v10, RP id derived from the app origin of `redirect_url`/`Origin` header, challenges kept in `verifications`), email code / magic link, phone SMS code (Twilio / webhook / console via `services/mail.sendSms`).
 
@@ -94,7 +98,7 @@ Users (list with `query,email_address[],phone_number[],username[],external_id[],
 - **OIDC / OAuth2 provider** (OrbitID as IdP): `/.well-known/openid-configuration`, `/oauth/authorize` (login redirect to app sign-in if no session, consent screen data, PKCE S256 required for public clients), `/oauth/token` (authorization_code, refresh_token, client_credentials not needed), `/oauth/userinfo`, `/oauth/revoke`, `/oauth/introspect`, `/oauth/jwks` ; id_token signed with instance key. Management API `/v1/oauth_applications` CRUD + rotate secret.
 - **Enterprise SSO**: SAML 2.0 SP (`@node-saml/node-saml`): metadata, SP-initiated login, ACS (with signature validation), IdP-initiated optional, attribute mapping; enterprise OIDC connections (discovery + code flow). Domain-based routing: sign-in with identifier whose email domain matches an active connection returns `enterprise_sso` first factor. Both end in `handleExternalIdentity`.
 
-## SDK contracts (mirror Clerk)
+## SDK contracts
 
 ### `@orbitid/js` — class `OrbitID`
 ```ts
@@ -112,7 +116,7 @@ orbit.openSignIn() etc. are NOT needed — components are rendered by React. Nav
 Token cache: in-memory per session+template; refresh 10 s before expiry; cross-tab sync via BroadcastChannel. Cookies: `__session` (JWT, `Path=/; SameSite=Lax`), `__client_uat` (unix seconds, 0 when signed out) so SSR/middleware can cheaply detect state.
 
 ### `@orbitid/react`
-`<OrbitIDProvider publishableKey appearance localization routerPush routerReplace signInUrl signUpUrl afterSignOutUrl signInFallbackRedirectUrl …>`; hooks `useOrbitID`, `useAuth` ({isLoaded,isSignedIn,userId,sessionId,orgId,orgRole,orgSlug,has,getToken,signOut}), `useUser`, `useSession`, `useSessionList`, `useSignIn`, `useSignUp`, `useClerk`-equivalent `useOrbitID`, `useOrganization` ({organization, membership, memberships, invitations, domains, membershipRequests, isLoaded} with paginated infinite options), `useOrganizationList` ({userMemberships, userInvitations, userSuggestions, setActive, createOrganization}), `useReverification`, control components `SignedIn, SignedOut, Protect({role,permission,condition,fallback}), RedirectToSignIn, RedirectToSignUp, AuthenticateWithRedirectCallback, OrbitIDLoaded, OrbitIDLoading`.
+`<OrbitIDProvider publishableKey appearance localization routerPush routerReplace signInUrl signUpUrl afterSignOutUrl signInFallbackRedirectUrl …>`; hooks `useOrbitID`, `useAuth` ({isLoaded,isSignedIn,userId,sessionId,orgId,orgRole,orgSlug,has,getToken,signOut}), `useUser`, `useSession`, `useSessionList`, `useSignIn`, `useSignUp`, `useOrbitID`, `useOrganization` ({organization, membership, memberships, invitations, domains, membershipRequests, isLoaded} with paginated infinite options), `useOrganizationList` ({userMemberships, userInvitations, userSuggestions, setActive, createOrganization}), `useReverification`, control components `SignedIn, SignedOut, Protect({role,permission,condition,fallback}), RedirectToSignIn, RedirectToSignUp, AuthenticateWithRedirectCallback, OrbitIDLoaded, OrbitIDLoading`.
 Prebuilt components (all built with `@orbitid/ui` shadcn primitives, react-hook-form where forms, fully driven by `environment`, with `appearance` prop {variables, theme, layout, elements-classNames} and `localization` object): `SignIn`, `SignUp`, `UserButton`, `UserProfile` (account/security/sessions/organizations tabs: profile, emails, phones, connected accounts, password, passkeys, TOTP w/ QR, backup codes, active devices, delete account), `OrganizationSwitcher`, `OrganizationProfile` (general, members, invitations, domains, membership requests, danger zone), `OrganizationList`, `CreateOrganization`, `Waitlist`, `APIKeys`, `GoogleOneTap` (optional), `OAuthConsent`. Path- and hash-routing both supported (`routing="path"|"hash"|"virtual"`, `path`).
 
 ### `@orbitid/backend`

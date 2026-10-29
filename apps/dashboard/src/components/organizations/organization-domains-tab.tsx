@@ -1,12 +1,6 @@
 import { useState } from "react";
 import {
-  Badge,
   Button,
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -21,16 +15,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@orbitid/ui";
-import { Globe, Plus, Trash2 } from "lucide-react";
+import { Globe, Plus } from "lucide-react";
 import { toast } from "sonner";
 import type { OrganizationDomainJSON, OrganizationJSON } from "@orbitid/shared";
 import { api, useApi } from "../../lib/api";
 import { errorMessage } from "../../lib/errors";
 import { formatDate } from "../../lib/format";
 import { asList } from "../../lib/types";
+import { DataTable, type DataTableColumn } from "../shared/data-table";
 import { EmptyState } from "../shared/empty-state";
 import { StatusBadge } from "../shared/status-badge";
 import { ConfirmDialog } from "../shared/confirm-dialog";
+import { Section } from "../shared/section";
 
 const ENROLLMENT_MODES = [
   { value: "manual_invitation", label: "Manual invitation" },
@@ -107,7 +103,7 @@ function AddDomainDialog({
             </Select>
           </div>
           {error ? (
-            <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <p role="alert" className="rounded-[3px] border border-signal/40 bg-signal/10 px-3 py-2 text-sm text-signal">
               {error}
             </p>
           ) : null}
@@ -148,52 +144,80 @@ export function OrganizationDomainsTab({ org, onChanged }: { org: OrganizationJS
     }
   }
 
-  return (
-    <Card>
-      <CardHeader className="flex-row flex-wrap items-start justify-between gap-2">
-        <div className="space-y-1">
-          <CardTitle>Domains</CardTitle>
-          <CardDescription>Domain ownership drives automatic invitations and suggestions.</CardDescription>
+  const columns: DataTableColumn<OrganizationDomainJSON>[] = [
+    {
+      id: "domain",
+      header: "Domain",
+      cell: (domain) => (
+        <div className="flex items-center gap-2">
+          <Globe className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+          <span className="truncate font-data text-sm">{domain.name}</span>
         </div>
+      ),
+    },
+    {
+      id: "enrollment",
+      header: "Enrollment",
+      cell: (domain) => (
+        <span className="text-sm">
+          {ENROLLMENT_MODES.find((option) => option.value === domain.enrollment_mode)?.label ??
+            domain.enrollment_mode.replace(/_/g, " ")}
+        </span>
+      ),
+    },
+    {
+      id: "status",
+      header: "Status",
+      cell: (domain) => <StatusBadge status={domain.verification?.status ?? "unverified"} />,
+    },
+    {
+      id: "added",
+      header: "Added",
+      headerClassName: "hidden sm:table-cell",
+      className: "hidden sm:table-cell",
+      cell: (domain) => (
+        <span className="font-data text-xs text-muted-foreground">{formatDate(domain.created_at)}</span>
+      ),
+    },
+    {
+      id: "actions",
+      header: <span className="sr-only">Actions</span>,
+      className: "w-24 text-right",
+      cell: (domain) => (
+        <Button
+          size="sm"
+          variant="ghost"
+          aria-label={`Remove ${domain.name}`}
+          onClick={() => setDeleting(domain)}
+        >
+          Remove
+        </Button>
+      ),
+    },
+  ];
+
+  return (
+    <Section
+      title="Domains"
+      description="Domain ownership drives automatic invitations and suggestions."
+      actions={
         <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
           <Plus aria-hidden /> Add domain
         </Button>
-      </CardHeader>
-      <CardContent>
-        {domainsQuery.isLoading ? (
-          <div className="space-y-2">
-            {Array.from({ length: 2 }).map((_, index) => (
-              <div key={index} className="h-12 animate-pulse rounded bg-muted" />
-            ))}
-          </div>
-        ) : domainsQuery.error ? (
-          <p role="alert" className="py-6 text-sm text-destructive">
-            {errorMessage(domainsQuery.error)}
-          </p>
-        ) : domains.length === 0 ? (
+      }
+    >
+      <DataTable
+        columns={columns}
+        rows={domains}
+        rowKey={(domain) => domain.id}
+        isLoading={domainsQuery.isLoading}
+        error={domainsQuery.error}
+        onRetry={() => void domainsQuery.refetch()}
+        loadingRows={3}
+        empty={
           <EmptyState icon={Globe} title="No domains" description="Verify a domain to enroll teammates automatically." />
-        ) : (
-          <ul className="divide-y">
-            {domains.map((domain) => (
-              <li key={domain.id} className="flex flex-wrap items-center gap-2 py-3">
-                <Globe className="size-4 text-muted-foreground" aria-hidden />
-                <span className="min-w-0 flex-1 truncate font-mono text-sm">{domain.name}</span>
-                <Badge variant="outline">{domain.enrollment_mode.replace(/_/g, " ")}</Badge>
-                <StatusBadge status={domain.verification?.status ?? "unverified"} />
-                <span className="hidden text-xs text-muted-foreground sm:inline">{formatDate(domain.created_at)}</span>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  aria-label={`Delete ${domain.name}`}
-                  onClick={() => setDeleting(domain)}
-                >
-                  <Trash2 aria-hidden />
-                </Button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </CardContent>
+        }
+      />
 
       <AddDomainDialog
         org={org}
@@ -216,6 +240,6 @@ export function OrganizationDomainsTab({ org, onChanged }: { org: OrganizationJS
         pending={pending}
         onConfirm={() => void remove()}
       />
-    </Card>
+    </Section>
   );
 }

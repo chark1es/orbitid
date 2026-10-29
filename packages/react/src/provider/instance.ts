@@ -6,7 +6,7 @@ type OrbitIDConstructor = new (publishableKey: string, options?: OrbitIDOptions)
 /**
  * `@orbitid/js` and `@orbitid/react` are versioned together but built independently, so the
  * concrete class is resolved at runtime and narrowed to the structural `OrbitIDInstance`
- * contract this package depends on (same relationship clerk-js has with @clerk/clerk-react).
+ * contract this package depends on.
  */
 function resolveOrbitIDConstructor(): OrbitIDConstructor {
   const candidate: unknown = (OrbitIDJS as Record<string, unknown>).OrbitID;

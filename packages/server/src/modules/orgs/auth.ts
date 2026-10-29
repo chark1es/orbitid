@@ -7,7 +7,9 @@ import { COOKIES, ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../../context";
 import * as s from "../../db/schema";
 import { sha256 } from "../../lib/crypto";
+import { isSessionExpired } from "../../services/sessions";
 import { verifySessionToken } from "../../services/tokens";
+import { first } from "../../lib/db";
 
 export type UserRow = typeof s.users.$inferSelect;
 export type SessionRow = typeof s.sessions.$inferSelect;
@@ -20,12 +22,13 @@ export interface Caller {
 
 const looksLikeJwt = (token: string) => token.split(".").length === 3;
 
-function activeSession(row: SessionRow | undefined): row is SessionRow {
-  return !!row && row.status === "active" && row.expireAt > Date.now();
+/** Active, not past its absolute expiry and not idle longer than the instance's inactivity timeout. */
+function activeSession(ctx: AppContext, row: SessionRow | undefined): row is SessionRow {
+  return !!row && row.status === "active" && !isSessionExpired(ctx, row);
 }
 
-function sessionUser(ctx: AppContext, row: SessionRow): Caller | null {
-  const user = ctx.db.select().from(s.users).where(eq(s.users.id, row.userId)).get();
+async function sessionUser(ctx: AppContext, row: SessionRow): Promise<Caller | null> {
+  const user = first(await ctx.db.select().from(s.users).where(eq(s.users.id, row.userId)));
   return user ? { user, userId: user.id, sessionId: row.id } : null;
 }
 
@@ -42,34 +45,33 @@ export async function tryResolveCaller(ctx: AppContext, c: Context): Promise<Cal
   if (bearer && looksLikeJwt(bearer)) {
     // Malformed / expired / foreign tokens simply mean "not signed in" for organization routes.
     const claims = await verifySessionToken(ctx, bearer).catch(() => null);
-    const row = claims?.sid ? ctx.db.select().from(s.sessions).where(eq(s.sessions.id, claims.sid)).get() : undefined;
-    if (activeSession(row) && row.userId === claims?.sub) return sessionUser(ctx, row);
+    const row = claims?.sid ? first(await ctx.db.select().from(s.sessions).where(eq(s.sessions.id, claims.sid))) : undefined;
+    if (activeSession(ctx, row) && row.userId === claims?.sub) return sessionUser(ctx, row);
     return null;
   }
 
   const clientToken = getCookie(c, COOKIES.client) ?? (bearer && !looksLikeJwt(bearer) ? bearer : null);
   if (!clientToken) return null;
-  const client = ctx.db.select().from(s.clients).where(eq(s.clients.tokenHash, sha256(clientToken))).get();
+  const client = first(await ctx.db.select().from(s.clients).where(eq(s.clients.tokenHash, sha256(clientToken))));
   if (!client) return null;
 
-  const belongs = (sessionId: string | null | undefined): SessionRow | undefined => {
+  const belongs = async (sessionId: string | null | undefined): Promise<SessionRow | undefined> => {
     if (!sessionId) return undefined;
-    const row = ctx.db.select().from(s.sessions).where(eq(s.sessions.id, sessionId)).get();
+    const row = first(await ctx.db.select().from(s.sessions).where(eq(s.sessions.id, sessionId)));
     return row && row.clientId === client.id ? row : undefined;
   };
 
-  const hintedRow = belongs(hinted);
-  if (activeSession(hintedRow)) return sessionUser(ctx, hintedRow);
-  const lastActive = belongs(client.lastActiveSessionId);
-  if (activeSession(lastActive)) return sessionUser(ctx, lastActive);
+  const hintedRow = await belongs(hinted);
+  if (activeSession(ctx, hintedRow)) return sessionUser(ctx, hintedRow);
+  const lastActive = await belongs(client.lastActiveSessionId);
+  if (activeSession(ctx, lastActive)) return sessionUser(ctx, lastActive);
 
-  const fallback = ctx.db
-    .select()
-    .from(s.sessions)
-    .where(and(eq(s.sessions.clientId, client.id), eq(s.sessions.status, "active")))
-    .orderBy(desc(s.sessions.lastActiveAt))
-    .get();
-  return activeSession(fallback) ? sessionUser(ctx, fallback) : null;
+  const fallback = first(await ctx.db
+      .select()
+      .from(s.sessions)
+      .where(and(eq(s.sessions.clientId, client.id), eq(s.sessions.status, "active")))
+      .orderBy(desc(s.sessions.lastActiveAt)));
+  return activeSession(ctx, fallback) ? await sessionUser(ctx, fallback) : null;
 }
 
 /** Same as {@link tryResolveCaller} but throws a 401 when nobody is signed in. */

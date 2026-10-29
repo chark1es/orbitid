@@ -24,12 +24,12 @@ describe("sign-in tokens & actor tokens", () => {
     expect(created.url).toContain("/sign-in?__orbit_ticket=");
     const ticket = ticketFromUrl(created.url!);
 
-    const stored = ctx.db.select().from(s.signInTokens).all()[0]!;
+    const stored = (await ctx.db.select().from(s.signInTokens))[0]!;
     expect(stored.tokenHash).toBe(sha256(ticket));
     expect(stored.tokenHash).not.toBe(ticket);
 
     await expect(redeemTicket(ctx, ticket)).resolves.toEqual({ kind: "sign_in_token", userId: user.id });
-    expect(ctx.db.select().from(s.signInTokens).all()[0]!.status).toBe("accepted");
+    expect((await ctx.db.select().from(s.signInTokens))[0]!.status).toBe("accepted");
 
     await expect(redeemTicket(ctx, ticket)).rejects.toMatchObject({ code: ErrorCodes.ticket_invalid });
     await expect(redeemTicket(ctx, "not-a-ticket")).rejects.toMatchObject({ code: ErrorCodes.ticket_invalid });
@@ -41,8 +41,8 @@ describe("sign-in tokens & actor tokens", () => {
 
     const expired = await json<SignInTokenJSON>(await api("POST", "/v1/sign_in_tokens", { user_id: user.id, expires_in_seconds: 10 }));
     const expiredTicket = ticketFromUrl(expired.url!);
-    ctx.db.update(s.signInTokens).set({ expiresAt: Date.now() - 1 }).where(eq(s.signInTokens.id, expired.id)).run();
-    expect(() => validateTicket(ctx, expiredTicket)).toThrow(expect.objectContaining({ code: ErrorCodes.ticket_expired }));
+    await ctx.db.update(s.signInTokens).set({ expiresAt: Date.now() - 1 }).where(eq(s.signInTokens.id, expired.id));
+    await expect(validateTicket(ctx, expiredTicket)).rejects.toMatchObject({ code: ErrorCodes.ticket_expired });
 
     const revoked = await json<SignInTokenJSON>(await api("POST", "/v1/sign_in_tokens", { user_id: user.id }));
     const revokedTicket = ticketFromUrl(revoked.url!);
@@ -73,7 +73,7 @@ describe("sign-in tokens & actor tokens", () => {
       actor: { sub: "user_admin" },
       sessionMaxDurationSeconds: 900,
     });
-    expect(ctx.db.select().from(s.actorTokens).all()[0]!.status).toBe("accepted");
+    expect((await ctx.db.select().from(s.actorTokens))[0]!.status).toBe("accepted");
 
     const second = await json<ActorTokenJSON>(await api("POST", "/v1/actor_tokens", { user_id: user.id, actor: { sub: "user_admin", extra: "x" } }));
     const revokedRes = await json<ActorTokenJSON>(await api("POST", `/v1/actor_tokens/${second.id}/revoke`));

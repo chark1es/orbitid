@@ -23,7 +23,7 @@ export function OrganizationMetadataTab({ org, onChanged }: { org: OrganizationJ
 
   return (
     <MetadataEditors
-      title="Organization metadata"
+      title="Metadata"
       description="Deep-merged server-side. Public metadata is visible to members; private metadata stays in the Backend API."
       pending={pending}
       fields={[

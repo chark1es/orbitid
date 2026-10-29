@@ -146,7 +146,10 @@ export function useOrganization(params: UseOrganizationParams = {}): UseOrganiza
   });
 
   const fetchMembership = useCallback(
-    () => (userId && organizationId ? fetchActiveMembership(user, organizationId) : Promise.resolve(null)),
+    (options: { force?: boolean }) =>
+      userId && organizationId
+        ? fetchActiveMembership(user, organizationId, options)
+        : Promise.resolve(null),
     [userId, organizationId, user],
   );
   const activeMembership = useAsyncValue<OrganizationMembershipResource>({

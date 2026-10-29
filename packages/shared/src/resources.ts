@@ -87,6 +87,8 @@ export interface UserJSON {
   unsafe_metadata: Metadata;
   /** Backend API only. */
   private_metadata?: Metadata;
+  /** Guest account created without any identifier; flips to false once it gains one. */
+  is_anonymous: boolean;
   banned: boolean;
   locked: boolean;
   lockout_expires_in_seconds: number | null;
@@ -101,6 +103,9 @@ export interface UserJSON {
   updated_at: number;
 }
 
+/** How the user proved who they are when the session was created. */
+export type AuthMethod = "password" | "email_code" | "email_link" | "sms" | "passkey" | "oauth" | "sso" | "ticket";
+
 export type SessionStatus = "active" | "ended" | "expired" | "removed" | "abandoned" | "replaced" | "revoked" | "pending";
 export interface SessionJSON {
   object: "session";
@@ -114,6 +119,9 @@ export interface SessionJSON {
   user: UserJSON | null; // included in client responses
   public_user_data: { first_name: string | null; last_name: string | null; image_url: string; has_image: boolean; identifier: string; user_id: string } | null;
   factor_verification_age: [number, number] | null; // minutes since first / second factor
+  /** The second factor was skipped because this browser holds a valid trusted-device token. */
+  second_factor_skipped_by_trusted_device?: boolean;
+  sign_in_method: AuthMethod | null;
   last_active_token: { object: "token"; jwt: string } | null;
   latest_activity?: { id: string; is_mobile: boolean; ip_address: string; city: string | null; country: string | null; browser_name: string; browser_version: string; device_type: string } | null;
   created_at: number;
@@ -134,7 +142,7 @@ export interface ClientJSON {
 export type SignInStatus = "needs_identifier" | "needs_first_factor" | "needs_second_factor" | "needs_new_password" | "complete";
 export type FirstFactorStrategy =
   | "password" | "email_code" | "email_link" | "phone_code" | "passkey" | "ticket" | "reset_password_email_code" | "reset_password_phone_code" | "web3_metamask_signature" | `oauth_${string}` | "enterprise_sso" | "saml";
-export type SecondFactorStrategy = "totp" | "phone_code" | "backup_code";
+export type SecondFactorStrategy = "totp" | "phone_code" | "email_code" | "backup_code";
 export interface SignInFactor {
   strategy: string;
   email_address_id?: string; safe_identifier?: string; phone_number_id?: string; primary?: boolean; default?: boolean;
@@ -221,6 +229,8 @@ export interface OrganizationInvitationJSON {
   id: string;
   email_address: string;
   organization_id: string;
+  organization_name?: string;
+  organization_image_url?: string;
   role: string;
   role_name: string;
   status: "pending" | "accepted" | "revoked" | "expired";
@@ -304,5 +314,19 @@ export interface EnterpriseConnectionJSON {
   created_at: number; updated_at: number;
 }
 export interface AuditLogJSON { object: "audit_log"; id: string; actor: string | null; action: string; target_type: string | null; target_id: string | null; metadata: Record<string, unknown>; ip: string | null; created_at: number }
+/** A browser that may skip the second factor until `expires_at`. The token itself is never serialized. */
+export interface TrustedDeviceJSON {
+  object: "trusted_device";
+  id: string;
+  user_id: string;
+  label: string | null;
+  user_agent: string | null;
+  ip_address: string | null;
+  expires_at: number;
+  last_used_at: number | null;
+  revoked_at: number | null;
+  created_at: number;
+  updated_at: number;
+}
 export interface PaginatedList<T> { data: T[]; total_count: number }
 export interface DeletedObjectJSON { object: string; id: string; deleted: true }

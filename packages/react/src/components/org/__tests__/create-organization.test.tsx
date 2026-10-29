@@ -15,6 +15,20 @@ const fillDetails = async (name: string) => {
 };
 
 describe("<CreateOrganization />", () => {
+  test("pre-disables creation when the user reached the organization limit", async () => {
+    const fake = createFakeInstance({
+      organizationSettings: { max_created_organizations_per_user: 1 },
+    });
+    renderWithOrbit(<CreateOrganization />, fake);
+
+    expect(
+      await screen.findByText(
+        "You have created the maximum number of organizations your account allows, 1. Delete one you created or ask an administrator to raise the limit.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByLabelText("Organization name")).toBeNull();
+  });
+
   test("auto-generates the slug until the user edits it", async () => {
     const fake = createFakeInstance();
     renderWithOrbit(<CreateOrganization />, fake);

@@ -6,6 +6,7 @@ import { exportJWK, generateKeyPair, SignJWT, type JWK } from "jose";
 import { eq } from "drizzle-orm";
 import * as s from "../../src/db/schema";
 import { setup, authHeaders, insertClient, BASE_URL } from "./helpers";
+import { first } from "../../src/lib/db";
 
 const handleExternalIdentity = vi.hoisted(() =>
   vi.fn(async (_ctx: unknown, flow: { redirectUrl: string }, profile: { provider: string; email?: string }) => ({
@@ -17,7 +18,7 @@ vi.mock("../../src/services/external-identity", async (importOriginal) => {
   return { ...actual, handleExternalIdentity };
 });
 
-type Harness = Awaited<ReturnType<typeof setup>>;
+type Harness = Awaited<Awaited<ReturnType<typeof setup>>>;
 const json = (body: unknown) => JSON.stringify(body);
 
 /** Minimal IdP: discovery, JWKS, token endpoint (checks PKCE) and userinfo. */
@@ -141,14 +142,14 @@ async function createOidcConnection(h: Harness, overrides: Record<string, unknow
 }
 
 /** What a browser does: start with its client cookie, keep the binding cookie the server sets for the callback. */
-async function startFlow(h: Harness, connectionId: string, client: ReturnType<typeof insertClient>, identifier = "ada@acme.com") {
+async function startFlow(h: Harness, connectionId: string, client: Awaited<ReturnType<typeof insertClient>>, identifier = "ada@acme.com") {
   const res = await h.app.request(`/v1/client/enterprise/start?${new URLSearchParams({
     client_id: client.clientId, identifier, redirect_url: "http://localhost:3000/after",
   })}`, { headers: { cookie: `__client=${client.token}` } });
   expect(res.status).toBe(302);
   const location = new URL(res.headers.get("location")!);
   const query = Object.fromEntries(location.searchParams);
-  const stateRow = h.ctx.db.select().from(s.oauthStates).where(eq(s.oauthStates.state, query.state!)).get()!;
+  const stateRow = first(await h.ctx.db.select().from(s.oauthStates).where(eq(s.oauthStates.state, query.state!)))!;
   const binding = /__orbit_oauth=([^;]+)/.exec(res.headers.get("set-cookie") ?? "")?.[1];
   return { location, query, stateRow, connectionId, cookie: `__client=${client.token}; __orbit_oauth=${binding}` };
 }
@@ -172,12 +173,12 @@ describe("enterprise OIDC connections", () => {
     expect(conn.oidc.client_secret).toBeUndefined();
     expect(JSON.stringify(conn)).not.toContain("mock-secret");
 
-    const row = h.ctx.db.select().from(s.enterpriseConnections).where(eq(s.enterpriseConnections.id, conn.id)).get()!;
+    const row = first(await h.ctx.db.select().from(s.enterpriseConnections).where(eq(s.enterpriseConnections.id, conn.id)))!;
     const stored = (row.config as Record<string, unknown>).clientSecretEnc as string;
     expect(stored).toMatch(/^v1\./);
     expect(stored).not.toContain("mock-secret");
 
-    const start = await startFlow(h, conn.id, insertClient(h.ctx));
+    const start = await startFlow(h, conn.id, await insertClient(h.ctx));
     expect(start.query.client_id).toBe("mock-client");
     expect(start.query.code_challenge).toBeTruthy();
     expect(start.query.code_challenge_method).toBe("S256");
@@ -186,12 +187,12 @@ describe("enterprise OIDC connections", () => {
 
   it("completes the authorization-code + PKCE callback and maps the profile", async () => {
     const conn = await createOidcConnection(h);
-    const client = insertClient(h.ctx);
+    const client = await insertClient(h.ctx);
     const start = await startFlow(h, conn.id, client);
     idp.expectedNonce = start.stateRow.nonce!;
 
     // Another browser holding the link cannot finish the flow.
-    const foreign = await callback(h, conn.id, { code: "good-code", state: start.query.state! }, `__client=${insertClient(h.ctx).token}`);
+    const foreign = await callback(h, conn.id, { code: "good-code", state: start.query.state! }, `__client=${(await insertClient(h.ctx)).token}`);
     expect(foreign.status).toBe(400);
     expect(handleExternalIdentity).not.toHaveBeenCalled();
 
@@ -227,7 +228,7 @@ describe("enterprise OIDC connections", () => {
 
   it("caches the discovery document", async () => {
     const conn = await createOidcConnection(h);
-    const client = insertClient(h.ctx);
+    const client = await insertClient(h.ctx);
     await startFlow(h, conn.id, client);
     await startFlow(h, conn.id, client);
     expect(idp.discoveryHits).toBe(1);
@@ -235,7 +236,7 @@ describe("enterprise OIDC connections", () => {
 
   it("rejects a nonce mismatch and IdP errors", async () => {
     const conn = await createOidcConnection(h);
-    const client = insertClient(h.ctx);
+    const client = await insertClient(h.ctx);
     const start = await startFlow(h, conn.id, client);
     idp.expectedNonce = "different-nonce";
     const mismatch = await callback(h, conn.id, { code: "good-code", state: start.query.state! }, start.cookie);
@@ -253,7 +254,7 @@ describe("enterprise OIDC connections", () => {
 
   it("refuses inactive connections, wrong protocols and unregistered redirect targets", async () => {
     const conn = await createOidcConnection(h);
-    const client = insertClient(h.ctx);
+    const client = await insertClient(h.ctx);
     await h.app.request(`/v1/enterprise_connections/${conn.id}`, { method: "PATCH", headers: authHeaders(), body: json({ active: false }) });
     const inactive = await h.app.request(`/v1/client/enterprise/start?${new URLSearchParams({
       client_id: client.clientId, identifier: "ada@acme.com", redirect_url: "http://localhost:3000/after",

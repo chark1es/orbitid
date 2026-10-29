@@ -4,14 +4,16 @@
 // state (including IdP-initiated decisions) travels in RelayState via `oauth_states`, because the SAML
 // client is constructed per request and therefore has no in-memory request cache.
 import { X509Certificate } from "node:crypto";
-import { createRemoteJWKSet, jwtVerify } from "jose";
+import { jwtVerify } from "jose";
 import { SAML, ValidateInResponseTo, type CacheProvider, type Profile } from "@node-saml/node-saml";
-import { and, eq } from "drizzle-orm";
+import { and, eq, gt, sql } from "drizzle-orm";
 import { ErrorCodes, OrbitError, type EnterpriseConnectionJSON } from "@orbitid/shared";
 import type { AppContext } from "../context";
 import * as s from "../db/schema";
 import { decrypt, encrypt } from "../lib/crypto";
+import { assertPublicUrl, remoteJwks, safeFetch } from "../lib/safe-fetch";
 import type { ExternalProfile } from "./external-identity";
+import { first } from "../lib/db";
 
 type ConnectionRow = typeof s.enterpriseConnections.$inferSelect;
 
@@ -100,47 +102,44 @@ const SAML_ASSERTION_MAX_AGE_MS = 24 * 60 * 60_000;
 
 /**
  * Remembers AuthnRequest IDs (so a response must answer a request we issued, once) and assertion IDs
- * (so a captured response cannot be replayed). Rows live in `oauth_states`; better-sqlite3 is synchronous,
- * so each check-then-write below is atomic.
+ * (so a captured response cannot be replayed). Rows live in `oauth_states`; every check-and-write is a
+ * single statement so parallel requests cannot both claim the same key.
  */
-function samlCache(ctx: AppContext): CacheProvider {
+export function samlCache(ctx: AppContext): CacheProvider {
   const rowKey = (key: string) => `saml:${key}`;
-  const live = (key: string) => {
-    const row = ctx.db.select().from(s.oauthStates).where(eq(s.oauthStates.state, rowKey(key))).get();
-    if (row && row.expiresAt <= Date.now()) {
-      ctx.db.delete(s.oauthStates).where(eq(s.oauthStates.state, rowKey(key))).run();
-      return undefined;
-    }
-    return row;
-  };
-  const write = (key: string, value: string, expiresAt: number) =>
-    ctx.db.insert(s.oauthStates).values({ state: rowKey(key), provider: "saml_cache", flow: { value }, expiresAt }).run();
   const valueOf = (row: { flow: Record<string, unknown> } | undefined) => (row ? String(row.flow.value) : null);
   return {
     async saveAsync(key, value) {
-      ctx.db.delete(s.oauthStates).where(eq(s.oauthStates.state, rowKey(key))).run();
-      write(key, value, Date.now() + SAML_CACHE_TTL_MS);
+      const expiresAt = Date.now() + SAML_CACHE_TTL_MS;
+      await ctx.db.insert(s.oauthStates).values({ state: rowKey(key), provider: "saml_cache", flow: { value }, expiresAt })
+        .onConflictDoUpdate({ target: s.oauthStates.state, set: { flow: { value }, expiresAt } });
       return { value, createdAt: Date.now() };
     },
     async getAsync(key) {
-      return valueOf(live(key));
+      return valueOf(first(await ctx.db.select().from(s.oauthStates)
+        .where(and(eq(s.oauthStates.state, rowKey(key)), gt(s.oauthStates.expiresAt, Date.now())))));
     },
     async removeAsync(key) {
       if (!key) return null;
-      const value = valueOf(live(key));
-      ctx.db.delete(s.oauthStates).where(eq(s.oauthStates.state, rowKey(key))).run();
-      return value;
+      const row = first(await ctx.db.delete(s.oauthStates).where(eq(s.oauthStates.state, rowKey(key))).returning());
+      return row && row.expiresAt > Date.now() ? valueOf(row) : null;
     },
     async consumeAsync(key) {
-      const value = valueOf(live(key));
-      ctx.db.delete(s.oauthStates).where(eq(s.oauthStates.state, rowKey(key))).run();
-      return value;
+      return valueOf(first(await ctx.db.delete(s.oauthStates)
+        .where(and(eq(s.oauthStates.state, rowKey(key)), gt(s.oauthStates.expiresAt, Date.now())))
+        .returning()));
     },
     async saveIfAbsentAsync(key, value, expiresAtMs) {
-      if (live(key)) return false;
       // node-saml passes the instant until which it would still accept this assertion.
-      write(key, value, expiresAtMs);
-      return true;
+      const now = Date.now();
+      const written = first(await ctx.db.insert(s.oauthStates).values({ state: rowKey(key), provider: "saml_cache", flow: { value }, expiresAt: expiresAtMs })
+        .onConflictDoUpdate({
+          target: s.oauthStates.state,
+          set: { flow: { value }, expiresAt: expiresAtMs },
+          setWhere: sql`${s.oauthStates.expiresAt} <= ${now}`,
+        })
+        .returning());
+      return !!written;
     },
   };
 }
@@ -176,12 +175,56 @@ export async function samlAuthorizeUrl(ctx: AppContext, conn: ConnectionRow, rel
   return samlClient(ctx, conn).getAuthorizeUrlAsync(relayState, undefined);
 }
 
+const SUCCESS_STATUS = "urn:oasis:names:tc:SAML:2.0:status:Success";
+
+/** Decodes the five predefined XML entities (attribute values of the values we compare are URLs). */
+const decodeXmlEntities = (value: string) =>
+  value.replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+
+/** Compares URLs the way the validator does (`new URL(...).href`), falling back to a literal comparison. */
+const sameUrl = (received: string, expected: string): boolean => {
+  try {
+    return new URL(received).href === new URL(expected).href;
+  } catch {
+    return received === expected;
+  }
+};
+
+const responseAttribute = (xml: string, element: string, attribute: string): string | null => {
+  const match = new RegExp(`<(?:[\\w.-]+:)?${element}\\b[^>]*\\b${attribute}="([^"]*)"`).exec(xml);
+  return match?.[1] !== undefined ? decodeXmlEntities(match[1]) : null;
+};
+
+/**
+ * Checks the parts of the response `@node-saml/node-saml` only warns about: the status code, the signed
+ * `Destination` and the bearer `Recipient` of the assertion. Reading them unverified is safe here because
+ * this function only ever *rejects*: altering any of these fields on a signed message breaks its signature,
+ * which the library refuses first.
+ */
+function assertResponseTarget(xml: string, acsUrl: string): void {
+  const status = responseAttribute(xml, "StatusCode", "Value");
+  if (status && status !== SUCCESS_STATUS) {
+    throw new Error(`the identity provider reported ${status.split(":").pop()}`);
+  }
+  const destination = responseAttribute(xml, "Response", "Destination");
+  if (destination && !sameUrl(destination, acsUrl)) {
+    throw new Error("the response is addressed to another assertion consumer service");
+  }
+  // Some IdPs omit `Recipient`; when one is present it must name this ACS (SAML profiles §4.1.4.3).
+  const recipients = [...xml.matchAll(/<(?:[\w.-]+:)?SubjectConfirmationData\b[^>]*\bRecipient="([^"]*)"/g)]
+    .map((match) => decodeXmlEntities(match[1]!));
+  if (recipients.length > 0 && !recipients.some((recipient) => sameUrl(recipient, acsUrl))) {
+    throw new Error("the assertion is not addressed to this assertion consumer service");
+  }
+}
+
 /** Validates a signed POST response and returns the parsed profile. */
 export async function validateSamlResponse(ctx: AppContext, conn: ConnectionRow, container: { SAMLResponse?: string }): Promise<Profile> {
   if (!container.SAMLResponse) {
     throw new OrbitError(400, ErrorCodes.verification_failed, "SAMLResponse is missing");
   }
   try {
+    assertResponseTarget(Buffer.from(container.SAMLResponse, "base64").toString("utf8"), acsUrlFor(ctx, conn.id));
     const { profile } = await samlClient(ctx, conn).validatePostResponseAsync({ SAMLResponse: container.SAMLResponse });
     if (!profile) throw new Error("no profile");
     return profile;
@@ -221,11 +264,11 @@ export function profileToExternalProfile(conn: ConnectionRow, profile: Profile):
 }
 
 /** Active connection matching an email, a bare domain or an identifier (`user@sub.acme.com`). */
-export function findConnectionForIdentifier(ctx: AppContext, identifier: string): ConnectionRow | null {
+export async function findConnectionForIdentifier(ctx: AppContext, identifier: string): Promise<ConnectionRow | null> {
   const value = identifier.trim().toLowerCase();
   if (!value) return null;
   const domain = (value.includes("@") ? value.slice(value.lastIndexOf("@") + 1) : value).replace(/^https?:\/\//, "").replace(/[/:].*$/, "");
-  const rows = ctx.db.select().from(s.enterpriseConnections).where(eq(s.enterpriseConnections.active, true)).all();
+  const rows = (await ctx.db.select().from(s.enterpriseConnections).where(eq(s.enterpriseConnections.active, true)));
   for (const row of rows) {
     for (const candidate of normalizeDomains(row.domains)) {
       if (domain === candidate) return row;
@@ -235,10 +278,9 @@ export function findConnectionForIdentifier(ctx: AppContext, identifier: string)
   return null;
 }
 
-export function findActiveConnection(ctx: AppContext, id: string): ConnectionRow | null {
-  return ctx.db.select().from(s.enterpriseConnections)
-    .where(and(eq(s.enterpriseConnections.id, id), eq(s.enterpriseConnections.active, true)))
-    .get() ?? null;
+export async function findActiveConnection(ctx: AppContext, id: string): Promise<ConnectionRow | null> {
+  return first(await ctx.db.select().from(s.enterpriseConnections)
+      .where(and(eq(s.enterpriseConnections.id, id), eq(s.enterpriseConnections.active, true)))) ?? null;
 }
 
 // ───────────── enterprise OIDC connection (OrbitID acting as OIDC client) ─────────────
@@ -257,9 +299,9 @@ export async function getOidcDiscovery(ctx: AppContext, conn: ConnectionRow): Pr
   if (cfg.discovery) return cfg.discovery;
   let doc: Record<string, unknown>;
   try {
-    const res = await fetch(cfg.discoveryUrl, { headers: { accept: "application/json" } });
+    const res = await safeFetch(ctx, cfg.discoveryUrl, { headers: { accept: "application/json" }, timeoutMs: 10_000, maxBytes: 256 * 1024 });
     if (!res.ok) throw new Error(`discovery returned ${res.status}`);
-    doc = (await res.json()) as Record<string, unknown>;
+    doc = JSON.parse(res.body) as Record<string, unknown>;
   } catch (err) {
     throw new OrbitError(400, ErrorCodes.oauth_callback_error, `Could not load OIDC discovery document: ${(err as Error).message}`);
   }
@@ -273,10 +315,15 @@ export async function getOidcDiscovery(ctx: AppContext, conn: ConnectionRow): Pr
   if (!discovery.issuer || !discovery.authorization_endpoint || !discovery.token_endpoint || !discovery.jwks_uri) {
     throw new OrbitError(400, ErrorCodes.oauth_callback_error, "OIDC discovery document is incomplete");
   }
-  ctx.db.update(s.enterpriseConnections)
-    .set({ config: { ...(conn.config ?? {}), discovery }, updatedAt: Date.now() })
-    .where(eq(s.enterpriseConnections.id, conn.id))
-    .run();
+  // Every endpoint in the document is operator-controlled (an attacker with settings access could point it inward).
+  for (const value of [discovery.authorization_endpoint, discovery.token_endpoint, discovery.jwks_uri, discovery.userinfo_endpoint]) {
+    if (value) await assertPublicUrl(ctx, value, "discovery_url").catch(() => {
+      throw new OrbitError(400, ErrorCodes.oauth_callback_error, "OIDC discovery document points at a non-public address");
+    });
+  }
+  await ctx.db.update(s.enterpriseConnections)
+            .set({ config: { ...(conn.config ?? {}), discovery }, updatedAt: Date.now() })
+            .where(eq(s.enterpriseConnections.id, conn.id));
   return discovery;
 }
 
@@ -319,16 +366,17 @@ export async function exchangeEnterpriseOidcCode(
     client_secret: decryptClientSecret(ctx, conn),
   });
   if (params.codeVerifier) body.set("code_verifier", params.codeVerifier);
-  const res = await fetch(discovery.token_endpoint, {
+  const res = await safeFetch(ctx, discovery.token_endpoint, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
     body,
+    timeoutMs: 10_000,
+    maxBytes: 256 * 1024,
   });
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new OrbitError(400, ErrorCodes.oauth_callback_error, `OIDC token exchange failed (${res.status}): ${text.slice(0, 200)}`);
+    throw new OrbitError(400, ErrorCodes.oauth_callback_error, `OIDC token exchange failed (${res.status}): ${res.body.slice(0, 200)}`);
   }
-  const json = (await res.json()) as Record<string, unknown>;
+  const json = res.json<Record<string, unknown>>();
   if (typeof json.access_token !== "string") throw new OrbitError(400, ErrorCodes.oauth_callback_error, "OIDC token response has no access_token");
   return {
     access_token: json.access_token,
@@ -341,16 +389,19 @@ export async function exchangeEnterpriseOidcCode(
 
 /** Verifies the IdP's id_token against its published JWKS (issuer + audience + nonce). */
 export async function verifyEnterpriseIdToken(
+  ctx: AppContext,
   conn: ConnectionRow,
   discovery: OidcDiscovery,
   idToken: string,
   nonce: string | null,
 ): Promise<Record<string, unknown>> {
-  const jwks = createRemoteJWKSet(new URL(discovery.jwks_uri));
   try {
+    const jwks = await remoteJwks(ctx, discovery.jwks_uri);
     const { payload } = await jwtVerify(idToken, jwks, {
       issuer: discovery.issuer,
       audience: oidcConfig(conn).clientId,
+      // Pin the algorithm: without this an RS256 key could be used as an HMAC secret ("alg confusion").
+      algorithms: ["RS256", "ES256", "PS256", "EdDSA"],
     });
     if (nonce && payload.nonce !== nonce) throw new Error("nonce mismatch");
     return payload as Record<string, unknown>;
@@ -359,11 +410,15 @@ export async function verifyEnterpriseIdToken(
   }
 }
 
-export async function fetchEnterpriseUserInfo(discovery: OidcDiscovery, accessToken: string): Promise<Record<string, unknown>> {
+export async function fetchEnterpriseUserInfo(ctx: AppContext, discovery: OidcDiscovery, accessToken: string): Promise<Record<string, unknown>> {
   if (!discovery.userinfo_endpoint) return {};
-  const res = await fetch(discovery.userinfo_endpoint, { headers: { authorization: `Bearer ${accessToken}`, accept: "application/json" } });
+  const res = await safeFetch(ctx, discovery.userinfo_endpoint, {
+    headers: { authorization: `Bearer ${accessToken}`, accept: "application/json" },
+    timeoutMs: 10_000,
+    maxBytes: 512 * 1024,
+  });
   if (!res.ok) throw new OrbitError(400, ErrorCodes.oauth_callback_error, `OIDC userinfo request failed (${res.status})`);
-  return (await res.json()) as Record<string, unknown>;
+  return res.json<Record<string, unknown>>();
 }
 
 /** Builds the external profile for an enterprise OIDC login from id_token + userinfo claims. */

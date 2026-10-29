@@ -29,6 +29,17 @@ if (!window.matchMedia) {
 
 Object.defineProperty(window, "scrollTo", { value: () => {}, writable: true });
 
+// Radix Select asks the pointer capture and scroll APIs of the element it opened from; jsdom has neither.
+if (!("hasPointerCapture" in HTMLElement.prototype)) {
+  Object.defineProperty(HTMLElement.prototype, "hasPointerCapture", { value: () => false, writable: true });
+  Object.defineProperty(HTMLElement.prototype, "setPointerCapture", { value: () => {}, writable: true });
+  Object.defineProperty(HTMLElement.prototype, "releasePointerCapture", { value: () => {}, writable: true });
+}
+
+if (!("scrollIntoView" in HTMLElement.prototype)) {
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { value: () => {}, writable: true });
+}
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();

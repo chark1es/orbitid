@@ -1,6 +1,7 @@
 // Server-side CAPTCHA verification (Cloudflare Turnstile / hCaptcha).
 import { ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../context";
+import { safeFetch } from "../lib/safe-fetch";
 
 /** Test seam: lets tests stub the verification result without network calls. */
 let verifierOverride: ((token: string, remoteIp?: string) => Promise<boolean>) | null = null;
@@ -27,8 +28,8 @@ export async function verifyCaptcha(ctx: AppContext, token: string | undefined, 
   const body = new URLSearchParams({ secret: sec.captchaSecret, response: token });
   if (remoteIp) body.set("remoteip", remoteIp);
   try {
-    const res = await fetch(endpoint, { method: "POST", body, signal: AbortSignal.timeout(5000) });
-    const json = (await res.json()) as { success?: boolean };
+    const res = await safeFetch(ctx, endpoint, { method: "POST", body, timeoutMs: 5_000, maxBytes: 64 * 1024 });
+    const json = res.json<{ success?: boolean }>();
     if (!json.success) throw botDetected();
   } catch (err) {
     if (err instanceof OrbitError) throw err;

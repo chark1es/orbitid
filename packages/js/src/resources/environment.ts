@@ -53,6 +53,15 @@ export interface PasskeySettings {
   showSignInButton: boolean;
 }
 
+export interface TrustedDevicesSettings {
+  enabled: boolean;
+  days: number;
+}
+
+export interface AnonymousSettings {
+  enabled: boolean;
+}
+
 export class AuthConfig {
   identificationRequirements: string[][];
   firstFactors: string[];
@@ -60,6 +69,10 @@ export class AuthConfig {
   singleSessionMode: boolean;
   signUpMode: "public" | "restricted" | "waitlist";
   legalConsentRequired: boolean;
+  /** Remembered browsers may skip the second factor. */
+  trustedDevices: TrustedDevicesSettings;
+  /** Guest sign-up (`signUp.createAnonymous()`) is available. */
+  anonymous: AnonymousSettings;
 
   constructor(json: EnvironmentJSON["auth_config"]) {
     this.identificationRequirements = json.identification_requirements ?? [];
@@ -68,6 +81,11 @@ export class AuthConfig {
     this.singleSessionMode = json.single_session_mode ?? false;
     this.signUpMode = json.sign_up_mode ?? "public";
     this.legalConsentRequired = json.legal_consent_required ?? false;
+    this.trustedDevices = {
+      enabled: json.trusted_devices?.enabled ?? false,
+      days: json.trusted_devices?.days ?? 30,
+    };
+    this.anonymous = { enabled: json.anonymous?.enabled ?? false };
   }
 }
 
@@ -151,6 +169,8 @@ export class UserSettings {
 export class OrganizationSettings {
   enabled: boolean;
   maxAllowedMemberships: number;
+  /** Organizations one user may create, or `null` for no limit. */
+  maxCreatedOrganizationsPerUser: number | null;
   creationEnabled: boolean;
   domainsEnabled: boolean;
   membershipRequestsEnabled: boolean;
@@ -162,6 +182,7 @@ export class OrganizationSettings {
   constructor(json: EnvironmentJSON["organization_settings"]) {
     this.enabled = json.enabled ?? false;
     this.maxAllowedMemberships = json.max_allowed_memberships ?? 5;
+    this.maxCreatedOrganizationsPerUser = json.max_created_organizations_per_user ?? null;
     this.creationEnabled = json.creation_enabled ?? true;
     this.domainsEnabled = json.domains_enabled ?? false;
     this.membershipRequestsEnabled = json.membership_requests_enabled ?? false;
@@ -193,7 +214,7 @@ export class DisplayConfig {
     this.supportEmail = json.support_email ?? null;
     this.termsUrl = json.terms_url ?? null;
     this.privacyUrl = json.privacy_url ?? null;
-    this.primaryColor = json.primary_color ?? "#6366f1";
+    this.primaryColor = json.primary_color ?? "#2b2522";
     this.theme = json.theme ?? "system";
     this.branded = json.branded ?? false;
     this.captchaEnabled = json.captcha_enabled ?? false;

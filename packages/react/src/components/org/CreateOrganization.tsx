@@ -13,6 +13,7 @@ import { RoleSelect } from "./_shared/RoleSelect";
 import {
   useAsyncAction,
   useNavigate,
+  useOrganizationCreationQuota,
   useOrganizationCreator,
   useOrganizationRoles,
   useOrgErrorText,
@@ -54,6 +55,7 @@ function CreateOrganizationView({
   const navigate = useNavigate();
   const router = useRouter({ routing, path, startPath: "/details" });
   const settings = useOrgSettings();
+  const quota = useOrganizationCreationQuota();
   const { createOrganization, setActive } = useOrganizationCreator();
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
@@ -172,6 +174,16 @@ function CreateOrganizationView({
       <Alert>
         <AlertDescription>
           {t("unstable__errors.organization_creation_not_allowed")}
+        </AlertDescription>
+      </Alert>
+    );
+  }
+
+  if (quota.reached) {
+    return (
+      <Alert>
+        <AlertDescription>
+          {t("createOrganization.limitReached", { max: quota.max ?? 0 })}
         </AlertDescription>
       </Alert>
     );

@@ -9,8 +9,7 @@ import type {
   SessionJSON,
   UserJSON,
 } from "@orbitid/shared";
-import { startRegistration } from "@simplewebauthn/browser";
-import type { PublicKeyCredentialCreationOptionsJSON } from "@simplewebauthn/types";
+import { startRegistration, type PublicKeyCredentialCreationOptionsJSON } from "@simplewebauthn/browser";
 import type { FapiClient } from "../fapi";
 import { fetchData, fetchPaginated, fetchList, unwrap } from "./base";
 import { isRecord } from "../util/object";
@@ -297,6 +296,8 @@ export interface TOTPJSON {
   uri?: string;
   qr_code?: string;
   verified?: boolean;
+  /** Plaintext single-use codes returned once by `attempt_verification`. */
+  backup_codes?: ({ code: string } | string)[];
 }
 
 export class TOTP {
@@ -306,6 +307,8 @@ export class TOTP {
   uri?: string;
   qrCode?: string;
   verified: boolean;
+  /** The ten backup codes the server issues when TOTP verification completes. */
+  backupCodes?: string[];
 
   constructor(json: TOTPJSON) {
     this.id = json.id;
@@ -313,10 +316,65 @@ export class TOTP {
     this.uri = json.uri;
     this.qrCode = json.qr_code ?? (json as { qrCode?: string }).qrCode;
     this.verified = json.verified ?? false;
+    this.backupCodes = parseBackupCodes(json.backup_codes);
   }
 
   static fromJSON(json: TOTPJSON): TOTP {
     return new TOTP(json);
+  }
+}
+
+function parseBackupCodes(value: TOTPJSON["backup_codes"]): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.flatMap((item) => {
+    if (typeof item === "string") return [item];
+    return item && typeof item.code === "string" ? [item.code] : [];
+  });
+}
+
+export interface TrustedDeviceJSON {
+  object: "trusted_device";
+  id: string;
+  user_id: string;
+  label: string | null;
+  user_agent: string | null;
+  ip_address: string | null;
+  expires_at: number;
+  last_used_at: number | null;
+  revoked_at: number | null;
+  created_at: number;
+  updated_at: number;
+}
+
+/** A browser remembered for skipping the second factor. The token itself is an HttpOnly cookie. */
+export class TrustedDevice {
+  readonly object = "trusted_device" as const;
+  id: string;
+  userId: string;
+  label: string | null;
+  userAgent: string | null;
+  ipAddress: string | null;
+  expiresAt: number;
+  lastUsedAt: number | null;
+  createdAt: number;
+
+  constructor(private readonly fapi: FapiClient, json: TrustedDeviceJSON) {
+    this.id = json.id;
+    this.userId = json.user_id;
+    this.label = json.label;
+    this.userAgent = json.user_agent;
+    this.ipAddress = json.ip_address;
+    this.expiresAt = json.expires_at;
+    this.lastUsedAt = json.last_used_at;
+    this.createdAt = json.created_at;
+  }
+
+  static fromJSON(fapi: FapiClient, json: TrustedDeviceJSON): TrustedDevice {
+    return new TrustedDevice(fapi, json);
+  }
+
+  async revoke(): Promise<void> {
+    await this.fapi.del(`/v1/client/me/trusted_devices/${this.id}`);
   }
 }
 
@@ -394,6 +452,8 @@ export class User {
   externalAccounts: ExternalAccount[];
   publicMetadata: Metadata;
   unsafeMetadata: Metadata;
+  /** Guest account: no identifiers yet, upgrades in place once one is added. */
+  isAnonymous: boolean;
   banned: boolean;
   locked: boolean;
   lastSignInAt: number | null;
@@ -425,6 +485,7 @@ export class User {
     this.externalAccounts = (json.external_accounts ?? []).map((account) => ExternalAccount.fromJSON(fapi, account));
     this.publicMetadata = json.public_metadata ?? {};
     this.unsafeMetadata = json.unsafe_metadata ?? {};
+    this.isAnonymous = json.is_anonymous ?? false;
     this.banned = json.banned ?? false;
     this.locked = json.locked ?? false;
     this.lastSignInAt = json.last_sign_in_at ?? null;
@@ -477,6 +538,7 @@ export class User {
     this.externalAccounts = (json.external_accounts ?? []).map((account) => ExternalAccount.fromJSON(this.fapi, account));
     this.publicMetadata = json.public_metadata ?? {};
     this.unsafeMetadata = json.unsafe_metadata ?? {};
+    this.isAnonymous = json.is_anonymous ?? this.isAnonymous;
     this.updatedAt = json.updated_at;
     return this;
   }
@@ -593,7 +655,7 @@ export class User {
     }
     const passkeyId = begin.id ?? begin.passkey_id;
     if (!passkeyId) throw new Error("OrbitID did not return a passkey id");
-    const credential = await startRegistration(options as PublicKeyCredentialCreationOptionsJSON);
+    const credential = await startRegistration({ optionsJSON: options as PublicKeyCredentialCreationOptionsJSON });
     const raw = await this.fapi.post<unknown>(`/v1/client/me/passkeys/${passkeyId}/attempt_verification`, {
       body: { public_key_credential: credential },
     });
@@ -627,6 +689,17 @@ export class User {
 
   async revokeSession(sessionId: string): Promise<void> {
     await this.fapi.post(`/v1/client/me/sessions/${sessionId}/revoke`);
+  }
+
+  /** Browsers remembered for skipping the second factor. */
+  async getTrustedDevices(): Promise<TrustedDevice[]> {
+    const data = await fetchData<unknown>(this.fapi, "GET", "/v1/client/me/trusted_devices");
+    return toList(data, (item) => TrustedDevice.fromJSON(this.fapi, item as TrustedDeviceJSON));
+  }
+
+  /** Revokes one remembered browser; its cookie stops working for the second factor. */
+  async revokeTrustedDevice(deviceId: string): Promise<void> {
+    await this.fapi.del(`/v1/client/me/trusted_devices/${deviceId}`);
   }
 
   async leaveOrganization(organizationId: string): Promise<void> {

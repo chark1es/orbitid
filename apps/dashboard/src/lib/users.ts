@@ -50,7 +50,7 @@ function metadataField(text: string, label: string): Record<string, unknown> | u
 }
 
 /**
- * Maps the create-user dialog to the Clerk-compatible `POST /v1/users` body: blank inputs are omitted
+ * Maps the create-user dialog to the `POST /v1/users` body: blank inputs are omitted
  * (not sent as empty strings) and metadata is parsed once, here, so the dialog stays declarative.
  */
 export function buildCreateUserPayload(form: CreateUserForm): CreateUserPayload {

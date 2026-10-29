@@ -55,7 +55,7 @@ export function initials(name: string): string {
   return (words[0]![0]! + words[1]![0]!).toUpperCase();
 }
 
-/** Lowercase, accent-free, hyphenated slug (matches Clerk's auto-slug). */
+/** Lowercase, accent-free, hyphenated slug. */
 export function slugify(value: string): string {
   return value
     .normalize("NFKD")
@@ -155,6 +155,8 @@ export interface OrgEnvironmentSettings {
   domainsEnabled: boolean;
   membershipRequestsEnabled: boolean;
   maxAllowedMemberships: number;
+  /** Organizations one user may create, or `null` for no limit. */
+  maxCreatedOrganizationsPerUser: number | null;
   forceOrganizationSelection: boolean;
   creatorRole: string;
   defaultRole: string;
@@ -175,7 +177,7 @@ const num = (value: unknown, fallback: number): number =>
 const str = (value: unknown, fallback: string): string =>
   typeof value === "string" && value ? value : fallback;
 
-/** Reads organization settings from either casing, with Clerk-compatible defaults. */
+/** Reads organization settings from either casing, with defaults. */
 export function readOrgSettings(environment: EnvironmentResource | null): OrgEnvironmentSettings {
   const raw = readRaw(environment);
   return {
@@ -188,6 +190,10 @@ export function readOrgSettings(environment: EnvironmentResource | null): OrgEnv
       false,
     ),
     maxAllowedMemberships: num(raw.maxAllowedMemberships ?? raw.max_allowed_memberships, 0),
+    maxCreatedOrganizationsPerUser:
+      typeof (raw.maxCreatedOrganizationsPerUser ?? raw.max_created_organizations_per_user) === "number"
+        ? Number(raw.maxCreatedOrganizationsPerUser ?? raw.max_created_organizations_per_user)
+        : null,
     forceOrganizationSelection: bool(
       raw.forceOrganizationSelection ?? raw.force_organization_selection,
       false,

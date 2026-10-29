@@ -2,10 +2,9 @@ import { useEffect, useMemo, useReducer, useRef } from "react";
 import type { OrbitIDInstance, SignInResource as SignInApi } from "../../../provider";
 import { useOrbitID } from "../../../hooks";
 import { useLocalizations } from "../../../localization";
-import { enUS } from "../../../localization/enUS";
+import type { TranslateParams, TranslationKey } from "../../../localization";
 import { useAppearance, type ResolvedAppearance } from "../../../appearance";
 import { normalizeEnvironment, type EnvironmentView } from "./environment";
-import { enUS as authStrings, fallbackTranslate, interpolate, type TranslateParams } from "./strings";
 import {
   invalidateNormalizedResources,
   normalizeClient,
@@ -42,7 +41,7 @@ export interface AuthRouter {
   replace(to: string): void;
 }
 
-export type TranslateFn = (key: string, params?: TranslateParams) => string;
+export type TranslateFn = (key: TranslationKey, params?: TranslateParams) => string;
 
 export interface AuthRuntime {
   orbit: OrbitInstance;
@@ -59,30 +58,6 @@ export interface AuthRuntime {
   session: NormalizedSession | null;
   signIn: SignInResource | null;
   signUp: SignUpResource | null;
-}
-
-let fallbackInstalled = false;
-
-/** Add the auth UI's strings to the active `enUS` resource for paths the provider does not define. */
-function installFallbackKeys(): void {
-  if (fallbackInstalled) return;
-  fallbackInstalled = true;
-  for (const [path, value] of Object.entries(authStrings)) {
-    const segments = path.split(".");
-    let target: Record<string, unknown> = enUS;
-    for (const segment of segments.slice(0, -1)) {
-      const existing = target[segment];
-      if (!isRecord(existing)) {
-        const created: Record<string, unknown> = {};
-        target[segment] = created;
-        target = created;
-      } else {
-        target = existing;
-      }
-    }
-    const leaf = segments[segments.length - 1]!;
-    if (target[leaf] === undefined) target[leaf] = value;
-  }
 }
 
 function browserRouter(orbit: OrbitInstance): AuthRouter {
@@ -108,7 +83,6 @@ export function useAuthRuntime(): AuthRuntime {
   const [, forceRender] = useReducer((n: number) => n + 1, 0);
 
   useEffect(() => {
-    installFallbackKeys();
     if (typeof orbit.addListener !== "function") return;
     const unsubscribe = orbit.addListener(() => {
       invalidateNormalizedResources();
@@ -127,13 +101,8 @@ export function useAuthRuntime(): AuthRuntime {
     [orbit.environment, orbit.isDevelopmentMode],
   );
 
-  const t = useMemo<TranslateFn>(() => {
-    return (key, params) => {
-      const translated = providerT?.(key, params);
-      if (typeof translated === "string" && translated !== key) return interpolate(translated, params);
-      return fallbackTranslate(key, params) ?? key;
-    };
-  }, [providerT]);
+  /** Reads the provider's localization; `createTranslator` falls back to `enUS` per key. */
+  const t = providerT as TranslateFn;
 
   const router = useMemo(() => browserRouter(orbit), [orbit]);
 

@@ -36,10 +36,12 @@ export {
   Passkey,
   TOTP,
   BackupCodeResource,
+  TrustedDevice,
   type UpdateUserParams,
   type PhoneNumberParams,
   type ReauthorizeParams,
   type TOTPJSON,
+  type TrustedDeviceJSON,
 } from "./resources/user";
 export {
   Organization,
@@ -71,6 +73,8 @@ export {
   type SignUpSettings,
   type UserSettingsActions,
   type PasskeySettings,
+  type TrustedDevicesSettings,
+  type AnonymousSettings,
 } from "./resources/environment";
 export { Verification } from "./resources/verification";
 

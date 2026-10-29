@@ -16,6 +16,11 @@ let respondWith: number[] = [];
 
 beforeAll(async () => {
   server = createServer((req, res) => {
+    // Ports are reused across test processes; ignore anything that is not a signed webhook request.
+    if (!req.headers["svix-id"]) {
+      res.writeHead(404).end();
+      return;
+    }
     let body = "";
     req.on("data", (chunk) => {
       body += chunk;
@@ -43,7 +48,7 @@ beforeEach(() => {
 const hookUrl = () => `http://127.0.0.1:${port}/hook`;
 
 async function forceDue(ctx: Awaited<ReturnType<typeof testApp>>["ctx"], deliveryId: string) {
-  ctx.db.update(s.webhookDeliveries).set({ nextAttemptAt: Date.now() }).where(eq(s.webhookDeliveries.id, deliveryId)).run();
+  await ctx.db.update(s.webhookDeliveries).set({ nextAttemptAt: Date.now() }).where(eq(s.webhookDeliveries.id, deliveryId));
 }
 
 async function deliveries(
@@ -184,7 +189,7 @@ describe("webhook delivery", () => {
     await json<WebhookEndpointJSON>(await api("POST", "/v1/webhooks/endpoints", { url: "http://127.0.0.1:1/unreachable" }));
     await expect(createUser(api)).resolves.toBeTruthy();
     await deliverDue(ctx);
-    const [delivery] = await deliveries(api, ctx.db.select().from(s.webhookEndpoints).all()[0]!.id);
+    const [delivery] = await deliveries(api, (await ctx.db.select().from(s.webhookEndpoints))[0]!.id);
     expect(delivery).toMatchObject({ status: "pending", attempt: 1, response_code: null });
     expect(delivery!.response_body).toMatch(/ECONNREFUSED|fetch failed/i);
   });

@@ -1,21 +1,25 @@
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { Badge, Button, Card, CardContent, Separator, Skeleton, Tabs, TabsContent, TabsList, TabsTrigger } from "@orbitid/ui";
-import { ArrowLeft, Loader2, UserRound } from "lucide-react";
+import { Button, Skeleton, Tabs, TabsContent } from "@orbitid/ui";
+import { ArrowLeft, Ghost, Loader2, UserRound } from "lucide-react";
 import type { UserJSON } from "@orbitid/shared";
 import { useApi } from "../lib/api";
 import { errorMessage } from "../lib/errors";
 import { primaryEmail, userLabel } from "../lib/format";
 import { useImpersonate } from "../lib/impersonation";
-import { PageHeader } from "../components/shared/page-header";
 import { StatusBadge } from "../components/shared/status-badge";
 import { UserAvatar } from "../components/shared/user-avatar";
 import { EmptyState } from "../components/shared/empty-state";
+import { CopyButton } from "../components/shared/copy-button";
+import { ConfirmDialog } from "../components/shared/confirm-dialog";
+import { TabStrip } from "../components/shared/tab-strip";
 import { UserRowActions } from "../components/users/user-row-actions";
 import { UserProfileTab } from "../components/users/user-profile-tab";
 import { UserIdentifiersTab } from "../components/users/user-identifiers-tab";
 import { UserSecurityTab } from "../components/users/user-security-tab";
 import { UserSessionsTab } from "../components/users/user-sessions-tab";
+import { UserTrustedDevices } from "../components/users/user-trusted-devices";
 import { UserOrganizationsTab } from "../components/users/user-organizations-tab";
 import { UserMetadataTab } from "../components/users/user-metadata-tab";
 import { UserActivityTab } from "../components/users/user-activity-tab";
@@ -26,6 +30,7 @@ const TABS = [
   { value: "identifiers", label: "Identifiers" },
   { value: "security", label: "Security" },
   { value: "sessions", label: "Sessions" },
+  { value: "devices", label: "Trusted devices" },
   { value: "organizations", label: "Organizations" },
   { value: "metadata", label: "Metadata" },
   { value: "activity", label: "Activity" },
@@ -40,6 +45,7 @@ export default function UserDetailPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const impersonate = useImpersonate();
+  const [confirmImpersonate, setConfirmImpersonate] = useState(false);
 
   const tabParam = searchParams.get("tab") as TabValue | null;
   const tab: TabValue = TABS.some((entry) => entry.value === tabParam) ? (tabParam as TabValue) : "profile";
@@ -64,28 +70,33 @@ export default function UserDetailPage() {
 
   if (userQuery.error) {
     return (
-      <Card>
-        <CardContent className="py-4">
-          <EmptyState
-            icon={UserRound}
-            title="Could not load this user"
-            description={errorMessage(userQuery.error)}
-            action={
-              <Button variant="outline" size="sm" onClick={() => navigate("/users")}>
-                <ArrowLeft aria-hidden /> Back to users
-              </Button>
-            }
-          />
-        </CardContent>
-      </Card>
+      <div className="border border-border bg-card">
+        <EmptyState
+          icon={UserRound}
+          title="Could not load this user"
+          description={`${errorMessage(userQuery.error)} The user may have been deleted. Reload, or search for them again.`}
+          action={
+            <Button variant="outline" size="sm" onClick={() => navigate("/users")}>
+              <ArrowLeft aria-hidden /> Back to users
+            </Button>
+          }
+        />
+      </div>
     );
   }
 
   if (!user) {
     return (
       <div className="space-y-4">
-        <Skeleton className="h-16 w-full" />
-        <Skeleton className="h-10 w-full max-w-xl" />
+        <Skeleton className="h-4 w-24" />
+        <div className="flex items-center gap-4 border-b border-border pb-4">
+          <Skeleton className="size-12" />
+          <div className="space-y-2">
+            <Skeleton className="h-6 w-48" />
+            <Skeleton className="h-3.5 w-64" />
+          </div>
+        </div>
+        <Skeleton className="h-9 w-full max-w-xl" />
         <Skeleton className="h-64 w-full" />
       </div>
     );
@@ -93,64 +104,83 @@ export default function UserDetailPage() {
 
   return (
     <>
-      <PageHeader
-        title={
-          <span className="flex flex-wrap items-center gap-2">
-            {userLabel(user)}
-            {user.banned ? <StatusBadge status="banned" /> : null}
-            {user.locked ? <StatusBadge status="locked" /> : null}
-          </span>
-        }
-        description={
-          <span className="flex flex-wrap items-center gap-2">
-            <span>{primaryEmail(user) || "No email address"}</span>
-            <span aria-hidden>·</span>
-            <code className="font-mono text-xs">{user.id}</code>
-          </span>
-        }
-        actions={
-          <>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void impersonate.impersonate(user.id)}
-              disabled={impersonate.pending}
-            >
-              {impersonate.pending ? <Loader2 className="animate-spin" aria-hidden /> : <UserRound aria-hidden />}
-              Impersonate
-            </Button>
-            <UserRowActions user={user} onDeleted={() => navigate("/users", { replace: true })} />
-          </>
-        }
-      />
-
-      <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-card px-4 py-3">
-        <UserAvatar name={userLabel(user)} imageUrl={user.image_url} size="lg" />
-        <div className="min-w-0 space-y-1">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Badge variant="outline">{user.username ? `@${user.username}` : "No username"}</Badge>
-            <Badge variant="outline">{user.email_addresses.length} email(s)</Badge>
-            <Badge variant="outline">{user.phone_numbers.length} phone(s)</Badge>
-            <Badge variant="outline">{user.passkeys.length} passkey(s)</Badge>
-            <Badge variant="outline">{user.external_accounts.length} social</Badge>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            External ID: <code>{user.external_id ?? "—"}</code>
-          </p>
-        </div>
+      <div>
+        <Link
+          to="/users"
+          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        >
+          <ArrowLeft className="size-3.5" strokeWidth={1.5} aria-hidden /> Users
+        </Link>
       </div>
 
-      <Tabs value={tab} onValueChange={setTab}>
-        <div className="overflow-x-auto pb-1">
-          <TabsList>
-            {TABS.map((entry) => (
-              <TabsTrigger key={entry.value} value={entry.value}>
-                {entry.label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
+      <header className="flex flex-col gap-4 border-b border-border pb-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <UserAvatar name={userLabel(user)} imageUrl={user.image_url} size="lg" />
+          <div className="min-w-0 space-y-1.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-[1.375rem] font-[650] leading-tight tracking-[-0.015em]">{userLabel(user)}</h1>
+              {user.banned ? <StatusBadge status="banned" /> : null}
+              {user.locked ? <StatusBadge status="locked" /> : null}
+              {user.two_factor_enabled ? <StatusBadge status="enabled" label="MFA" /> : null}
+              {user.is_anonymous ? <StatusBadge status="guest" tone="info" label="Guest" /> : null}
+              {!user.banned && !user.locked && !user.is_anonymous ? <StatusBadge status="active" /> : null}
+            </div>
+            <p className="font-data text-[0.8125rem] text-muted-foreground">{primaryEmail(user) || "No email address"}</p>
+            <div className="flex items-center gap-1">
+              <code className="max-w-[46ch] truncate font-data text-[0.75rem] text-muted-foreground">{user.id}</code>
+              <CopyButton value={user.id} label="Copy user ID" size="icon-xs" />
+            </div>
+            <dl className="flex flex-wrap items-center gap-y-1 pt-1 text-xs text-muted-foreground [&_dt]:text-[0.6875rem] [&_dt]:uppercase [&_dt]:tracking-[0.04em]">
+              <div className="flex items-center gap-1.5 border-l border-border pl-3 first:border-l-0 first:pl-0">
+                <dt>Username</dt>
+                <dd className="font-data text-foreground">{user.username ? `@${user.username}` : "none"}</dd>
+              </div>
+              <div className="flex items-center gap-1.5 border-l border-border pl-3">
+                <dt>External ID</dt>
+                <dd className="font-data text-foreground">{user.external_id ?? "none"}</dd>
+              </div>
+              <div className="flex items-center gap-1.5 border-l border-border pl-3">
+                <dt>Identifiers</dt>
+                <dd className="font-data text-foreground">
+                  {user.email_addresses.length} email, {user.phone_numbers.length} phone, {user.passkeys.length} passkey,{" "}
+                  {user.external_accounts.length} social
+                </dd>
+              </div>
+            </dl>
+          </div>
         </div>
-        <Separator className="my-4" />
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setConfirmImpersonate(true)}
+            disabled={impersonate.pending}
+          >
+            {impersonate.pending ? <Loader2 className="animate-spin" aria-hidden /> : <UserRound aria-hidden />}
+            Impersonate
+          </Button>
+          <UserRowActions user={user} onDeleted={() => navigate("/users", { replace: true })} />
+        </div>
+      </header>
+
+      {user.is_anonymous ? (
+        <div role="note" className="rounded-[4px] border border-info/35 bg-info/5 px-3 py-2.5">
+          <p className="flex items-start gap-2 text-sm font-medium">
+            <Ghost className="mt-0.5 size-4 shrink-0 text-info" strokeWidth={1.5} aria-hidden />
+            Guest account
+          </p>
+          <p className="mt-1 max-w-[75ch] text-sm leading-6 text-muted-foreground">
+            This account has no verified identifier and no password, so it can only be used from the session it was
+            created with. It becomes a registered account the moment it gains a verified email address, a verified phone
+            number, a password or a connected account, and keeps its ID, metadata and sessions. Guests cannot create
+            organizations or API keys.
+          </p>
+        </div>
+      ) : null}
+
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabStrip tabs={TABS} />
 
         <TabsContent value="profile">
           <UserProfileTab key={`profile-${user.updated_at}`} user={user} onUpdated={refresh} />
@@ -163,6 +193,9 @@ export default function UserDetailPage() {
         </TabsContent>
         <TabsContent value="sessions">
           <UserSessionsTab user={user} onUpdated={refresh} />
+        </TabsContent>
+        <TabsContent value="devices">
+          <UserTrustedDevices userId={user.id} />
         </TabsContent>
         <TabsContent value="organizations">
           <UserOrganizationsTab user={user} onUpdated={refresh} />
@@ -177,6 +210,18 @@ export default function UserDetailPage() {
           <UserDangerTab user={user} onDeleted={() => navigate("/users", { replace: true })} />
         </TabsContent>
       </Tabs>
+
+      <ConfirmDialog
+        open={confirmImpersonate}
+        onOpenChange={setConfirmImpersonate}
+        title={`Impersonate ${userLabel(user)}?`}
+        description="OrbitID opens your application in a new tab with a session for this user. Your dashboard stays signed in, and their own sessions are untouched."
+        confirmLabel="Open as this user"
+        onConfirm={() => {
+          setConfirmImpersonate(false);
+          void impersonate.impersonate(user.id);
+        }}
+      />
     </>
   );
 }

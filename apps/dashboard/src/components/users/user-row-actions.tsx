@@ -47,7 +47,7 @@ export function UserRowActions({ user, onDeleted }: { user: UserJSON; onDeleted?
             <MoreHorizontal aria-hidden />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-52">
+        <DropdownMenuContent align="end" className="w-52 rounded-[4px] border-border">
           <DropdownMenuItem onSelect={() => navigate(`/users/${user.id}`)}>
             <Eye aria-hidden /> View details
           </DropdownMenuItem>
@@ -85,7 +85,7 @@ export function UserRowActions({ user, onDeleted }: { user: UserJSON; onDeleted?
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
-            className="text-destructive focus:text-destructive"
+            className="text-signal focus:text-signal"
             onSelect={(event) => {
               event.preventDefault();
               setConfirmDelete(true);

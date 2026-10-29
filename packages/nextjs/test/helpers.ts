@@ -66,5 +66,6 @@ export async function signExpiredToken(claims: TestClaims = {}): Promise<string>
     .setIssuedAt(now - 120)
     .setNotBefore(now - 120)
     .setExpirationTime(now - 60)
+    .setIssuer("http://localhost:4000")
     .sign(privateKey);
 }

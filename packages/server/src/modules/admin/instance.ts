@@ -3,53 +3,23 @@ import { Hono, type Context } from "hono";
 import { z, ZodError } from "zod";
 import { eq } from "drizzle-orm";
 import { ErrorCodes, ID_PREFIX, OrbitError, type InstanceSettings } from "@orbitid/shared";
-import { parseBody, zodToOrbit } from "../../lib/http";
+import { parseBody, zodToOrbit, clientIp } from "../../lib/http";
 import { randomToken, sha256 } from "../../lib/crypto";
+import { maskSecrets, unmaskSettingsPatch } from "../../lib/secrets";
 import { newId } from "../../lib/ids";
 import * as s from "../../db/schema";
-import { sendEmail } from "../../services/mail";
+import { parseEmailFrom, parseSmtpUrl, sendEmail, sendTestEmail } from "../../services/mail";
+import { hit } from "../../lib/rate-limit";
 import { audit, listAuditLogs } from "../../services/audit";
 import { instanceStats } from "../../services/stats";
 import { rotateSigningKey } from "../../services/tokens";
 import type { AppContext, DeepPartial } from "../../context";
 import { listParams } from "./shared";
+import { first } from "../../lib/db";
 
-const MASK = "••••";
 const TESTING_TOKEN_TTL_MS = 3_600_000;
 
 type SettingsTree = Record<string, unknown>;
-
-/** Deep clone with secret fields replaced by `••••` and sibling `<field>Set` booleans. */
-function maskSettings(settings: InstanceSettings): SettingsTree {
-  const copy = JSON.parse(JSON.stringify(settings)) as SettingsTree;
-  const maskField = (owner: SettingsTree | undefined, key: string) => {
-    if (!owner) return;
-    const value = owner[key];
-    owner[`${key}Set`] = typeof value === "string" && value.length > 0;
-    if (typeof value === "string" && value.length > 0) owner[key] = MASK;
-  };
-  maskField(copy.email as SettingsTree, "smtpUrl");
-  maskField(copy.sms as SettingsTree, "twilioAuthToken");
-  maskField(copy.security as SettingsTree, "captchaSecret");
-  for (const provider of Object.values((copy.social ?? {}) as Record<string, SettingsTree>)) maskField(provider, "clientSecret");
-  return copy;
-}
-
-/** Drops `*Set` helper keys and masked values so a round-tripped GET/PATCH keeps the stored secrets. */
-function stripMasked(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(stripMasked);
-  if (value && typeof value === "object") {
-    const out: SettingsTree = {};
-    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-      if (key.endsWith("Set")) continue;
-      const cleaned = stripMasked(item);
-      if (cleaned === MASK) continue;
-      out[key] = cleaned;
-    }
-    return out;
-  }
-  return value;
-}
 
 const INSTANCE_URL_FIELDS = ["homeUrl", "logoUrl", "termsUrl", "privacyUrl"] as const;
 const INSTANCE_URL_LIST_FIELDS = ["allowedOrigins", "allowedRedirectOrigins"] as const;
@@ -78,6 +48,34 @@ function assertInstanceUrls(patch: SettingsTree): void {
   }
 }
 
+/** Rejects SMTP URLs and From headers that would fail at delivery time, before they are persisted. */
+function assertEmailSettings(patch: SettingsTree): void {
+  const email = patch.email as SettingsTree | undefined;
+  if (!email) return;
+  if (email.from !== undefined) {
+    if (typeof email.from !== "string") {
+      throw new OrbitError(422, ErrorCodes.form_param_format_invalid, "email.from must be a string", { param_name: "email.from" });
+    }
+    parseEmailFrom(email.from);
+  }
+  if (email.smtpUrl !== undefined) {
+    if (typeof email.smtpUrl !== "string") {
+      throw new OrbitError(422, ErrorCodes.form_param_format_invalid, "email.smtpUrl must be a string", { param_name: "email.smtpUrl" });
+    }
+    // An empty URL is the way to clear it; anything else must be a valid smtp(s):// URL.
+    if (email.smtpUrl.trim()) parseSmtpUrl(email.smtpUrl);
+  }
+  for (const field of ["resendApiKey"] as const) {
+    const value = email[field];
+    if (value !== undefined && typeof value !== "string") {
+      throw new OrbitError(422, ErrorCodes.form_param_format_invalid, `email.${field} must be a string`, { param_name: `email.${field}` });
+    }
+    if (typeof value === "string" && /\r|\n/.test(value)) {
+      throw new OrbitError(422, ErrorCodes.form_param_format_invalid, `email.${field} must not contain line breaks`, { param_name: `email.${field}` });
+    }
+  }
+}
+
 /** Accepts a partial settings tree (`settings.update` deep-merges it and validates against the schema). */
 function instanceJson(ctx: AppContext) {
   const settings = ctx.settings.get();
@@ -86,7 +84,8 @@ function instanceJson(ctx: AppContext) {
     id: "default",
     environment_type: ctx.env.nodeEnv === "production" ? "production" : "development",
     publishable_key: ctx.publishableKey,
-    ...maskSettings(settings),
+    database: { dialect: ctx.database.dialect, driver: ctx.database.driver, label: ctx.database.label },
+    ...maskSecrets(settings),
   };
 }
 
@@ -97,8 +96,10 @@ export default function routes(ctx: AppContext) {
 
   app.patch("/instance", async (c) => {
     const body = (await parseBody(c, z.record(z.string(), z.unknown()))) as SettingsTree;
-    const patch = stripMasked(body) as SettingsTree;
+    // Masks and unchanged echoes are dropped, so a full-object round trip keeps the stored credentials.
+    const patch = unmaskSettingsPatch(ctx.settings.get(), body);
     assertInstanceUrls(patch);
+    assertEmailSettings(patch);
     try {
       // `settings.update` deep-merges and re-validates the whole tree through the zod schema.
       await ctx.settings.update(patch as DeepPartial<InstanceSettings>);
@@ -106,7 +107,7 @@ export default function routes(ctx: AppContext) {
       if (err instanceof ZodError) throw zodToOrbit(err);
       throw err;
     }
-    audit(ctx, { actor: "secret_key", action: "instance.updated", targetType: "instance", targetId: "default", metadata: { fields: Object.keys(patch) } });
+    await audit(ctx, { actor: "secret_key", action: "instance.updated", targetType: "instance", targetId: "default", metadata: { fields: Object.keys(patch) } });
     return c.json(instanceJson(ctx));
   });
 
@@ -118,60 +119,70 @@ export default function routes(ctx: AppContext) {
     return c.json({ status: "ok", to });
   });
 
+  /** Sends a real test message through the resolved transport and reports which provider it used. */
+  app.post("/instance/email_test", async (c) => {
+    const body = await parseBody(c, z.object({ to: z.string() }));
+    await hit(ctx, `instance:email_test:${clientIp(c)}`, 10, 60_000);
+    await hit(ctx, "instance:email_test", 60, 60_000);
+    // Delivery failures surface as a 502 `email_delivery_failed` from the mail service, with the API key redacted.
+    const { provider } = await sendTestEmail(ctx, body.to);
+    await audit(ctx, { actor: "secret_key", action: "instance.email_test", targetType: "instance", targetId: "default", metadata: { provider } });
+    return c.json({ provider, ok: true as const });
+  });
+
   app.post("/instance/signing_keys/rotate", async (c) => {
     // services/tokens.ts owns the signing keys; report the stored row so the shape stays stable.
     const { kid } = await rotateSigningKey(ctx);
-    const key = ctx.db.select().from(s.signingKeys).where(eq(s.signingKeys.kid, kid)).get();
-    audit(ctx, { actor: "secret_key", action: "instance.signing_key.rotated", targetType: "instance", targetId: "default", metadata: { kid } });
+    const key = first(await ctx.db.select().from(s.signingKeys).where(eq(s.signingKeys.kid, kid)));
+    await audit(ctx, { actor: "secret_key", action: "instance.signing_key.rotated", targetType: "instance", targetId: "default", metadata: { kid } });
     return c.json({ object: "signing_key", kid, algorithm: key?.alg ?? "RS256", active: key?.active ?? true });
   });
 
-  app.post("/testing_tokens", (c) => {
+  app.post("/testing_tokens", async (c) => {
     if (!ctx.settings.get().security.testingTokensEnabled) {
       throw new OrbitError(400, ErrorCodes.not_allowed_access, "Testing tokens are disabled on this instance.");
     }
     const token = `tt_${randomToken(32)}`;
     const now = Date.now();
     const expiresAt = now + TESTING_TOKEN_TTL_MS;
-    ctx.db
-      .insert(s.verifications)
-      .values({
-        id: newId(ID_PREFIX.verification),
-        purpose: "testing_token",
-        strategy: "testing_token",
-        identifier: "",
-        ownerId: "",
-        tokenHash: sha256(token),
-        expiresAt,
-        createdAt: now,
-      })
-      .run();
-    audit(ctx, { actor: "secret_key", action: "testing_token.created", targetType: "instance", targetId: "default" });
+    await ctx.db
+                  .insert(s.verifications)
+                  .values({
+                    id: newId(ID_PREFIX.verification),
+                    purpose: "testing_token",
+                    strategy: "testing_token",
+                    identifier: "",
+                    ownerId: "",
+                    tokenHash: sha256(token),
+                    expiresAt,
+                    createdAt: now,
+                  });
+    await audit(ctx, { actor: "secret_key", action: "testing_token.created", targetType: "instance", targetId: "default" });
     return c.json({ object: "testing_token", token, expires_at: expiresAt });
   });
 
-  app.get("/audit_logs", (c) => {
+  app.get("/audit_logs", async (c) => {
     const { limit, offset, order_by } = listParams(c);
     const numeric = (name: string) => {
       const raw = c.req.query(name);
       const value = raw === undefined ? undefined : Number(raw);
       return value === undefined || Number.isNaN(value) ? undefined : value;
     };
-    const result = listAuditLogs(ctx, {
-      limit,
-      offset,
-      orderBy: order_by,
-      actor: c.req.query("actor") || undefined,
-      action: c.req.query("action") || undefined,
-      targetType: c.req.query("target_type") || undefined,
-      targetId: c.req.query("target_id") || undefined,
-      after: numeric("after"),
-      before: numeric("before"),
-    });
+    const result = await listAuditLogs(ctx, {
+          limit,
+          offset,
+          orderBy: order_by,
+          actor: c.req.query("actor") || undefined,
+          action: c.req.query("action") || undefined,
+          targetType: c.req.query("target_type") || undefined,
+          targetId: c.req.query("target_id") || undefined,
+          after: numeric("after"),
+          before: numeric("before"),
+        });
     return c.json(result);
   });
 
-  app.get("/stats", (c: Context) => c.json(instanceStats(ctx)));
+  app.get("/stats", async (c: Context) => c.json(await instanceStats(ctx)));
 
   return app;
 }

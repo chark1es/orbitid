@@ -52,18 +52,21 @@ export function CommandPalette() {
     <>
       <Button
         variant="outline"
-        className="h-8 w-8 justify-center gap-2 px-0 text-muted-foreground sm:w-56 sm:justify-start sm:px-2.5"
+        size="sm"
+        className="h-7 w-7 justify-center gap-2 px-0 text-muted-foreground sm:w-52 sm:justify-start sm:px-2"
         onClick={() => setOpen(true)}
-        aria-label="Search and navigate"
+        aria-label="Search pages and users"
       >
-        <Search className="size-4 shrink-0" aria-hidden />
-        <span className="hidden flex-1 text-left text-sm sm:inline">Search…</span>
-        <kbd className="hidden h-5 items-center rounded border bg-muted px-1.5 font-mono text-[10px] text-muted-foreground sm:inline-flex">⌘K</kbd>
+        <Search className="size-3.5 shrink-0" aria-hidden />
+        <span className="hidden flex-1 text-left text-[0.8125rem] font-normal sm:inline">Search</span>
+        <kbd className="hidden h-4.5 items-center rounded-xs border border-border bg-muted px-1 font-data text-[0.6875rem] text-muted-foreground sm:inline-flex">
+          ⌘K
+        </kbd>
       </Button>
       <CommandDialog open={open} onOpenChange={setOpen} title="Command palette" description="Search pages and users">
         <CommandInput placeholder="Search pages or users…" value={search} onValueChange={setSearch} />
         <CommandList>
-          <CommandEmpty>{isFetching ? "Searching…" : "No results."}</CommandEmpty>
+          <CommandEmpty>{isFetching ? "Searching…" : "No results. Try a name, an email, or a page."}</CommandEmpty>
           {enabled && (data?.data?.length ?? 0) > 0 ? (
             <>
               <CommandGroup heading="Users">

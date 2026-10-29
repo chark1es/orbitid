@@ -8,6 +8,8 @@ import { newId } from "../../lib/ids";
 import {
   assertValidCertificate, assertValidDomains, DEFAULT_ATTRIBUTE_MAPPING, encryptClientSecret, normalizeDomains,
 } from "../../services/saml";
+import { assertPublicUrl } from "../../lib/safe-fetch";
+import { first } from "../../lib/db";
 
 type ConnectionRow = typeof s.enterpriseConnections.$inferSelect;
 
@@ -66,9 +68,33 @@ function samlConfigFromBody(body: ConnectionBody) {
   };
 }
 
-export function createConnection(ctx: AppContext, body: ConnectionBody): ConnectionRow {
+/**
+ * One domain, one connection. If two connections claimed the same domain, sign-in routing and the assertion could land
+ * on different connections, so a second tenant could capture another's users. A connection that allows subdomains also
+ * claims everything beneath its domains.
+ */
+async function assertDomainsUnclaimed(ctx: AppContext, domains: string[], allowSubdomains: boolean, exceptId?: string): Promise<void> {
+  if (!domains.length) return;
+  const others = (await ctx.db.select().from(s.enterpriseConnections)).filter((row) => row.id !== exceptId);
+  const under = (child: string, parent: string) => child === parent || child.endsWith(`.${parent}`);
+  for (const domain of domains) {
+    for (const other of others) {
+      for (const taken of other.domains ?? []) {
+        const clash = domain === taken
+          || (other.allowSubdomains && under(domain, taken))
+          || (allowSubdomains && under(taken, domain));
+        if (clash) throw new OrbitError(409, ErrorCodes.duplicate_record, `The domain ${domain} already belongs to another connection`, { param_name: "domains" });
+      }
+    }
+  }
+}
+
+export async function createConnection(ctx: AppContext, body: ConnectionBody): Promise<ConnectionRow> {
   const domains = normalizeDomains(body.domains);
   assertValidDomains(domains);
+  await assertDomainsUnclaimed(ctx, domains, body.allow_subdomains);
+  if (body.protocol === "saml" && body.idp_sso_url) await assertPublicUrl(ctx, body.idp_sso_url, "idp_sso_url");
+  if (body.discovery_url) await assertPublicUrl(ctx, body.discovery_url, "discovery_url");
   const now = Date.now();
   const config = body.protocol === "saml"
     ? samlConfigFromBody(body)
@@ -92,12 +118,12 @@ export function createConnection(ctx: AppContext, body: ConnectionBody): Connect
     createdAt: now,
     updatedAt: now,
   };
-  ctx.db.insert(s.enterpriseConnections).values(row).run();
+  await ctx.db.insert(s.enterpriseConnections).values(row);
   return row;
 }
 
 /** Applies a partial update. Protocol is immutable, SAML keeps its attribute mapping merged with defaults. */
-export function updateConnection(ctx: AppContext, row: ConnectionRow, patch: z.infer<typeof connectionPatchSchema>): ConnectionRow {
+export async function updateConnection(ctx: AppContext, row: ConnectionRow, patch: z.infer<typeof connectionPatchSchema>): Promise<ConnectionRow> {
   const set: Partial<ConnectionRow> = { updatedAt: Date.now() };
   if (patch.name !== undefined) set.name = patch.name;
   if (patch.provider !== undefined) set.provider = patch.provider;
@@ -111,11 +137,17 @@ export function updateConnection(ctx: AppContext, row: ConnectionRow, patch: z.i
     assertValidDomains(domains);
     set.domains = domains;
   }
+  if (patch.domains !== undefined || patch.allow_subdomains !== undefined) {
+    await assertDomainsUnclaimed(ctx, set.domains ?? row.domains ?? [], set.allowSubdomains ?? row.allowSubdomains, row.id);
+  }
 
   const config = { ...(row.config ?? {}) } as Record<string, unknown>;
   if (row.protocol === "saml") {
     if (patch.idp_entity_id !== undefined) config.idpEntityId = patch.idp_entity_id;
-    if (patch.idp_sso_url !== undefined) config.idpSsoUrl = patch.idp_sso_url;
+    if (patch.idp_sso_url !== undefined) {
+      await assertPublicUrl(ctx, patch.idp_sso_url, "idp_sso_url");
+      config.idpSsoUrl = patch.idp_sso_url;
+    }
     if (patch.idp_certificate !== undefined) config.idpCertificate = assertValidCertificate(patch.idp_certificate);
     if (patch.attribute_mapping !== undefined) {
       const current = (config.attributeMapping as Record<string, string> | undefined) ?? {};
@@ -125,11 +157,12 @@ export function updateConnection(ctx: AppContext, row: ConnectionRow, patch: z.i
     if (patch.client_id !== undefined) config.clientId = patch.client_id;
     if (patch.client_secret !== undefined) config.clientSecretEnc = encryptClientSecret(ctx, patch.client_secret);
     if (patch.discovery_url !== undefined) {
+      await assertPublicUrl(ctx, patch.discovery_url, "discovery_url");
       config.discoveryUrl = patch.discovery_url;
       delete config.discovery; // re-resolve lazily against the new issuer
     }
   }
   set.config = config as ConnectionRow["config"];
-  ctx.db.update(s.enterpriseConnections).set(set).where(eq(s.enterpriseConnections.id, row.id)).run();
-  return ctx.db.select().from(s.enterpriseConnections).where(eq(s.enterpriseConnections.id, row.id)).get()!;
+  await ctx.db.update(s.enterpriseConnections).set(set).where(eq(s.enterpriseConnections.id, row.id));
+  return first(await ctx.db.select().from(s.enterpriseConnections).where(eq(s.enterpriseConnections.id, row.id)))!;
 }

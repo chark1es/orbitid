@@ -1,24 +1,59 @@
 import { useState } from "react";
-import { Alert, AlertDescription, AlertTitle, Badge, Button, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@orbitid/ui";
-import { Loader2, Mail, MessageSquare } from "lucide-react";
-import { toast } from "sonner";
+import {
+  Button,
+  Input,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@orbitid/ui";
+import { CircleCheck, CircleX, Loader2, Mail, Send } from "lucide-react";
 import { api } from "../lib/api";
-import { errorMessage, isHttpUrl, secretInputValue, secretIsConfigured } from "./_config/settings";
-import { ErrorAlert, Field, LoadingPage, PageHeader, SaveBar, SectionCard, SwitchRow } from "./_config/ui";
+import {
+  EMAIL_PROVIDER_LABELS,
+  emailFromError,
+  emailProviderLabel,
+  errorMessage,
+  isHttpUrl,
+  resendApiKeyError,
+  resolveEmailProvider,
+  secretInputValue,
+  secretIsConfigured,
+  smtpUrlError,
+} from "./_config/settings";
+import {
+  ErrorAlert,
+  Field,
+  LoadingPage,
+  MetaChip,
+  Notice,
+  PageHeader,
+  SaveBar,
+  SecretInput,
+  SettingsSection,
+  SwitchRow,
+} from "./_config/ui";
 import { useSettingsEditor } from "./_config/use-settings";
+
+type TestState =
+  | { state: "idle" }
+  | { state: "sending" }
+  | { state: "ok"; to: string; provider: string }
+  | { state: "error"; to: string; message: string };
 
 export default function Page() {
   const editor = useSettingsEditor();
   const settings = editor.settings;
   const [testEmail, setTestEmail] = useState("");
-  const [sending, setSending] = useState(false);
+  const [test, setTest] = useState<TestState>({ state: "idle" });
 
   if (editor.isLoading) return <LoadingPage rows={4} />;
   if (!settings) {
     return (
       <div className="space-y-6">
         <PageHeader title="Email & SMS" description="Application identity, email delivery, verification codes, and SMS." />
-        <ErrorAlert error={editor.error ?? "Could not load instance settings."} onRetry={editor.refetch} />
+        <ErrorAlert error={editor.error ?? "Instance settings did not load."} onRetry={editor.refetch} />
       </div>
     );
   }
@@ -26,16 +61,27 @@ export default function Page() {
   const app = settings.application;
   const email = settings.email;
   const sms = settings.sms;
+  const resolved = resolveEmailProvider(email);
+  const resendConfigured = secretIsConfigured(email.resendApiKey);
   const smtpConfigured = secretIsConfigured(email.smtpUrl);
   const twilioSecretConfigured = secretIsConfigured(sms.twilioAuthToken);
+  const fromError = emailFromError(email.from);
   const errors: string[] = [];
   if (!isHttpUrl(app.homeUrl)) errors.push("Home URL must be an http(s) URL.");
   if (app.termsUrl && !isHttpUrl(app.termsUrl)) errors.push("Terms URL must be an http(s) URL.");
   if (app.privacyUrl && !isHttpUrl(app.privacyUrl)) errors.push("Privacy URL must be an http(s) URL.");
   if (app.logoUrl && !isHttpUrl(app.logoUrl)) errors.push("Logo URL must be an http(s) URL.");
-  if (email.codeLength < 4 || email.codeLength > 10) errors.push("Verification codes must be 4–10 digits.");
+  if (fromError) errors.push(fromError);
+  if (email.codeLength < 4 || email.codeLength > 10) errors.push("Verification codes must be 4 to 10 digits.");
   if (email.codeLifetimeSeconds <= 0) errors.push("Code lifetime must be greater than zero.");
   if (email.linkLifetimeSeconds <= 0) errors.push("Magic link lifetime must be greater than zero.");
+  // The secret fields start blank while a stored value is kept, so an empty draft means "unchanged".
+  const smtpError = smtpUrlError(email.smtpUrl);
+  if (smtpError) errors.push(smtpError);
+  const resendError = resendApiKeyError(email.resendApiKey);
+  if (resendError) errors.push(resendError);
+  if (resolved.missing === "resendApiKey") errors.push("Resend is selected but no API key is stored. Add a key or choose another provider.");
+  if (resolved.missing === "smtpUrl") errors.push("SMTP is selected but no SMTP URL is stored. Add a URL or choose another provider.");
   if (sms.provider === "twilio" && (!sms.twilioAccountSid || !sms.twilioFrom)) errors.push("Twilio Account SID and sender number are required.");
   if (sms.provider === "twilio" && !twilioSecretConfigured) errors.push("Twilio auth token is required.");
   if (sms.provider === "webhook" && !isHttpUrl(sms.webhookUrl)) errors.push("SMS webhook URL must be an http(s) URL.");
@@ -46,18 +92,18 @@ export default function Page() {
   };
 
   const sendTest = async () => {
-    if (!testEmail.trim()) {
-      toast.error("Enter an email address first");
+    const to = testEmail.trim();
+    if (!to) {
+      setTest({ state: "error", to, message: "Enter an email address to send the test to." });
       return;
     }
-    setSending(true);
+    setTest({ state: "sending" });
     try {
-      await api("POST", "/instance/test_email", { to: testEmail.trim() });
-      toast.success("Test email queued", { description: `Sent to ${testEmail.trim()}.` });
+      // `email_test` reports the transport it used; failures come back with a redacted, safe message.
+      const response = await api<{ provider?: string }>("POST", "/instance/email_test", { to });
+      setTest({ state: "ok", to, provider: response?.provider ?? resolved.provider });
     } catch (error) {
-      toast.error("Could not send test email", { description: errorMessage(error) });
-    } finally {
-      setSending(false);
+      setTest({ state: "error", to, message: errorMessage(error) });
     }
   };
 
@@ -65,26 +111,24 @@ export default function Page() {
     <div className="space-y-6">
       <PageHeader
         title="Email & SMS"
-        description="Branding shown in emails, transport configuration, code/link lifetimes, and SMS delivery."
-        badge={<Badge variant="outline">Instance settings</Badge>}
+        description="Branding shown in emails, how mail leaves the server, code lifetimes, and SMS delivery."
+        badge={<MetaChip>Instance settings</MetaChip>}
       />
 
       {editor.error ? <ErrorAlert error={editor.error} onRetry={editor.refetch} /> : null}
 
-      <SectionCard
-        title="Application identity"
-        description="Shown on hosted pages and in outbound email."
-      >
-        <div className="grid gap-3 sm:grid-cols-2">
+      <SettingsSection title="Application identity" description="Shown on hosted pages and in outbound email.">
+        <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Application name" htmlFor="application-name" required>
             <Input id="application-name" value={app.name} onChange={(event) => editor.patch({ application: { name: event.target.value } })} />
           </Field>
-          <Field label="Logo URL" htmlFor="application-logo" description="Square SVG or PNG, ideally 256×256.">
+          <Field label="Logo URL" htmlFor="application-logo" description="Square SVG or PNG, 256 by 256 pixels works well.">
             <Input
               id="application-logo"
               value={app.logoUrl ?? ""}
               onChange={(event) => editor.patch({ application: { logoUrl: event.target.value || null } })}
               placeholder="https://example.com/logo.png"
+              className="font-data text-xs"
             />
           </Field>
           <Field label="Support email" htmlFor="application-support">
@@ -97,7 +141,12 @@ export default function Page() {
             />
           </Field>
           <Field label="Home URL" htmlFor="application-home">
-            <Input id="application-home" value={app.homeUrl} onChange={(event) => editor.patch({ application: { homeUrl: event.target.value } })} />
+            <Input
+              id="application-home"
+              value={app.homeUrl}
+              onChange={(event) => editor.patch({ application: { homeUrl: event.target.value } })}
+              className="font-data text-xs"
+            />
           </Field>
           <Field label="Terms of service URL" htmlFor="application-terms">
             <Input
@@ -105,6 +154,7 @@ export default function Page() {
               value={app.termsUrl ?? ""}
               onChange={(event) => editor.patch({ application: { termsUrl: event.target.value || null } })}
               placeholder="https://example.com/terms"
+              className="font-data text-xs"
             />
           </Field>
           <Field label="Privacy policy URL" htmlFor="application-privacy">
@@ -113,42 +163,161 @@ export default function Page() {
               value={app.privacyUrl ?? ""}
               onChange={(event) => editor.patch({ application: { privacyUrl: event.target.value || null } })}
               placeholder="https://example.com/privacy"
+              className="font-data text-xs"
             />
           </Field>
         </div>
-      </SectionCard>
+      </SettingsSection>
 
-      <SectionCard
-        title={
-          <span className="flex items-center gap-2">
-            <Mail className="size-4" /> Email delivery
-          </span>
-        }
-        description="SMTP transport and the sender address. Empty SMTP URL logs messages to the server console in development."
+      <SettingsSection
+        title="Email delivery"
+        description="How sign-in codes, magic links and invitations leave the server. Credentials are stored with the instance and never shown again."
+        actions={<MetaChip>{EMAIL_PROVIDER_LABELS[resolved.provider]}</MetaChip>}
       >
-        <Field label="From address" htmlFor="email-from" description="RFC 5322 mailbox, for example `OrbitID <no-reply@example.com>`.">
-          <Input id="email-from" value={email.from} onChange={(event) => editor.patch({ email: { from: event.target.value } })} />
-        </Field>
         <Field
-          label={
-            <span className="flex items-center gap-2">
-              SMTP URL
-              {smtpConfigured ? <Badge variant="outline">Configured</Badge> : null}
-            </span>
-          }
-          htmlFor="email-smtp"
-          description="smtp://user:password@host:587 — leave blank to keep the stored value."
+          label="Provider"
+          htmlFor="email-provider"
+          description="Automatic uses Resend when a key is set, then SMTP when a URL is set, then the server log."
+          className="max-w-md"
+        >
+          <Select
+            value={email.provider}
+            onValueChange={(provider) => editor.patch({ email: { provider: provider as typeof email.provider } })}
+          >
+            <SelectTrigger id="email-provider" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">Automatic</SelectItem>
+              <SelectItem value="resend">Resend</SelectItem>
+              <SelectItem value="smtp">SMTP</SelectItem>
+              <SelectItem value="console">Print to server log</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+
+        <p className="text-[0.8125rem] leading-relaxed text-muted-foreground" role="status">
+          {resolved.automatic ? "Automatic: " : "Selected: "}
+          <span className="font-medium text-foreground">{EMAIL_PROVIDER_LABELS[resolved.provider]}</span>
+          {resolved.provider === "resend" ? " sends over HTTPS with the stored API key." : null}
+          {resolved.provider === "smtp" ? " sends through the stored SMTP server." : null}
+          {resolved.provider === "console" ? " prints every message, codes included, to the server log." : null}
+        </p>
+
+        {resolved.provider === "console" ? (
+          <Notice
+            tone="caution"
+            role="alert"
+            title="Email is printed to the server log, not delivered"
+          >
+            <p>
+              Sign-in codes and magic links appear in plain text in the server log, so anyone who can read it can sign
+              in as your users. Choose Resend or SMTP with a working credential before you invite real users, or set
+              <code className="mx-1 font-data text-xs">ORBITID_RESEND_API_KEY</code> or
+              <code className="mx-1 font-data text-xs">ORBITID_SMTP_URL</code> on the server.
+            </p>
+          </Notice>
+        ) : null}
+
+        {resolved.missing ? (
+          <Notice tone="danger" role="alert" title={resolved.missing === "resendApiKey" ? "Resend has no API key" : "SMTP has no URL"}>
+            <p>
+              Sends fail with a 422 until this is fixed. Add the value below or pick Automatic so the server falls back to
+              another transport.
+            </p>
+          </Notice>
+        ) : null}
+
+        <Field
+          label="From address"
+          htmlFor="email-from"
+          required
+          error={fromError}
+          description="Mailbox in RFC 5322 form, for example OrbitID <no-reply@example.com>. Use a domain your provider has verified."
         >
           <Input
-            id="email-smtp"
-            type="password"
-            autoComplete="new-password"
-            value={secretInputValue(email.smtpUrl)}
-            onChange={(event) => editor.patch({ email: { smtpUrl: event.target.value } })}
-            placeholder={smtpConfigured ? "Stored SMTP URL — leave blank to keep" : "smtp://user:pass@localhost:587"}
+            id="email-from"
+            value={email.from}
+            onChange={(event) => editor.patch({ email: { from: event.target.value } })}
+            aria-invalid={Boolean(fromError)}
           />
         </Field>
-        <div className="grid gap-3 sm:grid-cols-3">
+
+        {email.provider === "resend" || email.provider === "auto" ? (
+          <SecretInput
+            id="email-resend"
+            label="Resend API key"
+            value={secretInputValue(email.resendApiKey)}
+            onChange={(resendApiKey) => editor.patch({ email: { resendApiKey } })}
+            configured={resendConfigured}
+            description={
+              resendConfigured
+                ? "A key is stored. Enter a new key to replace it, or leave blank to keep it."
+                : "Create a key in Resend for the domain you send from. Starts with re_."
+            }
+            placeholder={resendConfigured ? "Stored key, leave blank to keep" : "re_xxxxxxxx"}
+          />
+        ) : null}
+
+        {email.provider === "smtp" || email.provider === "auto" ? (
+          <SecretInput
+            id="email-smtp"
+            label="SMTP URL"
+            value={secretInputValue(email.smtpUrl)}
+            onChange={(smtpUrl) => editor.patch({ email: { smtpUrl } })}
+            configured={smtpConfigured}
+            description={
+              smtpConfigured
+                ? "A URL is stored. smtp:// uses STARTTLS, smtps:// uses TLS on port 465. Leave blank to keep it."
+                : "smtp://user:password@host:587 or smtps://user:password@host:465. Percent-encode special characters."
+            }
+            placeholder={smtpConfigured ? "Stored SMTP URL, leave blank to keep" : "smtp://user:pass@mail.example.com:587"}
+          />
+        ) : null}
+
+        <div className="space-y-2 border-t border-border pt-3">
+          <div>
+            <p className="text-sm font-medium">Send a test email</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Sends one real message through the saved settings, not the draft on this page. Save first if you just changed
+              the provider.
+            </p>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Input
+              type="email"
+              value={testEmail}
+              onChange={(event) => setTestEmail(event.target.value)}
+              placeholder="you@example.com"
+              aria-label="Test recipient"
+            />
+            <Button variant="outline" onClick={() => void sendTest()} disabled={test.state === "sending"}>
+              {test.state === "sending" ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Send className="size-4" aria-hidden />}
+              {test.state === "sending" ? "Sending…" : "Send test email"}
+            </Button>
+          </div>
+          {test.state === "ok" ? (
+            <p role="status" className="flex items-start gap-2 text-[0.8125rem] leading-relaxed">
+              <CircleCheck className="mt-0.5 size-4 shrink-0 text-go" strokeWidth={1.5} aria-hidden />
+              <span>
+                Delivered to <span className="font-data text-xs">{test.to}</span> through{" "}
+                <span className="font-medium">{emailProviderLabel(test.provider)}</span>. Check the inbox and the spam
+                folder.
+              </span>
+            </p>
+          ) : null}
+          {test.state === "error" ? (
+            <p role="alert" className="flex items-start gap-2 text-[0.8125rem] leading-relaxed">
+              <CircleX className="mt-0.5 size-4 shrink-0 text-signal" strokeWidth={1.5} aria-hidden />
+              <span>
+                <span className="font-medium">The test email was not delivered.</span> {test.message} The server redacts
+                credentials from this message, so it is safe to share.
+              </span>
+            </p>
+          ) : null}
+        </div>
+
+        <div className="grid gap-4 border-t border-border pt-3 sm:grid-cols-3">
           <Field label="Code length" htmlFor="email-code-length">
             <Input
               id="email-code-length"
@@ -178,125 +347,92 @@ export default function Page() {
             />
           </Field>
         </div>
-        <div className="rounded-lg border p-3">
-          <p className="text-sm font-medium">Send a test email</p>
-          <p className="mb-2 text-xs text-muted-foreground">Uses the currently saved SMTP configuration.</p>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Input
-              type="email"
-              value={testEmail}
-              onChange={(event) => setTestEmail(event.target.value)}
-              placeholder="you@example.com"
-              aria-label="Test recipient"
-            />
-            <Button variant="outline" onClick={() => void sendTest()} disabled={sending}>
-              {sending ? <Loader2 className="size-4 animate-spin" /> : <Mail className="size-4" />}
-              Send test email
-            </Button>
-          </div>
-        </div>
-      </SectionCard>
+      </SettingsSection>
 
-      <SectionCard
-        title={
-          <span className="flex items-center gap-2">
-            <MessageSquare className="size-4" /> SMS
-          </span>
-        }
-        description="SMS codes for phone verification, sign-in, and second factors."
-      >
-        <Field label="SMS provider" htmlFor="sms-provider">
+      <SettingsSection title="SMS" description="SMS codes for phone verification, sign-in, and second factors.">
+        <Field label="SMS provider" htmlFor="sms-provider" className="max-w-md">
           <Select value={sms.provider} onValueChange={(provider) => editor.patch({ sms: { provider } })}>
-            <SelectTrigger id="sms-provider" className="w-full sm:max-w-xs">
+            <SelectTrigger id="sms-provider" className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="console">Console (development)</SelectItem>
+              <SelectItem value="console">Print to server log</SelectItem>
               <SelectItem value="twilio">Twilio</SelectItem>
               <SelectItem value="webhook">Webhook</SelectItem>
             </SelectContent>
           </Select>
         </Field>
         {sms.provider === "twilio" ? (
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Account SID" htmlFor="twilio-sid">
               <Input
                 id="twilio-sid"
                 value={sms.twilioAccountSid}
                 onChange={(event) => editor.patch({ sms: { twilioAccountSid: event.target.value } })}
                 placeholder="ACxxxxxxxx"
+                className="font-data text-xs"
               />
             </Field>
-            <Field
-              label={
-                <span className="flex items-center gap-2">
-                  Auth token
-                  {twilioSecretConfigured ? <Badge variant="outline">Configured</Badge> : null}
-                </span>
-              }
-              htmlFor="twilio-token"
-              description="Leave blank to keep the stored token."
-            >
-              <Input
-                id="twilio-token"
-                type="password"
-                autoComplete="new-password"
-                value={secretInputValue(sms.twilioAuthToken)}
-                onChange={(event) => editor.patch({ sms: { twilioAuthToken: event.target.value } })}
-                placeholder={twilioSecretConfigured ? "Stored token — leave blank to keep" : "Auth token"}
-              />
-            </Field>
+            <SecretInput
+              id="twilio-token"
+              label="Auth token"
+              value={secretInputValue(sms.twilioAuthToken)}
+              onChange={(twilioAuthToken) => editor.patch({ sms: { twilioAuthToken } })}
+              configured={twilioSecretConfigured}
+              description={twilioSecretConfigured ? "A token is stored. Leave blank to keep it." : "Found next to the Account SID."}
+              placeholder={twilioSecretConfigured ? "Stored token, leave blank to keep" : "Auth token"}
+            />
             <Field label="Sender number" htmlFor="twilio-from">
               <Input
                 id="twilio-from"
                 value={sms.twilioFrom}
                 onChange={(event) => editor.patch({ sms: { twilioFrom: event.target.value } })}
                 placeholder="+15551234567"
+                className="font-data text-xs"
               />
             </Field>
           </div>
         ) : null}
         {sms.provider === "webhook" ? (
-          <Field label="Webhook URL" htmlFor="sms-webhook" description="POST { to, body } to this URL.">
+          <Field label="Webhook URL" htmlFor="sms-webhook" description="OrbitID posts { to, body } to this URL.">
             <Input
               id="sms-webhook"
               value={sms.webhookUrl}
               onChange={(event) => editor.patch({ sms: { webhookUrl: event.target.value } })}
               placeholder="https://example.com/sms"
+              className="font-data text-xs"
             />
           </Field>
         ) : null}
         {sms.provider === "console" ? (
-          <Alert>
-            <AlertTitle>Console provider</AlertTitle>
-            <AlertDescription>Messages are written to the server log. Use Twilio or a webhook in production.</AlertDescription>
-          </Alert>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            The console provider writes messages, codes included, to the server log. Switch to Twilio or a webhook before production.
+          </p>
         ) : null}
-      </SectionCard>
+      </SettingsSection>
 
-      <SectionCard title="Application home" description="Where hosted links and the sign-in redirect land.">
+      <SettingsSection title="Application home" description="Where hosted links and the sign-in redirect land.">
         <SwitchRow
           label="Development mode"
-          description="Allows localhost origins and logs more diagnostic detail."
+          description="Allows localhost origins and logs more diagnostic detail. Turn it off in production."
           checked={app.developmentMode}
           onCheckedChange={(developmentMode) => editor.patch({ application: { developmentMode } })}
         />
-      </SectionCard>
+        <p className="flex items-start gap-2 text-xs leading-relaxed text-muted-foreground">
+          <Mail className="mt-0.5 size-3.5 shrink-0" strokeWidth={1.5} aria-hidden />
+          Delivery behaviour and every provider field are documented in <code className="font-data">docs/EMAIL.md</code>.
+        </p>
+      </SettingsSection>
 
-      {errors.length > 0 ? (
-        <Alert variant="destructive">
-          <AlertTitle>Fix the following before saving</AlertTitle>
-          <AlertDescription>
-            <ul className="list-disc pl-4">
-              {errors.map((error) => (
-                <li key={error}>{error}</li>
-              ))}
-            </ul>
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      <SaveBar dirty={editor.dirty} saving={editor.saving} disabled={errors.length > 0} onSave={editor.save} onDiscard={editor.reset} />
+      <SaveBar
+        dirty={editor.dirty}
+        saving={editor.saving}
+        disabled={errors.length > 0}
+        errors={errors}
+        error={editor.saveError}
+        onSave={editor.save}
+        onDiscard={editor.reset}
+      />
     </div>
   );
 }

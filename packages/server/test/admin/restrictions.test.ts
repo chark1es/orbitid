@@ -70,10 +70,10 @@ describe("sign-up restrictions", () => {
     const rejection = await assertIdentifiersAllowed(ctx, { emails: ["waiting@example.com"] }).catch((err: unknown) => err);
     expect(rejection).toMatchObject({ code: ErrorCodes.waitlist_mode, status: 422 });
 
-    ctx.db.insert(s.waitlistEntries).values({ id: newId(ID_PREFIX.waitlist), email: "pending@example.com", status: "pending" }).run();
+    await ctx.db.insert(s.waitlistEntries).values({ id: newId(ID_PREFIX.waitlist), email: "pending@example.com", status: "pending" });
     await expect(assertIdentifiersAllowed(ctx, { emails: ["pending@example.com"] })).rejects.toMatchObject({ code: ErrorCodes.waitlist_mode });
 
-    ctx.db.insert(s.waitlistEntries).values({ id: newId(ID_PREFIX.waitlist), email: "invited@example.com", status: "invited" }).run();
+    await ctx.db.insert(s.waitlistEntries).values({ id: newId(ID_PREFIX.waitlist), email: "invited@example.com", status: "invited" });
     await expect(assertIdentifiersAllowed(ctx, { emails: ["invited@example.com"] })).resolves.toEqual({});
 
     const invitation = await json<InvitationJSON>(await api("POST", "/v1/invitations", { email_address: "invited-by-admin@example.com", notify: false }));
@@ -88,7 +88,7 @@ describe("sign-up restrictions", () => {
 
     await expect(assertIdentifiersAllowed(ctx, { emails: ["ticket@example.com"], invitationTicket: ticket })).resolves.toEqual({ invitationId: invitation.id });
     // The ticket is validated, not consumed, while screening the sign-up.
-    expect(ctx.db.select().from(s.invitations).all()[0]!.status).toBe("pending");
+    expect((await ctx.db.select().from(s.invitations))[0]!.status).toBe("pending");
     await expect(assertIdentifiersAllowed(ctx, { emails: ["ticket@example.com"], invitationTicket: "bogus" })).rejects.toMatchObject({ code: ErrorCodes.ticket_invalid });
   });
 

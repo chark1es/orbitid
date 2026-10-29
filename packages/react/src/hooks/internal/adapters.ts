@@ -12,6 +12,10 @@ import type {
   UserOrganizationInvitationResource,
   UserResource,
 } from "../../provider/types";
+import { cachedRequest, resourceIdentity } from "./requestCache";
+
+/** Page arguments plus the cache bypass used by `revalidate()`. */
+export type FetchArgs = PaginationQuery & { force?: boolean };
 
 const EMPTY = <T,>(): PaginatedResult<T> => ({ data: [], totalCount: 0 });
 
@@ -49,16 +53,25 @@ function paginateLocal<T>(rows: unknown, args: PaginationQuery): PaginatedResult
 }
 
 const paging = (args: PaginationQuery) => ({ limit: args.limit, offset: args.offset });
+const pageKey = (args: PaginationQuery) => `${args.limit ?? "all"}:${args.offset ?? 0}`;
+/** `id#instance` segment: same resource name, different SDK instance → different cache entry. */
+const identity = (resource: { id: string }) => `${resource.id}:${resourceIdentity(resource)}`;
 
 export async function fetchOrganizationMemberships(
   organization: OrganizationResource | null,
-  args: PaginationQuery,
+  args: FetchArgs,
   extra?: { role?: string; query?: string },
 ): Promise<PaginatedResult<OrganizationMembershipResource>> {
   const method = organization?.getMemberships;
   if (!organization || typeof method !== "function") return EMPTY();
-  const result = normalizePaginated<OrganizationMembershipResource>(
-    await method.call(organization, { ...paging(args), ...extra }),
+  const key = `org:${identity(organization)}:memberships:${pageKey(args)}:${extra?.role ?? ""}:${extra?.query ?? ""}`;
+  const result = await cachedRequest(
+    key,
+    async () =>
+      normalizePaginated<OrganizationMembershipResource>(
+        await method.call(organization, { ...paging(args), ...extra }),
+      ),
+    { force: args.force },
   );
   result.data.forEach(withPublicUserDataAliases);
   return result;
@@ -66,50 +79,75 @@ export async function fetchOrganizationMemberships(
 
 export async function fetchOrganizationInvitations(
   organization: OrganizationResource | null,
-  args: PaginationQuery,
+  args: FetchArgs,
 ): Promise<PaginatedResult<OrganizationInvitationResource>> {
   const method = organization?.getInvitations;
   if (!organization || typeof method !== "function") return EMPTY();
-  return paginateLocal<OrganizationInvitationResource>(await method.call(organization), args);
+  const rows = await cachedRequest(
+    `org:${identity(organization)}:invitations`,
+    async () => normalizePaginated<OrganizationInvitationResource>(await method.call(organization)).data,
+    { force: args.force },
+  );
+  return paginateLocal<OrganizationInvitationResource>(rows, args);
 }
 
 export async function fetchOrganizationDomains(
   organization: OrganizationResource | null,
-  args: PaginationQuery,
+  args: FetchArgs,
 ): Promise<PaginatedResult<OrganizationDomainResource>> {
   const method = organization?.getDomains;
   if (!organization || typeof method !== "function") return EMPTY();
-  return paginateLocal<OrganizationDomainResource>(await method.call(organization), args);
+  const rows = await cachedRequest(
+    `org:${identity(organization)}:domains`,
+    async () => normalizePaginated<OrganizationDomainResource>(await method.call(organization)).data,
+    { force: args.force },
+  );
+  return paginateLocal<OrganizationDomainResource>(rows, args);
 }
 
 export async function fetchOrganizationMembershipRequests(
   organization: OrganizationResource | null,
-  args: PaginationQuery,
+  args: FetchArgs,
 ): Promise<PaginatedResult<OrganizationMembershipRequestResource>> {
   const method = organization?.getMembershipRequests;
   if (!organization || typeof method !== "function") return EMPTY();
-  const result = paginateLocal<OrganizationMembershipRequestResource>(await method.call(organization), args);
+  const rows = await cachedRequest(
+    `org:${identity(organization)}:membership_requests`,
+    async () =>
+      normalizePaginated<OrganizationMembershipRequestResource>(await method.call(organization)).data,
+    { force: args.force },
+  );
+  const result = paginateLocal<OrganizationMembershipRequestResource>(rows, args);
   result.data.forEach(withPublicUserDataAliases);
   return result;
 }
 
 export async function fetchOrganizationApiKeys(
   organization: OrganizationResource | null,
-  args: PaginationQuery,
+  args: FetchArgs,
 ): Promise<PaginatedResult<ApiKeyResource>> {
   const list = organization?.apiKeys?.list;
   if (!organization || typeof list !== "function") return EMPTY();
-  return normalizePaginated<ApiKeyResource>(await list.call(organization.apiKeys, paging(args)));
+  return cachedRequest(
+    `org:${identity(organization)}:api_keys:${pageKey(args)}`,
+    async () => normalizePaginated<ApiKeyResource>(await list.call(organization.apiKeys, paging(args))),
+    { force: args.force },
+  );
 }
 
 export async function fetchUserMemberships(
   user: UserResource | null,
-  args: PaginationQuery,
+  args: FetchArgs,
 ): Promise<PaginatedResult<OrganizationMembershipResource>> {
   const method = user?.getOrganizationMemberships;
   if (!user || typeof method !== "function") return EMPTY();
-  const result = normalizePaginated<OrganizationMembershipResource>(
-    await method.call(user, { ...paging(args), page: args.page }),
+  const result = await cachedRequest(
+    `user:${identity(user)}:organization_memberships:${pageKey(args)}`,
+    async () =>
+      normalizePaginated<OrganizationMembershipResource>(
+        await method.call(user, { ...paging(args), page: args.page }),
+      ),
+    { force: args.force },
   );
   result.data.forEach(withPublicUserDataAliases);
   return result;
@@ -117,20 +155,32 @@ export async function fetchUserMemberships(
 
 export async function fetchUserInvitations(
   user: UserResource | null,
-  args: PaginationQuery,
+  args: FetchArgs,
 ): Promise<PaginatedResult<UserOrganizationInvitationResource>> {
   const method = user?.getOrganizationInvitations;
   if (!user || typeof method !== "function") return EMPTY();
-  return paginateLocal<UserOrganizationInvitationResource>(await method.call(user), args);
+  const rows = await cachedRequest(
+    `user:${identity(user)}:organization_invitations`,
+    async () =>
+      normalizePaginated<UserOrganizationInvitationResource>(await method.call(user)).data,
+    { force: args.force },
+  );
+  return paginateLocal<UserOrganizationInvitationResource>(rows, args);
 }
 
 export async function fetchUserSuggestions(
   user: UserResource | null,
-  args: PaginationQuery,
+  args: FetchArgs,
 ): Promise<PaginatedResult<OrganizationSuggestionResource>> {
   const method = user?.getOrganizationSuggestions;
   if (!user || typeof method !== "function") return EMPTY();
-  const result = paginateLocal<OrganizationSuggestionResource>(await method.call(user), args);
+  const rows = await cachedRequest(
+    `user:${identity(user)}:organization_suggestions`,
+    async () =>
+      normalizePaginated<OrganizationSuggestionResource>(await method.call(user)).data,
+    { force: args.force },
+  );
+  const result = paginateLocal<OrganizationSuggestionResource>(rows, args);
   result.data.forEach(withOrganizationDataAliases);
   return result;
 }
@@ -139,8 +189,9 @@ export async function fetchUserSuggestions(
 export async function fetchActiveMembership(
   user: UserResource | null,
   organizationId: string | null,
+  options: { force?: boolean } = {},
 ): Promise<OrganizationMembershipResource | null> {
   if (!user || !organizationId) return null;
-  const page = await fetchUserMemberships(user, { limit: 100, offset: 0 });
+  const page = await fetchUserMemberships(user, { limit: 100, offset: 0, force: options.force });
   return page.data.find((membership) => membership.organization?.id === organizationId) ?? null;
 }

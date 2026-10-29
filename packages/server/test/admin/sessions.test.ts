@@ -14,9 +14,9 @@ describe("sessions & clients", () => {
     const { api, ctx } = await testApp();
     const user = await createUser(api);
     const other = await createUser(api);
-    const first = createSessionFixture(ctx, user.id);
-    const second = createSessionFixture(ctx, user.id, { status: "revoked" });
-    createSessionFixture(ctx, other.id);
+    const first = await createSessionFixture(ctx, user.id);
+    const second = await createSessionFixture(ctx, user.id, { status: "revoked" });
+    await createSessionFixture(ctx, other.id);
 
     const list = await json<PaginatedList<SessionJSON>>(await api("GET", `/v1/sessions?user_id=${user.id}`));
     expect(list.total_count).toBe(2);
@@ -38,13 +38,13 @@ describe("sessions & clients", () => {
 
     const revoked = await json<SessionJSON>(await api("POST", `/v1/sessions/${second.sessionId}/revoke`));
     expect(revoked.status).toBe("revoked");
-    expect(ctx.db.select().from(s.sessions).all()).toHaveLength(3);
+    expect((await ctx.db.select().from(s.sessions))).toHaveLength(3);
   });
 
   it("mints session tokens and validates the template", async () => {
     const { api, ctx } = await testApp();
     const user = await createUser(api);
-    const { sessionId } = createSessionFixture(ctx, user.id);
+    const { sessionId } = await createSessionFixture(ctx, user.id);
     await api("POST", "/v1/jwt_templates", { name: "with-email", claims: { email: "{{user.primary_email_address}}" } });
 
     const plain = await json<{ object: string; jwt: string }>(await api("POST", `/v1/sessions/${sessionId}/tokens`));
@@ -56,7 +56,7 @@ describe("sessions & clients", () => {
 
     expect((await api("POST", `/v1/sessions/${sessionId}/tokens/missing`)).status).toBe(404);
 
-    const ended = createSessionFixture(ctx, user.id, { status: "ended" });
+    const ended = await createSessionFixture(ctx, user.id, { status: "ended" });
     const inactive = await api("POST", `/v1/sessions/${ended.sessionId}/tokens`);
     expect(inactive.status).toBe(400);
     expect((await json<ErrorBody>(inactive)).errors[0]!.code).toBe("authentication_invalid");
@@ -65,7 +65,7 @@ describe("sessions & clients", () => {
   it("exposes clients by id and by cookie token", async () => {
     const { api, ctx } = await testApp();
     const user = await createUser(api);
-    const { clientId, token, sessionId } = createSessionFixture(ctx, user.id);
+    const { clientId, token, sessionId } = await createSessionFixture(ctx, user.id);
 
     const client = await json<ClientJSON>(await api("GET", `/v1/clients/${clientId}`));
     expect(client.object).toBe("client");

@@ -9,6 +9,7 @@ import { decrypt, encrypt, randomToken } from "../lib/crypto";
 import { serializeUser } from "../serializers";
 import { getMembershipContext } from "./orgs";
 import { renderTemplateClaims } from "./jwt-templates";
+import { first } from "../lib/db";
 
 const ALG = "RS256";
 
@@ -27,14 +28,14 @@ export async function generateSigningKey(ctx: AppContext, opts: { active?: boole
   const kid = randomToken(9);
   const publicJwk = { ...(await exportJWK(publicKey)), alg: ALG, use: "sig", kid } as JWK;
   const privateJwk = { ...(await exportJWK(privateKey)), alg: ALG, use: "sig", kid } as JWK;
-  ctx.db.insert(s.signingKeys).values({
-    kid,
-    alg: ALG,
-    publicJwk: publicJwk as unknown as Record<string, unknown>,
-    privateJwkEnc: encrypt(ctx.env.encryptionKey, JSON.stringify(privateJwk)),
-    active: opts.active ?? true,
-    createdAt: Date.now(),
-  }).run();
+  await ctx.db.insert(s.signingKeys).values({
+            kid,
+            alg: ALG,
+            publicJwk: publicJwk as unknown as Record<string, unknown>,
+            privateJwkEnc: encrypt(ctx.env.encryptionKey, JSON.stringify(privateJwk)),
+            active: opts.active ?? true,
+            createdAt: Date.now(),
+          });
   cacheFor(ctx).set(kid, { privateKey, publicJwk });
   return { kid, publicJwk };
 }
@@ -51,16 +52,16 @@ async function loadKey(ctx: AppContext, row: typeof s.signingKeys.$inferSelect):
 
 /** Returns the active signing key, creating one on first boot. */
 export async function getActiveSigningKey(ctx: AppContext) {
-  let row = ctx.db.select().from(s.signingKeys).where(eq(s.signingKeys.active, true)).orderBy(desc(s.signingKeys.createdAt)).get();
+  let row = first(await ctx.db.select().from(s.signingKeys).where(eq(s.signingKeys.active, true)).orderBy(desc(s.signingKeys.createdAt)));
   if (!row) {
     // Rotate restores an old key only if explicitly requested; otherwise mint the instance's first key.
-    const latest = ctx.db.select().from(s.signingKeys).orderBy(desc(s.signingKeys.createdAt)).get();
+    const latest = first(await ctx.db.select().from(s.signingKeys).orderBy(desc(s.signingKeys.createdAt)));
     if (latest) {
-      ctx.db.update(s.signingKeys).set({ active: true }).where(eq(s.signingKeys.kid, latest.kid)).run();
-      row = ctx.db.select().from(s.signingKeys).where(eq(s.signingKeys.kid, latest.kid)).get()!;
+      await ctx.db.update(s.signingKeys).set({ active: true }).where(eq(s.signingKeys.kid, latest.kid));
+      row = first(await ctx.db.select().from(s.signingKeys).where(eq(s.signingKeys.kid, latest.kid)))!;
     } else {
       await generateSigningKey(ctx);
-      row = ctx.db.select().from(s.signingKeys).where(eq(s.signingKeys.active, true)).orderBy(desc(s.signingKeys.createdAt)).get()!;
+      row = first(await ctx.db.select().from(s.signingKeys).where(eq(s.signingKeys.active, true)).orderBy(desc(s.signingKeys.createdAt)))!;
     }
   }
   return { row, ...(await loadKey(ctx, row)) };
@@ -69,14 +70,14 @@ export async function getActiveSigningKey(ctx: AppContext) {
 /** Marks the current key rotated and creates a new active one. Old public keys stay in the JWKS. */
 export async function rotateSigningKey(ctx: AppContext): Promise<{ kid: string }> {
   const now = Date.now();
-  ctx.db.update(s.signingKeys).set({ active: false, rotatedAt: now }).where(eq(s.signingKeys.active, true)).run();
+  await ctx.db.update(s.signingKeys).set({ active: false, rotatedAt: now }).where(eq(s.signingKeys.active, true));
   cacheFor(ctx).clear();
   const { kid } = await generateSigningKey(ctx);
   return { kid };
 }
 
 export async function getJwks(ctx: AppContext): Promise<{ keys: JWK[] }> {
-  const rows = ctx.db.select().from(s.signingKeys).all();
+  const rows = (await ctx.db.select().from(s.signingKeys));
   if (!rows.length) {
     await getActiveSigningKey(ctx);
     return getJwks(ctx);
@@ -87,6 +88,7 @@ export async function getJwks(ctx: AppContext): Promise<{ keys: JWK[] }> {
 // ───────────── claim helpers ─────────────
 
 const asRecord = (v: unknown): Record<string, unknown> => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
+const PROTOTYPE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 function lookupPath(source: Record<string, unknown>, path: string): unknown {
   let cur: unknown = source;
@@ -97,6 +99,8 @@ function lookupPath(source: Record<string, unknown>, path: string): unknown {
       cur = Number.isInteger(idx) ? cur[idx] : undefined;
       continue;
     }
+    if (PROTOTYPE_KEYS.has(part)) return undefined;
+    if (!Object.prototype.hasOwnProperty.call(cur, part)) return undefined;
     cur = asRecord(cur)[part];
   }
   return cur;
@@ -142,7 +146,7 @@ async function membershipFor(ctx: AppContext, userId: string, orgId: string | nu
   if (!orgId) return null;
   const membership: OrgMembershipContext | null = await getMembershipContext(ctx, userId, orgId);
   if (!membership) return null;
-  const org = ctx.db.select().from(s.organizations).where(eq(s.organizations.id, orgId)).get();
+  const org = first(await ctx.db.select().from(s.organizations).where(eq(s.organizations.id, orgId)));
   return {
     id: membership.orgId,
     slug: membership.slug,
@@ -192,12 +196,12 @@ const minutesSince = (t: number | null) => (t ? Math.floor((Date.now() - t) / 60
 
 /** Mint a session JWT for an active session. Includes org_* claims for the session's active organization. */
 export async function signSessionToken(ctx: AppContext, sessionId: string, opts: { template?: string; azp?: string; skipCache?: boolean } = {}): Promise<string> {
-  const session = ctx.db.select().from(s.sessions).where(eq(s.sessions.id, sessionId)).get();
+  const session = first(await ctx.db.select().from(s.sessions).where(eq(s.sessions.id, sessionId)));
   if (!session) throw new OrbitError(404, ErrorCodes.resource_not_found, "Session not found");
   if (session.status !== "active" && session.status !== "pending") {
     throw new OrbitError(401, ErrorCodes.authentication_invalid, "This session is no longer active");
   }
-  const user = ctx.db.select().from(s.users).where(eq(s.users.id, session.userId)).get();
+  const user = first(await ctx.db.select().from(s.users).where(eq(s.users.id, session.userId)));
   if (!user) throw new OrbitError(404, ErrorCodes.resource_not_found, "User not found");
   if (user.banned) throw new OrbitError(403, ErrorCodes.user_banned, "This user has been banned");
   const nowMs = Date.now();
@@ -209,7 +213,7 @@ export async function signSessionToken(ctx: AppContext, sessionId: string, opts:
   const st = ctx.settings.get();
   const org = await membershipFor(ctx, user.id, session.lastActiveOrganizationId);
   const actor = (session.actor as Record<string, unknown> | null) ?? null;
-  const tokenContext: TokenContext = { userJson: serializeUser(ctx, user), org, sessionId, actor };
+  const tokenContext: TokenContext = { userJson: await serializeUser(ctx, user), org, sessionId, actor };
 
   const nowSeconds = Math.floor(Date.now() / 1000);
   let lifetime = st.session.tokenLifetimeSeconds;
@@ -235,6 +239,7 @@ export async function signSessionToken(ctx: AppContext, sessionId: string, opts:
     sts: session.status === "pending" ? "pending" : "active",
     fva: [minutesSince(session.firstFactorVerifiedAt), minutesSince(session.secondFactorVerifiedAt)],
   };
+  if (user.isAnonymous) base.anonymous = true;
   if (opts.azp) base.azp = opts.azp;
   if (org) {
     base.org_id = org.id;
@@ -259,19 +264,24 @@ export async function signSessionToken(ctx: AppContext, sessionId: string, opts:
     .sign(privateKey);
 }
 
-const PROTECTED_CLAIMS = new Set(["iss", "sub", "sid", "iat", "nbf", "exp", "jti", "azp", "act", "sts", "fva", "org_id", "org_slug", "org_role", "org_permissions"]);
+const PROTECTED_CLAIMS = new Set(["iss", "sub", "sid", "iat", "nbf", "exp", "jti", "azp", "act", "sts", "fva", "anonymous", "org_id", "org_slug", "org_role", "org_permissions"]);
 
 /** Template keys are stored encrypted: an HMAC secret (HS256) or a private JWK (RS256/ES256). */
 async function importTemplateKey(ctx: AppContext, encrypted: string, algorithm: string): Promise<KeyLike | Uint8Array> {
   const plain = decrypt(ctx.env.encryptionKey, encrypted);
   if (algorithm === "HS256") return new TextEncoder().encode(plain);
-  return importJWK(JSON.parse(plain), algorithm) as Promise<KeyLike>;
+  return (await importJWK(JSON.parse(plain), algorithm)) as KeyLike;
 }
 
 export async function verifySessionToken(ctx: AppContext, jwt: string): Promise<SessionClaims> {
   const jwks = await getJwks(ctx);
   try {
-    const { payload } = await jwtVerify(jwt, createLocalJWKSet(jwks), { issuer: ctx.env.baseUrl });
+    const { payload } = await jwtVerify(jwt, createLocalJWKSet(jwks), {
+      issuer: ctx.env.baseUrl,
+      // Instance keys are asymmetric only. Pinning the algorithms rejects `none` and HS256 confusion,
+      // where a public key would otherwise be tried as an HMAC secret.
+      algorithms: ["RS256"],
+    });
     // Session tokens never carry an audience; machine and OIDC tokens signed by the same key do.
     if (typeof payload.sid !== "string" || typeof payload.sub !== "string" || payload.aud !== undefined) {
       throw new OrbitError(401, ErrorCodes.authentication_invalid, "Not a session token");
@@ -288,7 +298,7 @@ export async function signJwt(ctx: AppContext, claims: Record<string, unknown>, 
   const active = await getActiveSigningKey(ctx);
   let key = active;
   if (opts.kid && opts.kid !== active.row.kid) {
-    const row = ctx.db.select().from(s.signingKeys).where(eq(s.signingKeys.kid, opts.kid)).get();
+    const row = first(await ctx.db.select().from(s.signingKeys).where(eq(s.signingKeys.kid, opts.kid)));
     if (row) key = { row, ...(await loadKey(ctx, row)) };
   }
   const payload: Record<string, unknown> = {

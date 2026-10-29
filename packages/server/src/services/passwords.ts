@@ -1,9 +1,11 @@
 // Password policy + argon2id hashing + optional HIBP check.
-import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
+import { createHash, scryptSync, timingSafeEqual } from "node:crypto";
 import { hash, verify } from "@node-rs/argon2";
 import { ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../context";
 import type { InstanceSettings } from "@orbitid/shared";
+import { safeFetch } from "../lib/safe-fetch";
 
 /** Argon2id parameters. Test runs use a cheaper cost so the suite stays fast (verification still works for both). */
 const isTest = process.env.NODE_ENV === "test" || !!process.env.VITEST;
@@ -13,9 +15,39 @@ const HASH_OPTIONS = isTest
 
 export const hashPassword = (password: string): Promise<string> => hash(password, HASH_OPTIONS);
 
-export async function verifyPassword(passwordHash: string, password: string): Promise<boolean> {
+/** bcrypt is optional (only needed to verify digests imported from bcrypt-based systems). */
+export function optionalBcrypt(): { compare?: (plain: string, hash: string) => Promise<boolean> } | null {
+  const require = createRequire(import.meta.url);
+  for (const id of ["bcryptjs", "bcrypt"]) {
+    try {
+      return require(id) as { compare?: (plain: string, hash: string) => Promise<boolean> };
+    } catch {
+      // not installed — try the next module id
+    }
+  }
+  return null;
+}
+
+/** `scrypt$<N>$<r>$<p>$<saltBase64>$<keyBase64>` */
+function verifyScrypt(hash: string, password: string): boolean {
+  const [scheme, n, r, p, salt, digest] = hash.split("$");
+  if (scheme !== "scrypt" || !n || !r || !p || !salt || !digest) return false;
+  const expected = Buffer.from(digest, "base64");
+  const actual = scryptSync(password, Buffer.from(salt, "base64"), expected.length, { N: Number(n), r: Number(r), p: Number(p), maxmem: 512 * 1024 * 1024 });
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
+/** Checks a stored digest of any supported format: argon2id (native), bcrypt and scrypt (imported users). */
+export async function verifyPassword(passwordHash: string | null | undefined, password: string): Promise<boolean> {
+  if (!passwordHash) return false;
   try {
-    return await verify(passwordHash, password);
+    if (passwordHash.startsWith("$argon2")) return await verify(passwordHash, password);
+    if (/^\$2[abxy]\$/.test(passwordHash)) {
+      const bcrypt = optionalBcrypt();
+      return bcrypt?.compare ? await bcrypt.compare(password, passwordHash) : false;
+    }
+    if (passwordHash.startsWith("scrypt$")) return verifyScrypt(passwordHash, password);
+    return false;
   } catch {
     return false;
   }
@@ -32,12 +64,13 @@ export async function isPasswordPwned(password: string): Promise<boolean> {
     const digest = sha1(password);
     const prefix = digest.slice(0, 5);
     const suffix = digest.slice(5);
-    const res = await fetch(`https://api.pwnedpasswords.com/range/${prefix}`, {
+    const res = await safeFetch(null, `https://api.pwnedpasswords.com/range/${prefix}`, {
       headers: { "Add-Padding": "true", "User-Agent": "OrbitID" },
-      signal: AbortSignal.timeout(4000),
+      timeoutMs: 4_000,
+      maxBytes: 256 * 1024,
     });
     if (!res.ok) return false;
-    const body = await res.text();
+    const body = res.body;
     for (const line of body.split("\n")) {
       const [hashSuffix, count] = line.trim().split(":");
       if (hashSuffix?.toUpperCase() === suffix && Number(count) > 0) return true;

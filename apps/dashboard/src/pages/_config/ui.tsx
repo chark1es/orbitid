@@ -1,15 +1,6 @@
 import * as React from "react";
 import {
-  Alert,
-  AlertDescription,
-  Badge,
   Button,
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
   Checkbox,
   Dialog,
   DialogContent,
@@ -19,12 +10,19 @@ import {
   DialogTitle,
   Input,
   Label,
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
   Skeleton,
   Switch,
+  Table,
   Textarea,
   cn,
 } from "@orbitid/ui";
-import { AlertCircle, Check, Copy, Eye, EyeOff, Inbox, Loader2, Plus, X } from "lucide-react";
+import { AlertCircle, Check, Copy, Eye, EyeOff, Inbox, Info, Loader2, Plus, TriangleAlert, X } from "lucide-react";
 import { toast } from "sonner";
 
 export function PageHeader({
@@ -34,57 +32,59 @@ export function PageHeader({
   actions,
 }: {
   title: string;
-  description?: string;
+  description?: React.ReactNode;
   badge?: React.ReactNode;
   actions?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-      <div className="space-y-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+    <header className="flex flex-col gap-4 pb-1 sm:flex-row sm:items-start sm:justify-between">
+      <div className="min-w-0 space-y-1.5">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <h1 className="text-[1.375rem] font-semibold leading-tight tracking-[-0.015em]">{title}</h1>
           {badge}
         </div>
-        {description ? <p className="max-w-3xl text-sm text-muted-foreground">{description}</p> : null}
+        {description ? <p className="max-w-[70ch] text-[0.8125rem] leading-relaxed text-muted-foreground">{description}</p> : null}
       </div>
       {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
-    </div>
+    </header>
   );
 }
 
-export function SectionCard({
+export function MetaChip({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center rounded-sm border border-border px-1.5 py-0.5 text-xs text-muted-foreground">
+      {children}
+    </span>
+  );
+}
+
+/** A ruled settings block: label and explanation on the left, controls on the right at 1024px and up. */
+export function SettingsSection({
+  id,
   title,
   description,
   actions,
   children,
-  footer,
-  className,
-  contentClassName,
 }: {
-  title?: React.ReactNode;
+  id?: string;
+  title: React.ReactNode;
   description?: React.ReactNode;
   actions?: React.ReactNode;
   children: React.ReactNode;
-  footer?: React.ReactNode;
-  className?: string;
-  contentClassName?: string;
 }) {
+  const generatedId = React.useId();
+  const headingId = id ?? generatedId;
   return (
-    <Card className={cn("gap-4 py-5", className)}>
-      {title || description || actions ? (
-        <CardHeader className="gap-1">
-          <div className="flex items-start justify-between gap-3">
-            <div className="space-y-1">
-              {title ? <CardTitle>{title}</CardTitle> : null}
-              {description ? <CardDescription>{description}</CardDescription> : null}
-            </div>
-            {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
-          </div>
-        </CardHeader>
-      ) : null}
-      <CardContent className={cn("space-y-5", contentClassName)}>{children}</CardContent>
-      {footer ? <CardFooter className="border-t pt-4">{footer}</CardFooter> : null}
-    </Card>
+    <section aria-labelledby={headingId} className="grid gap-x-10 gap-y-4 border-t border-border pt-6 lg:grid-cols-[220px_minmax(0,1fr)]">
+      <div className="space-y-1.5">
+        <h2 id={headingId} className="text-sm font-semibold">
+          {title}
+        </h2>
+        {description ? <p className="text-[0.8125rem] leading-relaxed text-muted-foreground">{description}</p> : null}
+        {actions ? <div className="flex flex-wrap items-center gap-2 pt-1">{actions}</div> : null}
+      </div>
+      <div className="min-w-0 space-y-4">{children}</div>
+    </section>
   );
 }
 
@@ -107,16 +107,117 @@ export function Field({
 }) {
   return (
     <div className={cn("space-y-1.5", className)}>
-      <Label htmlFor={htmlFor}>
+      <Label htmlFor={htmlFor} className="text-[0.8125rem] font-medium">
         {label}
-        {required ? <span className="ml-0.5 text-destructive">*</span> : null}
+        {required ? (
+          <span className="ml-0.5 text-destructive" aria-hidden>
+            *
+          </span>
+        ) : null}
       </Label>
       {children}
       {error ? (
         <p className="text-xs font-medium text-destructive">{error}</p>
       ) : description ? (
-        <p className="text-xs text-muted-foreground">{description}</p>
+        <p className="text-xs leading-relaxed text-muted-foreground">{description}</p>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Write-only secret field. The server masks a stored secret (`••••`) and marks it with `<field>Set`, so the
+ * input starts blank: typing a value replaces the stored one, leaving it blank keeps it.
+ */
+export function SecretInput({
+  id,
+  label,
+  value,
+  onChange,
+  configured,
+  description,
+  placeholder,
+  disabled,
+  required,
+  className,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  configured: boolean;
+  description?: React.ReactNode;
+  placeholder?: string;
+  disabled?: boolean;
+  required?: boolean;
+  className?: string;
+}) {
+  return (
+    <Field
+      label={label}
+      htmlFor={id}
+      description={
+        <span className="flex flex-wrap items-center gap-1.5">
+          <SecretSetChip configured={configured} />
+          <span>{description ?? (configured ? "A value is stored. Leave blank to keep it." : "No value is stored yet.")}</span>
+        </span>
+      }
+      required={required}
+      className={className}
+    >
+      <Input
+        id={id}
+        type="password"
+        autoComplete="new-password"
+        disabled={disabled}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder ?? (configured ? "Stored value, leave blank to keep" : "Not set")}
+      />
+    </Field>
+  );
+}
+
+/** A word plus a dot, so the state does not rely on colour. */
+export function SecretSetChip({ configured }: { configured: boolean }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-sm border border-border px-1.5 py-0.5 text-[0.6875rem] font-medium text-muted-foreground">
+      <span className={cn("size-1.5 rounded-full", configured ? "bg-go" : "bg-muted-foreground")} aria-hidden />
+      {configured ? "Set" : "Not set"}
+    </span>
+  );
+}
+
+/** Inline note with a worded state. Sits in the page flow, never as a floating toast. */
+export function Notice({
+  tone = "info",
+  title,
+  children,
+  role = "note",
+}: {
+  tone?: "info" | "caution" | "danger";
+  title: string;
+  children?: React.ReactNode;
+  role?: "note" | "status" | "alert";
+}) {
+  const Icon = tone === "danger" ? AlertCircle : tone === "caution" ? TriangleAlert : Info;
+  return (
+    <div
+      role={role}
+      className={cn(
+        "rounded-md border px-3 py-2.5",
+        tone === "danger" ? "border-destructive/40" : tone === "caution" ? "border-caution/50" : "border-border",
+      )}
+    >
+      <p className="flex items-start gap-2 text-sm font-medium">
+        <Icon
+          className={cn("mt-0.5 size-4 shrink-0", tone === "danger" ? "text-destructive" : tone === "caution" ? "text-caution" : "text-muted-foreground")}
+          strokeWidth={1.5}
+          aria-hidden
+        />
+        {title}
+      </p>
+      {children ? <div className="mt-1 space-y-1 pl-6 text-[0.8125rem] leading-relaxed text-muted-foreground">{children}</div> : null}
     </div>
   );
 }
@@ -136,15 +237,21 @@ export function SwitchRow({
   disabled?: boolean;
   id?: string;
 }) {
+  const generatedId = React.useId();
+  const controlId = id ?? generatedId;
   return (
-    <div className="flex items-start justify-between gap-4 rounded-lg border px-4 py-3">
-      <div className="space-y-0.5">
-        <Label htmlFor={id} className="text-sm font-medium">
+    <div
+      className={cn(
+        "flex items-start justify-between gap-6 border-b border-border py-3 first:pt-0 last:border-b-0 last:pb-0",
+      )}
+    >
+      <div className="min-w-0 space-y-0.5">
+        <Label htmlFor={controlId} className="text-sm font-medium">
           {label}
         </Label>
-        {description ? <p className="text-xs text-muted-foreground">{description}</p> : null}
+        {description ? <p className="text-[0.8125rem] leading-relaxed text-muted-foreground">{description}</p> : null}
       </div>
-      <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} disabled={disabled} className="mt-0.5" />
+      <Switch id={controlId} checked={checked} onCheckedChange={onCheckedChange} disabled={disabled} className="mt-0.5" />
     </div>
   );
 }
@@ -163,7 +270,12 @@ export function CheckboxRow({
   disabled?: boolean;
 }) {
   return (
-    <label className={cn("flex cursor-pointer items-start gap-3 rounded-md px-1 py-1.5", disabled && "cursor-not-allowed opacity-60")}>
+    <label
+      className={cn(
+        "flex cursor-pointer items-start gap-3 py-1.5",
+        disabled && "cursor-not-allowed",
+      )}
+    >
       <Checkbox
         className="mt-0.5"
         checked={checked}
@@ -172,9 +284,30 @@ export function CheckboxRow({
       />
       <span className="space-y-0.5">
         <span className="block text-sm font-medium leading-5">{label}</span>
-        {description ? <span className="block text-xs text-muted-foreground">{description}</span> : null}
+        {description ? <span className="block text-[0.8125rem] leading-relaxed text-muted-foreground">{description}</span> : null}
       </span>
     </label>
+  );
+}
+
+export function ValidationSummary({
+  errors,
+  title = "Cannot save yet",
+}: {
+  errors: readonly string[];
+  title?: string;
+}) {
+  if (errors.length === 0) return null;
+  return (
+    <div role="alert" className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2.5">
+      <p className="text-xs font-semibold text-destructive">{title}</p>
+      <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs leading-relaxed text-muted-foreground">
+        {errors.map((error) => (
+          <li key={error}>{error}</li>
+        ))}
+      </ul>
+      <p className="mt-1.5 text-xs text-muted-foreground">Fix the listed fields, then save again.</p>
+    </div>
   );
 }
 
@@ -182,6 +315,8 @@ export function SaveBar({
   dirty,
   saving,
   disabled,
+  errors = [],
+  error,
   onSave,
   onDiscard,
   saveLabel = "Save changes",
@@ -189,25 +324,49 @@ export function SaveBar({
   dirty: boolean;
   saving: boolean;
   disabled?: boolean;
+  errors?: readonly string[];
+  error?: string | null;
   onSave: () => void | Promise<boolean | void>;
   onDiscard: () => void;
   saveLabel?: string;
 }) {
-  if (!dirty && !saving) return null;
+  if (!dirty && !saving && errors.length === 0) return null;
   return (
-    <div className="sticky bottom-4 z-20 mt-6">
-      <div className="flex flex-col gap-3 rounded-xl border bg-background/95 px-4 py-3 shadow-lg backdrop-blur sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-2 text-sm">
-          <span className="size-2 rounded-full bg-amber-500" aria-hidden />
-          <span className="font-medium">Unsaved changes</span>
-          <span className="text-muted-foreground">Review before saving.</span>
+    <div className="sticky bottom-0 z-20 -mx-4 mt-8 border-t border-border bg-background px-4 py-3 md:-mx-6 md:px-6">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 space-y-1" role={errors.length > 0 ? "alert" : undefined}>
+          {errors.length > 0 ? (
+            <>
+              <p className="flex items-center gap-2 text-sm font-medium text-destructive">
+                <AlertCircle className="size-4" aria-hidden />
+                {errors.length === 1 ? "One setting needs attention" : `${errors.length} settings need attention`}
+              </p>
+              <ul className="list-disc space-y-0.5 pl-6 text-xs leading-relaxed text-muted-foreground">
+                {errors.map((error) => (
+                  <li key={error}>{error}</li>
+                ))}
+              </ul>
+              <p className="pl-6 text-xs text-muted-foreground">Fix the listed fields to enable saving.</p>
+            </>
+          ) : (
+            <p className="flex items-center gap-2 text-sm">
+              <span className="size-1.5 rounded-full bg-caution" aria-hidden />
+              <span className="font-medium">Unsaved changes</span>
+              <span className="text-muted-foreground">Save to apply them to this instance.</span>
+            </p>
+          )}
+          {error ? (
+            <p role="alert" className="max-w-[70ch] text-xs leading-relaxed text-destructive">
+              Save failed: {error} Check the server log, then save again.
+            </p>
+          ) : null}
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={onDiscard} disabled={saving}>
+        <div className="flex shrink-0 items-center gap-2 lg:pt-0.5">
+          <Button variant="outline" size="sm" onClick={onDiscard} disabled={saving || !dirty}>
             Discard
           </Button>
           <Button size="sm" onClick={() => void onSave()} disabled={saving || disabled || !dirty}>
-            {saving ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+            {saving ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Check className="size-4" aria-hidden />}
             {saving ? "Saving…" : saveLabel}
           </Button>
         </div>
@@ -218,23 +377,23 @@ export function SaveBar({
 
 export function LoadingPage({ rows = 3 }: { rows?: number }) {
   return (
-    <div className="space-y-6">
-      <div className="space-y-2">
+    <div className="space-y-8" aria-busy="true" aria-label="Loading settings">
+      <div className="space-y-2 pb-1">
         <Skeleton className="h-7 w-56" />
         <Skeleton className="h-4 w-96 max-w-full" />
       </div>
       {Array.from({ length: rows }).map((_, index) => (
-        <Card key={index} className="gap-4 py-5">
-          <CardHeader>
-            <Skeleton className="h-5 w-40" />
-            <Skeleton className="h-4 w-72 max-w-full" />
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-2/3" />
-          </CardContent>
-        </Card>
+        <div key={index} className="grid gap-x-10 gap-y-4 border-t border-border pt-6 lg:grid-cols-[220px_minmax(0,1fr)]">
+          <div className="space-y-2">
+            <Skeleton className="h-4 w-28" />
+            <Skeleton className="h-3 w-40" />
+          </div>
+          <div className="space-y-3">
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-2/3" />
+          </div>
+        </div>
       ))}
     </div>
   );
@@ -242,9 +401,13 @@ export function LoadingPage({ rows = 3 }: { rows?: number }) {
 
 export function TableSkeleton({ rows = 5 }: { rows?: number }) {
   return (
-    <div className="space-y-2" aria-busy="true" aria-label="Loading">
+    <div className="space-y-px border-y border-border py-1" aria-busy="true" aria-label="Loading rows">
       {Array.from({ length: rows }).map((_, index) => (
-        <Skeleton key={index} className="h-11 w-full" />
+        <div key={index} className="flex h-10 items-center gap-4 px-2">
+          <Skeleton className="h-3.5 w-32" />
+          <Skeleton className="h-3.5 flex-1" />
+          <Skeleton className="h-3.5 w-20" />
+        </div>
       ))}
     </div>
   );
@@ -252,17 +415,22 @@ export function TableSkeleton({ rows = 5 }: { rows?: number }) {
 
 export function ErrorAlert({ error, onRetry }: { error: string; onRetry?: () => void }) {
   return (
-    <Alert variant="destructive">
-      <AlertCircle />
-      <AlertDescription className="flex flex-wrap items-center gap-3">
-        <span>{error}</span>
-        {onRetry ? (
-          <Button variant="outline" size="sm" onClick={onRetry}>
-            Try again
-          </Button>
-        ) : null}
-      </AlertDescription>
-    </Alert>
+    <div role="alert" className="rounded-md border border-destructive/40 bg-destructive/5 px-4 py-3">
+      <div className="flex items-start gap-2.5">
+        <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden />
+        <div className="min-w-0 space-y-1">
+          <p className="text-sm font-medium">Could not load this data</p>
+          <p className="text-[0.8125rem] leading-relaxed text-muted-foreground">
+            {error} Check that the server is running, then try again.
+          </p>
+          {onRetry ? (
+            <Button variant="outline" size="sm" className="mt-1" onClick={onRetry}>
+              Try again
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -278,10 +446,12 @@ export function EmptyState({
   icon?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed px-6 py-12 text-center">
-      <div className="text-muted-foreground">{icon ?? <Inbox className="size-6" />}</div>
-      <p className="font-medium">{title}</p>
-      {description ? <p className="max-w-md text-sm text-muted-foreground">{description}</p> : null}
+    <div className="flex flex-col items-center justify-center gap-2 border-y border-border px-6 py-14 text-center">
+      <div className="text-muted-foreground" aria-hidden>
+        {icon ?? <Inbox className="size-5" />}
+      </div>
+      <p className="text-sm font-medium">{title}</p>
+      {description ? <p className="max-w-[60ch] text-[0.8125rem] leading-relaxed text-muted-foreground">{description}</p> : null}
       {action ? <div className="mt-2">{action}</div> : null}
     </div>
   );
@@ -292,7 +462,7 @@ async function copyToClipboard(value: string): Promise<void> {
     await navigator.clipboard.writeText(value);
     toast.success("Copied to clipboard");
   } catch {
-    toast.error("Could not copy to clipboard");
+    toast.error("Could not copy", { description: "Select the text and copy it manually." });
   }
 }
 
@@ -305,7 +475,7 @@ export function CopyButton({
 }: {
   value: string;
   label?: string;
-  size?: "icon" | "icon-sm" | "icon-xs" | "sm" | "default";
+  size?: "icon" | "icon-sm" | "sm" | "default";
   variant?: "ghost" | "outline" | "secondary" | "default";
   className?: string;
 }) {
@@ -318,7 +488,7 @@ export function CopyButton({
       onClick={() => void copyToClipboard(value)}
       title={label ?? "Copy"}
     >
-      <Copy className="size-3.5" />
+      <Copy className="size-3.5" aria-hidden />
       {label ? <span>{label}</span> : <span className="sr-only">Copy</span>}
     </Button>
   );
@@ -327,31 +497,34 @@ export function CopyButton({
 export function SecretReveal({
   value,
   emptyLabel = "Not configured",
-  mono = true,
+  warning,
 }: {
   value: string | null | undefined;
   emptyLabel?: string;
-  mono?: boolean;
+  warning?: string;
 }) {
   const [revealed, setRevealed] = React.useState(false);
-  if (!value) return <Badge variant="outline">{emptyLabel}</Badge>;
+  if (!value) return <p className="text-[0.8125rem] text-muted-foreground">{emptyLabel}</p>;
   const displayed = revealed ? value : "••••••••••••";
   return (
-    <div className="flex min-w-0 items-center gap-1 rounded-md border bg-muted/40 px-2 py-1">
-      <code className={cn("min-w-0 truncate text-xs", mono && "font-mono")} title={revealed ? undefined : "Hidden"}>
-        {displayed}
-      </code>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-xs"
-        onClick={() => setRevealed((current) => !current)}
-        title={revealed ? "Hide" : "Reveal"}
-      >
-        {revealed ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-        <span className="sr-only">{revealed ? "Hide secret" : "Reveal secret"}</span>
-      </Button>
-      <CopyButton value={value} size="icon-xs" />
+    <div className="space-y-1.5">
+      <div className="flex min-w-0 items-center gap-1 border border-border bg-muted/40 py-1 pl-2 pr-1">
+        <code className={cn("min-w-0 flex-1 truncate font-data text-xs", !revealed && "select-none")} title={revealed ? undefined : "Hidden"}>
+          {displayed}
+        </code>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          onClick={() => setRevealed((current) => !current)}
+          title={revealed ? "Hide" : "Reveal"}
+        >
+          {revealed ? <EyeOff className="size-3.5" aria-hidden /> : <Eye className="size-3.5" aria-hidden />}
+          <span className="sr-only">{revealed ? "Hide secret" : "Reveal secret"}</span>
+        </Button>
+        <CopyButton value={value} size="icon-sm" />
+      </div>
+      {warning ? <p className="text-xs leading-relaxed text-muted-foreground">{warning}</p> : null}
     </div>
   );
 }
@@ -390,12 +563,68 @@ export function ConfirmDialog({
             Cancel
           </Button>
           <Button variant={destructive ? "destructive" : "default"} onClick={onConfirm} disabled={loading}>
-            {loading ? <Loader2 className="size-4 animate-spin" /> : null}
+            {loading ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
             {confirmLabel}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Right-side detail panel. Use this instead of a modal when a form needs room. */
+export function DetailSheet({
+  open,
+  onOpenChange,
+  title,
+  description,
+  children,
+  footer,
+  size = "md",
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: React.ReactNode;
+  description?: React.ReactNode;
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+  size?: "md" | "lg";
+}) {
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="right"
+        className={cn("w-full gap-0 overflow-y-auto p-0", size === "lg" ? "sm:max-w-3xl" : "sm:max-w-xl")}
+      >
+        <SheetHeader className="border-b border-border px-5 py-4 pr-12">
+          <SheetTitle className="text-base">{title}</SheetTitle>
+          {description ? <SheetDescription className="leading-relaxed">{description}</SheetDescription> : null}
+        </SheetHeader>
+        <div className="flex-1 space-y-5 px-5 py-5">{children}</div>
+        {footer ? (
+          <SheetFooter className="sticky bottom-0 flex-row justify-end gap-2 border-t border-border bg-background px-5 py-3">
+            {footer}
+          </SheetFooter>
+        ) : null}
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+/** Table frame with the shared row height, rule, and column header treatment. */
+export function RuledTable({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div className={cn("w-full border-y border-border", className)}>
+      <Table
+        className={cn(
+          "[&_thead_tr]:border-border [&_thead_tr:hover]:bg-transparent",
+          "[&_th]:h-9 [&_th]:text-[0.75rem] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-[0.04em] [&_th]:text-muted-foreground",
+          "[&_td]:h-10 [&_td]:py-0 [&_tbody_tr]:border-border [&_tbody_tr:hover]:bg-muted/40",
+        )}
+      >
+        {children}
+      </Table>
+    </div>
   );
 }
 
@@ -419,11 +648,16 @@ export const JsonEditor = React.forwardRef<HTMLTextAreaElement, JsonEditorProps>
         rows={rows}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className={cn("min-h-40 font-mono text-xs leading-relaxed", error && "border-destructive", className)}
+        className={cn("min-h-40 font-data text-xs leading-relaxed", error && "border-destructive", className)}
         aria-invalid={Boolean(error)}
+        aria-describedby={error ? `${props.id ?? "json"}-error` : undefined}
         {...props}
       />
-      {error ? <p className="text-xs font-medium text-destructive">{error}</p> : null}
+      {error ? (
+        <p id={`${props.id ?? "json"}-error`} className="text-xs font-medium text-destructive">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 });
@@ -458,6 +692,7 @@ export function StringListEditor({
             value={value}
             placeholder={placeholder}
             onChange={(event) => update(index, event.target.value)}
+            className="font-data text-xs"
           />
           <Button
             type="button"
@@ -466,13 +701,13 @@ export function StringListEditor({
             onClick={() => onChange(values.filter((_, itemIndex) => itemIndex !== index))}
             title="Remove"
           >
-            <X className="size-4" />
+            <X className="size-4" aria-hidden />
             <span className="sr-only">Remove</span>
           </Button>
         </div>
       ))}
       <Button type="button" variant="outline" size="sm" onClick={() => onChange([...values, ""])}>
-        <Plus className="size-4" />
+        <Plus className="size-4" aria-hidden />
         {addLabel}
       </Button>
     </div>
@@ -481,10 +716,10 @@ export function StringListEditor({
 
 export function EndpointRow({ label, description, url }: { label: string; description?: string; url: string }) {
   return (
-    <div className="flex flex-col gap-1 rounded-lg border px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex items-center justify-between gap-4 border-b border-border py-2 last:border-b-0">
       <div className="min-w-0 space-y-0.5">
-        <p className="text-sm font-medium">{label}</p>
-        <code className="block truncate text-xs text-muted-foreground">{url}</code>
+        <p className="text-[0.8125rem] font-medium">{label}</p>
+        <code className="block truncate font-data text-xs text-muted-foreground">{url}</code>
         {description ? <p className="text-xs text-muted-foreground">{description}</p> : null}
       </div>
       <CopyButton value={url} size="icon-sm" variant="outline" />
@@ -494,11 +729,19 @@ export function EndpointRow({ label, description, url }: { label: string; descri
 
 export function StatusBadge({ status }: { status: string }) {
   const normalized = status.toLowerCase();
-  const positive = ["active", "success", "enabled", "verified", "accepted", "complete"].includes(normalized);
-  const negative = ["failed", "revoked", "disabled", "expired", "rejected", "banned", "locked"].includes(normalized);
+  const positive = ["active", "success", "enabled", "verified", "accepted", "complete", "delivered"].includes(normalized);
+  const caution = ["pending", "expired", "disabled", "inactive", "paused"].includes(normalized);
+  const negative = ["failed", "revoked", "rejected", "banned", "locked"].includes(normalized);
   return (
-    <Badge variant={positive ? "default" : negative ? "destructive" : "secondary"} className="capitalize">
+    <span className="inline-flex w-fit items-center gap-1.5 rounded-sm border border-border px-1.5 py-0.5 text-xs font-medium capitalize">
+      <span
+        className={cn(
+          "size-1.5 shrink-0 rounded-full",
+          positive ? "bg-go" : negative ? "bg-signal" : caution ? "bg-caution" : "bg-muted-foreground",
+        )}
+        aria-hidden
+      />
       {normalized.replace(/_/g, " ")}
-    </Badge>
+    </span>
   );
 }

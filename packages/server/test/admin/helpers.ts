@@ -20,7 +20,7 @@ export interface TestInstance {
 }
 
 export async function testApp(): Promise<TestInstance> {
-  const ctx = await createContext({ databasePath: ":memory:", secretKey: SECRET_KEY, baseUrl: "http://localhost:4000" });
+  const ctx = await createContext({ databaseUrl: ":memory:", secretKey: SECRET_KEY, baseUrl: "http://localhost:4000" });
   const app = createApp(ctx);
   const send = (path: string, init: RequestInit): Promise<Response> => Promise.resolve(app.request(path, init));
   return {
@@ -54,25 +54,24 @@ export async function createUser(api: TestInstance["api"], body: Record<string, 
 }
 
 /** Inserts a client + active session row directly (session creation belongs to the core sign-in service). */
-export function createSessionFixture(ctx: AppContext, userId: string, overrides: { status?: string; expireAt?: number } = {}) {
+export async function createSessionFixture(ctx: AppContext, userId: string, overrides: { status?: string; expireAt?: number } = {}) {
   const now = Date.now();
   const clientId = newId(ID_PREFIX.client);
-  ctx.db.insert(s.clients).values({ id: clientId, tokenHash: sha256(`client-token-${clientId}`), createdAt: now, updatedAt: now }).run();
+  await ctx.db.insert(s.clients).values({ id: clientId, tokenHash: sha256(`client-token-${clientId}`), createdAt: now, updatedAt: now });
   const sessionId = newId(ID_PREFIX.session);
-  ctx.db
-    .insert(s.sessions)
-    .values({
-      id: sessionId,
-      clientId,
-      userId,
-      status: overrides.status ?? "active",
-      lastActiveAt: now,
-      expireAt: overrides.expireAt ?? now + 3_600_000,
-      abandonAt: now + 86_400_000,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .run();
+  await ctx.db
+            .insert(s.sessions)
+            .values({
+              id: sessionId,
+              clientId,
+              userId,
+              status: overrides.status ?? "active",
+              lastActiveAt: now,
+              expireAt: overrides.expireAt ?? now + 3_600_000,
+              abandonAt: now + 86_400_000,
+              createdAt: now,
+              updatedAt: now,
+            });
   return { clientId, sessionId, token: `client-token-${clientId}` };
 }
 

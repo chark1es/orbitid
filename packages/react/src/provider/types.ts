@@ -77,12 +77,35 @@ export interface TOTPResource {
   secret?: string;
   uri?: string;
   qrCodeUrl?: string;
+  qrCode?: string;
+  qr_code?: string;
   verified?: boolean;
+  /** Ten single-use codes; the server returns them once, when verification completes. */
+  backupCodes?: string[];
   [key: string]: unknown;
 }
 
 export interface BackupCodeResource {
   codes: string[];
+  [key: string]: unknown;
+}
+
+/** A browser remembered for skipping the second factor (`GET /v1/client/me/trusted_devices`). */
+export interface TrustedDeviceResource {
+  id: string;
+  userId?: string;
+  user_id?: string;
+  label?: string | null;
+  userAgent?: string | null;
+  user_agent?: string | null;
+  ipAddress?: string | null;
+  ip_address?: string | null;
+  expiresAt?: number;
+  expires_at?: number;
+  lastUsedAt?: number | null;
+  last_used_at?: number | null;
+  createdAt?: number;
+  created_at?: number;
   [key: string]: unknown;
 }
 
@@ -105,7 +128,7 @@ export interface SessionPublicUserData {
   image_url?: string;
   has_image?: boolean;
   identifier?: string;
-  /** camelCase aliases added by `@orbitid/react` (Clerk-compatible component code). */
+  /** camelCase aliases added by `@orbitid/react`. */
   userId?: string;
   firstName?: string | null;
   lastName?: string | null;
@@ -202,6 +225,8 @@ export interface UserResource {
   createPasskey(params?: { name?: string }): Promise<PasskeyResource>;
   getSessions(): Promise<SessionResource[]>;
   revokeSession(sessionId: string): Promise<void>;
+  getTrustedDevices?(): Promise<TrustedDeviceResource[]>;
+  revokeTrustedDevice?(deviceId: string): Promise<void>;
   leaveOrganization(organizationId: string): Promise<void>;
   getOrganizationMemberships(params?: PaginationQuery): Promise<PaginatedResult<OrganizationMembershipResource>>;
   getOrganizationInvitations(): Promise<UserOrganizationInvitationResource[]>;
@@ -228,6 +253,10 @@ export interface SessionResource {
   publicUserData?: SessionPublicUserData | null;
   actor?: Actor | null;
   lastActiveOrganizationId?: string | null;
+  /** How the session was created (`password`, `email_code`, `passkey`, …), when known. */
+  signInMethod?: string | null;
+  /** True when a trusted device let this sign-in skip the second factor. */
+  secondFactorSkippedByTrustedDevice?: boolean;
   lastActiveToken?: TokenResource | null;
   factorVerificationAge?: [number, number] | null;
   expireAt?: number;
@@ -326,6 +355,9 @@ export interface OrganizationInvitationResource {
 
 export interface UserOrganizationInvitationResource extends OrganizationInvitationResource {
   organization?: OrganizationResource | null;
+  /** Denormalized organization label on `GET /me/organization_invitations`; absent on older servers. */
+  organizationName?: string | null;
+  organizationImageUrl?: string | null;
   accept(): Promise<UserOrganizationInvitationResource>;
 }
 
@@ -484,6 +516,8 @@ export interface EnvironmentResource {
   organizationSettings: {
     enabled: boolean;
     maxAllowedMemberships: number;
+    /** Organizations one user may create, or `null`/absent for no limit. */
+    maxCreatedOrganizationsPerUser?: number | null;
     creationEnabled: boolean;
     domainsEnabled: boolean;
     membershipRequestsEnabled: boolean;
@@ -653,6 +687,8 @@ export interface SignUpResource {
   abandonAt?: number;
   legalAcceptedAt?: number | null;
   create(params?: SignUpCreateParams): Promise<SignUpResource>;
+  /** Creates a guest account (needs `anonymous.enabled` on the instance). */
+  createAnonymous?(params?: { unsafeMetadata?: Metadata; legalAccepted?: boolean }): Promise<SignUpResource>;
   update(params: SignUpCreateParams): Promise<SignUpResource>;
   reload(): Promise<SignUpResource>;
   prepareVerification(params?: { strategy?: string }): Promise<SignUpResource>;

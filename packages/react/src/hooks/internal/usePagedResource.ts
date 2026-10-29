@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PaginatedResult, PaginationQuery } from "../../provider/types";
 
-/** Clerk-compatible paginated resource returned by `useOrganization()` / `useOrganizationList()`. */
+/** Paginated resource returned by `useOrganization()` / `useOrganizationList()`. */
 export interface PagedResource<T> {
   data: T[];
   /** Total rows on the server. */
@@ -25,11 +25,19 @@ export interface PagedResource<T> {
   setData(data: T[]): void;
 }
 
+export interface PagedFetchArgs extends PaginationQuery {
+  limit: number;
+  offset: number;
+  page: number;
+  /** `revalidate()` bypasses the shared request cache. */
+  force?: boolean;
+}
+
 export interface UsePagedResourceOptions<T> {
   /** Resource identity (e.g. `org:org_123:memberships`); changing it resets pagination. */
   key: string;
   /** Fetches one page. Must be stable or closure-safe: only `args` is used. */
-  fetcher: (args: PaginationQuery & { limit: number; offset: number; page: number }) => Promise<PaginatedResult<T>>;
+  fetcher: (args: PagedFetchArgs) => Promise<PaginatedResult<T>>;
   /** Extra query params — hashed into the cache key and part of the resource identity. */
   params?: Record<string, unknown>;
   pageSize?: number;
@@ -57,6 +65,13 @@ interface PagedState<T> {
 
 const CACHE_TTL_MS = 5 * 60_000;
 const cache = new Map<string, CacheEntry>();
+
+/** Drop every seeded page for `key`, so a remount after a mutation cannot show old rows. */
+function invalidatePages(key: string): void {
+  for (const cacheKey of [...cache.keys()]) {
+    if (cacheKey === key || cacheKey.startsWith(`${key}|`)) cache.delete(cacheKey);
+  }
+}
 
 function serializeParams(params?: Record<string, unknown>): string {
   if (!params) return "";
@@ -123,7 +138,12 @@ export function usePagedResource<T>(options: UsePagedResourceOptions<T>): PagedR
 
       const offset = (targetPage - 1) * pageSize;
       try {
-        const result = await fetcherRef.current({ limit: pageSize, offset, page: targetPage });
+        const result = await fetcherRef.current({
+          limit: pageSize,
+          offset,
+          page: targetPage,
+          ...(mode === "revalidate" ? { force: true } : {}),
+        });
         if (requestIdRef.current !== requestId) return;
         cache.set(cacheKeyFor(targetPage), { data: result.data, count: result.totalCount, at: Date.now() });
 
@@ -191,8 +211,9 @@ export function usePagedResource<T>(options: UsePagedResourceOptions<T>): PagedR
   }, [load]);
 
   const revalidate = useCallback(async () => {
+    invalidatePages(key);
     await load(stateRef.current.page, "revalidate");
-  }, [load]);
+  }, [key, load]);
 
   const setData = useCallback((data: T[]) => {
     setState((previous) => ({ ...previous, data }));

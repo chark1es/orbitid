@@ -26,8 +26,10 @@ export function isValidRedirectUrl(url: string | null | undefined, options: Redi
   if (!url) return false;
   const trimmed = url.trim();
   if (!trimmed) return false;
+  // Browsers drop tabs and newlines and read `\` as `/`, so these all turn into `//evil.com`.
+  if (/[\u0000-\u001f]/.test(trimmed)) return false;
   // `//evil.com` is protocol-relative and therefore cross-origin.
-  if (trimmed.startsWith("//")) return false;
+  if (/^[/\\]{2}/.test(trimmed) || trimmed.startsWith("/\\")) return false;
   if (trimmed.startsWith("/")) return true;
   if (!/^https?:\/\//i.test(trimmed)) return false;
   let parsed: URL;
@@ -46,7 +48,7 @@ export function isValidRedirectUrl(url: string | null | undefined, options: Redi
 }
 
 /**
- * Clerk-compatible precedence: `forceRedirectUrl` → validated `redirectUrl` →
+ * Redirect precedence: `forceRedirectUrl` → validated `redirectUrl` →
  * `fallbackRedirectUrl` → `defaultRedirectUrl`.
  */
 export function resolveRedirectUrl(options: RedirectResolutionOptions): string | undefined {
@@ -66,6 +68,12 @@ export function getRedirectUrlFromLocation(paramName = "redirect_url"): string |
   const queryIndex = hash.indexOf("?");
   if (queryIndex < 0) return null;
   return new URLSearchParams(hash.slice(queryIndex + 1)).get(paramName);
+}
+
+/** The `redirect_url` in the current location when it is safe to follow (same origin or allowlisted), else undefined. */
+export function safeRedirectUrlFromLocation(options: RedirectAllowlistOptions = {}): string | undefined {
+  const url = getRedirectUrlFromLocation();
+  return url && isValidRedirectUrl(url, options) ? url : undefined;
 }
 
 /** Append `param=value` to a relative or absolute URL, before any hash. Idempotent. */

@@ -1,15 +1,4 @@
-import { useId } from "react";
-import {
-  Area,
-  AreaChart,
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { DailyCount } from "../../lib/types";
 import { formatNumber } from "../../lib/format";
 
@@ -19,69 +8,53 @@ function shortDay(value: string): string {
   return month && day ? `${month}/${day}` : value;
 }
 
+const axisTick = { fontSize: 11, fill: "var(--muted-foreground)", fontFamily: "var(--font-mono, ui-monospace)" };
+
 const tooltipStyle = {
-  borderRadius: "var(--radius-md)",
+  borderRadius: 4,
   border: "1px solid var(--border)",
   background: "var(--popover)",
   color: "var(--popover-foreground)",
   fontSize: 12,
+  boxShadow: "0 6px 16px -8px oklch(0.2 0.01 60 / 0.35)",
 };
 
 /**
- * Sign-ups / sign-ins trend. Both charts share axes, tooltip and theme tokens; only the mark differs.
+ * One daily count series. Daily counts arrive as small integers, so columns read more honestly than
+ * a line: a zero day is an absent column, not a dip in a curve.
  */
 export function TrendChart({
   data,
-  kind,
-  color,
+  tone,
   label,
 }: {
   data: DailyCount[];
-  kind: "area" | "bar";
-  color: string;
+  tone: "ink" | "signal";
   label: string;
 }) {
-  const gradientId = `trend-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
-  const axisProps = {
-    dataKey: "date",
-    tickFormatter: shortDay,
-    tickLine: false,
-    axisLine: false,
-    minTickGap: 24,
-  } as const;
-  const tooltip = (
-    <Tooltip
-      labelFormatter={(value) => shortDay(String(value))}
-      formatter={(value) => [formatNumber(Number(value)), label]}
-      contentStyle={tooltipStyle}
-    />
-  );
+  const color = tone === "signal" ? "var(--signal)" : "var(--foreground)";
 
   return (
-    <ResponsiveContainer width="100%" height={240}>
-      {kind === "area" ? (
-        <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -18 }}>
-          <defs>
-            <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={color} stopOpacity={0.35} />
-              <stop offset="100%" stopColor={color} stopOpacity={0.02} />
-            </linearGradient>
-          </defs>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
-          <XAxis {...axisProps} />
-          <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={44} />
-          {tooltip}
-          <Area type="monotone" dataKey="count" name={label} stroke={color} strokeWidth={2} fill={`url(#${gradientId})`} />
-        </AreaChart>
-      ) : (
-        <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -18 }}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
-          <XAxis {...axisProps} />
-          <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={44} />
-          {tooltip}
-          <Bar dataKey="count" name={label} fill={color} radius={[4, 4, 0, 0]} maxBarSize={22} />
-        </BarChart>
-      )}
+    <ResponsiveContainer width="100%" height={170}>
+      <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -22 }}>
+        <CartesianGrid strokeDasharray="2 4" vertical={false} stroke="var(--border)" />
+        <XAxis
+          dataKey="date"
+          tickFormatter={shortDay}
+          tickLine={false}
+          axisLine={false}
+          minTickGap={28}
+          tick={axisTick}
+        />
+        <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={40} tick={axisTick} />
+        <Tooltip
+          labelFormatter={(value) => shortDay(String(value))}
+          formatter={(value) => [formatNumber(Number(value)), label]}
+          contentStyle={tooltipStyle}
+          cursor={{ fill: "var(--muted)", fillOpacity: 0.4 }}
+        />
+        <Bar dataKey="count" name={label} fill={color} maxBarSize={12} isAnimationActive={false} />
+      </BarChart>
     </ResponsiveContainer>
   );
 }

@@ -127,6 +127,10 @@ export class Session {
   lastActiveAt: number;
   lastActiveOrganizationId: string | null;
   actor: SessionJSON["actor"];
+  /** How the session was created (`password`, `email_code`, `passkey`, …), when known. */
+  signInMethod: SessionJSON["sign_in_method"];
+  /** True when a trusted device let this sign-in skip the second factor. */
+  secondFactorSkippedByTrustedDevice: boolean;
   user: User | null;
   publicUserData: SessionPublicUserData | null;
   factorVerificationAge: [number, number] | null;
@@ -150,6 +154,8 @@ export class Session {
     this.lastActiveAt = json.last_active_at;
     this.lastActiveOrganizationId = json.last_active_organization_id;
     this.actor = json.actor;
+    this.signInMethod = json.sign_in_method ?? null;
+    this.secondFactorSkippedByTrustedDevice = json.second_factor_skipped_by_trusted_device === true;
     this.user = json.user ? User.fromJSON(fapi, json.user, this.tokenCache) : null;
     this.publicUserData = mapPublicUserData(json.public_user_data);
     this.factorVerificationAge = json.factor_verification_age;
@@ -179,6 +185,8 @@ export class Session {
     this.lastActiveAt = json.last_active_at;
     this.lastActiveOrganizationId = json.last_active_organization_id;
     this.actor = json.actor;
+    this.signInMethod = json.sign_in_method ?? null;
+    this.secondFactorSkippedByTrustedDevice = json.second_factor_skipped_by_trusted_device === true;
     if (json.user) this.user = User.fromJSON(this.fapi, json.user, this.tokenCache);
     this.publicUserData = mapPublicUserData(json.public_user_data) ?? this.publicUserData;
     this.factorVerificationAge = json.factor_verification_age ?? this.factorVerificationAge;

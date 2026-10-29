@@ -179,6 +179,36 @@ export function useOrganizationCreator(): Pick<UserOrgScope, "createOrganization
   return { createOrganization: list.createOrganization, setActive: list.setActive };
 }
 
+export interface OrganizationCreationQuota {
+  /** Organizations the signed-in user created. */
+  created: number;
+  /** Configured limit, `null` when the instance sets none. */
+  max: number | null;
+  reached: boolean;
+}
+
+/**
+ * Whether the user may still create an organization. Counts the user's memberships whose
+ * organization reports them as `createdBy`; servers that omit `created_by` never reach a limit.
+ */
+export function useOrganizationCreationQuota(): OrganizationCreationQuota {
+  const settings = useOrgSettings();
+  const { user } = useUser();
+  const list = useOrganizationList({
+    userMemberships: { pageSize: 100 },
+    userInvitations: false,
+    userSuggestions: false,
+  });
+  const memberships = list.userMemberships.data;
+  return useMemo(() => {
+    const created = user
+      ? memberships.filter((membership) => membership.organization?.createdBy === user.id).length
+      : 0;
+    const max = settings.maxCreatedOrganizationsPerUser;
+    return { created, max, reached: max !== null && created >= max };
+  }, [memberships, settings.maxCreatedOrganizationsPerUser, user]);
+}
+
 /** Display name + id of the signed-in user (personal account row). */
 export function useSelfUser(): { id: string | null; name: string; user: UserResource | null } {
   const { isSignedIn, userId } = useAuth();

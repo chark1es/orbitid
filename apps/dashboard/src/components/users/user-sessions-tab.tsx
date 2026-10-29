@@ -1,11 +1,6 @@
 import { useState } from "react";
 import {
   Button,
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
   Select,
   SelectContent,
   SelectItem,
@@ -25,6 +20,7 @@ import { StatusBadge } from "../shared/status-badge";
 import { TimeAgo } from "../shared/time-ago";
 import { EmptyState } from "../shared/empty-state";
 import { ConfirmDialog } from "../shared/confirm-dialog";
+import { Section } from "../shared/section";
 
 const STATUSES = ["all", "active", "ended", "expired", "revoked", "removed", "abandoned", "replaced", "pending"];
 
@@ -77,7 +73,14 @@ export function UserSessionsTab({ user, onUpdated }: { user: UserJSON; onUpdated
     {
       id: "status",
       header: "Status",
-      cell: (session) => <StatusBadge status={session.status} />,
+      cell: (session) => (
+        <div className="space-y-1">
+          <StatusBadge status={session.status} />
+          {session.second_factor_skipped_by_trusted_device ? (
+            <StatusBadge status="skipped" tone="info" label="Second factor skipped: trusted device" />
+          ) : null}
+        </div>
+      ),
     },
     {
       id: "created",
@@ -94,7 +97,9 @@ export function UserSessionsTab({ user, onUpdated }: { user: UserJSON; onUpdated
       header: "Expires",
       headerClassName: "hidden md:table-cell",
       className: "hidden md:table-cell",
-      cell: (session) => <span className="text-sm text-muted-foreground">{formatDateTime(session.expire_at)}</span>,
+      cell: (session) => (
+        <span className="font-data text-xs text-muted-foreground">{formatDateTime(session.expire_at)}</span>
+      ),
     },
     {
       id: "device",
@@ -104,7 +109,7 @@ export function UserSessionsTab({ user, onUpdated }: { user: UserJSON; onUpdated
       cell: (session) => (
         <div className="text-xs text-muted-foreground">
           <p>{session.latest_activity?.browser_name || "Unknown browser"}</p>
-          <p className="font-mono">{session.latest_activity?.ip_address || "—"}</p>
+          <p className="font-data">{session.latest_activity?.ip_address || "Unknown IP"}</p>
         </div>
       ),
     },
@@ -113,7 +118,7 @@ export function UserSessionsTab({ user, onUpdated }: { user: UserJSON; onUpdated
       header: "Session ID",
       headerClassName: "hidden xl:table-cell",
       className: "hidden xl:table-cell",
-      cell: (session) => <code className="text-xs text-muted-foreground">{session.id}</code>,
+      cell: (session) => <code className="font-data text-xs text-muted-foreground">{session.id}</code>,
     },
     {
       id: "actions",
@@ -133,13 +138,12 @@ export function UserSessionsTab({ user, onUpdated }: { user: UserJSON; onUpdated
   ];
 
   return (
-    <Card>
-      <CardHeader className="flex-row flex-wrap items-start justify-between gap-2">
-        <div className="space-y-1">
-          <CardTitle>Sessions</CardTitle>
-          <CardDescription>Every device where this user has an active or past session.</CardDescription>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
+    <Section
+      title="Sessions"
+      description="Every device where this user has an active or past session."
+      className="border-t-0 pt-0"
+      actions={
+        <>
           <Select
             value={status}
             onValueChange={(value) => {
@@ -158,12 +162,18 @@ export function UserSessionsTab({ user, onUpdated }: { user: UserJSON; onUpdated
               ))}
             </SelectContent>
           </Select>
-          <Button size="sm" variant="outline" onClick={() => setConfirmRevokeAll(true)} disabled={!rows.some((s) => s.status === "active")}>
-            <LogOut aria-hidden /> Revoke active
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setConfirmRevokeAll(true)}
+            disabled={!rows.some((session) => session.status === "active")}
+          >
+            <LogOut aria-hidden /> Revoke active sessions
           </Button>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-3">
+        </>
+      }
+    >
+      <div className="space-y-3">
         <DataTable
           columns={columns}
           rows={rows}
@@ -185,7 +195,7 @@ export function UserSessionsTab({ user, onUpdated }: { user: UserJSON; onUpdated
           }}
           disabled={sessions.isFetching}
         />
-      </CardContent>
+      </div>
       <ConfirmDialog
         open={confirmRevokeAll}
         onOpenChange={setConfirmRevokeAll}
@@ -196,6 +206,6 @@ export function UserSessionsTab({ user, onUpdated }: { user: UserJSON; onUpdated
         pending={pendingId === "all"}
         onConfirm={() => void revokeAll()}
       />
-    </Card>
+    </Section>
   );
 }

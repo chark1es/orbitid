@@ -1,4 +1,5 @@
 // Client (browser/device) authentication + ClientJSON serialization.
+import { findAsync } from "../../lib/async";
 import type { Context } from "hono";
 import { deleteCookie, setCookie } from "hono/cookie";
 import { and, desc, eq } from "drizzle-orm";
@@ -13,6 +14,7 @@ import { evaluateSessionStatus, getSession, isSessionExpired } from "../../servi
 import { signSessionToken } from "../../services/tokens";
 import { buildSignInJSON } from "./signin-core";
 import { buildSignUpJSON } from "./signup-core";
+import { first } from "../../lib/db";
 
 export type ClientRow = typeof s.clients.$inferSelect;
 
@@ -47,44 +49,52 @@ function readClientToken(c: Context): string | null {
 }
 
 /** Creates a client row, returns it plus the opaque token that must be set as a cookie. */
-export function createClient(ctx: AppContext, c: Context): { row: ClientRow; token: string } {
+export async function createClient(ctx: AppContext, c: Context): Promise<{ row: ClientRow; token: string }> {
   const token = randomToken(32);
   const id = newId("client");
   const now = Date.now();
-  ctx.db.insert(s.clients).values({
-    id, tokenHash: sha256(token), ip: clientIp(c), userAgent: c.req.header("user-agent") ?? null, createdAt: now, updatedAt: now,
-  }).run();
-  return { row: ctx.db.select().from(s.clients).where(eq(s.clients.id, id)).get()!, token };
+  await ctx.db.insert(s.clients).values({
+            id, tokenHash: sha256(token), ip: clientIp(c), userAgent: c.req.header("user-agent") ?? null, createdAt: now, updatedAt: now,
+          });
+  return { row: first(await ctx.db.select().from(s.clients).where(eq(s.clients.id, id)))!, token };
 }
 
 /** Looks up the client from the cookie / bearer token without creating one. */
-export function findClient(ctx: AppContext, c: Context): ClientRow | null {
+export async function findClient(ctx: AppContext, c: Context): Promise<ClientRow | null> {
   const token = readClientToken(c);
   if (!token) return null;
-  return ctx.db.select().from(s.clients).where(eq(s.clients.tokenHash, sha256(token))).get() ?? null;
+  return first(await ctx.db.select().from(s.clients).where(eq(s.clients.tokenHash, sha256(token)))) ?? null;
 }
 
 /** Returns the request's client, creating one (and setting the httpOnly cookie) when absent. */
-export function getOrCreateClient(ctx: AppContext, c: Context): ClientRow {
-  const existing = findClient(ctx, c);
+export async function getOrCreateClient(ctx: AppContext, c: Context): Promise<ClientRow> {
+  const existing = await findClient(ctx, c);
   if (existing) return existing;
-  const { row, token } = createClient(ctx, c);
+  const { row, token } = await createClient(ctx, c);
   setClientCookie(c, ctx, token);
   return row;
 }
 
-export function requireClient(ctx: AppContext, c: Context): ClientRow {
-  const client = findClient(ctx, c);
+export async function requireClient(ctx: AppContext, c: Context): Promise<ClientRow> {
+  const client = await findClient(ctx, c);
   if (!client) throw new OrbitError(401, ErrorCodes.client_state_invalid, "No client found. Reload the page to create one.");
   return client;
 }
 
 /** Rotates the opaque client token (used after an OAuth form_post callback where the cookie may be missing). */
-export function regenerateClientToken(ctx: AppContext, c: Context, clientId: string): string {
+export async function regenerateClientToken(ctx: AppContext, c: Context, clientId: string): Promise<string> {
   const token = randomToken(32);
-  ctx.db.update(s.clients).set({ tokenHash: sha256(token), updatedAt: Date.now() }).where(eq(s.clients.id, clientId)).run();
+  await ctx.db.update(s.clients).set({ tokenHash: sha256(token), updatedAt: Date.now() }).where(eq(s.clients.id, clientId));
   setClientCookie(c, ctx, token);
   return token;
+}
+
+/**
+ * Rotates the client token when a session is created from it, so a token captured before sign-in cannot
+ * be replayed against the now-authenticated client (session fixation).
+ */
+export async function rotateClientTokenOnSignIn(ctx: AppContext, c: Context, clientId: string): Promise<void> {
+  await regenerateClientToken(ctx, c, clientId);
 }
 
 export const clientAzp = (c: Context): string | undefined => {
@@ -100,22 +110,22 @@ export const clientAzp = (c: Context): string | undefined => {
 };
 
 /** Latest in-flight sign_in / sign_up for the client (completed attempts are hidden from the SDK). */
-function inflightSignIn(ctx: AppContext, clientId: string) {
-  const row = ctx.db.select().from(s.signIns).where(eq(s.signIns.clientId, clientId)).orderBy(desc(s.signIns.createdAt)).get();
+async function inflightSignIn(ctx: AppContext, clientId: string) {
+  const row = first(await ctx.db.select().from(s.signIns).where(eq(s.signIns.clientId, clientId)).orderBy(desc(s.signIns.createdAt)));
   return row && row.status !== "complete" && row.status !== "abandoned" ? row : undefined;
 }
-function inflightSignUp(ctx: AppContext, clientId: string) {
-  const row = ctx.db.select().from(s.signUps).where(eq(s.signUps.clientId, clientId)).orderBy(desc(s.signUps.createdAt)).get();
+async function inflightSignUp(ctx: AppContext, clientId: string) {
+  const row = first(await ctx.db.select().from(s.signUps).where(eq(s.signUps.clientId, clientId)).orderBy(desc(s.signUps.createdAt)));
   return row && row.status !== "complete" && row.status !== "abandoned" ? row : undefined;
 }
 
 /** Wire representation of a client including its sessions (with users) and freshly minted session tokens. */
 export async function serializeClient(ctx: AppContext, client: ClientRow, opts: { azp?: string } = {}): Promise<ClientJSON> {
-  const fresh = ctx.db.select().from(s.clients).where(eq(s.clients.id, client.id)).get() ?? client;
-  const rows = ctx.db.select().from(s.sessions).where(eq(s.sessions.clientId, fresh.id)).orderBy(desc(s.sessions.createdAt)).all();
+  const fresh = first(await ctx.db.select().from(s.clients).where(eq(s.clients.id, client.id))) ?? client;
+  const rows = (await ctx.db.select().from(s.sessions).where(eq(s.sessions.clientId, fresh.id)).orderBy(desc(s.sessions.createdAt)));
   const sessions: SessionJSON[] = [];
   for (const stored of rows) {
-    const status = evaluateSessionStatus(ctx, stored);
+    const status = await evaluateSessionStatus(ctx, stored);
     if (status === "expired") continue;
     const row = { ...stored, status };
     let token: string | null = null;
@@ -126,16 +136,16 @@ export async function serializeClient(ctx: AppContext, client: ClientRow, opts: 
         token = null;
       }
     }
-    sessions.push({ ...serializeSession(ctx, row, { withUser: true, lastToken: token }), last_active_token: token ? { object: "token", jwt: token } : null });
+    sessions.push({ ...await serializeSession(ctx, row, { withUser: true, lastToken: token }), last_active_token: token ? { object: "token", jwt: token } : null });
   }
-  const signInRow = inflightSignIn(ctx, fresh.id);
-  const signUpRow = inflightSignUp(ctx, fresh.id);
+  const signInRow = await inflightSignIn(ctx, fresh.id);
+  const signUpRow = await inflightSignUp(ctx, fresh.id);
   return {
     object: "client",
     id: fresh.id,
     sessions,
-    sign_in: signInRow ? buildSignInJSON(ctx, signInRow) : null,
-    sign_up: signUpRow ? buildSignUpJSON(ctx, signUpRow) : null,
+    sign_in: signInRow ? await buildSignInJSON(ctx, signInRow) : null,
+    sign_up: signUpRow ? await buildSignUpJSON(ctx, signUpRow) : null,
     last_active_session_id: fresh.lastActiveSessionId ?? null,
     cookie_expires_at: Date.now() + ONE_YEAR_SECONDS * 1000,
     created_at: fresh.createdAt,
@@ -144,27 +154,27 @@ export async function serializeClient(ctx: AppContext, client: ClientRow, opts: 
 }
 
 /** Active session for the client (the one the SDK is using), or null. */
-export function activeClientSession(ctx: AppContext, client: ClientRow) {
+export async function activeClientSession(ctx: AppContext, client: ClientRow) {
   if (client.lastActiveSessionId) {
-    const row = getSession(ctx, client.lastActiveSessionId);
-    const status = row && row.clientId === client.id ? evaluateSessionStatus(ctx, row) : null;
+    const row = await getSession(ctx, client.lastActiveSessionId);
+    const status = row && row.clientId === client.id ? await evaluateSessionStatus(ctx, row) : null;
     if (row && (status === "active" || status === "pending")) return { ...row, status };
   }
-  const rows = ctx.db.select().from(s.sessions)
-    .where(and(eq(s.sessions.clientId, client.id), eq(s.sessions.status, "active")))
-    .orderBy(desc(s.sessions.lastActiveAt)).all();
-  const row = rows.find((candidate) => {
-    const status = evaluateSessionStatus(ctx, candidate);
+  const rows = (await ctx.db.select().from(s.sessions)
+      .where(and(eq(s.sessions.clientId, client.id), eq(s.sessions.status, "active")))
+      .orderBy(desc(s.sessions.lastActiveAt)));
+  const row = await findAsync(rows, async (candidate) => {
+    const status = await evaluateSessionStatus(ctx, candidate);
     return status === "active" || status === "pending";
   });
-  return row ? { ...row, status: evaluateSessionStatus(ctx, row) } : null;
+  return row ? { ...row, status: await evaluateSessionStatus(ctx, row) } : null;
 }
 
 /** The signed-in user for a client (throw when there is none). */
-export function requireActiveUser(ctx: AppContext, client: ClientRow) {
-  const session = activeClientSession(ctx, client);
+export async function requireActiveUser(ctx: AppContext, client: ClientRow) {
+  const session = await activeClientSession(ctx, client);
   if (!session) throw new OrbitError(401, ErrorCodes.authentication_invalid, "Not signed in");
-  const user = ctx.db.select().from(s.users).where(eq(s.users.id, session.userId)).get();
+  const user = first(await ctx.db.select().from(s.users).where(eq(s.users.id, session.userId)));
   if (!user) throw new OrbitError(401, ErrorCodes.authentication_invalid, "Not signed in");
   if (user.banned) throw new OrbitError(403, ErrorCodes.user_banned, "This user has been banned");
   return { session, user };

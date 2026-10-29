@@ -37,10 +37,10 @@ describe("sessions & tokens", () => {
   it("uses JWT templates and custom session claims", async () => {
     const { app, ctx } = await setup();
     const user = await signUpUser(app);
-    ctx.db.insert(schema.jwtTemplates).values({
-      id: "jtmpl_custom", name: "custom", claims: { email: "{{user.primary_email_address}}", orgs: "{{org.slug || 'none'}}" },
-      lifetime: 120, allowedClockSkew: 5, createdAt: Date.now(), updatedAt: Date.now(),
-    }).run();
+    await ctx.db.insert(schema.jwtTemplates).values({
+                  id: "jtmpl_custom", name: "custom", claims: { email: "{{user.primary_email_address}}", orgs: "{{org.slug || 'none'}}" },
+                  lifetime: 120, allowedClockSkew: 5, createdAt: Date.now(), updatedAt: Date.now(),
+                });
 
     const templated = await user.client.json<{ jwt: string }>(`/v1/client/sessions/${user.sessionId}/tokens/custom`, { method: "POST", body: {} });
     const jwks = (await (await app.request("/.well-known/jwks.json")).json()) as { keys: JWK[] };
@@ -90,18 +90,18 @@ describe("sessions & tokens", () => {
     const { app, ctx } = await setup();
     const user = await signUpUser(app);
     const now = Date.now();
-    ctx.db.insert(schema.signInTokens).values({
-      id: "sit_test", userId: user.userId, tokenHash: sha256("sit-ticket"), status: "pending", expiresAt: now + 60_000, createdAt: now, updatedAt: now,
-    }).run();
+    await ctx.db.insert(schema.signInTokens).values({
+                  id: "sit_test", userId: user.userId, tokenHash: sha256("sit-ticket"), status: "pending", expiresAt: now + 60_000, createdAt: now, updatedAt: now,
+                });
     const sitClient = testClient(app);
     const sit = await sitClient.json<{ response: { status: string; created_session_id: string } }>("/v1/client/sign_ins", { body: { ticket: "sit-ticket" } });
     expect(sit.response.status).toBe("complete");
     expect(sit.response.created_session_id).toMatch(/^sess_/);
 
-    ctx.db.insert(schema.actorTokens).values({
-      id: "act_test", userId: user.userId, actor: { sub: "admin_42" }, tokenHash: sha256("actor-ticket"), status: "pending",
-      expiresAt: now + 60_000, sessionMaxDurationSeconds: 600, createdAt: now, updatedAt: now,
-    }).run();
+    await ctx.db.insert(schema.actorTokens).values({
+                  id: "act_test", userId: user.userId, actor: { sub: "admin_42" }, tokenHash: sha256("actor-ticket"), status: "pending",
+                  expiresAt: now + 60_000, sessionMaxDurationSeconds: 600, createdAt: now, updatedAt: now,
+                });
     const actorClient = testClient(app);
     const actorSignIn = await actorClient.json<{ response: { status: string; created_session_id: string } }>("/v1/client/sign_ins", { body: { ticket: "actor-ticket" } });
     expect(actorSignIn.response.status).toBe("complete");
@@ -129,10 +129,10 @@ describe("sessions & tokens", () => {
     const { app, ctx } = await setup();
     const user = await signUpUser(app);
     const now = Date.now();
-    ctx.db.insert(schema.organizations).values({ id: "org_claims", name: "Claims Inc", slug: "claims-inc", createdAt: now, updatedAt: now }).run();
-    ctx.db.insert(schema.organizationMemberships).values({
-      id: "orgmem_claims", organizationId: "org_claims", userId: user.userId, roleKey: "org:admin", createdAt: now, updatedAt: now,
-    }).run();
+    await ctx.db.insert(schema.organizations).values({ id: "org_claims", name: "Claims Inc", slug: "claims-inc", createdAt: now, updatedAt: now });
+    await ctx.db.insert(schema.organizationMemberships).values({
+                  id: "orgmem_claims", organizationId: "org_claims", userId: user.userId, roleKey: "org:admin", createdAt: now, updatedAt: now,
+                });
 
     await user.client.json(`/v1/client/sessions/${user.sessionId}/touch`, { body: { active_organization_id: "org_claims" } });
     const minted = await user.client.json<{ jwt: string }>(`/v1/client/sessions/${user.sessionId}/tokens`, { method: "POST", body: {} });
@@ -166,7 +166,7 @@ describe("sessions & tokens", () => {
     const { app, ctx } = await setup();
     const user = await signUpUser(app);
     const sessionId = user.sessionId;
-    ctx.db.update(schema.sessions).set({ lastActiveAt: Date.now() - 120_000 }).where(eq(schema.sessions.id, sessionId)).run();
+    await ctx.db.update(schema.sessions).set({ lastActiveAt: Date.now() - 120_000 }).where(eq(schema.sessions.id, sessionId));
 
     const touched = await user.client.json<{ response: { last_active_at: number } }>(`/v1/client/sessions/${sessionId}/touch`, { body: {} });
     expect(touched.response.last_active_at).toBeGreaterThan(Date.now() - 5_000);
@@ -214,7 +214,7 @@ describe("sessions & tokens", () => {
     const { app, ctx } = await setup();
     const user = await signUpUser(app);
     const sessionId = user.sessionId;
-    ctx.db.update(schema.sessions).set({ firstFactorVerifiedAt: Date.now() - 60 * 60_000 }).where(eq(schema.sessions.id, sessionId)).run();
+    await ctx.db.update(schema.sessions).set({ firstFactorVerifiedAt: Date.now() - 60 * 60_000 }).where(eq(schema.sessions.id, sessionId));
 
     const denied = await user.client.json("/v1/client/me/email_addresses", { body: { email_address: "second@example.com" } });
     const error = errorsOf(denied)[0]!;
@@ -236,7 +236,7 @@ describe("sessions & tokens", () => {
   it("expires sessions past their lifetime", async () => {
     const { app, ctx } = await setup();
     const user = await signUpUser(app);
-    ctx.db.update(schema.sessions).set({ expireAt: Date.now() - 1 }).where(eq(schema.sessions.id, user.sessionId)).run();
+    await ctx.db.update(schema.sessions).set({ expireAt: Date.now() - 1 }).where(eq(schema.sessions.id, user.sessionId));
     const me = await user.client.json("/v1/client/me");
     expect(errorsOf(me)[0]?.code).toBe("authentication_invalid");
     const state = await getClient(user.client);
@@ -247,7 +247,7 @@ describe("sessions & tokens", () => {
     const { app, ctx } = await setup();
     await ctx.settings.update({ session: { inactivityTimeoutSeconds: 60 } });
     const user = await signUpUser(app);
-    ctx.db.update(schema.sessions).set({ lastActiveAt: Date.now() - 120_000 }).where(eq(schema.sessions.id, user.sessionId)).run();
+    await ctx.db.update(schema.sessions).set({ lastActiveAt: Date.now() - 120_000 }).where(eq(schema.sessions.id, user.sessionId));
     const me = await user.client.json("/v1/client/me");
     expect(errorsOf(me)[0]?.code).toBe("authentication_invalid");
   });

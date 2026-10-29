@@ -91,15 +91,15 @@ function CreateInvitationsDialog({ open, onOpenChange }: { open: boolean; onOpen
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="rounded-[6px] sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Create invitation</DialogTitle>
-            <DialogDescription>
-              Invitations are required when sign-up mode is `restricted` or when the allowlist is enabled.
+            <DialogTitle className="text-base font-[650] tracking-[-0.01em]">Create invitation</DialogTitle>
+            <DialogDescription className="text-sm leading-6 text-muted-foreground">
+              Invitations are required when sign-up mode is restricted, or when the allowlist is on.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <Label>Mode</Label>
               <Select value={mode} onValueChange={(value) => setMode(value as "single" | "bulk")}>
                 <SelectTrigger aria-label="Invitation mode">
@@ -112,7 +112,7 @@ function CreateInvitationsDialog({ open, onOpenChange }: { open: boolean; onOpen
               </Select>
             </div>
             {mode === "single" ? (
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 <Label htmlFor="invitation-email">Email address</Label>
                 <Input
                   id="invitation-email"
@@ -123,7 +123,7 @@ function CreateInvitationsDialog({ open, onOpenChange }: { open: boolean; onOpen
                 />
               </div>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 <Label htmlFor="invitation-emails">Email addresses</Label>
                 <Textarea
                   id="invitation-emails"
@@ -131,29 +131,32 @@ function CreateInvitationsDialog({ open, onOpenChange }: { open: boolean; onOpen
                   onChange={(event) => setEmails(event.target.value)}
                   rows={5}
                   placeholder={"one@example.com\ntwo@example.com"}
-                  className="font-mono text-xs"
+                  className="font-data text-xs leading-6"
                 />
-                <p className="text-xs text-muted-foreground">Separate with commas, spaces or new lines. Duplicates are dropped.</p>
+                <p className="text-xs leading-5 text-muted-foreground">
+                  Separate addresses with commas, spaces or new lines. Duplicates are dropped.
+                </p>
               </div>
             )}
             <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="invitation-expiry">Expires in (days)</Label>
+              <div className="space-y-1.5">
+                <Label htmlFor="invitation-expiry">Expires in days</Label>
                 <Input
                   id="invitation-expiry"
                   type="number"
                   min={1}
                   value={expiresInDays}
                   onChange={(event) => setExpiresInDays(event.target.value)}
+                  className="font-data"
                 />
               </div>
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center justify-between gap-3 sm:pt-6">
                 <Label htmlFor="invitation-notify">Send email</Label>
                 <Switch id="invitation-notify" checked={notify} onCheckedChange={setNotify} />
               </div>
             </div>
             {error ? (
-              <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              <p role="alert" className="border border-signal/40 bg-signal/5 px-2.5 py-2 text-sm leading-6">
                 {error}
               </p>
             ) : null}
@@ -226,7 +229,7 @@ export default function InvitationsPage() {
     {
       id: "email",
       header: "Email",
-      cell: (invitation) => <span className="font-mono text-sm">{invitation.email_address}</span>,
+      cell: (invitation) => <span className="font-data text-[0.8125rem]">{invitation.email_address}</span>,
     },
     {
       id: "status",
@@ -237,23 +240,33 @@ export default function InvitationsPage() {
       id: "created",
       header: "Created",
       sortKey: "created_at",
-      cell: (invitation) => <span className="text-sm text-muted-foreground">{formatDate(invitation.created_at)}</span>,
+      cell: (invitation) => (
+        <span className="font-data text-xs text-muted-foreground">{formatDate(invitation.created_at)}</span>
+      ),
     },
     {
       id: "expires",
       header: "Expires",
       headerClassName: "hidden sm:table-cell",
       className: "hidden sm:table-cell",
-      cell: (invitation) => <span className="text-sm text-muted-foreground">{formatDate(invitation.expires_at)}</span>,
+      cell: (invitation) => (
+        <span className="font-data text-xs text-muted-foreground">{formatDate(invitation.expires_at)}</span>
+      ),
     },
     {
       id: "actions",
       header: <span className="sr-only">Actions</span>,
-      className: "w-24 text-right",
+      className: "w-32 text-right",
       cell: (invitation) => (
         <div className="flex justify-end gap-1">
-          {invitation.url ? <CopyButton value={invitation.url} label="Copy invitation URL" /> : null}
-          <Button size="xs" variant="outline" disabled={invitation.status !== "pending"} onClick={() => setRevoking(invitation)}>
+          {invitation.url ? <CopyButton value={invitation.url} label="Copy invitation URL" size="icon-sm" /> : null}
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={invitation.status !== "pending"}
+            onClick={() => setRevoking(invitation)}
+            aria-label={`Revoke invitation for ${invitation.email_address}`}
+          >
             <Ban aria-hidden /> Revoke
           </Button>
         </div>
@@ -267,31 +280,35 @@ export default function InvitationsPage() {
         title="Invitations"
         description="Instance-level invitations used to gate sign-ups."
         actions={
-          <Button size="sm" onClick={() => setCreateOpen(true)}>
+          <Button onClick={() => setCreateOpen(true)}>
             <MailPlus aria-hidden /> Create invitation
           </Button>
         }
       />
 
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-56 flex-1">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+      <div className="flex flex-wrap items-end gap-x-2 gap-y-3">
+        <div className="relative min-w-56 flex-1 max-w-md">
+          <Search
+            className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+            strokeWidth={1.5}
+            aria-hidden
+          />
           <Input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search invitations…"
+            placeholder="Search invitations"
             aria-label="Search invitations"
-            className="pl-8"
+            className="h-[34px] pl-8"
           />
         </div>
         <Select value={status} onValueChange={(value) => table.setFilter("status", value === "all" ? null : value)}>
-          <SelectTrigger className="h-9 w-[140px]" aria-label="Filter invitations by status">
+          <SelectTrigger className="h-[34px] w-[132px]" aria-label="Filter invitations by status">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             {STATUSES.map((value) => (
               <SelectItem key={value} value={value}>
-                <span className="capitalize">{value}</span>
+                {value === "all" ? "Any status" : value.charAt(0).toUpperCase() + value.slice(1)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -308,7 +325,22 @@ export default function InvitationsPage() {
         sortKey={table.sortKey}
         sortDescending={table.sortDescending}
         onSort={table.toggleSort}
-        empty={<EmptyState icon={MailPlus} title="No invitations" description="Create one to let a specific person sign up." />}
+        empty={
+          <EmptyState
+            icon={MailPlus}
+            title={table.hasFilters ? "No invitations match these filters" : "No invitations yet"}
+            description={
+              table.hasFilters
+                ? "Clear the status filter or search for another address."
+                : "Create one to let a specific person sign up while sign-ups are restricted."
+            }
+            action={
+              <Button size="sm" onClick={() => setCreateOpen(true)}>
+                <MailPlus aria-hidden /> Create invitation
+              </Button>
+            }
+          />
+        }
       />
 
       <TablePagination
@@ -327,8 +359,8 @@ export default function InvitationsPage() {
           if (!open) setRevoking(null);
         }}
         title="Revoke invitation?"
-        description={revoking ? `${revoking.email_address} will no longer be able to use this invitation.` : undefined}
-        confirmLabel="Revoke"
+        description={revoking ? `${revoking.email_address} can no longer use this invitation. You can send a new one.` : undefined}
+        confirmLabel="Revoke invitation"
         destructive
         pending={pending}
         onConfirm={() => void revoke()}

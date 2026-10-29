@@ -30,7 +30,7 @@ import {
 import { factorsOf } from "../_shared/api";
 import { AuthenticateWithRedirectCallback } from "../../../control";
 import { signUpUrlFor } from "./flow";
-import { useAuthRuntime } from "../_shared/w6";
+import { useAuthRuntime, type TranslateFn } from "../_shared/w6";
 import { useElementClasses } from "../_shared/appearance";
 import { FormError } from "../_shared/form-error";
 import { Field } from "../_shared/field";
@@ -120,7 +120,7 @@ function IdentifierPreview({ value, onEdit }: { value: string; onEdit: () => voi
 }
 
 function identifierLabel(
-  t: (key: string) => string,
+  t: TranslateFn,
   identifiers: readonly string[],
 ): string {
   if (identifiers.length === 1) {
@@ -158,7 +158,7 @@ function useConditionalPasskey(flow: SignInFlow, enabled: boolean) {
     void (isAvailable as () => Promise<boolean>)
       .call(credential)
       .then((available) => {
-        if (available) void flowRef.current.authenticateWithPasskey();
+        if (available) void flowRef.current.authenticateWithPasskey({ autofill: true });
       })
       .catch(() => undefined);
   }, [enabled]);
@@ -221,7 +221,7 @@ export function StartStep({ flow, props }: StepProps) {
               <Input
                 {...field}
                 type={identifierInputType(environment.identifiers)}
-                autoComplete={identifierAutoComplete(environment.identifiers)}
+                autoComplete={`${identifierAutoComplete(environment.identifiers)}${passkeyEnabled && environment.passkey.allowAutofill ? " webauthn" : ""}`}
                 placeholder={t("signIn.start.identifierPlaceholder")}
                 autoFocus
                 disabled={flow.busy}
@@ -687,7 +687,7 @@ interface StrategyOption {
 function buildStrategyOptions(
   factors: ReturnType<typeof factorsOf>,
   environment: EnvironmentView,
-  t: (key: string, params?: Record<string, string | number>) => string,
+  t: TranslateFn,
 ): StrategyOption[] {
   const options: StrategyOption[] = [];
   const seen = new Set<string>();
@@ -769,7 +769,7 @@ function inferFactors(environment: EnvironmentView) {
 
 export function SecondFactorStep({ flow }: StepProps) {
   const runtime = useAuthRuntime();
-  const { t } = runtime;
+  const { t, environment } = runtime;
   const { el } = useElementClasses();
   const factors = factorsOf(flow.signIn, "second");
   const available: Array<{ strategy: string; label: string }> =
@@ -782,19 +782,28 @@ export function SecondFactorStep({ flow }: StepProps) {
 
   const [strategy, setStrategy] = useState(() => available[0]?.strategy ?? "totp");
   const [code, setCode] = useState("");
+  const [trust, setTrust] = useState(true);
+  const trustEnabled = environment.trustedDevices.enabled;
 
   const changeStrategy = async (next: string) => {
     setStrategy(next);
     setCode("");
     flow.setError(null);
-    if (next === "phone_code") {
-      const factor = factors.find((candidate) => candidate.strategy === "phone_code");
-      await flow.prepareSecondFactor("phone_code", factor?.phone_number_id ? { phoneNumberId: factor.phone_number_id } : {});
+    if (next === "phone_code" || next === "email_code") {
+      const factor = factors.find((candidate) => candidate.strategy === next);
+      await flow.prepareSecondFactor(next, {
+        ...(factor?.phone_number_id ? { phoneNumberId: factor.phone_number_id } : {}),
+        ...(factor?.email_address_id ? { emailAddressId: factor.email_address_id } : {}),
+      });
     }
   };
 
   const submit = () => {
-    void flow.attemptSecondFactor({ strategy, code });
+    void flow.attemptSecondFactor({
+      strategy,
+      code,
+      ...(trustEnabled && trust ? { trustDevice: true } : {}),
+    });
   };
 
   return (
@@ -832,12 +841,33 @@ export function SecondFactorStep({ flow }: StepProps) {
         <OtpField
           value={code}
           onChange={setCode}
-          onComplete={(value) => void flow.attemptSecondFactor({ strategy, code: value })}
+          onComplete={(value) =>
+            void flow.attemptSecondFactor({
+              strategy,
+              code: value,
+              ...(trustEnabled && trust ? { trustDevice: true } : {}),
+            })
+          }
           label={t("formFieldLabel__code")}
           disabled={flow.busy}
           autoFocus
         />
       )}
+      {trustEnabled ? (
+        <div className="flex items-center justify-between gap-3 rounded-md border p-3">
+          <Label htmlFor="trust-this-browser" className="text-sm font-normal">
+            {t("signIn.secondFactor.trustDevice", { days: environment.trustedDevices.days })}
+          </Label>
+          <input
+            id="trust-this-browser"
+            type="checkbox"
+            className="size-4 accent-foreground"
+            checked={trust}
+            onChange={(event) => setTrust(event.target.checked)}
+            disabled={flow.busy}
+          />
+        </div>
+      ) : null}
       <Button
         type="button"
         disabled={flow.busy || code.length < (strategy === "backup_code" ? 8 : 6)}
@@ -854,8 +884,9 @@ export function SecondFactorStep({ flow }: StepProps) {
   );
 }
 
-function labelForSecondFactor(t: (key: string) => string, strategy: string): string {
+function labelForSecondFactor(t: TranslateFn, strategy: string): string {
   if (strategy === "phone_code") return t("signIn.secondFactor.methodPhoneCode");
+  if (strategy === "email_code") return t("signIn.secondFactor.methodEmailCode");
   if (strategy === "backup_code") return t("signIn.secondFactor.methodBackupCode");
   return t("signIn.secondFactor.methodTotp");
 }
@@ -1004,7 +1035,7 @@ export function SuccessStep({ flow }: StepProps) {
   const { t, environment, navigate } = runtime;
   return (
     <div className="flex flex-col items-center gap-3 py-2 text-center">
-      <CheckCircle2Icon className="size-10 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+      <CheckCircle2Icon className="size-10 text-go" aria-hidden="true" />
       <p className="text-sm font-medium">{t("signIn.success.title")}</p>
       <p className="text-sm text-muted-foreground">
         {t("signIn.success.message", { applicationName: environment.app.name })}

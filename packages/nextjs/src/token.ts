@@ -26,6 +26,8 @@ export interface VerifySessionTokenOptions {
   jwksUrl?: string;
   /** Frontend API URL; `${apiUrl}/.well-known/jwks.json` is used when no `jwtKey` is given. */
   apiUrl?: string;
+  /** Required `iss` claim: the server's public URL. Tokens from any other issuer are refused. */
+  issuer?: string;
   /** Values accepted in the `azp` claim (app origins). */
   authorizedParties?: string[];
   audience?: string;
@@ -138,6 +140,7 @@ export async function verifySessionToken(
 
   const verifyOptions = {
     algorithms,
+    issuer: options.issuer ? stripTrailingSlash(options.issuer) : undefined,
     audience: options.audience,
     clockTolerance: options.clockSkewInMs !== undefined ? options.clockSkewInMs / 1000 : undefined,
   };

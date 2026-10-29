@@ -1,4 +1,4 @@
-import { enUS } from "./enUS";
+import { enUS, type TranslationKey } from "./enUS";
 import type { LocalizationParams, LocalizationResource, TFunction } from "./types";
 
 export { mergeLocalization } from "./merge";
@@ -50,4 +50,20 @@ export function translateErrorCode(t: TFunction, code: string | undefined, fallb
   if (!code) return fallback ?? t("unstable__errors.unknown_error");
   const message = getByPath(enUS, `unstable__errors.${code}`);
   return message ? t(`unstable__errors.${code}`) : (fallback ?? t("unstable__errors.unknown_error"));
+}
+
+function collectKeys(resource: LocalizationResource, prefix: string, into: Set<string>): void {
+  for (const [key, value] of Object.entries(resource)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (typeof value === "string") into.add(path);
+    else if (value) collectKeys(value, path, into);
+  }
+}
+
+const keys: Set<string> = new Set();
+collectKeys(enUS, "", keys);
+
+/** True when `key` is a dot path defined in `enUS`. Narrows to {@link TranslationKey}. */
+export function isTranslationKey(key: string): key is TranslationKey {
+  return keys.has(key);
 }

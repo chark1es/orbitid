@@ -7,8 +7,10 @@ import {
 } from "@orbitid/shared";
 import { newId } from "../lib/ids";
 import { safeEqual } from "../lib/crypto";
+import { safeFetch } from "../lib/safe-fetch";
 import * as s from "../db/schema";
 import type { AppContext } from "../context";
+import { first } from "../lib/db";
 
 /** Wait between attempts: after failure #1, #2, ... (`5s, 5m, 30m, 2h, 5h, 10h`), then the delivery is marked failed. */
 export const WEBHOOK_RETRY_DELAYS_MS = [5_000, 300_000, 1_800_000, 7_200_000, 18_000_000, 36_000_000] as const;
@@ -99,15 +101,14 @@ export async function emitEvent(ctx: AppContext, type: WebhookEventType, data: u
     const now = Date.now();
     const eventId = newId(ID_PREFIX.webhookEvent);
     const envelope: WebhookEvent = { id: eventId, object: "event", type, data, timestamp: now, instance_id: "default" };
-    ctx.db.insert(s.webhookEvents).values({ id: eventId, type, payload: envelope as unknown as Record<string, unknown> }).run();
-    const endpoints = ctx.db.select().from(s.webhookEndpoints).where(eq(s.webhookEndpoints.disabled, false)).all();
+    await ctx.db.insert(s.webhookEvents).values({ id: eventId, type, payload: envelope as unknown as Record<string, unknown> });
+    const endpoints = (await ctx.db.select().from(s.webhookEndpoints).where(eq(s.webhookEndpoints.disabled, false)));
     for (const endpoint of endpoints) {
       const types = endpoint.eventTypes ?? [];
       if (types.length && !types.includes(type)) continue;
-      ctx.db
-        .insert(s.webhookDeliveries)
-        .values({ id: newId(ID_PREFIX.delivery), endpointId: endpoint.id, eventId, status: "pending", attempt: 0, nextAttemptAt: now })
-        .run();
+      await ctx.db
+                        .insert(s.webhookDeliveries)
+                        .values({ id: newId(ID_PREFIX.delivery), endpointId: endpoint.id, eventId, status: "pending", attempt: 0, nextAttemptAt: now });
     }
   } catch (err) {
     console.error("[webhooks] failed to emit", type, err);
@@ -123,7 +124,7 @@ async function attemptDelivery(ctx: AppContext, delivery: DeliveryRow, endpoint:
   let responseBody = "";
   let ok = false;
   try {
-    const res = await fetch(endpoint.url, {
+    const res = await safeFetch(ctx, endpoint.url, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -133,27 +134,27 @@ async function attemptDelivery(ctx: AppContext, delivery: DeliveryRow, endpoint:
         "svix-signature": signWebhook(endpoint.secret, event.id, timestamp, body),
       },
       body,
-      signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
+      timeoutMs: DELIVERY_TIMEOUT_MS,
+      maxBytes: RESPONSE_BODY_LIMIT * 4,
     });
     responseCode = res.status;
-    responseBody = await res.text();
+    responseBody = res.body;
     ok = res.ok;
   } catch (err) {
     responseBody = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
   }
   const retryDelay = WEBHOOK_RETRY_DELAYS_MS[attempt - 1];
   const failed = !ok && attempt >= WEBHOOK_MAX_ATTEMPTS;
-  ctx.db
-    .update(s.webhookDeliveries)
-    .set({
-      attempt,
-      responseCode,
-      responseBody: responseBody.slice(0, RESPONSE_BODY_LIMIT),
-      status: ok ? "success" : failed ? "failed" : "pending",
-      nextAttemptAt: ok || failed ? null : Date.now() + (retryDelay ?? WEBHOOK_RETRY_DELAYS_MS[WEBHOOK_RETRY_DELAYS_MS.length - 1]),
-    })
-    .where(eq(s.webhookDeliveries.id, delivery.id))
-    .run();
+  await ctx.db
+            .update(s.webhookDeliveries)
+            .set({
+              attempt,
+              responseCode,
+              responseBody: responseBody.slice(0, RESPONSE_BODY_LIMIT),
+              status: ok ? "success" : failed ? "failed" : "pending",
+              nextAttemptAt: ok || failed ? null : Date.now() + (retryDelay ?? WEBHOOK_RETRY_DELAYS_MS[WEBHOOK_RETRY_DELAYS_MS.length - 1]),
+            })
+            .where(eq(s.webhookDeliveries.id, delivery.id));
 }
 
 /**
@@ -162,20 +163,26 @@ async function attemptDelivery(ctx: AppContext, delivery: DeliveryRow, endpoint:
  */
 export async function deliverDue(ctx: AppContext, opts: { limit?: number } = {}): Promise<number> {
   const now = Date.now();
-  const due = ctx.db
-    .select()
-    .from(s.webhookDeliveries)
-    .where(and(eq(s.webhookDeliveries.status, "pending"), lte(s.webhookDeliveries.nextAttemptAt, now)))
-    .limit(opts.limit ?? 20)
-    .all();
+  const due = (await ctx.db
+      .select()
+      .from(s.webhookDeliveries)
+      .where(and(eq(s.webhookDeliveries.status, "pending"), lte(s.webhookDeliveries.nextAttemptAt, now)))
+      .limit(opts.limit ?? 20));
   let attempted = 0;
   for (const delivery of due) {
-    const endpoint = ctx.db.select().from(s.webhookEndpoints).where(eq(s.webhookEndpoints.id, delivery.endpointId)).get();
-    const event = ctx.db.select().from(s.webhookEvents).where(eq(s.webhookEvents.id, delivery.eventId)).get();
+    const endpoint = first(await ctx.db.select().from(s.webhookEndpoints).where(eq(s.webhookEndpoints.id, delivery.endpointId)));
+    const event = first(await ctx.db.select().from(s.webhookEvents).where(eq(s.webhookEvents.id, delivery.eventId)));
     if (!endpoint || !event) continue;
     // Claim the row before the network call so overlapping ticks cannot deliver it twice.
-    ctx.db.update(s.webhookDeliveries).set({ nextAttemptAt: Date.now() + CLAIM_WINDOW_MS }).where(eq(s.webhookDeliveries.id, delivery.id)).run();
-    await attemptDelivery(ctx, delivery, endpoint, event);
+    const claimed = first(await ctx.db.update(s.webhookDeliveries).set({ nextAttemptAt: Date.now() + CLAIM_WINDOW_MS })
+      .where(and(
+        eq(s.webhookDeliveries.id, delivery.id),
+        eq(s.webhookDeliveries.status, "pending"),
+        lte(s.webhookDeliveries.nextAttemptAt, now),
+      ))
+      .returning());
+    if (!claimed) continue;
+    await attemptDelivery(ctx, claimed, endpoint, event);
     attempted += 1;
   }
   return attempted;

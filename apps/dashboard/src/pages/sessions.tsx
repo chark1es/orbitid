@@ -4,7 +4,6 @@ import { keepPreviousData, useQueryClient } from "@tanstack/react-query";
 import {
   Button,
   Input,
-  Label,
   Select,
   SelectContent,
   SelectItem,
@@ -47,11 +46,9 @@ export default function SessionsPage() {
   const path = buildListPath("/sessions", {
     limit: table.limit,
     page: table.page,
+    query: table.query,
     orderBy: table.orderBy,
-    extra: {
-      status: status === "all" ? undefined : status,
-      user_id: table.filter("user_id") || undefined,
-    },
+    extra: { status: status === "all" ? undefined : status, user_id: table.filter("user_id") || undefined },
   });
   const sessions = useApi<{ data: SessionJSON[]; total_count: number }>(["sessions", path], path, {
     placeholderData: keepPreviousData,
@@ -65,10 +62,7 @@ export default function SessionsPage() {
       await api("POST", `/sessions/${revoking.id}/revoke`);
       toast.success("Session revoked");
       setRevoking(null);
-      await Promise.all([
-        sessions.refetch(),
-        queryClient.invalidateQueries({ queryKey: ["stats"] }),
-      ]);
+      await Promise.all([sessions.refetch(), queryClient.invalidateQueries({ queryKey: ["stats"] })]);
     } catch (error) {
       toast.error(errorMessage(error));
     } finally {
@@ -88,11 +82,16 @@ export default function SessionsPage() {
       cell: (session) =>
         session.public_user_data ? (
           <div className="min-w-0">
-            <Link to={`/users/${session.public_user_data.user_id}`} className="truncate text-sm font-medium hover:underline">
+            <Link
+              to={`/users/${session.public_user_data.user_id}`}
+              className="block max-w-[30ch] truncate text-sm font-medium underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
               {[session.public_user_data.first_name, session.public_user_data.last_name].filter(Boolean).join(" ") ||
                 session.public_user_data.identifier}
             </Link>
-            <p className="truncate text-xs text-muted-foreground">{session.public_user_data.identifier}</p>
+            <span className="block max-w-[30ch] truncate font-data text-[0.6875rem] text-muted-foreground">
+              {session.public_user_data.identifier}
+            </span>
           </div>
         ) : (
           <span className="text-xs text-muted-foreground">Unknown user</span>
@@ -102,20 +101,22 @@ export default function SessionsPage() {
       id: "created",
       header: "Started",
       sortKey: "created_at",
-      cell: (session) => <TimeAgo value={session.created_at} className="text-sm" />,
+      cell: (session) => <TimeAgo value={session.created_at} className="font-data text-xs text-muted-foreground" />,
     },
     {
       id: "last_active",
       header: "Last active",
       sortKey: "last_active_at",
-      cell: (session) => <TimeAgo value={session.last_active_at} className="text-sm" />,
+      cell: (session) => <TimeAgo value={session.last_active_at} className="font-data text-xs text-muted-foreground" />,
     },
     {
       id: "expires",
       header: "Expires",
       headerClassName: "hidden lg:table-cell",
       className: "hidden lg:table-cell",
-      cell: (session) => <span className="text-xs text-muted-foreground">{formatDateTime(session.expire_at)}</span>,
+      cell: (session) => (
+        <span className="font-data text-xs text-muted-foreground">{formatDateTime(session.expire_at)}</span>
+      ),
     },
     {
       id: "device",
@@ -124,7 +125,7 @@ export default function SessionsPage() {
       className: "hidden xl:table-cell",
       cell: (session) => (
         <div className="text-xs text-muted-foreground">
-          <p className="font-mono">{session.latest_activity?.ip_address || "—"}</p>
+          <p className="font-data">{session.latest_activity?.ip_address || "No activity recorded"}</p>
           <p>{session.latest_activity?.browser_name || "Unknown browser"}</p>
         </div>
       ),
@@ -139,6 +140,7 @@ export default function SessionsPage() {
           variant="outline"
           disabled={session.status !== "active"}
           onClick={() => setRevoking(session)}
+          aria-label={`Revoke session for ${session.public_user_data?.identifier ?? session.id}`}
         >
           <LogOut aria-hidden /> Revoke
         </Button>
@@ -148,34 +150,50 @@ export default function SessionsPage() {
 
   return (
     <>
-      <PageHeader title="Sessions" description="Active and historical sessions across every client." />
+      <PageHeader
+        title="Sessions"
+        description="Active and historical sessions across every client. Revoking one signs that client out."
+      />
 
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="relative min-w-56 flex-1">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+      <div className="flex flex-wrap items-end gap-x-2 gap-y-3">
+        <div className="relative min-w-56 flex-1 max-w-md">
+          <Search
+            className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+            strokeWidth={1.5}
+            aria-hidden
+          />
           <Input
             value={userId}
             onChange={(event) => setUserId(event.target.value)}
-            placeholder="Filter by user ID…"
+            placeholder="Filter by user ID"
             aria-label="Filter sessions by user"
-            className="pl-8"
+            className="h-[34px] pl-8 font-data text-xs"
           />
         </div>
-        <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">Status</Label>
-          <Select value={status} onValueChange={(value) => table.setFilter("status", value === "all" ? null : value)}>
-            <SelectTrigger className="h-9 w-[140px]" aria-label="Filter sessions by status">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {STATUSES.map((value) => (
-                <SelectItem key={value} value={value}>
-                  <span className="capitalize">{value}</span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <Select value={status} onValueChange={(value) => table.setFilter("status", value === "all" ? null : value)}>
+          <SelectTrigger className="h-[34px] w-[132px]" aria-label="Filter sessions by status">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {STATUSES.map((value) => (
+              <SelectItem key={value} value={value}>
+                {value === "all" ? "Any status" : value.charAt(0).toUpperCase() + value.slice(1)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {table.hasFilters ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setUserId("");
+              table.reset();
+            }}
+          >
+            Clear
+          </Button>
+        ) : null}
       </div>
 
       <DataTable
@@ -188,7 +206,17 @@ export default function SessionsPage() {
         sortKey={table.sortKey}
         sortDescending={table.sortDescending}
         onSort={table.toggleSort}
-        empty={<EmptyState icon={MonitorSmartphone} title="No sessions" description="Sessions appear here after users sign in." />}
+        empty={
+          <EmptyState
+            icon={MonitorSmartphone}
+            title={table.hasFilters ? "No sessions match these filters" : "No sessions yet"}
+            description={
+              table.hasFilters
+                ? "Clear the status or user filter to see every session."
+                : "Sessions appear after someone signs in through your app or the test site."
+            }
+          />
+        }
       />
 
       <TablePagination
@@ -206,7 +234,7 @@ export default function SessionsPage() {
           if (!open) setRevoking(null);
         }}
         title="Revoke this session?"
-        description="The client is signed out immediately; refresh tokens issued for it stop working."
+        description="The client is signed out on its next request and refresh tokens issued for this session stop working."
         confirmLabel="Revoke session"
         destructive
         pending={pending}

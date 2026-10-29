@@ -131,32 +131,50 @@ function OrganizationListView({
         </header>
         <ErrorBanner message={error ?? listError} />
         <div className="flex flex-col gap-2">
-          {list.invitations.data.map((invitation) => (
-            <div
-              key={invitation.id}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3"
-              data-testid={`org-list-invitation-${invitation.id}`}
-            >
-              <div className="flex flex-col">
-                <span className="font-medium">{invitation.emailAddress}</span>
-                <span className="text-sm text-muted-foreground">
-                  {roleLabel(invitation.role, invitation.roleName, t)}
-                </span>
-              </div>
-              <Button
-                type="button"
-                size="sm"
-                disabled={acceptAction.isPending}
-                onClick={() => {
-                  void acceptAction
-                    .run(invitation.id, invitation.organizationId)
-                    .then(redirectAfterAccept);
-                }}
+          {list.invitations.data.map((invitation) => {
+            const organizationName =
+              invitation.organizationName ?? invitation.organization?.name ?? null;
+            const organizationImage =
+              invitation.organizationImageUrl ?? invitation.organization?.imageUrl ?? null;
+            return (
+              <div
+                key={invitation.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3"
+                data-testid={`org-list-invitation-${invitation.id}`}
               >
-                {t("organizationList.invitationAccept")}
-              </Button>
-            </div>
-          ))}
+                <div className="flex min-w-0 items-center gap-2">
+                  {organizationName ? (
+                    <OrgAvatar name={organizationName} imageUrl={organizationImage} />
+                  ) : null}
+                  <div className="flex min-w-0 flex-col">
+                    <span className="truncate font-medium">
+                      {organizationName ?? invitation.emailAddress}
+                    </span>
+                    <span className="truncate text-sm text-muted-foreground">
+                      {roleLabel(invitation.role, invitation.roleName, t)}
+                    </span>
+                    {organizationName ? (
+                      <span className="truncate text-sm text-muted-foreground">
+                        {invitation.emailAddress}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={acceptAction.isPending}
+                  onClick={() => {
+                    void acceptAction
+                      .run(invitation.id, invitation.organizationId)
+                      .then(redirectAfterAccept);
+                  }}
+                >
+                  {t("organizationList.invitationAccept")}
+                </Button>
+              </div>
+            );
+          })}
         </div>
         <div className="flex justify-end">
           <Button

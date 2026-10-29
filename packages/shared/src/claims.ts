@@ -1,6 +1,6 @@
 /**
  * Session JWT claims (RS256/ES256, signed with the instance key, public keys at `/.well-known/jwks.json`).
- * Default `__session` token. Keys are short on purpose (cookie size), like Clerk v2 tokens.
+ * Default `__session` token. Keys are short on purpose (cookie size).
  */
 export interface SessionClaims {
   /** issuer = frontend API URL */
@@ -25,6 +25,8 @@ export interface SessionClaims {
   fva?: [number, number];
   /** session status: "active" | "pending" */
   sts?: "active" | "pending";
+  /** True for a guest (anonymous) account that has not attached an identifier yet. */
+  anonymous?: boolean;
   /** custom claims from instance session.customClaims or JWT template */
   [key: string]: unknown;
 }

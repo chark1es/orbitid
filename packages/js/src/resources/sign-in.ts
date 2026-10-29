@@ -1,6 +1,5 @@
 import type { SignInFactor as SignInFactorJSON, SignInJSON, SignInStatus } from "@orbitid/shared";
-import type { PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/types";
-import { startAuthentication } from "@simplewebauthn/browser";
+import { startAuthentication, type PublicKeyCredentialRequestOptionsJSON } from "@simplewebauthn/browser";
 import type { FapiClient } from "../fapi";
 import { fetchData } from "./base";
 import { Verification } from "./verification";
@@ -73,12 +72,15 @@ export interface AttemptFirstFactorParams {
 export interface PrepareSecondFactorParams {
   strategy: string;
   phoneNumberId?: string;
+  emailAddressId?: string;
 }
 
 export interface AttemptSecondFactorParams {
   strategy: string;
   code: string;
   signature?: string;
+  /** Remember this browser so it skips the second factor until `environment.authConfig.trustedDevices.days`. */
+  trustDevice?: boolean;
 }
 
 export interface ResetPasswordParams {
@@ -248,6 +250,7 @@ export class SignIn {
     const json = await this.post(`${this.basePath}/prepare_second_factor`, {
       strategy: params.strategy,
       phone_number_id: params.phoneNumberId,
+      email_address_id: params.emailAddressId,
     });
     return this.update(json);
   }
@@ -257,6 +260,7 @@ export class SignIn {
       strategy: params.strategy,
       code: params.code,
       signature: params.signature,
+      trust_device: params.trustDevice,
     });
     return this.update(json);
   }
@@ -297,7 +301,7 @@ export class SignIn {
       optionsJSON = toRequestOptions(this.firstFactorVerification?.nonce);
     }
     if (!optionsJSON) throw new Error("OrbitID did not return passkey request options");
-    const credential = await startAuthentication(optionsJSON, options.autofill);
+    const credential = await startAuthentication({ optionsJSON, useBrowserAutofill: options.autofill });
     return this.attemptFirstFactor({ strategy: "passkey", publicKeyCredential: credential });
   }
 

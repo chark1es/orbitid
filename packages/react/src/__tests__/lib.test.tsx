@@ -136,7 +136,7 @@ describe("createAuthState", () => {
 });
 
 describe("redirect helpers", () => {
-  it("applies Clerk precedence and validates origins", () => {
+  it("applies redirect precedence and validates origins", () => {
     const allowlist = { origin: "https://app.example.com", allowedRedirectOrigins: ["https://trusted.dev", /\.corp\.com$/] };
 
     expect(

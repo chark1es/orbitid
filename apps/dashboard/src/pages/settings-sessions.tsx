@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, AlertDescription, AlertTitle, Accordion, AccordionContent, AccordionItem, AccordionTrigger, Badge, Input } from "@orbitid/ui";
-import { Info } from "lucide-react";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+  Input,
+} from "@orbitid/ui";
 import {
   SESSION_SHORTCODES,
   formatJson,
@@ -13,9 +18,10 @@ import {
   Field,
   JsonEditor,
   LoadingPage,
+  MetaChip,
   PageHeader,
   SaveBar,
-  SectionCard,
+  SettingsSection,
   SwitchRow,
 } from "./_config/ui";
 import { useSettingsEditor } from "./_config/use-settings";
@@ -39,7 +45,7 @@ export default function Page() {
     return (
       <div className="space-y-6">
         <PageHeader title="Sessions" description="Session lifetime, token refresh, and custom session token claims." />
-        <ErrorAlert error={editor.error ?? "Could not load instance settings."} onRetry={editor.refetch} />
+        <ErrorAlert error={editor.error ?? "Instance settings did not load."} onRetry={editor.refetch} />
       </div>
     );
   }
@@ -50,6 +56,8 @@ export default function Page() {
   if (settings.session.tokenLifetimeSeconds <= 0) errors.push("Token lifetime must be greater than zero.");
   if (settings.session.inactivityTimeoutSeconds > 0 && settings.session.inactivityTimeoutSeconds > settings.session.lifetimeSeconds)
     errors.push("Inactivity timeout cannot exceed the session lifetime.");
+  if (settings.session.trustedDevicesEnabled && (settings.session.trustedDeviceDays < 1 || settings.session.trustedDeviceDays > 365))
+    errors.push("Trusted device duration must be between 1 and 365 days.");
   if (claimsError) errors.push("Custom claims are not valid JSON.");
 
   const number = (value: string) => {
@@ -81,14 +89,14 @@ export default function Page() {
     <div className="space-y-6">
       <PageHeader
         title="Sessions"
-        description="Control how long sessions last, how token refresh works, and which custom claims are added to session JWTs."
-        badge={<Badge variant="outline">Instance settings</Badge>}
+        description="Control how long sessions last, how often tokens refresh, and which custom claims session JWTs carry."
+        badge={<MetaChip>Instance settings</MetaChip>}
       />
 
       {editor.error ? <ErrorAlert error={editor.error} onRetry={editor.refetch} /> : null}
 
-      <SectionCard title="Session lifetime" description="Sessions expire after the maximum lifetime even while active.">
-        <div className="grid gap-3 sm:grid-cols-2">
+      <SettingsSection title="Session lifetime" description="A session expires at the maximum lifetime even while it is in use.">
+        <div className="grid gap-4 sm:grid-cols-2">
           <Field
             label="Maximum session lifetime (seconds)"
             htmlFor="session-lifetime"
@@ -122,7 +130,7 @@ export default function Page() {
           <Field
             label="Session token lifetime (seconds)"
             htmlFor="session-token-lifetime"
-            description={`JWTs are refreshed by the SDK. ${humanDuration(settings.session.tokenLifetimeSeconds)}; 60 seconds is recommended.`}
+            description={`The SDK refreshes tokens on this cadence. ${humanDuration(settings.session.tokenLifetimeSeconds)}; 60 seconds is recommended.`}
           >
             <Input
               id="session-token-lifetime"
@@ -135,26 +143,67 @@ export default function Page() {
         </div>
         <SwitchRow
           label="Multi-session mode"
-          description="Allow multiple sessions per client (for example, multiple accounts in one browser)."
+          description="Allow multiple sessions per client, for example two accounts in one browser."
           checked={settings.session.multiSession}
           onCheckedChange={(multiSession) => editor.patch({ session: { multiSession } })}
         />
-      </SectionCard>
+        <dl className="grid gap-x-8 gap-y-2 border-t border-border pt-3 sm:grid-cols-2">
+          <div className="flex items-baseline justify-between gap-4">
+            <dt className="text-xs text-muted-foreground">Effective lifetime</dt>
+            <dd className="font-data text-xs font-medium">{humanDuration(settings.session.lifetimeSeconds)}</dd>
+          </div>
+          <div className="flex items-baseline justify-between gap-4">
+            <dt className="text-xs text-muted-foreground">Refresh cadence</dt>
+            <dd className="font-data text-xs font-medium">Every {humanDuration(settings.session.tokenLifetimeSeconds)}</dd>
+          </div>
+        </dl>
+      </SettingsSection>
 
-      <SectionCard
-        title="Custom session token claims"
-        description="Claims merged into every session JWT. Shortcodes are resolved per user and organization at mint time."
+      <SettingsSection
+        title="Trusted devices"
+        description="Let a user skip the second factor on a browser they have marked as trusted, until the trust expires."
       >
-        <JsonEditor
-          ref={claimsRef}
-          value={claimsText}
-          onChange={updateClaims}
-          error={claimsError}
-          placeholder='{\n  "email": "{{user.primary_email_address}}",\n  "org": "{{org.slug}}"\n}'
+        <SwitchRow
+          label="Allow trusted devices"
+          description="A user can remember this browser after a successful second factor, so the next sign-in asks for the password only."
+          checked={settings.session.trustedDevicesEnabled}
+          onCheckedChange={(trustedDevicesEnabled) => editor.patch({ session: { trustedDevicesEnabled } })}
         />
+        <Field
+          label="Trust duration (days)"
+          htmlFor="trusted-device-days"
+          description="How long a remembered browser keeps skipping the second factor. Turning the feature off keeps but ignores the records."
+          className="max-w-md"
+        >
+          <Input
+            id="trusted-device-days"
+            type="number"
+            min={1}
+            max={365}
+            value={settings.session.trustedDeviceDays}
+            disabled={!settings.session.trustedDevicesEnabled}
+            onChange={(event) => editor.patch({ session: { trustedDeviceDays: number(event.target.value) } })}
+          />
+        </Field>
+      </SettingsSection>
+
+      <SettingsSection
+        title="Custom session token claims"
+        description="Claims merged into every session JWT. Shortcodes resolve per user and organization when the token is minted."
+      >
+        <Field label="Claims (JSON)">
+          <JsonEditor
+            ref={claimsRef}
+            value={claimsText}
+            onChange={updateClaims}
+            error={claimsError}
+            placeholder={'{\n  "email": "{{user.primary_email_address}}",\n  "org": "{{org.slug}}"\n}'}
+            aria-label="Custom session claims"
+          />
+        </Field>
         <Accordion type="single" collapsible>
           <AccordionItem value="shortcodes">
-            <AccordionTrigger className="text-sm">Shortcode reference — click to insert</AccordionTrigger>
+            <AccordionTrigger className="text-sm">Shortcode reference, click to insert</AccordionTrigger>
             <AccordionContent>
               <div className="grid gap-1.5 sm:grid-cols-2">
                 {SESSION_SHORTCODES.map((item) => (
@@ -162,55 +211,35 @@ export default function Page() {
                     key={item.code}
                     type="button"
                     onClick={() => insertShortcode(item.code)}
-                    className="flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent"
+                    className="flex items-center justify-between gap-2 border border-border px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   >
-                    <code className="font-mono">{item.code}</code>
+                    <code className="font-data">{item.code}</code>
                     <span className="truncate text-muted-foreground">{item.description}</span>
                   </button>
                 ))}
               </div>
-              <p className="mt-2 text-xs text-muted-foreground">
-                Whole-value shortcodes keep their JSON type; embedded shortcodes are stringified. Use <code>{"{{a}} || {{b}}"}</code> for a fallback.
+              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                A claim that is exactly one shortcode keeps its JSON type. Embedded shortcodes become strings. Use{" "}
+                <code>{"{{a}} || {{b}}"}</code> to fall back when the first value is empty.
               </p>
             </AccordionContent>
           </AccordionItem>
         </Accordion>
-      </SectionCard>
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Reverification uses <code>factor_verification_age</code> on the session. Applications can require a fresh first or second factor
+          with <code>has({"{ reverification: ... }"})</code>. An expired verification does not end the session.
+        </p>
+      </SettingsSection>
 
-      <Alert>
-        <Info />
-        <AlertTitle>Reverification</AlertTitle>
-        <AlertDescription>
-          Reverification decisions use <code>factor_verification_age</code> on the session. Applications can require a fresh first or second
-          factor with <code>has({"{ reverification: ... }"})</code>; expired verification does not end the session.
-        </AlertDescription>
-      </Alert>
-
-      <div className="grid gap-2 sm:grid-cols-2">
-        <div className="rounded-lg border px-3 py-2">
-          <p className="text-xs text-muted-foreground">Effective lifetime</p>
-          <p className="text-sm font-medium">{humanDuration(settings.session.lifetimeSeconds)}</p>
-        </div>
-        <div className="rounded-lg border px-3 py-2">
-          <p className="text-xs text-muted-foreground">Refresh cadence</p>
-          <p className="text-sm font-medium">Every {humanDuration(settings.session.tokenLifetimeSeconds)}</p>
-        </div>
-      </div>
-
-      {errors.length > 0 ? (
-        <Alert variant="destructive">
-          <AlertTitle>Fix the following before saving</AlertTitle>
-          <AlertDescription>
-            <ul className="list-disc pl-4">
-              {errors.map((error) => (
-                <li key={error}>{error}</li>
-              ))}
-            </ul>
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      <SaveBar dirty={editor.dirty} saving={editor.saving} disabled={errors.length > 0} onSave={editor.save} onDiscard={editor.reset} />
+      <SaveBar
+        dirty={editor.dirty}
+        saving={editor.saving}
+        disabled={errors.length > 0}
+        errors={errors}
+        error={editor.saveError}
+        onSave={editor.save}
+        onDiscard={editor.reset}
+      />
     </div>
   );
 }

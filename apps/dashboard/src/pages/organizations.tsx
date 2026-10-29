@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { keepPreviousData, useQueryClient } from "@tanstack/react-query";
 import {
   Button,
@@ -12,7 +12,7 @@ import {
   Input,
   Label,
 } from "@orbitid/ui";
-import { Building2, Plus, Search, Trash2, Users } from "lucide-react";
+import { Building2, Plus, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { OrganizationJSON } from "@orbitid/shared";
 import { api, useApi } from "../lib/api";
@@ -62,7 +62,7 @@ function CreateOrganizationDialog({ open, onOpenChange }: { open: boolean; onOpe
       setName("");
       setSlug("");
       setSlugTouched(false);
-      navigate(`/organizations/${created.id}`);
+      if (created?.id) navigate(`/organizations/${created.id}`);
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -72,13 +72,15 @@ function CreateOrganizationDialog({ open, onOpenChange }: { open: boolean; onOpe
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="rounded-[6px] sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Create organization</DialogTitle>
-          <DialogDescription>Organizations group members, roles, invitations and domains.</DialogDescription>
+          <DialogTitle className="text-base font-[650] tracking-[-0.01em]">Create organization</DialogTitle>
+          <DialogDescription className="text-sm leading-6 text-muted-foreground">
+            Organizations group members, roles, invitations and domains.
+          </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="space-y-4">
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <Label htmlFor="org-name">Name</Label>
             <Input
               id="org-name"
@@ -90,7 +92,7 @@ function CreateOrganizationDialog({ open, onOpenChange }: { open: boolean; onOpe
               required
             />
           </div>
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <Label htmlFor="org-slug">Slug</Label>
             <Input
               id="org-slug"
@@ -100,11 +102,12 @@ function CreateOrganizationDialog({ open, onOpenChange }: { open: boolean; onOpe
                 setSlug(slugify(event.target.value));
               }}
               placeholder="acme"
+              className="font-data"
             />
-            <p className="text-xs text-muted-foreground">Lowercase letters, numbers and dashes.</p>
+            <p className="text-xs leading-5 text-muted-foreground">Lowercase letters, numbers and dashes.</p>
           </div>
           {error ? (
-            <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <p role="alert" className="border border-signal/40 bg-signal/5 px-2.5 py-2 text-sm leading-6">
               {error}
             </p>
           ) : null}
@@ -155,8 +158,13 @@ export default function OrganizationsPage() {
         <div className="flex items-center gap-2.5">
           <UserAvatar name={org.name} imageUrl={org.image_url} size="sm" />
           <div className="min-w-0">
-            <p className="truncate text-sm font-medium">{org.name}</p>
-            <p className="truncate text-xs text-muted-foreground">{org.slug}</p>
+            <Link
+              to={`/organizations/${org.id}`}
+              className="block max-w-[34ch] truncate text-sm font-medium underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {org.name}
+            </Link>
+            <span className="block truncate font-data text-[0.6875rem] text-muted-foreground">{org.slug}</span>
           </div>
         </div>
       ),
@@ -164,28 +172,35 @@ export default function OrganizationsPage() {
     {
       id: "members",
       header: "Members",
-      cell: (org) => <span className="tabular-nums">{formatNumber(org.members_count ?? 0)}</span>,
+      cell: (org) => (
+        <span className="font-data text-xs tabular-nums">{formatNumber(org.members_count ?? 0)}</span>
+      ),
     },
     {
       id: "invitations",
       header: "Pending invitations",
       headerClassName: "hidden sm:table-cell",
       className: "hidden sm:table-cell",
-      cell: (org) => <span className="tabular-nums">{formatNumber(org.pending_invitations_count ?? 0)}</span>,
+      cell: (org) => (
+        <span className="font-data text-xs tabular-nums text-muted-foreground">
+          {formatNumber(org.pending_invitations_count ?? 0)}
+        </span>
+      ),
     },
     {
       id: "created",
       header: "Created",
       sortKey: "created_at",
-      cell: (org) => <TimeAgo value={org.created_at} className="text-sm" />,
+      cell: (org) => <TimeAgo value={org.created_at} className="font-data text-xs text-muted-foreground" />,
     },
     {
       id: "actions",
       header: <span className="sr-only">Actions</span>,
-      className: "w-10 text-right",
+      className: "w-9 text-right",
+      headerClassName: "w-9",
       cell: (org) => (
         <Button
-          size="icon"
+          size="icon-sm"
           variant="ghost"
           aria-label={`Delete ${org.name}`}
           onClick={(event) => {
@@ -205,21 +220,27 @@ export default function OrganizationsPage() {
         title="Organizations"
         description="Every organization on this instance, with member and invitation counts."
         actions={
-          <Button size="sm" onClick={() => setCreateOpen(true)}>
+          <Button onClick={() => setCreateOpen(true)}>
             <Plus aria-hidden /> Create organization
           </Button>
         }
       />
 
-      <div className="relative max-w-md">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-        <Input
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search organizations…"
-          aria-label="Search organizations"
-          className="pl-8"
-        />
+      <div className="flex flex-wrap items-end gap-x-2 gap-y-3">
+        <div className="relative min-w-56 flex-1 max-w-md">
+          <Search
+            className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+            strokeWidth={1.5}
+            aria-hidden
+          />
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search by name or slug"
+            aria-label="Search organizations"
+            className="h-[34px] pl-8"
+          />
+        </div>
       </div>
 
       <DataTable
@@ -237,7 +258,22 @@ export default function OrganizationsPage() {
           <EmptyState
             icon={Building2}
             title={table.query ? "No organizations match this search" : "No organizations yet"}
-            description={table.query ? "Try another name or slug." : "Create an organization or let users create their own."}
+            description={
+              table.query
+                ? "Search another name or slug, or clear the search."
+                : "Create an organization here, or let users create their own from your app."
+            }
+            action={
+              table.query ? (
+                <Button variant="outline" size="sm" onClick={() => setSearch("")}>
+                  Clear search
+                </Button>
+              ) : (
+                <Button size="sm" onClick={() => setCreateOpen(true)}>
+                  <Plus aria-hidden /> Create organization
+                </Button>
+              )
+            }
           />
         }
       />
@@ -251,11 +287,6 @@ export default function OrganizationsPage() {
         disabled={organizations.isFetching}
       />
 
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <Users className="size-3.5" aria-hidden />
-        Row click opens the organization detail.
-      </div>
-
       <CreateOrganizationDialog open={createOpen} onOpenChange={setCreateOpen} />
       <ConfirmDialog
         open={!!deleting}
@@ -264,9 +295,11 @@ export default function OrganizationsPage() {
         }}
         title="Delete organization?"
         description={
-          deleting ? `${deleting.name} and all memberships, invitations and domains will be permanently removed.` : undefined
+          deleting
+            ? `${deleting.name} is removed with every membership, invitation and domain. Members lose access immediately and this cannot be undone.`
+            : undefined
         }
-        confirmLabel="Delete"
+        confirmLabel="Delete organization"
         destructive
         onConfirm={async () => {
           if (!deleting) return;

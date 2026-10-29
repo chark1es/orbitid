@@ -13,6 +13,14 @@ function isIdSegment(segment: string): boolean {
   return segment.includes("_") || segment.length > 24 || /^[a-z]+_[A-Za-z0-9]/.test(segment);
 }
 
+function labelFor(segment: string, parent: string | undefined): string {
+  const known = ROUTE_LABELS[segment];
+  if (known) return known;
+  if (parent === "settings") return segment.replace(/-/g, " ");
+  if (isIdSegment(segment)) return segment;
+  return segment.replace(/-/g, " ");
+}
+
 export function Breadcrumbs() {
   const { pathname } = useLocation();
   const segments = pathname.split("/").filter(Boolean);
@@ -22,29 +30,26 @@ export function Breadcrumbs() {
       <Breadcrumb>
         <BreadcrumbList>
           <BreadcrumbItem>
-            <BreadcrumbPage>Overview</BreadcrumbPage>
+            <BreadcrumbPage className="font-medium">Overview</BreadcrumbPage>
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
     );
   }
 
-  const crumbs: { label: string; href?: string }[] = [];
-  segments.forEach((segment, index) => {
-    const href = `/${segments.slice(0, index + 1).join("/")}`;
-    const parent = segments[index - 1];
-    const label =
-      ROUTE_LABELS[segment] ??
-      (parent === "settings" ? segment.replace(/-/g, " ") : isIdSegment(segment) ? segment : segment.replace(/-/g, " "));
-    crumbs.push({ label, href });
-  });
+  const crumbs = segments.map((segment, index) => ({
+    label: labelFor(segment, segments[index - 1]),
+    href: `/${segments.slice(0, index + 1).join("/")}`,
+  }));
 
   return (
-    <Breadcrumb className="min-w-0">
-      <BreadcrumbList className="flex-nowrap">
+    <Breadcrumb className="min-w-0 flex-1 overflow-hidden">
+      <BreadcrumbList className="flex-nowrap text-muted-foreground">
         <BreadcrumbItem className="hidden sm:inline-flex">
           <BreadcrumbLink asChild>
-            <Link to="/">OrbitID</Link>
+            <Link to="/" className="font-data text-xs">
+              OrbitID
+            </Link>
           </BreadcrumbLink>
         </BreadcrumbItem>
         <BreadcrumbSeparator className="hidden sm:block" />
@@ -54,12 +59,10 @@ export function Breadcrumbs() {
             <span key={crumb.href} className="flex min-w-0 items-center gap-1.5">
               <BreadcrumbItem className={isLast ? "min-w-0" : "hidden md:inline-flex"}>
                 {isLast ? (
-                  <BreadcrumbPage className="max-w-[36ch] truncate capitalize">{crumb.label}</BreadcrumbPage>
+                  <BreadcrumbPage className="max-w-[32ch] truncate font-medium">{crumb.label}</BreadcrumbPage>
                 ) : (
                   <BreadcrumbLink asChild>
-                    <Link to={crumb.href ?? "/"} className="capitalize">
-                      {crumb.label}
-                    </Link>
+                    <Link to={crumb.href}>{crumb.label}</Link>
                   </BreadcrumbLink>
                 )}
               </BreadcrumbItem>

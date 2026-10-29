@@ -16,11 +16,12 @@ import {
   signInResetPassword,
   toAuthError,
 } from "../_shared/api";
-import type { SignInFactorView } from "../_shared/w6";
+import type { OrbitInstance, SignInFactorView } from "../_shared/w6";
 import { useAuthRuntime } from "../_shared/w6";
 import { OrbitIDOptionsContext } from "../../../provider";
 import type { SignInProps, SignInResource } from "../_shared/types";
 import { currentClient } from "../_shared/api";
+import { safeRedirectUrlFromLocation } from "../../../lib/redirects";
 
 export const SIGN_IN_STEPS = [
   "start",
@@ -36,6 +37,7 @@ export const SIGN_IN_STEPS = [
   "enterprise-sso",
   "transfer",
   "sso-callback",
+  "setup-mfa",
   "success",
 ] as const;
 
@@ -87,7 +89,20 @@ export interface SignInFlow {
   selectFirstFactor: (factor: SignInFactorView) => Promise<void>;
   enterSecondFactor: (signIn: SignInResource) => Promise<void>;
   complete: (signIn: SignInResource) => Promise<void>;
+  /** The session the sign-in created, while the server keeps it `pending` for MFA enrolment. */
+  pendingSessionId: string | null;
+  /** Continue after enrolment: the server activated the session, so navigate to the redirect. */
+  completeSetup: () => void;
+  /** True once enrolment finished, so the pending-session guard stops pulling the UI back. */
+  setupCompleted: boolean;
   pollCompletion: () => Promise<void>;
+}
+
+/** True when the server created the session as `pending` (required MFA, no factor enrolled yet). */
+function isPendingSession(orbit: OrbitInstance, sessionId: string | null): boolean {
+  if (!sessionId) return false;
+  const sessions = currentClient(orbit)?.sessions ?? [];
+  return sessions.some((session) => session.id === sessionId && session.status === "pending");
 }
 
 export function useSignInFlow(props: SignInProps, step: SignInStep, go: (step: SignInStep) => void): SignInFlow {
@@ -104,11 +119,16 @@ export function useSignInFlow(props: SignInProps, step: SignInStep, go: (step: S
   );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pendingSessionId, setPendingSessionId] = useState<string | null>(() =>
+    runtime.session?.status === "pending" ? runtime.session.id : null,
+  );
+  const [setupCompleted, setSetupCompleted] = useState(false);
 
   const redirectTarget = useMemo(
     () =>
       props.forceRedirectUrl ??
       options.signInForceRedirectUrl ??
+      safeRedirectUrlFromLocation({ allowedRedirectOrigins: options.allowedRedirectOrigins }) ??
       props.fallbackRedirectUrl ??
       options.signInFallbackRedirectUrl ??
       undefined,
@@ -140,18 +160,32 @@ export function useSignInFlow(props: SignInProps, step: SignInStep, go: (step: S
         setError(t("common.internalError"));
         return;
       }
+      const sessionId = next.created_session_id;
       setBusy(true);
       try {
-        await finishAuth(runtime, next.created_session_id, redirectTarget);
+        if (isPendingSession(orbit, sessionId)) {
+          setSignIn(next);
+          setPendingSessionId(sessionId);
+          go("setup-mfa");
+          return;
+        }
+        await finishAuth(runtime, sessionId, redirectTarget);
         setSignIn(next);
         if (!redirectTarget) go("success");
       } catch (caught) {
+        // The server rejects activation for a pending session; show the enrolment step instead.
+        if (toAuthError(caught).code === "session_pending") {
+          setSignIn(next);
+          setPendingSessionId(sessionId);
+          go("setup-mfa");
+          return;
+        }
         setError(errorMessage(t, caught));
       } finally {
         setBusy(false);
       }
     },
-    [runtime, redirectTarget, t, go],
+    [orbit, runtime, redirectTarget, t, go],
   );
 
   const enterSecondFactor = useCallback(
@@ -162,11 +196,12 @@ export function useSignInFlow(props: SignInProps, step: SignInStep, go: (step: S
         factors.find((factor) => factor.default) ??
         factors.find((factor) => factor.strategy === "totp") ??
         factors[0];
-      if (preferred?.strategy === "phone_code") {
+      if (preferred?.strategy === "phone_code" || preferred?.strategy === "email_code") {
         await run(() =>
           signInPrepareSecondFactor(orbit, {
-            strategy: "phone_code",
+            strategy: preferred.strategy,
             ...(preferred.phone_number_id ? { phoneNumberId: preferred.phone_number_id } : {}),
+            ...(preferred.email_address_id ? { emailAddressId: preferred.email_address_id } : {}),
           }),
         );
       }
@@ -336,6 +371,16 @@ export function useSignInFlow(props: SignInProps, step: SignInStep, go: (step: S
   );
 
   const authenticateWithPasskey = useCallback(async (options?: { autofill?: boolean }) => {
+    if (options?.autofill) {
+      // Conditional UI runs in the background: a dismissed or unavailable prompt is not an error to show.
+      try {
+        const result = await signInAuthenticateWithPasskey(orbit, options);
+        if (result?.signIn) await route(result.signIn);
+      } catch {
+        /* the user kept typing an identifier instead */
+      }
+      return;
+    }
     const result = await run(() => signInAuthenticateWithPasskey(orbit, options ?? {}));
     if (result?.signIn) await route(result.signIn);
   }, [orbit, run, route]);
@@ -390,24 +435,63 @@ export function useSignInFlow(props: SignInProps, step: SignInStep, go: (step: S
       }
     }
     if (activeSession) {
+      if (isPendingSession(orbit, activeSession)) {
+        setPendingSessionId(activeSession);
+        go("setup-mfa");
+        return;
+      }
       try {
         await finishAuth(runtime, activeSession, redirectTarget);
         if (!redirectTarget) go("success");
       } catch (caught) {
+        if (toAuthError(caught).code === "session_pending") {
+          setPendingSessionId(activeSession);
+          go("setup-mfa");
+          return;
+        }
         setError(errorMessage(t, caught));
       }
     }
   }, [orbit, runtime, redirectTarget, complete, go, t]);
 
+  const completeSetup = useCallback(() => {
+    setPendingSessionId(null);
+    setSetupCompleted(true);
+    if (redirectTarget) runtime.navigate(redirectTarget, { replace: true });
+    else go("success");
+  }, [runtime, redirectTarget, go]);
+
+  // A magic link opened in a different browser than the one that asked for it is refused; say so instead of showing nothing.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (new URLSearchParams(window.location.search).get("__orbit_status") === "different_browser") {
+      setError(t("unstable__errors.link_different_browser"));
+    }
+  }, [t]);
+
   // Sign-in tokens and impersonation links from the Backend API arrive as `?__orbit_ticket=`.
+  // A visitor who already has an active session skips the form and goes where the sign-in would have led.
   const ticketStarted = useRef(false);
   useEffect(() => {
     if (!runtime.loaded || ticketStarted.current || typeof window === "undefined") return;
     const ticket = new URLSearchParams(window.location.search).get("__orbit_ticket");
-    if (!ticket) return;
+    if (!ticket) {
+      const leavesThisPage = (target: string) => {
+        try {
+          return new URL(target, window.location.href).pathname !== window.location.pathname;
+        } catch {
+          return false;
+        }
+      };
+      if (runtime.session?.status === "active" && redirectTarget && leavesThisPage(redirectTarget)) {
+        ticketStarted.current = true;
+        runtime.navigate(redirectTarget, { replace: true });
+      }
+      return;
+    }
     ticketStarted.current = true;
     void create({ strategy: "ticket", ticket });
-  }, [runtime.loaded, create]);
+  }, [runtime, redirectTarget, create]);
 
   return {
     signIn,
@@ -431,6 +515,9 @@ export function useSignInFlow(props: SignInProps, step: SignInStep, go: (step: S
     selectFirstFactor,
     enterSecondFactor,
     complete,
+    pendingSessionId,
+    completeSetup,
+    setupCompleted,
     pollCompletion,
   };
 }

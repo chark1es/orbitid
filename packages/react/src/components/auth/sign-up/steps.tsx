@@ -13,6 +13,7 @@ import {
 } from "@orbitid/ui";
 import { ArrowLeftIcon, CheckCircle2Icon, Loader2Icon, MailIcon } from "lucide-react";
 import { useAuthRuntime } from "../_shared/w6";
+import type { TranslationKey } from "../../../localization";
 import { useElementClasses } from "../_shared/appearance";
 import { CaptchaWidget } from "../_shared/captcha";
 import { Field } from "../_shared/field";
@@ -447,7 +448,7 @@ export function VerifyEmailLinkStep({ flow }: SignUpStepProps) {
   );
 }
 
-const FIELD_LABELS: Record<string, string> = {
+const FIELD_LABELS: Record<string, TranslationKey> = {
   email_address: "formFieldLabel__emailAddress",
   phone_number: "formFieldLabel__phoneNumber",
   username: "formFieldLabel__username",
@@ -571,7 +572,7 @@ export function SignUpSuccessStep() {
   const { t, environment, navigate } = runtime;
   return (
     <div className="flex flex-col items-center gap-3 py-2 text-center">
-      <CheckCircle2Icon className="size-10 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+      <CheckCircle2Icon className="size-10 text-go" aria-hidden="true" />
       <p className="text-sm font-medium">{t("signUp.success.title", { applicationName: environment.app.name })}</p>
       <p className="text-sm text-muted-foreground">{t("signUp.success.message")}</p>
       <Button type="button" className="w-full" onClick={() => navigate(environment.app.homeUrl)}>

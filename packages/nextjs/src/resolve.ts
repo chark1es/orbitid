@@ -35,6 +35,7 @@ export async function resolveRequestAuthState(
       jwtKey: env.jwtKey,
       jwksUrl: env.jwksUrl,
       apiUrl: env.apiUrl,
+      issuer: env.issuer,
       authorizedParties: env.authorizedParties,
       clockSkewInMs: env.clockSkewInMs,
     });
@@ -56,6 +57,7 @@ export async function resolveRequestAuthState(
     jwtKey: env.jwtKey,
     jwksUrl: env.jwksUrl,
     apiUrl: env.apiUrl,
+    issuer: env.issuer,
     authorizedParties: env.authorizedParties,
     clockSkewInMs: env.clockSkewInMs,
   });
@@ -63,8 +65,10 @@ export async function resolveRequestAuthState(
   if (result.valid) {
     return { status: "signed-in", token: result.token, claims: result.claims, url };
   }
-  if (result.reason === "expired" && uatActive) {
-    return handshake(url, AUTH_REASONS.expiredToken);
+  // A dead token next to a live client is exactly what the handshake exists for: ask the Frontend API
+  // for a fresh one instead of sending a signed-in visitor to the sign-in page.
+  if ((result.reason === "expired" || result.reason === "invalid") && uatActive) {
+    return handshake(url, result.reason === "expired" ? AUTH_REASONS.expiredToken : AUTH_REASONS.invalidToken);
   }
   return signedOut(url, result.reason, result.message, result.claims ?? null);
 }

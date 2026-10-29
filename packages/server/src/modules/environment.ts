@@ -33,12 +33,13 @@ export function buildEnvironment(ctx: AppContext): EnvironmentJSON {
   }
   if (st.attributes.password.enabled && st.attributes.password.usedForFirstFactor) firstFactors.push("password");
   if (st.attributes.phoneNumber.enabled && st.attributes.phoneNumber.usedForFirstFactor) firstFactors.push("phone_code");
-  if (st.attributes.passkey.enabled) firstFactors.push("passkey");
+  if (st.attributes.passkey.enabled && st.attributes.passkey.usedForFirstFactor) firstFactors.push("passkey");
   for (const p of social) firstFactors.push(p.strategy);
 
   const secondFactors: string[] = [];
   if (st.attributes.authenticatorApp.enabled) secondFactors.push("totp");
   if (st.attributes.phoneNumber.enabled && st.attributes.phoneNumber.usedForSecondFactor) secondFactors.push("phone_code");
+  if (st.attributes.emailAddress.enabled && st.attributes.emailAddress.usedForSecondFactor) secondFactors.push("email_code");
   if (st.attributes.backupCode.enabled) secondFactors.push("backup_code");
 
   const identification: string[] = [];
@@ -58,6 +59,8 @@ export function buildEnvironment(ctx: AppContext): EnvironmentJSON {
       single_session_mode: !st.session.multiSession,
       sign_up_mode: st.signUp.mode,
       legal_consent_required: st.signUp.legalConsentRequired,
+      trusted_devices: { enabled: st.session.trustedDevicesEnabled, days: st.session.trustedDeviceDays },
+      anonymous: { enabled: st.anonymous.enabled },
     },
     user_settings: {
       attributes: {
@@ -95,6 +98,7 @@ export function buildEnvironment(ctx: AppContext): EnvironmentJSON {
       force_organization_selection: st.organizations.forceOrganizationSelection,
       creator_role: st.organizations.creatorRole,
       default_role: st.organizations.defaultRole,
+      max_created_organizations_per_user: st.organizations.maxCreatedOrganizationsPerUser,
     },
     display_config: {
       application_name: st.application.name,

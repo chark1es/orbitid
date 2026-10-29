@@ -3,6 +3,7 @@ import { WEBHOOK_EVENT_TYPES, defaultInstanceSettings } from "@orbitid/shared";
 import {
   SAMPLE_TEMPLATE_CONTEXT,
   buildSettingsPatch,
+  emailFromError,
   groupWebhookEvents,
   humanDuration,
   insertAtCursor,
@@ -15,10 +16,13 @@ import {
   previewTemplateClaims,
   renderTemplateString,
   reservedJwtClaimErrors,
+  resolveEmailProvider,
+  resendApiKeyError,
   roleKeyError,
   secretInputValue,
   secretIsConfigured,
   shouldPreserveSecret,
+  smtpUrlError,
   textToList,
 } from "../settings";
 
@@ -72,16 +76,19 @@ describe("buildSettingsPatch", () => {
     expect(buildSettingsPatch(base, draft)).toEqual({ email: { smtpUrl: "smtp://new" } });
   });
 
-  it("does not partially mask a real secret into the patch", () => {
+  it("sends a typed secret that merely contains a bullet instead of dropping it", () => {
     const base = { security: { captchaSecret: "abcdef123456" } };
     const draft = { security: { captchaSecret: "abcdef••••" } };
-    expect(buildSettingsPatch(base, draft)).toEqual({});
+    expect(buildSettingsPatch(base, draft)).toEqual({ security: { captchaSecret: "abcdef••••" } });
   });
 
   it("detects masked server values", () => {
     expect(isMaskedSecret("••••")).toBe(true);
     expect(isMaskedSecret("••••••••")).toBe(true);
-    expect(isMaskedSecret("sk_live_••••••••")).toBe(true);
+    // Only the server's own mask counts; a value that merely contains bullets or stars is a real value.
+    expect(isMaskedSecret("sk_live_••••••••")).toBe(false);
+    expect(isMaskedSecret("smtp://user:p•ssw0rd@mail.example.com:587")).toBe(false);
+    expect(isMaskedSecret("xxxx")).toBe(false);
     expect(isMaskedSecret("smtp://user:pass@host")).toBe(false);
     expect(shouldPreserveSecret("")).toBe(true);
     expect(shouldPreserveSecret(undefined)).toBe(true);
@@ -90,6 +97,31 @@ describe("buildSettingsPatch", () => {
     expect(secretInputValue("actual")).toBe("actual");
     expect(secretIsConfigured("••••••••")).toBe(true);
     expect(secretIsConfigured("")).toBe(false);
+  });
+
+  it("keeps every masked secret the server can send, including Resend and the Apple key", () => {
+    const base = {
+      email: { resendApiKey: "re_live_stored", smtpUrl: "smtp://user:pass@host:587" },
+      sms: { twilioAuthToken: "stored-token" },
+      security: { captchaSecret: "stored-captcha" },
+      social: {
+        apple: { clientSecret: "apple-secret", applePrivateKey: "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----" },
+      },
+    };
+    const draft = {
+      email: { resendApiKey: "••••", smtpUrl: "••••" },
+      sms: { twilioAuthToken: "••••" },
+      security: { captchaSecret: "••••" },
+      social: { apple: { clientSecret: "••••", applePrivateKey: "••••" } },
+    };
+    expect(buildSettingsPatch(base, draft)).toEqual({});
+  });
+
+  it("replaces a masked secret with a typed value and clears it with an explicit empty follow-up", () => {
+    const base = { email: { resendApiKey: "re_live_stored" } };
+    expect(buildSettingsPatch(base, { email: { resendApiKey: "re_live_new" } })).toEqual({
+      email: { resendApiKey: "re_live_new" },
+    });
   });
 });
 
@@ -205,6 +237,52 @@ describe("role and permission keys", () => {
     expect(permissionKeyError("billing:manage")).toMatch(/org:/);
     expect(permissionKeyError("org:billing:manage:extra")).toMatch(/org:<feature>:<action>/);
     expect(permissionKeyError("org:Billing:Manage")).toMatch(/lowercase/);
+  });
+});
+
+describe("email provider resolution", () => {
+  it("follows the server: an explicit provider wins, auto picks the first configured transport", () => {
+    const email = defaultInstanceSettings().email;
+    expect(resolveEmailProvider(email)).toMatchObject({ provider: "console", automatic: true });
+    expect(resolveEmailProvider({ ...email, resendApiKey: "••••" })).toMatchObject({ provider: "resend", automatic: true });
+    expect(resolveEmailProvider({ ...email, smtpUrl: "••••" })).toMatchObject({ provider: "smtp", automatic: true });
+    expect(resolveEmailProvider({ ...email, smtpUrl: "••••", resendApiKey: "••••" })).toMatchObject({ provider: "resend" });
+    expect(resolveEmailProvider({ ...email, provider: "console", resendApiKey: "••••" })).toMatchObject({
+      provider: "console",
+      automatic: false,
+    });
+  });
+
+  it("reports a selected provider that has no credential instead of falling back", () => {
+    const email = defaultInstanceSettings().email;
+    expect(resolveEmailProvider({ ...email, provider: "resend" })).toMatchObject({ provider: "resend", missing: "resendApiKey" });
+    expect(resolveEmailProvider({ ...email, provider: "smtp" })).toMatchObject({ provider: "smtp", missing: "smtpUrl" });
+    expect(resolveEmailProvider({ ...email, provider: "resend", resendApiKey: "••••" }).missing).toBeNull();
+  });
+
+  it("validates the from address the way the server does", () => {
+    expect(emailFromError("OrbitID <no-reply@example.com>")).toBeNull();
+    expect(emailFromError("no-reply@localhost")).toBeNull();
+    expect(emailFromError("")).toMatch(/required/);
+    expect(emailFromError("no-reply@example.com\r\nBcc: x@example.com")).toMatch(/line breaks/);
+    expect(emailFromError("OrbitID")).toMatch(/email address/);
+    expect(emailFromError("<no-reply@example.com>")).toBeNull();
+  });
+
+  it("accepts only smtp and smtps URLs on a valid port", () => {
+    expect(smtpUrlError("")).toBeNull();
+    expect(smtpUrlError("smtp://user:pass@mail.example.com:587")).toBeNull();
+    expect(smtpUrlError("smtps://mail.example.com")).toBeNull();
+    expect(smtpUrlError("https://mail.example.com")).toMatch(/smtp:\/\//);
+    expect(smtpUrlError("smtp://mail.example.com/path")).toMatch(/path/);
+    expect(smtpUrlError("smtp://mail.example.com?x=1")).toMatch(/query/);
+    expect(smtpUrlError("smtp://mail.example.com:99999")).toMatch(/port below 65535/);
+    expect(smtpUrlError("not a url")).toMatch(/smtp:\/\//);
+  });
+
+  it("refuses line breaks in a Resend key", () => {
+    expect(resendApiKeyError("re_live_ok")).toBeNull();
+    expect(resendApiKeyError("re_live\r\nX: y")).toMatch(/line breaks/);
   });
 });
 

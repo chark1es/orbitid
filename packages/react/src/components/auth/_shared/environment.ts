@@ -68,6 +68,10 @@ export interface EnvironmentView {
   passkey: { allowAutofill: boolean; showSignInButton: boolean };
   singleSessionMode: boolean;
   secondFactors: string[];
+  /** Trusted browsers may skip the second factor (from `auth_config.trusted_devices`). */
+  trustedDevices: { enabled: boolean; days: number };
+  /** Guest sign-up is available (from `auth_config.anonymous`). */
+  anonymous: { enabled: boolean };
   actions: { deleteSelf: boolean; createOrganization: boolean };
   captcha: CaptchaSettingsView;
 }
@@ -144,6 +148,8 @@ export function createDefaultEnvironment(): EnvironmentJSON {
       single_session_mode: false,
       sign_up_mode: "public",
       legal_consent_required: false,
+      trusted_devices: { enabled: false, days: 30 },
+      anonymous: { enabled: false },
     },
     user_settings: {
       attributes: {
@@ -237,6 +243,7 @@ export function createDefaultEnvironment(): EnvironmentJSON {
     organization_settings: {
       enabled: false,
       max_allowed_memberships: 5,
+      max_created_organizations_per_user: null,
       creation_enabled: true,
       domains_enabled: false,
       membership_requests_enabled: false,
@@ -252,7 +259,7 @@ export function createDefaultEnvironment(): EnvironmentJSON {
       support_email: null,
       terms_url: null,
       privacy_url: null,
-      primary_color: "#6366f1",
+      primary_color: "#2b2522",
       theme: "system",
       branded: true,
       captcha_enabled: false,
@@ -282,6 +289,11 @@ function booleanValue(record: Record<string, unknown>, snake: string, camel?: st
 function numberValue(record: Record<string, unknown>, snake: string, camel: string | undefined, fallback: number): number {
   const value = pick(record, snake, camel);
   return typeof value === "number" ? value : fallback;
+}
+
+function nullableNumberValue(record: Record<string, unknown>, snake: string, camel: string): number | null {
+  const value = pick(record, snake, camel);
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 /**
@@ -359,6 +371,19 @@ export function environmentFromResource(raw: unknown): EnvironmentJSON | null {
       single_session_mode: booleanValue(auth, "single_session_mode", "singleSessionMode"),
       sign_up_mode: stringValue(auth, "sign_up_mode", "signUpMode", defaults.auth_config.sign_up_mode) as EnvironmentJSON["auth_config"]["sign_up_mode"],
       legal_consent_required: booleanValue(auth, "legal_consent_required", "legalConsentRequired"),
+      trusted_devices: (() => {
+        const rawTrusted = pick(auth, "trusted_devices", "trustedDevices");
+        const record = isRecord(rawTrusted) ? rawTrusted : {};
+        return {
+          enabled: booleanValue(record, "enabled", undefined, defaults.auth_config.trusted_devices.enabled),
+          days: numberValue(record, "days", undefined, defaults.auth_config.trusted_devices.days),
+        };
+      })(),
+      anonymous: (() => {
+        const rawAnonymous = auth.anonymous;
+        const record = isRecord(rawAnonymous) ? rawAnonymous : {};
+        return { enabled: booleanValue(record, "enabled", undefined, defaults.auth_config.anonymous.enabled) };
+      })(),
     },
     user_settings: {
       attributes,
@@ -391,6 +416,11 @@ export function environmentFromResource(raw: unknown): EnvironmentJSON | null {
     organization_settings: {
       enabled: booleanValue(organizationRaw, "enabled"),
       max_allowed_memberships: numberValue(organizationRaw, "max_allowed_memberships", "maxAllowedMemberships", 5),
+      max_created_organizations_per_user: nullableNumberValue(
+        organizationRaw,
+        "max_created_organizations_per_user",
+        "maxCreatedOrganizationsPerUser",
+      ),
       creation_enabled: booleanValue(organizationRaw, "creation_enabled", "creationEnabled", true),
       domains_enabled: booleanValue(organizationRaw, "domains_enabled", "domainsEnabled"),
       membership_requests_enabled: booleanValue(organizationRaw, "membership_requests_enabled", "membershipRequestsEnabled"),
@@ -483,7 +513,7 @@ export function normalizeEnvironment(
       supportEmail: display.support_email ?? null,
       termsUrl: display.terms_url ?? null,
       privacyUrl: display.privacy_url ?? null,
-      primaryColor: display.primary_color || "#6366f1",
+      primaryColor: display.primary_color || "#2b2522",
       theme: display.theme || "system",
       branded: display.branded !== false,
       developmentMode: Boolean(
@@ -516,6 +546,11 @@ export function normalizeEnvironment(
     },
     singleSessionMode: Boolean(env.auth_config?.single_session_mode),
     secondFactors: env.auth_config?.second_factors ?? [],
+    trustedDevices: {
+      enabled: Boolean(env.auth_config?.trusted_devices?.enabled),
+      days: Number(env.auth_config?.trusted_devices?.days ?? 30),
+    },
+    anonymous: { enabled: Boolean(env.auth_config?.anonymous?.enabled) },
     actions: {
       deleteSelf: userSettings?.actions?.delete_self !== false,
       createOrganization: userSettings?.actions?.create_organization !== false,

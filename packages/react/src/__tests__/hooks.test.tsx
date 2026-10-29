@@ -44,7 +44,7 @@ function AuthSnapshot() {
 }
 
 describe("useAuth", () => {
-  it("projects session claims into the Clerk-compatible shape", async () => {
+  it("projects session claims into the auth state shape", async () => {
     const jwt = makeJwt(
       sessionClaims({
         org_id: "org_7",
@@ -121,15 +121,17 @@ describe("useAuth", () => {
     function Probe() {
       const signedOut = useAuth();
       const signedIn = useAuth({ treatPendingAsSignedOut: false });
+      const { session } = useSession();
       return (
         <p data-testid="pending">
-          {String(signedOut.isSignedIn)}:{String(signedIn.isSignedIn)}:{signedOut.sessionStatus}
+          {String(signedOut.isSignedIn)}:{String(signedIn.isSignedIn)}:{signedOut.sessionStatus}:
+          {session?.status}
         </p>
       );
     }
 
     renderWithProvider(<Probe />, { instance });
-    expect(screen.getByTestId("pending").textContent).toBe("false:true:pending");
+    expect(screen.getByTestId("pending").textContent).toBe("false:true:pending:pending");
   });
 });
 
@@ -171,6 +173,34 @@ describe("resource hooks", () => {
       signInStatus: "needs_identifier",
       missingFields: ["email_address"],
     });
+  });
+
+  it("exposes isAnonymous on useUser", () => {
+    const instance = createFakeOrbitID({
+      loaded: true,
+      session: fakeSession(),
+      user: fakeUser({ isAnonymous: true }),
+    });
+
+    function Probe() {
+      const { isAnonymous, user } = useUser();
+      return <p data-testid="anonymous">{JSON.stringify({ isAnonymous, id: user?.id })}</p>;
+    }
+
+    renderWithProvider(<Probe />, { instance });
+    expect(JSON.parse(screen.getByTestId("anonymous").textContent!)).toMatchObject({ isAnonymous: true, id: "user_1" });
+  });
+
+  it("reports isAnonymous false for a regular account", () => {
+    const instance = createFakeOrbitID({ loaded: true, session: fakeSession(), user: fakeUser() });
+
+    function Probe() {
+      const { isAnonymous } = useUser();
+      return <p data-testid="anonymous">{String(isAnonymous)}</p>;
+    }
+
+    renderWithProvider(<Probe />, { instance });
+    expect(screen.getByTestId("anonymous").textContent).toBe("false");
   });
 });
 

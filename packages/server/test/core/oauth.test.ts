@@ -6,6 +6,7 @@ import { registerOAuthProvider, resetOAuthProviders, type OAuthAdapter } from ".
 import type { AppContext } from "../../src/context";
 import type { ExternalProfile } from "../../src/services/external-identity";
 import { errorsOf, getClient, setup, signUpUser, testClient } from "./helpers";
+import { first } from "../../src/lib/db";
 
 function fakeGoogle(profile: ExternalProfile) {
   return (): OAuthAdapter => ({
@@ -71,7 +72,7 @@ describe("social OAuth", () => {
     expect(completed.response.status).toBe("complete");
     expect(completed.response.created_session_id).toMatch(/^sess_/);
 
-    const external = ctx.db.select().from(schema.externalAccounts).where(eq(schema.externalAccounts.userId, completed.response.created_user_id)).get()!;
+    const external = first(await ctx.db.select().from(schema.externalAccounts).where(eq(schema.externalAccounts.userId, completed.response.created_user_id)))!;
     expect(external.provider).toBe("google");
     expect(external.accessTokenEnc).not.toBe("access-token-value");
     expect(external.accessTokenEnc).toMatch(/^v1\./);
@@ -166,7 +167,7 @@ describe("social OAuth", () => {
     const { app, ctx } = await setup();
     await enableGoogle(ctx);
     const owner = await signUpUser(app, { email: "mfa-oauth@example.com" });
-    ctx.db.update(schema.users).set({ totpVerified: true }).where(eq(schema.users.id, owner.userId)).run();
+    await ctx.db.update(schema.users).set({ totpVerified: true }).where(eq(schema.users.id, owner.userId));
     registerOAuthProvider("google", fakeGoogle({ provider: "google", providerUserId: "g-mfa", email: "mfa-oauth@example.com", emailVerified: true }));
 
     const attacker = testClient(app);
@@ -200,7 +201,7 @@ describe("social OAuth", () => {
     });
     expect(result.response.status).not.toBe("complete");
     expect(result.response.unverified_fields).toContain("email_address");
-    const victim = ctx.db.select().from(schema.emailAddresses).where(eq(schema.emailAddresses.email, "victim@example.com")).get();
+    const victim = first(await ctx.db.select().from(schema.emailAddresses).where(eq(schema.emailAddresses.email, "victim@example.com")));
     expect(victim?.verified ?? false).toBe(false);
   });
 

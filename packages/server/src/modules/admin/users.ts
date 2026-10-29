@@ -1,6 +1,6 @@
 // Backend API users: CRUD, filters, metadata, ban/lock, MFA, identifiers, impersonation.
 import { Hono, type Context } from "hono";
-import { and, eq, gte, inArray, like, lt, or, sql, type SQL } from "drizzle-orm";
+import { and, count, eq, exists, gte, inArray, lt, or, sql, type SQL } from "drizzle-orm";
 import { authenticator } from "otplib";
 import { z } from "zod";
 import { ErrorCodes, ID_PREFIX, OrbitError } from "@orbitid/shared";
@@ -8,15 +8,18 @@ import { parseBody } from "../../lib/http";
 import { decrypt, encrypt, sha256 } from "../../lib/crypto";
 import { newId } from "../../lib/ids";
 import * as s from "../../db/schema";
-import { serializeUser, serializeMembership } from "../../serializers";
+import { serializeUser, serializeMembership, serializeTrustedDevice } from "../../serializers";
 import { emitEvent } from "../../services/webhooks";
 import { audit } from "../../services/audit";
 import { onUserDeleted } from "../../services/orgs";
+import { listTrustedDevices, revokeAllTrustedDevices, revokeTrustedDevice } from "../../services/trusted-devices";
 import type { AppContext } from "../../context";
 import { assertPasswordHasher, assertPasswordPolicy, hashPassword, verifyPassword } from "./passwords";
 import {
   bool, deleted, getUserOrThrow, listParams, mergeMetadata, metadataSchema, normalizeEmail, page, parseOrderBy, queryValues,
 } from "./shared";
+import { first, containsText } from "../../lib/db";
+import { assertImageBytes, IMAGE_CONTENT_TYPES } from "../../lib/images";
 
 const AUDIT_ACTOR = "secret_key";
 const MAX_PROFILE_IMAGE_BYTES = 512 * 1024;
@@ -76,20 +79,19 @@ const metadataPatchSchema = z.object({
 });
 
 /** Applies `query`, array filters, `banned`, `locked`, `mfa`, `last_active_at_since` and date bounds. Array filters are intersected. */
-function userWhere(ctx: AppContext, c: Context): SQL | undefined {
+async function userWhere(ctx: AppContext, c: Context): Promise<SQL | undefined> {
   const conds: SQL[] = [];
   const search = c.req.query("query")?.trim();
   if (search) {
-    const pattern = `%${search}%`;
     conds.push(
       or(
-        like(s.users.id, pattern),
-        like(s.users.username, pattern),
-        like(s.users.firstName, pattern),
-        like(s.users.lastName, pattern),
-        sql`(${s.users.firstName} || ' ' || ${s.users.lastName}) LIKE ${pattern}`,
-        sql`EXISTS (SELECT 1 FROM email_addresses e WHERE e.user_id = ${s.users.id} AND e.email LIKE ${pattern})`,
-        sql`EXISTS (SELECT 1 FROM phone_numbers p WHERE p.user_id = ${s.users.id} AND p.phone LIKE ${pattern})`,
+        containsText(s.users.id, search),
+        containsText(s.users.username, search),
+        containsText(s.users.firstName, search),
+        containsText(s.users.lastName, search),
+        containsText(sql`(coalesce(${s.users.firstName}, '') || ' ' || coalesce(${s.users.lastName}, ''))`, search),
+        exists(ctx.db.select({ one: sql`1` }).from(s.emailAddresses).where(and(eq(s.emailAddresses.userId, s.users.id), containsText(s.emailAddresses.email, search)))),
+        exists(ctx.db.select({ one: sql`1` }).from(s.phoneNumbers).where(and(eq(s.phoneNumbers.userId, s.users.id), containsText(s.phoneNumbers.phone, search)))),
       )!,
     );
   }
@@ -105,26 +107,26 @@ function userWhere(ctx: AppContext, c: Context): SQL | undefined {
 
   const emails = queryValues(c, "email_address").map(normalizeEmail);
   if (emails.length) {
-    restrictTo(ctx.db.select({ id: s.emailAddresses.userId }).from(s.emailAddresses).where(inArray(s.emailAddresses.email, emails)).all().flatMap((r) => (r.id ? [r.id] : [])));
+    restrictTo((await ctx.db.select({ id: s.emailAddresses.userId }).from(s.emailAddresses).where(inArray(s.emailAddresses.email, emails))).flatMap((r) => (r.id ? [r.id] : [])));
   }
   const phones = queryValues(c, "phone_number");
   if (phones.length) {
-    restrictTo(ctx.db.select({ id: s.phoneNumbers.userId }).from(s.phoneNumbers).where(inArray(s.phoneNumbers.phone, phones)).all().flatMap((r) => (r.id ? [r.id] : [])));
+    restrictTo((await ctx.db.select({ id: s.phoneNumbers.userId }).from(s.phoneNumbers).where(inArray(s.phoneNumbers.phone, phones))).flatMap((r) => (r.id ? [r.id] : [])));
   }
   const usernames = queryValues(c, "username").map((u) => u.toLowerCase());
   if (usernames.length) {
-    restrictTo(ctx.db.select({ id: s.users.id }).from(s.users).where(inArray(s.users.usernameLower, usernames)).all().map((r) => r.id));
+    restrictTo((await ctx.db.select({ id: s.users.id }).from(s.users).where(inArray(s.users.usernameLower, usernames))).map((r) => r.id));
   }
   const externalIds = queryValues(c, "external_id");
   if (externalIds.length) {
-    restrictTo(ctx.db.select({ id: s.users.id }).from(s.users).where(inArray(s.users.externalId, externalIds)).all().map((r) => r.id));
+    restrictTo((await ctx.db.select({ id: s.users.id }).from(s.users).where(inArray(s.users.externalId, externalIds))).map((r) => r.id));
   }
   const userIds = queryValues(c, "user_id");
   if (userIds.length) restrictTo(userIds);
   const orgIds = queryValues(c, "organization_id");
   if (orgIds.length) {
     restrictTo(
-      ctx.db.select({ id: s.organizationMemberships.userId }).from(s.organizationMemberships).where(inArray(s.organizationMemberships.organizationId, orgIds)).all().map((r) => r.id),
+      (await ctx.db.select({ id: s.organizationMemberships.userId }).from(s.organizationMemberships).where(inArray(s.organizationMemberships.organizationId, orgIds))).map((r) => r.id),
     );
   }
   if (allowed.ids !== null) conds.push(allowed.ids.length ? inArray(s.users.id, allowed.ids) : sql`1 = 0`);
@@ -133,6 +135,8 @@ function userWhere(ctx: AppContext, c: Context): SQL | undefined {
   if (banned === "true" || banned === "false") conds.push(eq(s.users.banned, banned === "true"));
   const locked = c.req.query("locked");
   if (locked === "true" || locked === "false") conds.push(eq(s.users.locked, locked === "true"));
+  const anonymous = c.req.query("is_anonymous");
+  if (anonymous === "true" || anonymous === "false") conds.push(eq(s.users.isAnonymous, anonymous === "true"));
   const mfa = c.req.query("mfa");
   if (mfa === "true" || mfa === "false") conds.push(eq(s.users.totpVerified, mfa === "true"));
   const activeSince = c.req.query("last_active_at_since");
@@ -146,29 +150,28 @@ function userWhere(ctx: AppContext, c: Context): SQL | undefined {
 }
 
 /** Revokes every non-ended session of a user (ban / password change). */
-function revokeSessions(ctx: AppContext, userId: string, exceptSessionId?: string): void {
-  ctx.db
-    .update(s.sessions)
-    .set({ status: "revoked", updatedAt: Date.now() })
-    .where(and(eq(s.sessions.userId, userId), eq(s.sessions.status, "active"), exceptSessionId ? sql`${s.sessions.id} != ${exceptSessionId}` : undefined))
-    .run();
+async function revokeSessions(ctx: AppContext, userId: string, exceptSessionId?: string): Promise<void> {
+  await ctx.db
+            .update(s.sessions)
+            .set({ status: "revoked", updatedAt: Date.now() })
+            .where(and(eq(s.sessions.userId, userId), eq(s.sessions.status, "active"), exceptSessionId ? sql`${s.sessions.id} != ${exceptSessionId}` : undefined));
 }
 
 export default function routes(ctx: AppContext) {
   const app = new Hono();
 
-  app.get("/users/count", (c) => {
-    const total = ctx.db.select({ n: sql<number>`count(*)` }).from(s.users).where(userWhere(ctx, c)).get()?.n ?? 0;
+  app.get("/users/count", async (c) => {
+    const total = first(await ctx.db.select({ n: count() }).from(s.users).where(await userWhere(ctx, c)))?.n ?? 0;
     return c.json({ object: "total_count", total_count: Number(total) });
   });
 
-  app.get("/users", (c) => {
-    const where = userWhere(ctx, c);
+  app.get("/users", async (c) => {
+    const where = await userWhere(ctx, c);
     const { limit, offset, order_by } = listParams(c);
     const order = parseOrderBy(order_by, USER_ORDER_COLUMNS, "-created_at");
-    const rows = ctx.db.select().from(s.users).where(where).orderBy(order).limit(limit).offset(offset).all();
-    const total = Number(ctx.db.select({ n: sql<number>`count(*)` }).from(s.users).where(where).get()?.n ?? 0);
-    const data = rows.map((row) => serializeUser(ctx, row, { backend: true }));
+    const rows = (await ctx.db.select().from(s.users).where(where).orderBy(order).limit(limit).offset(offset));
+    const total = Number(first(await ctx.db.select({ n: count() }).from(s.users).where(where))?.n ?? 0);
+    const data = (await Promise.all(rows.map((row) => serializeUser(ctx, row, { backend: true }))));
     if (c.req.query("paginated") === "true") return c.json(page(data, total));
     c.header("x-total-count", String(total));
     return c.json(data);
@@ -194,10 +197,10 @@ export default function routes(ctx: AppContext) {
     }
 
     const username = body.username?.trim() || null;
-    if (username && ctx.db.select().from(s.users).where(eq(s.users.usernameLower, username.toLowerCase())).get()) {
+    if (username && first(await ctx.db.select().from(s.users).where(eq(s.users.usernameLower, username.toLowerCase())))) {
       throw new OrbitError(422, ErrorCodes.form_identifier_exists, "This username is already taken.", { param_name: "username" });
     }
-    if (body.external_id && ctx.db.select().from(s.users).where(eq(s.users.externalId, body.external_id)).get()) {
+    if (body.external_id && first(await ctx.db.select().from(s.users).where(eq(s.users.externalId, body.external_id)))) {
       throw new OrbitError(422, ErrorCodes.form_identifier_exists, "This external_id is already in use.", { param_name: "external_id" });
     }
     const emails = (body.email_address ?? []).map(normalizeEmail);
@@ -205,7 +208,7 @@ export default function routes(ctx: AppContext) {
       throw new OrbitError(422, ErrorCodes.duplicate_record, "email_address contains the same address twice.", { param_name: "email_address" });
     }
     for (const email of emails) {
-      if (ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.email, email)).get()) {
+      if (first(await ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.email, email)))) {
         throw new OrbitError(422, ErrorCodes.form_identifier_exists, `${email} is already in use.`, { param_name: "email_address" });
       }
     }
@@ -217,71 +220,67 @@ export default function routes(ctx: AppContext) {
     const now = Date.now();
     const created = body.created_at ?? now;
     const id = newId(ID_PREFIX.user);
-    const row = ctx.db
-      .insert(s.users)
-      .values({
-        id,
-        externalId: body.external_id ?? null,
-        username,
-        usernameLower: username ? username.toLowerCase() : null,
-        firstName: body.first_name ?? null,
-        lastName: body.last_name ?? null,
-        passwordHash,
-        passwordUpdatedAt: passwordHash ? now : null,
-        publicMetadata: body.public_metadata ?? {},
-        privateMetadata: body.private_metadata ?? {},
-        unsafeMetadata: body.unsafe_metadata ?? {},
-        totpSecretEnc: body.totp_secret ? encrypt(ctx.env.encryptionKey, body.totp_secret) : null,
-        totpVerified: !!body.totp_secret,
-        backupCodes: body.backup_codes ? body.backup_codes.map((code) => sha256(code)) : null,
-        deleteSelfEnabled: body.delete_self_enabled ?? true,
-        createOrganizationEnabled: body.create_organization_enabled ?? true,
-        legalAcceptedAt: body.legal_accepted_at ?? null,
-        createdAt: created,
-        updatedAt: created,
-      })
-      .returning()
-      .get()!;
+    const row = first(await ctx.db
+          .insert(s.users)
+          .values({
+            id,
+            externalId: body.external_id ?? null,
+            username,
+            usernameLower: username ? username.toLowerCase() : null,
+            firstName: body.first_name ?? null,
+            lastName: body.last_name ?? null,
+            passwordHash,
+            passwordUpdatedAt: passwordHash ? now : null,
+            publicMetadata: body.public_metadata ?? {},
+            privateMetadata: body.private_metadata ?? {},
+            unsafeMetadata: body.unsafe_metadata ?? {},
+            totpSecretEnc: body.totp_secret ? encrypt(ctx.env.encryptionKey, body.totp_secret) : null,
+            totpVerified: !!body.totp_secret,
+            backupCodes: body.backup_codes ? body.backup_codes.map((code) => sha256(code)) : null,
+            deleteSelfEnabled: body.delete_self_enabled ?? true,
+            createOrganizationEnabled: body.create_organization_enabled ?? true,
+            legalAcceptedAt: body.legal_accepted_at ?? null,
+            createdAt: created,
+            updatedAt: created,
+          })
+          .returning())!;
 
-    const emailIds = emails.map((email) =>
-      ctx.db
-        .insert(s.emailAddresses)
-        .values({ id: newId(ID_PREFIX.email), userId: id, email, verified: true, verifiedAt: now, verifiedStrategy: "email_code", createdAt: now, updatedAt: now })
-        .returning()
-        .get()!,
-    );
-    const phoneIds = phones.map((phone) =>
-      ctx.db
-        .insert(s.phoneNumbers)
-        .values({ id: newId(ID_PREFIX.phone), userId: id, phone, verified: true, verifiedAt: now, createdAt: now, updatedAt: now })
-        .returning()
-        .get()!,
-    );
+    const emailIds = await Promise.all(emails.map(async (email) =>
+      first(await ctx.db
+                .insert(s.emailAddresses)
+                .values({ id: newId(ID_PREFIX.email), userId: id, email, verified: true, verifiedAt: now, verifiedStrategy: "email_code", createdAt: now, updatedAt: now })
+                .returning())!,
+    ));
+    const phoneIds = await Promise.all(phones.map(async (phone) =>
+      first(await ctx.db
+                .insert(s.phoneNumbers)
+                .values({ id: newId(ID_PREFIX.phone), userId: id, phone, verified: true, verifiedAt: now, createdAt: now, updatedAt: now })
+                .returning())!,
+    ));
     if (emailIds[0] || phoneIds[0]) {
-      ctx.db
-        .update(s.users)
-        .set({ primaryEmailAddressId: emailIds[0]?.id ?? null, primaryPhoneNumberId: phoneIds[0]?.id ?? null, updatedAt: now })
-        .where(eq(s.users.id, id))
-        .run();
+      await ctx.db
+                        .update(s.users)
+                        .set({ primaryEmailAddressId: emailIds[0]?.id ?? null, primaryPhoneNumberId: phoneIds[0]?.id ?? null, updatedAt: now })
+                        .where(eq(s.users.id, id));
     }
 
-    const user = getUserOrThrow(ctx, id);
-    const json = serializeUser(ctx, user, { backend: true });
+    const user = await getUserOrThrow(ctx, id);
+    const json = await serializeUser(ctx, user, { backend: true });
     await emitEvent(ctx, "user.created", json);
-    audit(ctx, { actor: AUDIT_ACTOR, action: "user.created", targetType: "user", targetId: id, metadata: { email_addresses: emails, username } });
+    await audit(ctx, { actor: AUDIT_ACTOR, action: "user.created", targetType: "user", targetId: id, metadata: { email_addresses: emails, username } });
     return c.json(json);
   });
 
-  app.get("/users/:id", (c) => c.json(serializeUser(ctx, getUserOrThrow(ctx, c.req.param("id")), { backend: true })));
+  app.get("/users/:id", async (c) => c.json(await serializeUser(ctx, await getUserOrThrow(ctx, c.req.param("id")), { backend: true })));
 
   app.patch("/users/:id", async (c) => {
-    const existing = getUserOrThrow(ctx, c.req.param("id"));
+    const existing = await getUserOrThrow(ctx, c.req.param("id"));
     const body = await parseBody(c, updateUserSchema);
     const now = Date.now();
     const patch: Partial<typeof s.users.$inferInsert> = { updatedAt: now };
 
     if (body.external_id !== undefined) {
-      if (body.external_id && ctx.db.select().from(s.users).where(eq(s.users.externalId, body.external_id)).get()?.id !== existing.id) {
+      if (body.external_id && first(await ctx.db.select().from(s.users).where(eq(s.users.externalId, body.external_id)))?.id !== existing.id) {
         throw new OrbitError(422, ErrorCodes.form_identifier_exists, "This external_id is already in use.", { param_name: "external_id" });
       }
       patch.externalId = body.external_id;
@@ -289,7 +288,7 @@ export default function routes(ctx: AppContext) {
     if (body.username !== undefined) {
       const username = body.username?.trim() || null;
       if (username) {
-        const taken = ctx.db.select().from(s.users).where(eq(s.users.usernameLower, username.toLowerCase())).get();
+        const taken = first(await ctx.db.select().from(s.users).where(eq(s.users.usernameLower, username.toLowerCase())));
         if (taken && taken.id !== existing.id) throw new OrbitError(422, ErrorCodes.form_identifier_exists, "This username is already taken.", { param_name: "username" });
       }
       patch.username = username;
@@ -299,7 +298,7 @@ export default function routes(ctx: AppContext) {
     if (body.last_name !== undefined) patch.lastName = body.last_name;
     if (body.primary_email_address_id !== undefined) {
       if (body.primary_email_address_id) {
-        const email = ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.id, body.primary_email_address_id)).get();
+        const email = first(await ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.id, body.primary_email_address_id)));
         if (!email || email.userId !== existing.id) {
           throw new OrbitError(422, ErrorCodes.form_param_value_invalid, "primary_email_address_id must reference an email address of this user.", { param_name: "primary_email_address_id" });
         }
@@ -308,7 +307,7 @@ export default function routes(ctx: AppContext) {
     }
     if (body.primary_phone_number_id !== undefined) {
       if (body.primary_phone_number_id) {
-        const phone = ctx.db.select().from(s.phoneNumbers).where(eq(s.phoneNumbers.id, body.primary_phone_number_id)).get();
+        const phone = first(await ctx.db.select().from(s.phoneNumbers).where(eq(s.phoneNumbers.id, body.primary_phone_number_id)));
         if (!phone || phone.userId !== existing.id) {
           throw new OrbitError(422, ErrorCodes.form_param_value_invalid, "primary_phone_number_id must reference a phone number of this user.", { param_name: "primary_phone_number_id" });
         }
@@ -340,84 +339,89 @@ export default function routes(ctx: AppContext) {
     if (body.create_organizations_limit !== undefined) patch.createOrganizationsLimit = body.create_organizations_limit;
     if (body.legal_accepted_at !== undefined) patch.legalAcceptedAt = body.legal_accepted_at;
 
-    ctx.db.update(s.users).set(patch).where(eq(s.users.id, existing.id)).run();
-    if (body.sign_out_of_other_sessions) revokeSessions(ctx, existing.id);
+    await ctx.db.update(s.users).set(patch).where(eq(s.users.id, existing.id));
+    if (body.sign_out_of_other_sessions) await revokeSessions(ctx, existing.id);
+    // Changing or removing a credential forgets every browser that could skip the second factor.
+    if (body.password !== undefined || body.password_digest !== undefined || body.totp_secret !== undefined) {
+      await revokeAllTrustedDevices(ctx, existing.id);
+    }
 
-    const json = serializeUser(ctx, getUserOrThrow(ctx, existing.id), { backend: true });
+    const json = await serializeUser(ctx, await getUserOrThrow(ctx, existing.id), { backend: true });
     await emitEvent(ctx, "user.updated", json);
-    audit(ctx, { actor: AUDIT_ACTOR, action: "user.updated", targetType: "user", targetId: existing.id, metadata: { fields: Object.keys(body) } });
+    await audit(ctx, { actor: AUDIT_ACTOR, action: "user.updated", targetType: "user", targetId: existing.id, metadata: { fields: Object.keys(body) } });
     return c.json(json);
   });
 
   app.patch("/users/:id/metadata", async (c) => {
-    const existing = getUserOrThrow(ctx, c.req.param("id"));
+    const existing = await getUserOrThrow(ctx, c.req.param("id"));
     const body = await parseBody(c, metadataPatchSchema);
-    ctx.db
-      .update(s.users)
-      .set({
-        publicMetadata: body.public_metadata ? mergeMetadata(existing.publicMetadata ?? {}, body.public_metadata) : existing.publicMetadata,
-        privateMetadata: body.private_metadata ? mergeMetadata(existing.privateMetadata ?? {}, body.private_metadata) : existing.privateMetadata,
-        unsafeMetadata: body.unsafe_metadata ? mergeMetadata(existing.unsafeMetadata ?? {}, body.unsafe_metadata) : existing.unsafeMetadata,
-        updatedAt: Date.now(),
-      })
-      .where(eq(s.users.id, existing.id))
-      .run();
-    const json = serializeUser(ctx, getUserOrThrow(ctx, existing.id), { backend: true });
+    await ctx.db
+                  .update(s.users)
+                  .set({
+                    publicMetadata: body.public_metadata ? mergeMetadata(existing.publicMetadata ?? {}, body.public_metadata) : existing.publicMetadata,
+                    privateMetadata: body.private_metadata ? mergeMetadata(existing.privateMetadata ?? {}, body.private_metadata) : existing.privateMetadata,
+                    unsafeMetadata: body.unsafe_metadata ? mergeMetadata(existing.unsafeMetadata ?? {}, body.unsafe_metadata) : existing.unsafeMetadata,
+                    updatedAt: Date.now(),
+                  })
+                  .where(eq(s.users.id, existing.id));
+    const json = await serializeUser(ctx, await getUserOrThrow(ctx, existing.id), { backend: true });
     await emitEvent(ctx, "user.updated", json);
-    audit(ctx, { actor: AUDIT_ACTOR, action: "user.metadata.updated", targetType: "user", targetId: existing.id });
+    await audit(ctx, { actor: AUDIT_ACTOR, action: "user.metadata.updated", targetType: "user", targetId: existing.id });
     return c.json(json);
   });
 
   app.delete("/users/:id", async (c) => {
-    const existing = getUserOrThrow(ctx, c.req.param("id"));
-    const payload = { ...serializeUser(ctx, existing, { backend: true }), deleted: true as const };
+    const existing = await getUserOrThrow(ctx, c.req.param("id"));
+    const payload = { ...await serializeUser(ctx, existing, { backend: true }), deleted: true as const };
     // Runs while the row still exists so membership/org webhook payloads can be serialized.
     await onUserDeleted(ctx, existing.id);
-    ctx.db.delete(s.users).where(eq(s.users.id, existing.id)).run();
+    await ctx.db.delete(s.users).where(eq(s.users.id, existing.id));
     await emitEvent(ctx, "user.deleted", payload);
-    audit(ctx, { actor: AUDIT_ACTOR, action: "user.deleted", targetType: "user", targetId: existing.id });
+    await audit(ctx, { actor: AUDIT_ACTOR, action: "user.deleted", targetType: "user", targetId: existing.id });
     return c.json(deleted("user", existing.id));
   });
 
   app.post("/users/:id/ban", async (c) => {
-    const existing = getUserOrThrow(ctx, c.req.param("id"));
-    ctx.db.update(s.users).set({ banned: true, updatedAt: Date.now() }).where(eq(s.users.id, existing.id)).run();
-    revokeSessions(ctx, existing.id);
-    const json = serializeUser(ctx, getUserOrThrow(ctx, existing.id), { backend: true });
+    const existing = await getUserOrThrow(ctx, c.req.param("id"));
+    await ctx.db.update(s.users).set({ banned: true, updatedAt: Date.now() }).where(eq(s.users.id, existing.id));
+    await revokeSessions(ctx, existing.id);
+    await revokeAllTrustedDevices(ctx, existing.id);
+    const json = await serializeUser(ctx, await getUserOrThrow(ctx, existing.id), { backend: true });
     await emitEvent(ctx, "user.updated", json);
-    audit(ctx, { actor: AUDIT_ACTOR, action: "user.banned", targetType: "user", targetId: existing.id });
+    await audit(ctx, { actor: AUDIT_ACTOR, action: "user.banned", targetType: "user", targetId: existing.id });
     return c.json(json);
   });
 
   app.post("/users/:id/unban", async (c) => {
-    const existing = getUserOrThrow(ctx, c.req.param("id"));
-    ctx.db.update(s.users).set({ banned: false, updatedAt: Date.now() }).where(eq(s.users.id, existing.id)).run();
-    const json = serializeUser(ctx, getUserOrThrow(ctx, existing.id), { backend: true });
+    const existing = await getUserOrThrow(ctx, c.req.param("id"));
+    await ctx.db.update(s.users).set({ banned: false, updatedAt: Date.now() }).where(eq(s.users.id, existing.id));
+    const json = await serializeUser(ctx, await getUserOrThrow(ctx, existing.id), { backend: true });
     await emitEvent(ctx, "user.updated", json);
-    audit(ctx, { actor: AUDIT_ACTOR, action: "user.unbanned", targetType: "user", targetId: existing.id });
+    await audit(ctx, { actor: AUDIT_ACTOR, action: "user.unbanned", targetType: "user", targetId: existing.id });
     return c.json(json);
   });
 
   app.post("/users/:id/lock", async (c) => {
-    const existing = getUserOrThrow(ctx, c.req.param("id"));
-    ctx.db.update(s.users).set({ locked: true, lockoutExpiresAt: null, updatedAt: Date.now() }).where(eq(s.users.id, existing.id)).run();
-    const json = serializeUser(ctx, getUserOrThrow(ctx, existing.id), { backend: true });
+    const existing = await getUserOrThrow(ctx, c.req.param("id"));
+    await ctx.db.update(s.users).set({ locked: true, lockoutExpiresAt: null, updatedAt: Date.now() }).where(eq(s.users.id, existing.id));
+    await revokeAllTrustedDevices(ctx, existing.id);
+    const json = await serializeUser(ctx, await getUserOrThrow(ctx, existing.id), { backend: true });
     await emitEvent(ctx, "user.updated", json);
-    audit(ctx, { actor: AUDIT_ACTOR, action: "user.locked", targetType: "user", targetId: existing.id });
+    await audit(ctx, { actor: AUDIT_ACTOR, action: "user.locked", targetType: "user", targetId: existing.id });
     return c.json(json);
   });
 
   app.post("/users/:id/unlock", async (c) => {
-    const existing = getUserOrThrow(ctx, c.req.param("id"));
-    ctx.db.update(s.users).set({ locked: false, lockoutExpiresAt: null, failedAttempts: 0, updatedAt: Date.now() }).where(eq(s.users.id, existing.id)).run();
-    const json = serializeUser(ctx, getUserOrThrow(ctx, existing.id), { backend: true });
+    const existing = await getUserOrThrow(ctx, c.req.param("id"));
+    await ctx.db.update(s.users).set({ locked: false, lockoutExpiresAt: null, failedAttempts: 0, updatedAt: Date.now() }).where(eq(s.users.id, existing.id));
+    const json = await serializeUser(ctx, await getUserOrThrow(ctx, existing.id), { backend: true });
     await emitEvent(ctx, "user.updated", json);
-    audit(ctx, { actor: AUDIT_ACTOR, action: "user.unlocked", targetType: "user", targetId: existing.id });
+    await audit(ctx, { actor: AUDIT_ACTOR, action: "user.unlocked", targetType: "user", targetId: existing.id });
     return c.json(json);
   });
 
   app.post("/users/:id/verify_password", async (c) => {
-    const existing = getUserOrThrow(ctx, c.req.param("id"));
+    const existing = await getUserOrThrow(ctx, c.req.param("id"));
     const body = await parseBody(c, z.object({ password: z.string() }));
     if (!(await verifyPassword(existing.passwordHash, body.password))) {
       throw new OrbitError(422, ErrorCodes.form_password_incorrect, "Password is incorrect.", { param_name: "password" });
@@ -426,7 +430,7 @@ export default function routes(ctx: AppContext) {
   });
 
   app.post("/users/:id/verify_totp", async (c) => {
-    const existing = getUserOrThrow(ctx, c.req.param("id"));
+    const existing = await getUserOrThrow(ctx, c.req.param("id"));
     const body = await parseBody(c, z.object({ code: z.string() }));
     if (!existing.totpSecretEnc) throw new OrbitError(422, ErrorCodes.totp_not_enabled, "TOTP is not enabled for this user.");
     const secret = decrypt(ctx.env.encryptionKey, existing.totpSecretEnc);
@@ -437,64 +441,72 @@ export default function routes(ctx: AppContext) {
   });
 
   app.delete("/users/:id/mfa", async (c) => {
-    const existing = getUserOrThrow(ctx, c.req.param("id"));
-    ctx.db.update(s.users).set({ totpSecretEnc: null, totpVerified: false, backupCodes: null, updatedAt: Date.now() }).where(eq(s.users.id, existing.id)).run();
-    ctx.db.update(s.phoneNumbers).set({ reservedForSecondFactor: false, defaultSecondFactor: false }).where(eq(s.phoneNumbers.userId, existing.id)).run();
-    const json = serializeUser(ctx, getUserOrThrow(ctx, existing.id), { backend: true });
+    const existing = await getUserOrThrow(ctx, c.req.param("id"));
+    await ctx.db.update(s.users).set({ totpSecretEnc: null, totpVerified: false, backupCodes: null, updatedAt: Date.now() }).where(eq(s.users.id, existing.id));
+    await ctx.db.update(s.phoneNumbers).set({ reservedForSecondFactor: false, defaultSecondFactor: false }).where(eq(s.phoneNumbers.userId, existing.id));
+    await revokeAllTrustedDevices(ctx, existing.id);
+    const json = await serializeUser(ctx, await getUserOrThrow(ctx, existing.id), { backend: true });
     await emitEvent(ctx, "user.updated", json);
-    audit(ctx, { actor: AUDIT_ACTOR, action: "user.mfa.reset", targetType: "user", targetId: existing.id });
+    await audit(ctx, { actor: AUDIT_ACTOR, action: "user.mfa.reset", targetType: "user", targetId: existing.id });
     return c.json(json);
   });
 
   app.delete("/users/:id/password", async (c) => {
-    const existing = getUserOrThrow(ctx, c.req.param("id"));
-    ctx.db.update(s.users).set({ passwordHash: null, passwordUpdatedAt: null, updatedAt: Date.now() }).where(eq(s.users.id, existing.id)).run();
-    const json = serializeUser(ctx, getUserOrThrow(ctx, existing.id), { backend: true });
+    const existing = await getUserOrThrow(ctx, c.req.param("id"));
+    await ctx.db.update(s.users).set({ passwordHash: null, passwordUpdatedAt: null, updatedAt: Date.now() }).where(eq(s.users.id, existing.id));
+    await revokeAllTrustedDevices(ctx, existing.id);
+    const json = await serializeUser(ctx, await getUserOrThrow(ctx, existing.id), { backend: true });
     await emitEvent(ctx, "user.updated", json);
-    audit(ctx, { actor: AUDIT_ACTOR, action: "user.password.removed", targetType: "user", targetId: existing.id });
+    await audit(ctx, { actor: AUDIT_ACTOR, action: "user.password.removed", targetType: "user", targetId: existing.id });
     return c.json(json);
   });
 
   app.post("/users/:id/profile_image", async (c) => {
-    const existing = getUserOrThrow(ctx, c.req.param("id"));
+    const existing = await getUserOrThrow(ctx, c.req.param("id"));
     let dataUrl: string;
     if ((c.req.header("content-type") ?? "").includes("multipart/form-data")) {
       const body = await c.req.parseBody();
       const file = body["file"];
       if (!(file instanceof File)) throw new OrbitError(422, ErrorCodes.form_param_missing, "file is required.", { param_name: "file" });
       if (file.size > MAX_PROFILE_IMAGE_BYTES) throw new OrbitError(413, ErrorCodes.form_param_format_invalid, "Image must be smaller than 512 KB.", { param_name: "file" });
-      dataUrl = `data:${file.type || "image/png"};base64,${Buffer.from(await file.arrayBuffer()).toString("base64")}`;
+      const bytes = Buffer.from(await file.arrayBuffer());
+      const kind = assertImageBytes(bytes, "file");
+      dataUrl = `data:${IMAGE_CONTENT_TYPES[kind]};base64,${bytes.toString("base64")}`;
     } else {
-      const body = await parseBody(c, z.object({ file: z.string() }));
-      if (!/^(data:image\/[a-z0-9.+-]+;base64,|https?:\/\/)/i.test(body.file)) {
-        throw new OrbitError(422, ErrorCodes.form_param_format_invalid, "file must be an image data URL or an http(s) URL.", { param_name: "file" });
+      const body = await parseBody(c, z.object({ file: z.string().max(MAX_PROFILE_IMAGE_BYTES) }));
+      // Only an image data URL of an allowed raster format; remote URLs are not fetched by the server.
+      const match = /^data:([a-z0-9.+/-]+);base64,(.+)$/i.exec(body.file.trim());
+      if (!match) {
+        throw new OrbitError(422, ErrorCodes.form_param_format_invalid, "file must be a base64 image data URL", { param_name: "file" });
       }
-      dataUrl = body.file;
+      const bytes = Buffer.from(match[2]!, "base64");
+      if (bytes.byteLength > MAX_PROFILE_IMAGE_BYTES) throw new OrbitError(413, ErrorCodes.form_param_format_invalid, "Image must be smaller than 512 KB.", { param_name: "file" });
+      const kind = assertImageBytes(bytes, "file");
+      dataUrl = `data:${IMAGE_CONTENT_TYPES[kind]};base64,${bytes.toString("base64")}`;
     }
-    ctx.db.update(s.users).set({ imageUrl: dataUrl, hasImage: true, updatedAt: Date.now() }).where(eq(s.users.id, existing.id)).run();
-    const json = serializeUser(ctx, getUserOrThrow(ctx, existing.id), { backend: true });
+    await ctx.db.update(s.users).set({ imageUrl: dataUrl, hasImage: true, updatedAt: Date.now() }).where(eq(s.users.id, existing.id));
+    const json = await serializeUser(ctx, await getUserOrThrow(ctx, existing.id), { backend: true });
     await emitEvent(ctx, "user.updated", json);
-    audit(ctx, { actor: AUDIT_ACTOR, action: "user.profile_image.updated", targetType: "user", targetId: existing.id });
+    await audit(ctx, { actor: AUDIT_ACTOR, action: "user.profile_image.updated", targetType: "user", targetId: existing.id });
     return c.json(json);
   });
 
   app.delete("/users/:id/profile_image", async (c) => {
-    const existing = getUserOrThrow(ctx, c.req.param("id"));
-    ctx.db.update(s.users).set({ imageUrl: null, hasImage: false, updatedAt: Date.now() }).where(eq(s.users.id, existing.id)).run();
-    const json = serializeUser(ctx, getUserOrThrow(ctx, existing.id), { backend: true });
+    const existing = await getUserOrThrow(ctx, c.req.param("id"));
+    await ctx.db.update(s.users).set({ imageUrl: null, hasImage: false, updatedAt: Date.now() }).where(eq(s.users.id, existing.id));
+    const json = await serializeUser(ctx, await getUserOrThrow(ctx, existing.id), { backend: true });
     await emitEvent(ctx, "user.updated", json);
-    audit(ctx, { actor: AUDIT_ACTOR, action: "user.profile_image.removed", targetType: "user", targetId: existing.id });
+    await audit(ctx, { actor: AUDIT_ACTOR, action: "user.profile_image.removed", targetType: "user", targetId: existing.id });
     return c.json(json);
   });
 
-  app.get("/users/:id/oauth_access_tokens/:provider", (c) => {
-    const existing = getUserOrThrow(ctx, c.req.param("id"));
+  app.get("/users/:id/oauth_access_tokens/:provider", async (c) => {
+    const existing = await getUserOrThrow(ctx, c.req.param("id"));
     const provider = c.req.param("provider");
-    const accounts = ctx.db
-      .select()
-      .from(s.externalAccounts)
-      .where(and(eq(s.externalAccounts.userId, existing.id), eq(s.externalAccounts.provider, provider)))
-      .all();
+    const accounts = (await ctx.db
+          .select()
+          .from(s.externalAccounts)
+          .where(and(eq(s.externalAccounts.userId, existing.id), eq(s.externalAccounts.provider, provider))));
     if (!accounts.length) throw new OrbitError(404, ErrorCodes.resource_not_found, "No external account for this provider.");
     return c.json(
       accounts.map((account) => ({
@@ -508,13 +520,26 @@ export default function routes(ctx: AppContext) {
     );
   });
 
-  app.get("/users/:id/organization_memberships", (c) => {
-    const existing = getUserOrThrow(ctx, c.req.param("id"));
+  app.get("/users/:id/organization_memberships", async (c) => {
+    const existing = await getUserOrThrow(ctx, c.req.param("id"));
     const { limit, offset } = listParams(c);
     const where = eq(s.organizationMemberships.userId, existing.id);
-    const rows = ctx.db.select().from(s.organizationMemberships).where(where).limit(limit).offset(offset).all();
-    const total = Number(ctx.db.select({ n: sql<number>`count(*)` }).from(s.organizationMemberships).where(where).get()?.n ?? 0);
-    return c.json(page(rows.map((row) => serializeMembership(ctx, row, { backend: true })), total));
+    const rows = (await ctx.db.select().from(s.organizationMemberships).where(where).limit(limit).offset(offset));
+    const total = Number(first(await ctx.db.select({ n: count() }).from(s.organizationMemberships).where(where))?.n ?? 0);
+    return c.json(page((await Promise.all(rows.map((row) => serializeMembership(ctx, row, { backend: true })))), total));
+  });
+
+  app.get("/users/:id/trusted_devices", async (c) => {
+    const existing = await getUserOrThrow(ctx, c.req.param("id"));
+    return c.json((await listTrustedDevices(ctx, existing.id)).map(serializeTrustedDevice));
+  });
+
+  app.delete("/users/:id/trusted_devices/:device_id", async (c) => {
+    const existing = await getUserOrThrow(ctx, c.req.param("id"));
+    const row = await revokeTrustedDevice(ctx, existing.id, c.req.param("device_id") ?? "");
+    if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Trusted device not found.");
+    await audit(ctx, { actor: AUDIT_ACTOR, action: "user.trusted_device.revoked", targetType: "user", targetId: existing.id, metadata: { trusted_device_id: row.id } });
+    return c.json(deleted("trusted_device", row.id));
   });
 
   return app;

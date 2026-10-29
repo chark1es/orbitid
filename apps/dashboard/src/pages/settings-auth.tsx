@@ -1,23 +1,32 @@
 import type { AttributeConfig } from "@orbitid/shared";
-import { Alert, AlertDescription, AlertTitle, Badge, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch } from "@orbitid/ui";
-import { KeyRound, Lock, ShieldCheck } from "lucide-react";
+import {
+  Input,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Switch,
+} from "@orbitid/ui";
 import {
   CheckboxRow,
   ErrorAlert,
   Field,
   LoadingPage,
+  MetaChip,
   PageHeader,
   SaveBar,
-  SectionCard,
+  SecretInput,
+  SettingsSection,
   SwitchRow,
 } from "./_config/ui";
-import { secretInputValue, secretIsConfigured } from "./_config/settings";
+import { secretInputValue, secretIsConfigured, humanDuration } from "./_config/settings";
 import { useSettingsEditor } from "./_config/use-settings";
 
 const ATTRIBUTE_KEYS = ["emailAddress", "phoneNumber", "username", "firstName", "lastName", "password", "passkey", "backupCode", "authenticatorApp"] as const;
 type AttributeKey = (typeof ATTRIBUTE_KEYS)[number];
 
-function AttributeCard({
+function AttributeBlock({
   title,
   description,
   config,
@@ -36,72 +45,68 @@ function AttributeCard({
 }) {
   const disabled = !config.enabled;
   return (
-    <SectionCard
-      title={
-        <span className="flex items-center gap-2">
-          {title}
-          <Badge variant={config.enabled ? "default" : "secondary"}>{config.enabled ? "On" : "Off"}</Badge>
-        </span>
-      }
-      description={description}
-      actions={<Switch checked={config.enabled} onCheckedChange={(enabled) => onChange({ enabled })} aria-label={`Enable ${title}`} />}
-      className="gap-3"
-    >
-      <div className={disabled ? "space-y-3 opacity-60" : "space-y-3"}>
-        <div className="grid gap-2 sm:grid-cols-2">
-          <CheckboxRow
-            label="Required"
-            description="Users must supply this attribute at sign-up."
-            checked={config.required}
-            disabled={disabled}
-            onCheckedChange={(required) => onChange({ required })}
-          />
-          <CheckboxRow
-            label="Used for sign-in"
-            description="Identifier accepted by the sign-in form."
-            checked={config.usedForFirstFactor}
-            disabled={disabled}
-            onCheckedChange={(usedForFirstFactor) => onChange({ usedForFirstFactor })}
-          />
-          {showVerifyAtSignUp ? (
-            <CheckboxRow
-              label="Verify at sign-up"
-              description="Require verification before the sign-up completes."
-              checked={config.verifyAtSignUp}
-              disabled={disabled}
-              onCheckedChange={(verifyAtSignUp) => onChange({ verifyAtSignUp })}
-            />
-          ) : null}
+    <div className="space-y-3 border-b border-border pb-5 last:border-b-0 last:pb-0">
+      <div className="flex items-start justify-between gap-6">
+        <div className="min-w-0 space-y-0.5">
+          <p className="text-sm font-medium">{title}</p>
+          <p className="text-[0.8125rem] leading-relaxed text-muted-foreground">{description}</p>
         </div>
-        {showVerification && verificationOptions?.length ? (
-          <div className="space-y-2 rounded-lg border p-3">
-            <p className="text-sm font-medium">Verification methods</p>
-            <div className="grid gap-1 sm:grid-cols-2">
-              {verificationOptions.map((option) => (
-                <CheckboxRow
-                  key={option.value}
-                  label={option.label}
-                  checked={config.verifications.includes(option.value)}
-                  disabled={disabled}
-                  onCheckedChange={(checked) =>
-                    onChange({
-                      verifications: checked
-                        ? [...config.verifications, option.value]
-                        : config.verifications.filter((value) => value !== option.value),
-                    })
-                  }
-                />
-              ))}
-            </div>
-            {config.verifications.length === 0 ? (
-              <p className="text-xs text-amber-600 dark:text-amber-400">
-                No verification method selected — users will not be able to verify this attribute.
-              </p>
-            ) : null}
-          </div>
+        <div className="flex shrink-0 items-center gap-2.5">
+          <span className="text-xs text-muted-foreground">{config.enabled ? "On" : "Off"}</span>
+          <Switch checked={config.enabled} onCheckedChange={(enabled) => onChange({ enabled })} aria-label={`Enable ${title}`} />
+        </div>
+      </div>
+      <div className="grid gap-x-8 gap-y-1 sm:grid-cols-2">
+        <CheckboxRow
+          label="Required"
+          description="Users must supply this attribute at sign-up."
+          checked={config.required}
+          disabled={disabled}
+          onCheckedChange={(required) => onChange({ required })}
+        />
+        <CheckboxRow
+          label="Used for sign-in"
+          description="The sign-in form accepts this identifier."
+          checked={config.usedForFirstFactor}
+          disabled={disabled}
+          onCheckedChange={(usedForFirstFactor) => onChange({ usedForFirstFactor })}
+        />
+        {showVerifyAtSignUp ? (
+          <CheckboxRow
+            label="Verify at sign-up"
+            description="Sign-up completes only after verification."
+            checked={config.verifyAtSignUp}
+            disabled={disabled}
+            onCheckedChange={(verifyAtSignUp) => onChange({ verifyAtSignUp })}
+          />
         ) : null}
       </div>
-    </SectionCard>
+      {showVerification && verificationOptions?.length ? (
+        <fieldset className="space-y-1 border-t border-border pt-3">
+          <legend className="text-xs font-medium uppercase tracking-[0.04em] text-muted-foreground">Verification methods</legend>
+          <div className="grid gap-x-8 gap-y-1 sm:grid-cols-2">
+            {verificationOptions.map((option) => (
+              <CheckboxRow
+                key={option.value}
+                label={option.label}
+                checked={config.verifications.includes(option.value)}
+                disabled={disabled}
+                onCheckedChange={(checked) =>
+                  onChange({
+                    verifications: checked
+                      ? [...config.verifications, option.value]
+                      : config.verifications.filter((value) => value !== option.value),
+                  })
+                }
+              />
+            ))}
+          </div>
+          {config.verifications.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No method selected. Users cannot verify this attribute, so sign-up will block when verification is required.</p>
+          ) : null}
+        </fieldset>
+      ) : null}
+    </div>
   );
 }
 
@@ -109,12 +114,12 @@ export default function Page() {
   const editor = useSettingsEditor();
   const settings = editor.settings;
 
-  if (editor.isLoading) return <LoadingPage rows={4} />;
+  if (editor.isLoading) return <LoadingPage rows={5} />;
   if (!settings) {
     return (
       <div className="space-y-6">
-        <PageHeader title="User & Authentication" description="Configure identifiers, password policy, MFA, and abuse protection." />
-        <ErrorAlert error={editor.error ?? "Could not load instance settings."} onRetry={editor.refetch} />
+        <PageHeader title="User & authentication" description="Identifiers, password policy, second factors, and abuse protection." />
+        <ErrorAlert error={editor.error ?? "Instance settings did not load."} onRetry={editor.refetch} />
       </div>
     );
   }
@@ -140,53 +145,55 @@ export default function Page() {
   };
 
   const captchaSecretConfigured = secretIsConfigured(settings.security.captchaSecret);
+  const emailSecondFactor = settings.attributes.emailAddress.usedForSecondFactor;
   const hasSecondFactor =
     settings.attributes.authenticatorApp.enabled || settings.attributes.backupCode.enabled || settings.attributes.phoneNumber.usedForSecondFactor;
-  if (settings.mfa.required && !hasSecondFactor) errors.push("Enable at least one second factor before requiring MFA.");
+  if (settings.mfa.required && !hasSecondFactor && !emailSecondFactor) errors.push("Enable at least one second factor before requiring MFA.");
+  if (emailSecondFactor && !settings.attributes.emailAddress.enabled) errors.push("Enable the email address identifier before using it as a second factor.");
+  if (emailSecondFactor && settings.attributes.emailAddress.verifications.length === 0)
+    errors.push("Email code as a second factor needs a verification method on the email address.");
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="User & Authentication"
-        description="Choose how users identify themselves, how passwords are enforced, and which second factors are available."
-        badge={<Badge variant="outline">Instance settings</Badge>}
+        title="User & authentication"
+        description="Choose how users identify themselves, how passwords are enforced, and which second factors they can use."
+        badge={<MetaChip>Instance settings</MetaChip>}
       />
 
       {editor.error ? <ErrorAlert error={editor.error} onRetry={editor.refetch} /> : null}
 
-      <SectionCard
+      <SettingsSection
         title="Identifiers"
-        description="Each identifier can be enabled, required, and used on the sign-in form. Verification methods apply to sign-up and sign-in."
+        description="Each identifier can be enabled, required, and accepted on the sign-in form. Verification methods apply to sign-up and sign-in."
       >
-        <div className="grid gap-3 lg:grid-cols-2">
-          <AttributeCard
-            title="Email address"
-            description="Primary identifier for most applications."
-            config={settings.attributes.emailAddress}
-            onChange={(patch) => updateAttribute("emailAddress", patch)}
-            verificationOptions={[
-              { value: "email_code", label: "Email code" },
-              { value: "email_link", label: "Email link" },
-            ]}
-          />
-          <AttributeCard
-            title="Phone number"
-            description="SMS-based sign-in and verification."
-            config={settings.attributes.phoneNumber}
-            onChange={(patch) => updateAttribute("phoneNumber", patch)}
-            verificationOptions={[{ value: "phone_code", label: "SMS code" }]}
-          />
-          <AttributeCard
-            title="Username"
-            description="A unique handle users can sign in with."
-            config={settings.attributes.username}
-            onChange={(patch) => updateAttribute("username", patch)}
-            showVerification={false}
-            showVerifyAtSignUp={false}
-          />
-        </div>
+        <AttributeBlock
+          title="Email address"
+          description="The primary identifier for most applications."
+          config={settings.attributes.emailAddress}
+          onChange={(patch) => updateAttribute("emailAddress", patch)}
+          verificationOptions={[
+            { value: "email_code", label: "Email code" },
+            { value: "email_link", label: "Email link" },
+          ]}
+        />
+        <AttributeBlock
+          title="Phone number"
+          description="SMS-based sign-in and verification."
+          config={settings.attributes.phoneNumber}
+          onChange={(patch) => updateAttribute("phoneNumber", patch)}
+          verificationOptions={[{ value: "phone_code", label: "SMS code" }]}
+        />
+        <AttributeBlock
+          title="Username"
+          description="A unique handle users can sign in with."
+          config={settings.attributes.username}
+          onChange={(patch) => updateAttribute("username", patch)}
+          showVerification={false}
+          showVerifyAtSignUp={false}
+        />
         {settings.attributes.username.enabled ? (
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Username minimum length" htmlFor="username-min">
               <Input
                 id="username-min"
@@ -207,24 +214,20 @@ export default function Page() {
             </Field>
           </div>
         ) : null}
-      </SectionCard>
+      </SettingsSection>
 
-      <SectionCard
-        title={
-          <span className="flex items-center gap-2">
-            <Lock className="size-4" /> Password
-          </span>
-        }
-        description="Password authentication and complexity requirements."
-        actions={<Badge variant={settings.attributes.password.enabled ? "default" : "secondary"}>{settings.attributes.password.enabled ? "Enabled" : "Disabled"}</Badge>}
+      <SettingsSection
+        title="Password"
+        description="Password sign-in and complexity requirements. Password length counts characters, not bytes."
+        actions={<MetaChip>{settings.attributes.password.enabled ? "Enabled" : "Disabled"}</MetaChip>}
       >
         <SwitchRow
           label="Allow password sign-in"
-          description="Disable to force passwordless or social sign-in."
+          description="Turn off to require passwordless or social sign-in."
           checked={settings.attributes.password.enabled}
           onCheckedChange={(enabled) => updateAttribute("password", { enabled })}
         />
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Minimum length" htmlFor="password-min">
             <Input
               id="password-min"
@@ -244,14 +247,14 @@ export default function Page() {
             />
           </Field>
         </div>
-        <div className="grid gap-2 sm:grid-cols-2">
-          <CheckboxRow label="Require lowercase letter" checked={settings.password.requireLowercase} onCheckedChange={(requireLowercase) => editor.patch({ password: { requireLowercase } })} />
-          <CheckboxRow label="Require uppercase letter" checked={settings.password.requireUppercase} onCheckedChange={(requireUppercase) => editor.patch({ password: { requireUppercase } })} />
-          <CheckboxRow label="Require number" checked={settings.password.requireNumbers} onCheckedChange={(requireNumbers) => editor.patch({ password: { requireNumbers } })} />
-          <CheckboxRow label="Require special character" checked={settings.password.requireSpecialCharacter} onCheckedChange={(requireSpecialCharacter) => editor.patch({ password: { requireSpecialCharacter } })} />
+        <div className="grid gap-x-8 gap-y-1 sm:grid-cols-2">
+          <CheckboxRow label="Require a lowercase letter" checked={settings.password.requireLowercase} onCheckedChange={(requireLowercase) => editor.patch({ password: { requireLowercase } })} />
+          <CheckboxRow label="Require an uppercase letter" checked={settings.password.requireUppercase} onCheckedChange={(requireUppercase) => editor.patch({ password: { requireUppercase } })} />
+          <CheckboxRow label="Require a number" checked={settings.password.requireNumbers} onCheckedChange={(requireNumbers) => editor.patch({ password: { requireNumbers } })} />
+          <CheckboxRow label="Require a special character" checked={settings.password.requireSpecialCharacter} onCheckedChange={(requireSpecialCharacter) => editor.patch({ password: { requireSpecialCharacter } })} />
           <CheckboxRow
-            label="Reject pwned passwords"
-            description="Check HaveIBeenPwned using k-anonymity. Adds latency to password changes."
+            label="Reject breached passwords"
+            description="Check HaveIBeenPwned with k-anonymity. Adds latency to password changes."
             checked={settings.password.rejectPwned}
             onCheckedChange={(rejectPwned) => editor.patch({ password: { rejectPwned } })}
           />
@@ -261,16 +264,9 @@ export default function Page() {
             onCheckedChange={(signOutOfOtherSessionsOnChange) => editor.patch({ password: { signOutOfOtherSessionsOnChange } })}
           />
         </div>
-      </SectionCard>
+      </SettingsSection>
 
-      <SectionCard
-        title={
-          <span className="flex items-center gap-2">
-            <KeyRound className="size-4" /> Passkeys
-          </span>
-        }
-        description="WebAuthn passkeys for phishing-resistant sign-in."
-      >
+      <SettingsSection title="Passkeys" description="WebAuthn passkeys for phishing-resistant sign-in.">
         <SwitchRow
           label="Allow passkeys"
           description="Users can register passkeys from their profile or during sign-up."
@@ -284,17 +280,10 @@ export default function Page() {
           disabled={!settings.attributes.passkey.enabled}
           onCheckedChange={(usedForFirstFactor) => updateAttribute("passkey", { usedForFirstFactor })}
         />
-      </SectionCard>
+      </SettingsSection>
 
-      <SectionCard
-        title={
-          <span className="flex items-center gap-2">
-            <ShieldCheck className="size-4" /> Multi-factor authentication
-          </span>
-        }
-        description="Second factors required after the first factor succeeds."
-      >
-        <div className="grid gap-2 sm:grid-cols-2">
+      <SettingsSection title="Multi-factor authentication" description="Second factors required after the first factor succeeds.">
+        <div className="grid gap-x-8 gap-y-1 sm:grid-cols-2">
           <CheckboxRow
             label="Authenticator app (TOTP)"
             description="Six-digit codes from an authenticator app."
@@ -305,6 +294,13 @@ export default function Page() {
             label="Backup codes"
             checked={settings.attributes.backupCode.enabled}
             onCheckedChange={(enabled) => updateAttribute("backupCode", { enabled })}
+          />
+          <CheckboxRow
+            label="Email one-time code"
+            description="Send a code to the user's verified email address as the second step."
+            checked={settings.attributes.emailAddress.usedForSecondFactor}
+            disabled={!settings.attributes.emailAddress.enabled}
+            onCheckedChange={(usedForSecondFactor) => updateAttribute("emailAddress", { usedForSecondFactor })}
           />
           <CheckboxRow
             label="SMS code"
@@ -320,12 +316,11 @@ export default function Page() {
           />
         </div>
         {!hasSecondFactor ? (
-          <Alert>
-            <AlertTitle>No second factor enabled</AlertTitle>
-            <AlertDescription>Requiring MFA without an enabled second factor will lock users out of sign-in.</AlertDescription>
-          </Alert>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            No second factor is enabled. Enabling “Require MFA for all users” without one locks every user out of sign-in.
+          </p>
         ) : null}
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Maximum verification attempts" htmlFor="mfa-attempts" description="Failed attempts before the account locks.">
             <Input
               id="mfa-attempts"
@@ -345,44 +340,82 @@ export default function Page() {
             />
           </Field>
         </div>
-      </SectionCard>
+      </SettingsSection>
 
-      <SectionCard title="Sign-up" description="Control who can create an account and what they must accept.">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Sign-up mode" htmlFor="sign-up-mode" description="Restricted mode requires an invitation; waitlist collects addresses for approval.">
-            <Select value={settings.signUp.mode} onValueChange={(mode) => editor.patch({ signUp: { mode } })}>
-              <SelectTrigger id="sign-up-mode" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="public">Public — anyone can sign up</SelectItem>
-                <SelectItem value="restricted">Restricted — invitation only</SelectItem>
-                <SelectItem value="waitlist">Waitlist</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-        </div>
+      <SettingsSection title="Sign-up" description="Who can create an account and what they must accept.">
+        <Field
+          label="Sign-up mode"
+          htmlFor="sign-up-mode"
+          description="Restricted mode requires an invitation. Waitlist collects addresses for approval."
+          className="max-w-md"
+        >
+          <Select value={settings.signUp.mode} onValueChange={(mode) => editor.patch({ signUp: { mode } })}>
+            <SelectTrigger id="sign-up-mode" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="public">Public: anyone can sign up</SelectItem>
+              <SelectItem value="restricted">Restricted: invitation only</SelectItem>
+              <SelectItem value="waitlist">Waitlist</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
         <CheckboxRow
           label="Require legal consent"
-          description="Users must accept your terms and privacy policy before completing sign-up."
+          description="Users accept your terms and privacy policy before sign-up completes."
           checked={settings.signUp.legalConsentRequired}
           onCheckedChange={(legalConsentRequired) => editor.patch({ signUp: { legalConsentRequired } })}
         />
         <CheckboxRow
           label="Progressive sign-up"
-          description="Let users start with one identifier and add missing requirements later."
+          description="Let users start with one identifier and add the missing requirements later."
           checked={settings.signUp.progressive}
           onCheckedChange={(progressive) => editor.patch({ signUp: { progressive } })}
         />
-      </SectionCard>
+      </SettingsSection>
 
-      <SectionCard title="Personal information" description="Name fields collected during sign-up.">
-        <div className="grid gap-3 sm:grid-cols-2">
+      <SettingsSection
+        title="Guest accounts"
+        description="Let a visitor start using the app before they sign up. A guest has no identifier until they add one."
+      >
+        <SwitchRow
+          label="Allow anonymous sign-ups"
+          description="The anonymous sign-up strategy is accepted and creates a user with no email address or password."
+          checked={settings.anonymous.enabled}
+          onCheckedChange={(enabled) => editor.patch({ anonymous: { enabled } })}
+        />
+        <Field
+          label="Delete inactive guests after (seconds)"
+          htmlFor="anonymous-retention"
+          description={
+            settings.anonymous.retentionSeconds > 0
+              ? `A guest with no activity for ${humanDuration(settings.anonymous.retentionSeconds)} is deleted. 0 keeps them forever.`
+              : "0 keeps guests until they are deleted by hand."
+          }
+          className="max-w-md"
+        >
+          <Input
+            id="anonymous-retention"
+            type="number"
+            min={0}
+            value={settings.anonymous.retentionSeconds}
+            disabled={!settings.anonymous.enabled}
+            onChange={(event) => editor.patch({ anonymous: { retentionSeconds: number(event.target.value) } })}
+          />
+        </Field>
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Guests count against your user totals and can reach anything a signed-in user can, so keep the list short in
+          the Users page.
+        </p>
+      </SettingsSection>
+
+      <SettingsSection title="Personal information" description="Name fields collected during sign-up.">
+        <div className="grid gap-6 sm:grid-cols-2">
           {([
             ["firstName", "First name"],
             ["lastName", "Last name"],
           ] as const).map(([key, label]) => (
-            <div key={key} className="space-y-2 rounded-lg border p-3">
+            <div key={key} className="space-y-2 border-b border-border pb-3 sm:border-b-0 sm:pb-0">
               <SwitchRow
                 label={label}
                 checked={settings.attributes[key].enabled}
@@ -397,16 +430,16 @@ export default function Page() {
             </div>
           ))}
         </div>
-      </SectionCard>
+      </SettingsSection>
 
-      <SectionCard title="Bot & abuse protection" description="Captcha, enumeration protection, and rate limiting for sensitive endpoints.">
+      <SettingsSection title="Bot and abuse protection" description="Captcha, account enumeration protection, and rate limits on sensitive endpoints.">
         <SwitchRow
           label="Enable bot protection"
           description="Require a captcha challenge on sign-up and password reset."
           checked={settings.security.botProtection}
           onCheckedChange={(botProtection) => editor.patch({ security: { botProtection } })}
         />
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Captcha provider" htmlFor="captcha-provider">
             <Select
               value={settings.security.captchaProvider}
@@ -428,28 +461,19 @@ export default function Page() {
               value={settings.security.captchaSiteKey}
               onChange={(event) => editor.patch({ security: { captchaSiteKey: event.target.value } })}
               placeholder="0x4AAAAAAA…"
+              className="font-data"
             />
           </Field>
-          <Field
-            label={
-              <span className="flex items-center gap-2">
-                Secret key
-                {captchaSecretConfigured ? <Badge variant="outline">Configured</Badge> : null}
-              </span>
-            }
-            htmlFor="captcha-secret"
-            description="Leave blank to keep the stored secret."
+          <SecretInput
+            id="captcha-secret"
+            label="Secret key"
+            configured={captchaSecretConfigured}
+            value={secretInputValue(settings.security.captchaSecret)}
+            onChange={(captchaSecret) => editor.patch({ security: { captchaSecret } })}
+            description={captchaSecretConfigured ? "A secret is stored. Leave blank to keep it." : "From the captcha provider's dashboard."}
+            placeholder={captchaSecretConfigured ? "Stored secret, leave blank to keep" : "Captcha secret"}
             className="sm:col-span-2"
-          >
-            <Input
-              id="captcha-secret"
-              type="password"
-              autoComplete="new-password"
-              value={secretInputValue(settings.security.captchaSecret)}
-              onChange={(event) => editor.patch({ security: { captchaSecret: event.target.value } })}
-              placeholder={captchaSecretConfigured ? "Stored secret — leave blank to keep" : "Captcha secret"}
-            />
-          </Field>
+          />
         </div>
         <SwitchRow
           label="Enumeration protection"
@@ -465,26 +489,21 @@ export default function Page() {
         />
         <SwitchRow
           label="Testing tokens"
-          description="Allow `+clerk_test`-style testing tokens in non-production environments."
+          description="Allow fixed test codes in non-production environments."
           checked={settings.security.testingTokensEnabled}
           onCheckedChange={(testingTokensEnabled) => editor.patch({ security: { testingTokensEnabled } })}
         />
-      </SectionCard>
+      </SettingsSection>
 
-      {errors.length > 0 ? (
-        <Alert variant="destructive">
-          <AlertTitle>Fix the following before saving</AlertTitle>
-          <AlertDescription>
-            <ul className="list-disc pl-4">
-              {errors.map((error) => (
-                <li key={error}>{error}</li>
-              ))}
-            </ul>
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      <SaveBar dirty={editor.dirty} saving={editor.saving} disabled={errors.length > 0} onSave={editor.save} onDiscard={editor.reset} />
+      <SaveBar
+        dirty={editor.dirty}
+        saving={editor.saving}
+        disabled={errors.length > 0}
+        errors={errors}
+        error={editor.saveError}
+        onSave={editor.save}
+        onDiscard={editor.reset}
+      />
     </div>
   );
 }

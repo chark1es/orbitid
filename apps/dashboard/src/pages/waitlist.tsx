@@ -137,8 +137,8 @@ export default function WaitlistPage() {
   const columns: DataTableColumn<WaitlistEntryJSON>[] = [
     {
       id: "select",
-      className: "w-10",
-      headerClassName: "w-10",
+      className: "w-9",
+      headerClassName: "w-9",
       header: (
         <Checkbox
           checked={allSelected ? true : someSelected ? "indeterminate" : false}
@@ -173,7 +173,7 @@ export default function WaitlistPage() {
     {
       id: "email",
       header: "Email",
-      cell: (entry) => <span className="font-mono text-sm">{entry.email_address}</span>,
+      cell: (entry) => <span className="font-data text-[0.8125rem]">{entry.email_address}</span>,
     },
     {
       id: "status",
@@ -189,14 +189,16 @@ export default function WaitlistPage() {
         entry.invitation ? (
           <StatusBadge status={entry.invitation.status} label={`Invitation ${entry.invitation.status}`} />
         ) : (
-          <span className="text-xs text-muted-foreground">—</span>
+          <span className="text-xs text-muted-foreground">None</span>
         ),
     },
     {
       id: "created",
       header: "Joined waitlist",
       sortKey: "created_at",
-      cell: (entry) => <span className="text-sm text-muted-foreground">{formatDate(entry.created_at)}</span>,
+      cell: (entry) => (
+        <span className="font-data text-xs text-muted-foreground">{formatDate(entry.created_at)}</span>
+      ),
     },
     {
       id: "actions",
@@ -209,6 +211,7 @@ export default function WaitlistPage() {
             variant="outline"
             disabled={pending !== null || entry.status === "invited" || entry.status === "completed"}
             onClick={() => void invite(entry)}
+            aria-label={`Invite ${entry.email_address}`}
           >
             <MailPlus aria-hidden /> Invite
           </Button>
@@ -217,11 +220,12 @@ export default function WaitlistPage() {
             variant="ghost"
             disabled={pending !== null || entry.status === "rejected"}
             onClick={() => void reject(entry)}
+            aria-label={`Reject ${entry.email_address}`}
           >
             <UserX aria-hidden /> Reject
           </Button>
           <Button
-            size="icon"
+            size="icon-sm"
             variant="ghost"
             aria-label={`Delete ${entry.email_address}`}
             disabled={pending !== null}
@@ -236,27 +240,34 @@ export default function WaitlistPage() {
 
   return (
     <>
-      <PageHeader title="Waitlist" description="Approve or reject people waiting for access to your application." />
+      <PageHeader
+        title="Waitlist"
+        description="Approve or reject people waiting for access to your application."
+      />
 
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-56 flex-1">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+      <div className="flex flex-wrap items-end gap-x-2 gap-y-3">
+        <div className="relative min-w-56 flex-1 max-w-md">
+          <Search
+            className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+            strokeWidth={1.5}
+            aria-hidden
+          />
           <Input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search waitlist…"
+            placeholder="Search waitlist"
             aria-label="Search waitlist"
-            className="pl-8"
+            className="h-[34px] pl-8"
           />
         </div>
         <Select value={status} onValueChange={(value) => table.setFilter("status", value === "all" ? null : value)}>
-          <SelectTrigger className="h-9 w-[140px]" aria-label="Filter waitlist by status">
+          <SelectTrigger className="h-[34px] w-[132px]" aria-label="Filter waitlist by status">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             {STATUSES.map((value) => (
               <SelectItem key={value} value={value}>
-                <span className="capitalize">{value}</span>
+                {value === "all" ? "Any status" : value.charAt(0).toUpperCase() + value.slice(1)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -276,8 +287,12 @@ export default function WaitlistPage() {
       </div>
 
       {selected.size > 0 ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2">
-          <span className="text-sm font-medium">{selected.size} selected</span>
+        <div
+          role="region"
+          aria-label="Bulk actions"
+          className="flex flex-wrap items-center gap-2 rounded-[4px] border border-border bg-muted/40 px-3 py-2"
+        >
+          <span className="text-sm font-medium tabular-nums">{selected.size} selected</span>
           <div className="ml-auto flex flex-wrap gap-2">
             <Button size="sm" variant="outline" disabled={pending !== null} onClick={() => void bulk("invite")}>
               <MailPlus aria-hidden /> Invite
@@ -285,7 +300,12 @@ export default function WaitlistPage() {
             <Button size="sm" variant="outline" disabled={pending !== null} onClick={() => void bulk("reject")}>
               <UserX aria-hidden /> Reject
             </Button>
-            <Button size="sm" variant="destructive" disabled={pending !== null} onClick={() => setConfirmBulkDelete(true)}>
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={pending !== null}
+              onClick={() => setConfirmBulkDelete(true)}
+            >
               <Trash2 aria-hidden /> Delete
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
@@ -309,7 +329,11 @@ export default function WaitlistPage() {
           <EmptyState
             icon={Clock}
             title={table.hasFilters ? "No waitlist entries match" : "The waitlist is empty"}
-            description={table.hasFilters ? "Try another search or status." : "Entries appear when sign-up mode is `waitlist`."}
+            description={
+              table.hasFilters
+                ? "Clear the status filter or search for another address."
+                : "Entries arrive when sign-up mode is set to waitlist and someone signs up."
+            }
           />
         }
       />
@@ -338,8 +362,8 @@ export default function WaitlistPage() {
           if (!open) setDeleting(null);
         }}
         title="Delete waitlist entry?"
-        description={deleting?.email_address}
-        confirmLabel="Delete"
+        description={deleting ? `${deleting.email_address} is removed from the waitlist. An invitation already sent keeps working.` : undefined}
+        confirmLabel="Delete entry"
         destructive
         pending={pending === deleting?.id}
         onConfirm={() => {
@@ -350,7 +374,7 @@ export default function WaitlistPage() {
         open={confirmBulkDelete}
         onOpenChange={setConfirmBulkDelete}
         title={`Delete ${selected.size} waitlist entr${selected.size === 1 ? "y" : "ies"}?`}
-        description="The entries are removed from the waitlist; pending invitations are unaffected."
+        description="The selected entries are removed from the waitlist. Invitations already sent keep working."
         confirmLabel="Delete entries"
         destructive
         pending={pending === "bulk"}

@@ -58,7 +58,7 @@ export interface AppearanceElementStyle {
 }
 
 /**
- * Per-element override, keyed by Clerk's element names (`card`, `headerTitle`,
+ * Per-element override, keyed by the element names the components use (`card`, `headerTitle`,
  * `formButtonPrimary`, `formFieldInput`, `footerActionLink`, `socialButtonsBlockButton`, ...).
  */
 export type AppearanceElement =

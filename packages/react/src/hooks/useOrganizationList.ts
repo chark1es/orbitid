@@ -10,6 +10,7 @@ import type {
 } from "../provider/types";
 import { fetchUserInvitations, fetchUserMemberships, fetchUserSuggestions } from "./internal/adapters";
 import { usePagedResource, type PagedResource } from "./internal/usePagedResource";
+import { invalidateRequest } from "./internal/requestCache";
 import { resolvePageOptions, type UseOrganizationParam } from "./internal/pageOptions";
 import { useOrbitID } from "./useOrbitID";
 
@@ -89,17 +90,28 @@ export function useOrganizationList(params: UseOrganizationListParams = {}): Use
 
   const revalidateMemberships = userMemberships.revalidate;
   const revalidateInvitations = userInvitations.revalidate;
+  /** Drops every cached page for the user's membership/invitation/suggestion endpoints. */
+  const invalidateUserOrganizationData = useCallback(() => {
+    if (!userId) return;
+    invalidateRequest(`user:${userId}:`);
+  }, [userId]);
+
   const setActive = useCallback(
     async ({ organization, beforeEmit }: SetActiveOrganizationParams) => {
       await instance.setActive({ session: instance.session, organization, beforeEmit });
+      invalidateUserOrganizationData();
       await Promise.all([revalidateMemberships(), revalidateInvitations()]);
     },
-    [instance, revalidateMemberships, revalidateInvitations],
+    [instance, invalidateUserOrganizationData, revalidateMemberships, revalidateInvitations],
   );
 
   const createOrganization = useCallback(
-    (params: CreateOrganizationParams) => instance.createOrganization(params),
-    [instance],
+    async (params: CreateOrganizationParams) => {
+      const organization = await instance.createOrganization(params);
+      invalidateUserOrganizationData();
+      return organization;
+    },
+    [instance, invalidateUserOrganizationData],
   );
 
   return useMemo(

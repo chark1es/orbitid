@@ -54,5 +54,5 @@ export const LocalizationContext = createContext<LocalizationContextValue>({
 /** Load state for `<OrbitIDLoaded/>`, `<OrbitIDLoading/>`, `<OrbitIDFailed/>`. */
 export const StatusContext = createContext<OrbitIDStatusContextValue>({ status: "loading", error: null, retry: () => {} });
 
-/** Clerk's name for the provider options context (`OptionsContext`). */
+/** Older name for the provider options context. */
 export const OptionsContext = OrbitIDOptionsContext;

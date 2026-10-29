@@ -10,7 +10,7 @@ export type RouteMatcherParam = RouteMatcherPattern | RouteMatcher | Array<Route
 /**
  * Compile a Next.js-style path pattern into a RegExp.
  *
- * Supported syntax (a superset of what Clerk's `createRouteMatcher` accepts):
+ * Supported syntax:
  * - `:param`          → one path segment           (`/api/:id`)
  * - `:param*`, `:param+` → rest of the path        (`/api/:path*`)
  * - `*`               → within one segment        (`/files/*.png`)
