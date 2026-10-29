@@ -372,7 +372,7 @@ export const frontendPaths: DocumentedOperation[] = [
         scopes: arr(obj({ scope: str(), description: str() })),
       }),
     },
-    errors: [403, 404, 422, 429],
+    errors: [403, 404, 410, 422, 429],
   }),
   op("post", "/v1/client/oauth/device/approve", tagMe, "decideDeviceAuthorization", "Approve or deny a device code", {
     security: "frontend",
@@ -388,7 +388,7 @@ export const frontendPaths: DocumentedOperation[] = [
         scopes: arr(str()),
       }),
     },
-    errors: [403, 404, 409, 422, 429],
+    errors: [403, 404, 409, 410, 422, 429],
   }),
 
   // passkeys

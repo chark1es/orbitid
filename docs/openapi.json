@@ -3481,6 +3481,9 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
+          "410": {
+            "$ref": "#/components/responses/Gone"
+          },
           "422": {
             "$ref": "#/components/responses/UnprocessableEntity"
           },
@@ -3604,6 +3607,9 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "410": {
+            "$ref": "#/components/responses/Gone"
           },
           "422": {
             "$ref": "#/components/responses/UnprocessableEntity"
@@ -15261,6 +15267,12 @@
           },
           "429": {
             "$ref": "#/components/responses/TooManyRequests"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         }
       }
@@ -24798,6 +24810,36 @@
             "description": "Seconds until the next attempt is allowed."
           }
         },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            }
+          }
+        }
+      },
+      "Gone": {
+        "description": "The resource existed but is no longer available, for example an expired device code.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            }
+          }
+        }
+      },
+      "BadGateway": {
+        "description": "An outbound provider (email, identity provider, SMS) refused or failed the call. The message never contains a provider credential.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiError"
+            }
+          }
+        }
+      },
+      "ServiceUnavailable": {
+        "description": "A required capability is not configured on this instance, for example `email_not_configured`.",
         "content": {
           "application/json": {
             "schema": {

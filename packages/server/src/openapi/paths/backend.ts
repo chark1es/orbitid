@@ -529,7 +529,7 @@ export const backendPaths: DocumentedOperation[] = [
       "A delivery failure answers 502 with a message that never contains the provider key. Rate limited per address and overall.",
     body: { schema: obj({ to: str({ description: "Recipient address." }) }) },
     success: { status: 200, schema: obj({ provider: { type: "string", enum: ["resend", "smtp", "console"] }, ok: { const: true } }) },
-    errors: [422, 429],
+    errors: [422, 429, 502, 503],
   }),
   op("post", "/v1/instance/signing_keys/rotate", "Instance", "rotateSigningKey", "Rotate the session signing key", {
     security: "backend",

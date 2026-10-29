@@ -82,6 +82,18 @@ const errorResponses = {
     headers: { "Retry-After": { schema: { type: "integer" }, description: "Seconds until the next attempt is allowed." } },
     content: { "application/json": { schema: ref("ApiError") } },
   },
+  Gone: {
+    description: "The resource existed but is no longer available, for example an expired device code.",
+    content: { "application/json": { schema: ref("ApiError") } },
+  },
+  BadGateway: {
+    description: "An outbound provider (email, identity provider, SMS) refused or failed the call. The message never contains a provider credential.",
+    content: { "application/json": { schema: ref("ApiError") } },
+  },
+  ServiceUnavailable: {
+    description: "A required capability is not configured on this instance, for example `email_not_configured`.",
+    content: { "application/json": { schema: ref("ApiError") } },
+  },
 } satisfies Record<string, unknown>;
 
 /** The same statuses for OAuth protocol endpoints, which answer with RFC 6749's `{ error, error_description }`. */

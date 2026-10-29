@@ -122,6 +122,33 @@ describe("orbitIdMiddleware", () => {
     expect(forwardedAuth(response, "x-orbitid-auth-status")).toBe("signed-out");
   });
 
+  it("rejects a token from another issuer even when the signature checks out", async () => {
+    const token = await signTestToken({}, { issuer: "https://attacker.example" });
+    const middleware = orbitIdMiddleware({ jwtKey: await jwtKey(), issuer: "http://localhost:4000" });
+    const response = await middleware(req("/dashboard", { token }));
+    expect(forwardedAuth(response, "x-orbitid-auth-status")).toBe("signed-out");
+    const ok = await signTestToken({}, { issuer: "http://localhost:4000" });
+    const accepted = await middleware(req("/dashboard", { token: ok }));
+    expect(forwardedAuth(accepted, "x-orbitid-auth-status")).toBe("signed-in");
+  });
+
+  it("does not treat a pending session as signed in", async () => {
+    const token = await signTestToken({ sts: "pending", org_role: "org:admin", org_permissions: ["org:sys_memberships:manage"] });
+    const isProtected = createRouteMatcher(["/dashboard(.*)"]);
+    let seen: { authenticated: boolean; userId: string | null } | null = null;
+    const middleware = orbitIdMiddleware(
+      async (auth, request) => {
+        seen = { authenticated: auth.isAuthenticated, userId: auth.userId };
+        if (isProtected(request)) await auth.protect({ permission: "org:sys_memberships:manage" });
+      },
+      { jwtKey: await jwtKey(), signInUrl: "/sign-in" },
+    );
+    const response = await middleware(req("/dashboard", { token }));
+    expect(seen).toEqual({ authenticated: false, userId: null });
+    expect(response.status).toBe(307);
+    expect(new URL(response.headers.get("location")!).pathname).toBe("/sign-in");
+  });
+
   it("enforces authorizedParties from the azp claim", async () => {
     const token = await signTestToken({ azp: "https://evil.test" });
     const middleware = orbitIdMiddleware({

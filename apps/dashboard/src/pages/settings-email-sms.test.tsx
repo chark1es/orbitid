@@ -56,6 +56,25 @@ describe("email & SMS settings", () => {
     });
   });
 
+  it("lets the operator save other changes while a stored SMTP URL stays masked", async () => {
+    const calls = mockApi({
+      instance: instanceBody((settings) => {
+        settings.email.provider = "smtp";
+        settings.email.smtpUrl = "••••";
+      }),
+    });
+    renderPage(<Page />);
+
+    await screen.findByLabelText(/SMTP URL/);
+    fireEvent.change(screen.getByLabelText(/Code length/), { target: { value: "7" } });
+    const save = await screen.findByRole("button", { name: /save changes/i });
+    expect((save as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(save);
+    await waitFor(() => {
+      expect(calls.find((call) => call.method === "PATCH")?.body).toEqual({ email: { codeLength: 7 } });
+    });
+  });
+
   it("blocks saving an invalid from address with the reason", async () => {
     const calls = mockApi();
     renderPage(<Page />);

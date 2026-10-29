@@ -132,6 +132,7 @@ export async function completeHandshake(
     jwtKey: env.jwtKey,
     jwksUrl: env.jwksUrl,
     apiUrl: env.apiUrl,
+    issuer: env.issuer,
     authorizedParties: env.authorizedParties,
     clockSkewInMs: env.clockSkewInMs,
   });

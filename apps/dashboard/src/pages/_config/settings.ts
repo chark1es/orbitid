@@ -215,7 +215,8 @@ export function emailProviderLabel(provider: string | null | undefined): string 
 /** Mirrors the server's `parseSmtpUrl`: `smtp://` (STARTTLS) or `smtps://` (implicit TLS), host and port only. */
 export function smtpUrlError(value: string): string | null {
   const raw = value.trim();
-  if (!raw) return null;
+  // A stored URL comes back masked; there is nothing to validate until the operator types a replacement.
+  if (!raw || isMaskedSecret(raw)) return null;
   if (/[\r\n]/.test(raw)) return "SMTP URL must not contain line breaks.";
   let url: URL;
   try {
@@ -234,6 +235,7 @@ export function smtpUrlError(value: string): string | null {
 
 /** Resend keys are `re_…`; a value with a line break is refused by the server. */
 export function resendApiKeyError(value: string): string | null {
+  if (isMaskedSecret(value)) return null;
   if (/[\r\n]/.test(value)) return "API key must not contain line breaks.";
   return null;
 }

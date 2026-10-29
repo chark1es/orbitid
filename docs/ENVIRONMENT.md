@@ -21,6 +21,7 @@ Set these where OrbitID runs: the container environment, `docker compose`'s `.en
 | `ORBITID_BASE_URL` | yes in production | `http://localhost:<port>` | The URL browsers and your apps use to reach the server. It is the token issuer. |
 | `PORT` / `ORBITID_PORT` | no | `4000` | Port to listen on. |
 | `ORBITID_SECRET_KEY` | no | derived from the encryption key | Backend API key. Set it only to pin a specific value. |
+| `ORBITID_DATABASE_PATH` | no | none | Legacy alias: a SQLite file path, used when `ORBITID_DATABASE_URL` is not set. |
 | `ORBITID_DATA_DIR` | no | `./data` | Uploads and, for SQLite, the database file. |
 | `ORBITID_DASHBOARD_DIR` | no | built dashboard next to the server | Folder holding the built dashboard. |
 | `ORBITID_DATABASE_POOL` | no | `10` | Maximum Postgres connections. |
@@ -64,6 +65,7 @@ These are compiled into your site's client code, so everyone can read them. They
 | `NEXT_PUBLIC_ORBITID_SIGN_UP_URL` | no (`/sign-up`) | Where your sign-up page lives. |
 | `NEXT_PUBLIC_ORBITID_AFTER_SIGN_IN_URL` | no (`/`) | Where users land after signing in. |
 | `NEXT_PUBLIC_ORBITID_AFTER_SIGN_UP_URL` | no (`/`) | Where users land after signing up. |
+| `VITE_ORBITID_API_URL` | no | Build-time API URL for the OrbitID dashboard when it is served from a different origin than the server. The dashboard bundle ships to browsers, so this is public. See [DASHBOARD.md](DASHBOARD.md). |
 
 ## Which file does each label go in?
 

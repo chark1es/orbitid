@@ -30,6 +30,8 @@ Next.js 14+ integration for OrbitID.
 | `ORBITID_AUTHORIZED_PARTIES` | server/middleware | comma-separated origins checked against `azp`. Optional |
 | `ORBITID_WEBHOOK_SECRET` | server | default `whsec_…` for `verifyWebhook()`. Only to receive webhooks |
 
+Session tokens must carry the issuer encoded in your publishable key (the server's public URL); a validly signed token from any other issuer is refused. Override it with the `issuer` option of `orbitIdMiddleware` if you front the server with a different public URL.
+
 Every variable in the repo, including the ones for the OrbitID server itself, is listed by label in [docs/ENVIRONMENT.md](../../docs/ENVIRONMENT.md).
 
 Without `ORBITID_JWT_KEY`, middleware verifies tokens through `${apiUrl}/.well-known/jwks.json`.

@@ -96,7 +96,7 @@ export interface OperationInput {
   /** The success status and its body. `302` is used by the browser redirect endpoints. */
   success?: { status: 200 | 201 | 202 | 204 | 302; schema?: Schema; contentType?: string; description?: string; headers?: Record<string, Schema> };
   /** Additional error statuses. `400`, `401`, `404` and `422` are inferred from the operation. */
-  errors?: (400 | 401 | 403 | 404 | 409 | 422 | 429)[];
+  errors?: (400 | 401 | 403 | 404 | 409 | 410 | 422 | 429 | 502 | 503)[];
   /** Defaults to the OrbitID envelope. OAuth protocol endpoints answer with the OAuth error shape instead. */
   errorShape?: ErrorShape;
 }
@@ -131,8 +131,11 @@ export const ERROR_RESPONSE_NAMES: Record<number, string> = {
   403: "Forbidden",
   404: "NotFound",
   409: "Conflict",
+  410: "Gone",
   422: "UnprocessableEntity",
   429: "TooManyRequests",
+  502: "BadGateway",
+  503: "ServiceUnavailable",
 };
 
 const errorResponse = (status: number, shape: ErrorShape) => {

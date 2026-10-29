@@ -109,18 +109,20 @@ function createMiddlewareAuthObject(
 ): MiddlewareAuthObject {
   const claims = state.status === "signed-in" ? state.claims : null;
   const sessionStatus = claims?.sts ?? (state.status === "signed-in" ? "active" : null);
+  // A pending session (required MFA not yet set up) is not a signed-in user, here as in `auth()`.
+  const authenticatedClaims = sessionStatus === "pending" ? null : claims;
 
   const auth: MiddlewareAuthObject = {
-    userId: claims?.sub ?? null,
+    userId: authenticatedClaims?.sub ?? null,
     sessionId: claims?.sid ?? null,
-    orgId: claims?.org_id ?? null,
-    orgRole: claims?.org_role ?? null,
-    orgSlug: claims?.org_slug ?? null,
-    orgPermissions: claims?.org_permissions ?? null,
+    orgId: authenticatedClaims?.org_id ?? null,
+    orgRole: authenticatedClaims?.org_role ?? null,
+    orgSlug: authenticatedClaims?.org_slug ?? null,
+    orgPermissions: authenticatedClaims?.org_permissions ?? null,
     actor: claims?.act ?? null,
     sessionClaims: claims,
     sessionStatus,
-    isAuthenticated: state.status === "signed-in" && claims !== null,
+    isAuthenticated: state.status === "signed-in" && authenticatedClaims !== null,
     getToken: async (opts) =>
       opts?.template ? null : state.token,
     has: createHasChecker(claims, sessionStatus),

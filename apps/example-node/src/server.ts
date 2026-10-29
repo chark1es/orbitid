@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import type { WebhookEvent } from "@orbitid/node";
+import { isOrbitIdError, type WebhookEvent } from "@orbitid/node";
 import { orbit, PERMISSION_LIST_USERS } from "./orbit.js";
 
 const PORT = Number(process.env.PORT ?? 3001);
@@ -116,6 +116,14 @@ const server = createServer((req, res) => {
   };
 
   void run().catch((error: unknown) => {
+    // Verification that could not run at all (key set unreachable, bad configuration) is a 503, not a 500:
+    // the caller is not signed out, the server just cannot tell right now.
+    if (isOrbitIdError(error) && ["jwks-fetch-failed", "network-error", "request-timeout", "configuration"].includes(error.reason ?? "")) {
+      console.error("[example-node] verification unavailable:", error.reason);
+      if (!res.headersSent) apiError(res, 503, "authentication_unavailable", "Authentication is temporarily unavailable");
+      else res.end();
+      return;
+    }
     // Log the failure server-side; the caller only learns that something went wrong.
     console.error("[example-node]", error);
     if (!res.headersSent) apiError(res, 500, "internal_server_error", "Internal server error");

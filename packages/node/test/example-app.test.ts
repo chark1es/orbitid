@@ -169,6 +169,24 @@ describe("example-node app", () => {
     expect(result.stdout).toContain("example@example.com");
   }, 40_000);
 
+  it("answers 503, not 500, when the key set cannot be reached", async () => {
+    const deadPort = await freePort();
+    const port = await freePort();
+    const child = spawn(process.execPath, ["--import", "tsx", "apps/example-node/src/server.ts"], {
+      cwd: REPO_ROOT,
+      env: { ...process.env, PORT: String(port), ORBITID_SECRET_KEY: secretKey, ORBITID_API_URL: `http://127.0.0.1:${deadPort}` },
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    try {
+      await waitForServer(`http://127.0.0.1:${port}`, 20_000);
+      const res = await jsonFetch(`http://127.0.0.1:${port}/me`, { headers: { authorization: `Bearer ${sessionToken}` } });
+      expect(res.status).toBe(503);
+      expect(res.body.errors[0].code).toBe("authentication_unavailable");
+    } finally {
+      child.kill("SIGTERM");
+    }
+  });
+
   it("answers 404 with the server's error shape for an unknown route", async () => {
     const response = await jsonFetch(`${exampleUrl}/nope`);
     expect(response.status).toBe(404);

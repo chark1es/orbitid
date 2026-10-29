@@ -167,8 +167,8 @@ describe("OpenAPI document structure", () => {
     const components = spec.components as unknown as { responses: Json; parameters: Json };
     expect(Object.keys(components.responses).sort()).toEqual(
       [
-        "BadRequest", "Conflict", "Forbidden", "NotFound", "OAuthBadRequest", "OAuthUnauthorized",
-        "TooManyRequests", "Unauthorized", "UnprocessableEntity",
+        "BadGateway", "BadRequest", "Conflict", "Forbidden", "Gone", "NotFound", "OAuthBadRequest", "OAuthUnauthorized",
+        "ServiceUnavailable", "TooManyRequests", "Unauthorized", "UnprocessableEntity",
       ],
     );
     expect(Object.keys(components.parameters).sort()).toEqual(["Limit", "Offset", "OrderBy", "Paginated"]);
