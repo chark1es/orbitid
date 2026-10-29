@@ -292,12 +292,19 @@ export class OrbitID {
     // `__client_uat` first: middleware uses it to decide whether a handshake can refresh a missing
     // `__session`, so a token request that fails must not leave the browser looking signed out.
     this.writeClientUat();
+    const session = this._session;
     try {
-      const token = await this._session.getToken();
-      setSessionCookie(token, this.cookieOptions);
+      const token = await session.getToken();
+      // The user may have signed out or switched session while the request was in flight.
+      if (this.isCurrentActiveSession(session)) setSessionCookie(token, this.cookieOptions);
     } catch {
       /* leave the existing `__session` untouched: the next refresh retries */
     }
+  }
+
+  /** True while `session` is still the active session of this instance. */
+  private isCurrentActiveSession(session: Session): boolean {
+    return this._session === session && session.status === "active";
   }
 
   private startTokenRefresh(): void {
@@ -313,6 +320,8 @@ export class OrbitID {
     if (!session || session.status !== "active") return;
     try {
       const token = await session.getToken({ skipCache: true });
+      // A response that lands after sign-out or a session switch must not bring the old session back.
+      if (!this.isCurrentActiveSession(session)) return;
       setSessionCookie(token, this.cookieOptions);
       this.writeClientUat();
     } catch {

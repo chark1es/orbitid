@@ -47,12 +47,15 @@ const equalJson = (a: unknown, b: unknown): boolean => {
  * Instance settings: masking, normalizing, and PATCH payload construction
  * ---------------------------------------------------------------------------------------------- */
 
-const MASKED_PATTERN = /^[•*x]{4,}$/i;
-const PARTIAL_MASK_PATTERN = /^[A-Za-z0-9_-]{0,8}[•*x]{4,}[A-Za-z0-9_-]{0,8}$/;
+/** The server masks every stored secret as a run of bullets (`••••`) and drops that mask when it is sent back. */
+const MASK_PATTERN = /^•{4,}$/;
 
+/**
+ * Only the server's own mask counts. A value the operator typed that merely contains a bullet, or looks like a
+ * mask (`xxxx`, `****`), is a real value and must be validated and sent, never silently dropped.
+ */
 export function isMaskedSecret(value: unknown): boolean {
-  if (typeof value !== "string" || value.length < 4) return false;
-  return MASKED_PATTERN.test(value) || PARTIAL_MASK_PATTERN.test(value) || value.includes("•");
+  return typeof value === "string" && MASK_PATTERN.test(value);
 }
 
 /** An empty or masked secret means "keep the stored value". */

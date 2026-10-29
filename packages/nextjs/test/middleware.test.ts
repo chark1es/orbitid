@@ -132,6 +132,14 @@ describe("orbitIdMiddleware", () => {
     expect(forwardedAuth(accepted, "x-orbitid-auth-status")).toBe("signed-in");
   });
 
+  it("falls back to the API URL as the expected issuer when there is no publishable key", async () => {
+    const middleware = orbitIdMiddleware({ jwtKey: await jwtKey(), apiUrl: "https://api.orbitid.test" });
+    const foreign = await signTestToken({}, { issuer: "https://evil.test" });
+    expect(forwardedAuth(await middleware(req("/dashboard", { token: foreign })), "x-orbitid-auth-status")).toBe("signed-out");
+    const own = await signTestToken({}, { issuer: "https://api.orbitid.test" });
+    expect(forwardedAuth(await middleware(req("/dashboard", { token: own })), "x-orbitid-auth-status")).toBe("signed-in");
+  });
+
   it("does not treat a pending session as signed in", async () => {
     const token = await signTestToken({ sts: "pending", org_role: "org:admin", org_permissions: ["org:sys_memberships:manage"] });
     const isProtected = createRouteMatcher(["/dashboard(.*)"]);

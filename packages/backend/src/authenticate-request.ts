@@ -126,7 +126,8 @@ export async function authenticateRequest(request: Request, options: Authenticat
   };
 
   try {
-    const claims = await verifyToken(token, options);
+    // Tokens are issued by the Frontend API, so that URL (explicit or from the publishable key) is the expected issuer.
+    const claims = await verifyToken(token, { ...options, issuer: options.issuer ?? frontendApiUrl(options) ?? undefined });
     currentSessionId = claims.sid;
     return {
       status: "signed-in",

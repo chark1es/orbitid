@@ -137,7 +137,7 @@ describe("middleware handshake", () => {
   });
 
   it("only completes a handshake it started (crafted links cannot sign a browser in)", async () => {
-    const token = await signTestToken({ sub: "user_victim", sid: "sess_victim" });
+    const token = await signTestToken({ sub: "user_victim", sid: "sess_victim" }, { issuer: API_URL });
     const response = await (await middleware())(
       req(`/dashboard?__orbit_handshake=${token}`, { cookie: `__client_uat=1700000000` }),
     );
@@ -150,7 +150,7 @@ describe("middleware handshake", () => {
   });
 
   it("sets __session and __client_uat from a valid handshake token and strips the parameter", async () => {
-    const token = await signTestToken({ sub: "user_42", sid: "sess_42" });
+    const token = await signTestToken({ sub: "user_42", sid: "sess_42" }, { issuer: API_URL });
     const response = await (await middleware())(
       req(`/dashboard/settings?__orbit_handshake=${token}&tab=2`, {
         cookie: `__client_uat=1700000000; ${HANDSHAKE_MARKER_COOKIE}=1`,
@@ -199,7 +199,7 @@ describe("middleware handshake", () => {
         .sign(other.privateKey);
     }],
     ["a tampered token", async () => {
-      const token = await signTestToken();
+      const token = await signTestToken({}, { issuer: API_URL });
       const parts = token.split(".");
       return `${parts[0]}.${parts[1]}.${"A".repeat(parts[2]!.length)}`;
     }],
@@ -225,7 +225,7 @@ describe("middleware handshake", () => {
   });
 
   it("rejects a handshake token for an unauthorized party", async () => {
-    const token = await signTestToken({ azp: "https://evil.test" });
+    const token = await signTestToken({ azp: "https://evil.test" }, { issuer: API_URL });
     const response = await (await middleware({ authorizedParties: [APP] }))(
       req(`/dashboard?__orbit_handshake=${token}`, { cookie: `__client_uat=1700000000; ${HANDSHAKE_MARKER_COOKIE}=1` }),
     );

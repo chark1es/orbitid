@@ -145,8 +145,8 @@ export interface ResolvedServerEnv {
   apiUrl: string;
   jwksUrl: string;
   authorizedParties: string[] | undefined;
-  /** Expected token issuer (the server's public URL); `undefined` only when no valid publishable key is configured. */
-  issuer: string | undefined;
+  /** Expected token issuer (the server's public URL): the publishable key's URL, else the API URL. */
+  issuer: string;
   signInUrl: string;
   signUpUrl: string;
   afterSignInUrl: string;
@@ -168,7 +168,8 @@ export function getServerEnv(overrides: ServerEnvOverrides = {}): ResolvedServer
       overrides.authorizedParties !== undefined
         ? parseAuthorizedParties(overrides.authorizedParties)
         : getAuthorizedParties(),
-    issuer: overrides.issuer ? stripTrailingSlash(overrides.issuer) : frontendApiFromPublishableKey(publishableKey) ?? undefined,
+    // Without a publishable key the API URL is the best statement of who issues tokens; never verify without an issuer.
+    issuer: overrides.issuer ? stripTrailingSlash(overrides.issuer) : frontendApiFromPublishableKey(publishableKey) ?? stripTrailingSlash(apiUrl),
     signInUrl: overrides.signInUrl ?? readEnv(ENV_KEYS.signInUrl) ?? DEFAULT_SIGN_IN_URL,
     signUpUrl: overrides.signUpUrl ?? readEnv(ENV_KEYS.signUpUrl) ?? DEFAULT_SIGN_UP_URL,
     afterSignInUrl: overrides.afterSignInUrl ?? readEnv(ENV_KEYS.afterSignInUrl) ?? DEFAULT_AFTER_SIGN_IN_URL,

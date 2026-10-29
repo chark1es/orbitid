@@ -27,7 +27,7 @@ describe("OAuthConsent", () => {
         });
       }
       expect(init?.method).toBe("POST");
-      expect(JSON.parse(String(init?.body))).toMatchObject({ consent: "allow", client_id: "oa_1" });
+      expect(JSON.parse(String(init?.body))).toMatchObject({ approve: true, client_id: "oa_1" });
       return jsonResponse({ response: { redirect_url: "/consent-done" } });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -51,6 +51,22 @@ describe("OAuthConsent", () => {
 
     await waitFor(() => expect(harness.instance.navigations.at(-1)?.to).toBe("/consent-done"));
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain("client_id=oa_1");
+  });
+
+  it("shows the server's message when the decision is refused", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/oauth/consent_info")) {
+        return jsonResponse({ response: { application: { client_id: "oa_1", name: "Acme Analytics", logo_url: null }, scopes: [] } });
+      }
+      return new Response(JSON.stringify({ errors: [{ code: "resource_not_found", message: "OAuth application not found" }] }), { status: 404, headers: { "Content-Type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderAuth(
+      <OAuthConsent clientId="oa_1" scope="openid" redirectUri="https://app.example.com/callback" frontendApiUrl="https://auth.example.com" />,
+      setupAuth(),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Allow" }));
+    expect(await screen.findByText(/not found/i)).toBeTruthy();
   });
 
   it("shows an invalid-request state without parameters", async () => {

@@ -67,3 +67,7 @@ cd playground
 ```
 
 The unit tests cover the feature matrix builder against an `EnvironmentJSON` fixture, the mail transport resolution, the device-flow response and poll parsing, the raw session skip marker, the JWT decoder and countdown, and the `has()` probe helpers.
+
+## Local only
+
+The playground holds your secret key and calls Backend API helpers (seed data, webhook registration, email test), so it answers only on `localhost`, `127.0.0.1` and `[::1]`. Any other host gets a 403. Set `ORBITID_PLAYGROUND_ALLOW_REMOTE=true` (WEBSITE · BACKEND) only on a network you trust.

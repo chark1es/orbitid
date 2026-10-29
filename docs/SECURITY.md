@@ -215,6 +215,17 @@ The server hardens what it controls; these parts are yours.
    trace ids and user ids are fine, tokens and codes are never logged by the server (the one opt-in exception is `ORBITID_ALLOW_CONSOLE_EMAIL=true`, which exists for trials) but may appear in your proxy's
    logs if a client puts them in a URL.
 
+## Dashboard sign-in
+
+The dashboard has no accounts of its own yet: an operator pastes the instance secret key, which the page keeps in
+`sessionStorage` (this tab only; it is gone when the tab closes) and sends as a bearer token. That means any script
+that runs in the dashboard's origin can read the key. The defenses are around that surface rather than around the
+key: the dashboard's CSP allows scripts only from its own origin plus one nonce-tagged bootstrap script, with no
+inline handlers and no `eval`; the app renders every server string through React text nodes (there is no
+`dangerouslySetInnerHTML` anywhere in it); and the page is served with `frame-ancestors 'none'` and `no-store`. Keep
+the dashboard on its own origin, behind your TLS and, if you can, behind a VPN or an allowlist. Operator accounts with
+an httpOnly session are the next step for this surface.
+
 ## Dependency status
 
 `bun audit` is clean except for one advisory in `zod` 3.x (memory use when validating very large arrays that carry

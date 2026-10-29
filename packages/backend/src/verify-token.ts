@@ -110,6 +110,10 @@ export async function verifyToken(token: string, options: VerifyTokenOptions = {
   }
 
   const issuer = options.issuer ?? options.apiUrl;
+  // A key alone proves who signed, not which instance a token belongs to: always know the issuer to expect.
+  if (publicKey && !issuer) {
+    throw new TokenVerificationError("invalid-issuer", "Verifying with `jwtKey` needs `issuer` (or `apiUrl`): the server's public URL.");
+  }
   let payload: Record<string, unknown>;
   try {
     const verifyOptions = {

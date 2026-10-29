@@ -76,16 +76,19 @@ describe("buildSettingsPatch", () => {
     expect(buildSettingsPatch(base, draft)).toEqual({ email: { smtpUrl: "smtp://new" } });
   });
 
-  it("does not partially mask a real secret into the patch", () => {
+  it("sends a typed secret that merely contains a bullet instead of dropping it", () => {
     const base = { security: { captchaSecret: "abcdef123456" } };
     const draft = { security: { captchaSecret: "abcdef••••" } };
-    expect(buildSettingsPatch(base, draft)).toEqual({});
+    expect(buildSettingsPatch(base, draft)).toEqual({ security: { captchaSecret: "abcdef••••" } });
   });
 
   it("detects masked server values", () => {
     expect(isMaskedSecret("••••")).toBe(true);
     expect(isMaskedSecret("••••••••")).toBe(true);
-    expect(isMaskedSecret("sk_live_••••••••")).toBe(true);
+    // Only the server's own mask counts; a value that merely contains bullets or stars is a real value.
+    expect(isMaskedSecret("sk_live_••••••••")).toBe(false);
+    expect(isMaskedSecret("smtp://user:p•ssw0rd@mail.example.com:587")).toBe(false);
+    expect(isMaskedSecret("xxxx")).toBe(false);
     expect(isMaskedSecret("smtp://user:pass@host")).toBe(false);
     expect(shouldPreserveSecret("")).toBe(true);
     expect(shouldPreserveSecret(undefined)).toBe(true);

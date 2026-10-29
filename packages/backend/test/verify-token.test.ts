@@ -126,4 +126,11 @@ describe("verifyToken", () => {
     const expired = await sign({ expiresAt: Math.floor(Date.now() / 1000) - 5 });
     await expectReason(expired, { jwksUrl, issuer: ISSUER }, "token-expired");
   });
+
+  it("refuses to verify with a jwtKey when no issuer is known", async () => {
+    const token = await sign({});
+    await expectReason(token, { jwtKey: publicKeyPem }, "invalid-issuer");
+    const claims = await verifyToken(token, { jwtKey: publicKeyPem, apiUrl: ISSUER });
+    expect(claims.sub).toBeTruthy();
+  });
 });

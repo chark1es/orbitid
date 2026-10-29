@@ -9,7 +9,7 @@ import {
   cn,
 } from "@orbitid/ui";
 import { LockIcon, ShieldCheckIcon } from "lucide-react";
-import { apiOrigin, currentUser, displayName, initials, primaryIdentifier, toAuthError } from "./_shared/api";
+import { apiOrigin, currentUser, displayName, errorMessage, initials, primaryIdentifier, toAuthError } from "./_shared/api";
 import { AuthAppearanceScope, useElementClasses } from "./_shared/appearance";
 import { AuthCard } from "./_shared/auth-card";
 import { FormError } from "./_shared/form-error";
@@ -149,8 +149,8 @@ function OAuthConsentInner(props: OAuthConsentProps) {
           scope,
           redirect_uri: redirectUri,
           state,
-          consent: allow ? "allow" : "deny",
-          allow,
+          // The server's field is `approve`; anything else is rejected with `form_param_missing`.
+          approve: allow,
         },
       });
       const redirect =
@@ -171,8 +171,9 @@ function OAuthConsentInner(props: OAuthConsentProps) {
         if (state) target.searchParams.set("state", state);
         window.location.assign(target.toString());
       }
-    } catch {
-      setError(t("oauthConsent.error"));
+    } catch (caught) {
+      // Show what the server said (expired session, unknown application) instead of a generic failure.
+      setError(errorMessage(t, caught));
     } finally {
       setBusy(false);
     }
