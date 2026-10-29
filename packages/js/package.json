@@ -19,8 +19,8 @@
     "jose": "^5.9.0"
   },
   "devDependencies": {
+    "jsdom": "^25.0.0",
     "typescript": "^5.6.0",
-    "vitest": "^2.1.0",
-    "jsdom": "^25.0.0"
+    "vitest": "^4"
   }
 }

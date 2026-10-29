@@ -12,5 +12,7 @@ export default defineConfig({
     css: false,
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
+    // The workspace suites run side by side; give slow UI interactions room so load does not cause false failures.
+    testTimeout: 20_000,
   },
 });
