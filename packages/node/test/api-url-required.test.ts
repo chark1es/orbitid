@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { encodePublishableKey } from "@orbitid/shared";
 import { createOrbitId } from "../src";
 
 describe("createOrbitId without an API URL", () => {
@@ -17,5 +18,15 @@ describe("createOrbitId without an API URL", () => {
     delete process.env.ORBITID_API_URL;
     const orbit = createOrbitId({ secretKey: "sk_test_" + "a".repeat(32), publishableKey: "pk_test_aHR0cDovL2xvY2FsaG9zdDo0MDAw" });
     expect(orbit.config.apiUrl).toBe("http://localhost:4000");
+  });
+
+  it("verifies tokens against the public issuer while reaching the server on an internal address", () => {
+    delete process.env.ORBITID_ISSUER;
+    const viaKey = createOrbitId({ secretKey: "sk_test_" + "a".repeat(32), apiUrl: "http://orbitid:4000", publishableKey: encodePublishableKey("https://auth.example.com") });
+    expect(viaKey.config.apiUrl).toBe("http://orbitid:4000");
+    expect(viaKey.config.issuer).toBe("https://auth.example.com");
+    expect(viaKey.config.jwksUrl).toBe("http://orbitid:4000/.well-known/jwks.json");
+    const explicit = createOrbitId({ secretKey: "sk_test_" + "a".repeat(32), apiUrl: "http://orbitid:4000", issuer: "https://login.example.com/" });
+    expect(explicit.config.issuer).toBe("https://login.example.com");
   });
 });

@@ -25,6 +25,7 @@ export const ENV_KEYS = {
   jwksUrl: "ORBITID_JWKS_URL",
   publishableKey: "ORBITID_PUBLISHABLE_KEY",
   audience: "ORBITID_AUDIENCE",
+  issuer: "ORBITID_ISSUER",
   webhookSecret: "ORBITID_WEBHOOK_SECRET",
 } as const;
 
@@ -34,8 +35,14 @@ export interface CreateOrbitIdOptions {
    * It is never logged, never echoed in an error and never returned by this SDK.
    */
   secretKey?: string;
-  /** Base URL of the OrbitID server. `ORBITID_API_URL`, then the publishable key, then the package default. */
+  /** Base URL of the OrbitID server, as this process reaches it. `ORBITID_API_URL`, else read from the publishable key. Required. */
   apiUrl?: string;
+  /**
+   * The server's public URL, which is what tokens carry as `iss`. Defaults to the URL in the publishable key, else
+   * `apiUrl`. Set it when your process reaches the server on an internal address (`http://orbitid:4000`) but tokens are
+   * issued for the public one (`https://auth.example.com`). `ORBITID_ISSUER`.
+   */
+  issuer?: string;
   /** JWKS endpoint. Defaults to `${apiUrl}/.well-known/jwks.json`; `ORBITID_JWKS_URL` overrides. */
   jwksUrl?: string;
   /** Publishable key (`pk_test_…`). Only used to derive the API URL when `apiUrl` is not set. */
@@ -177,6 +184,20 @@ function resolveApiUrl(options: CreateOrbitIdOptions): string | undefined {
   return undefined;
 }
 
+function resolveIssuer(options: CreateOrbitIdOptions, apiUrl: string): string {
+  const explicit = options.issuer ?? readEnv(ENV_KEYS.issuer);
+  if (explicit) return explicit.replace(/\/+$/, "");
+  const publishableKey = options.publishableKey ?? readEnv(ENV_KEYS.publishableKey);
+  if (publishableKey && isPublishableKey(publishableKey)) {
+    try {
+      return decodePublishableKey(publishableKey).frontendApi.replace(/\/+$/, "");
+    } catch {
+      /* a malformed key was already reported while resolving the API URL */
+    }
+  }
+  return apiUrl;
+}
+
 function resolveJwksUrl(options: CreateOrbitIdOptions, apiUrl: string): string {
   const explicit = options.jwksUrl ?? readEnv(ENV_KEYS.jwksUrl);
   if (explicit) return explicit;
@@ -241,8 +262,9 @@ export function createOrbitId(options: CreateOrbitIdOptions = {}): OrbitIdNode {
 
   const audience = normalizeAudience(options.audience ?? readEnv(ENV_KEYS.audience));
   const clockToleranceSeconds = options.clockToleranceSeconds ?? 5;
-  const issuer = client.apiUrl;
-  const jwksUrl = resolveJwksUrl(options, issuer);
+  const issuer = resolveIssuer(options, client.apiUrl);
+  // Keys are fetched from where this process reaches the server, whatever the public issuer is.
+  const jwksUrl = resolveJwksUrl(options, client.apiUrl);
   const jwks = new JwksCache({
     url: jwksUrl,
     fetch: transport.fetch,
@@ -325,7 +347,7 @@ export function createOrbitId(options: CreateOrbitIdOptions = {}): OrbitIdNode {
     honoRequireAuth: (adapterOptions) => hono.honoRequireAuth(sdk, adapterOptions),
     honoRequirePermission: (permission, adapterOptions) => hono.honoRequirePermission(sdk, permission, adapterOptions),
     honoRequireRole: (role, adapterOptions) => hono.honoRequireRole(sdk, role, adapterOptions),
-    config: { apiUrl: issuer, jwksUrl, issuer, audience, clockToleranceSeconds },
+    config: { apiUrl: client.apiUrl, jwksUrl, issuer, audience, clockToleranceSeconds },
     version: SDK_VERSION,
   };
   return sdk;

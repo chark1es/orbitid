@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { exportSPKI, generateKeyPair, SignJWT, type KeyLike } from "jose";
-import type { SessionClaims } from "@orbitid/shared";
+import { encodePublishableKey, type SessionClaims } from "@orbitid/shared";
 import { buildAuthObject, createClaimsHasCheck } from "../src/auth-object";
 import { authenticateRequest, parseCookie } from "../src/authenticate-request";
 
@@ -223,5 +223,35 @@ describe("authenticateRequest", () => {
     expect(await state.toAuth().getToken()).toBeNull();
     expect(parseCookie("__session=a%20b; other=x", "__session")).toBe("a b");
     expect(parseCookie(null, "__session")).toBeNull();
+  });
+});
+
+describe("authenticateRequest issuer", () => {
+  const PUBLISHABLE_KEY = encodePublishableKey("https://auth.example.com");
+
+  it("accepts tokens issued for the public URL when apiUrl is an internal address", async () => {
+    const token = await sign();
+    const result = await authenticateRequest(requestWith({ authorization: `Bearer ${token}` }), {
+      jwtKey: publicKeyPem,
+      apiUrl: "http://orbitid:4000",
+      publishableKey: PUBLISHABLE_KEY,
+    });
+    expect(result.status).toBe("signed-in");
+  });
+
+  it("rejects a token from another issuer", async () => {
+    const foreign = await new SignJWT({ sid: "sess_1" })
+      .setProtectedHeader({ alg: "RS256" })
+      .setIssuer("https://evil.example")
+      .setSubject("user_1")
+      .setIssuedAt()
+      .setExpirationTime("5m")
+      .sign(privateKey);
+    const result = await authenticateRequest(requestWith({ authorization: `Bearer ${foreign}` }), {
+      jwtKey: publicKeyPem,
+      apiUrl: "http://orbitid:4000",
+      publishableKey: PUBLISHABLE_KEY,
+    });
+    expect(result.status).not.toBe("signed-in");
   });
 });

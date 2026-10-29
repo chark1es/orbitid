@@ -50,6 +50,7 @@ Set these on the server side of your own app: the Next.js server, an Express or 
 | `ORBITID_JWT_KEY` | no | `@orbitid/nextjs` | PEM public key to verify session tokens without fetching the key set. |
 | `ORBITID_JWKS_URL` | no | `@orbitid/node` | Key set URL when it is not `<api url>/.well-known/jwks.json`. |
 | `ORBITID_AUTHORIZED_PARTIES` | no | `@orbitid/nextjs` | Comma-separated origins accepted in the token's `azp` claim. |
+| `ORBITID_ISSUER` | no | `@orbitid/node` | The server's public URL, which tokens carry as `iss`. Defaults to the URL in the publishable key, else `ORBITID_API_URL`. Set it when this process reaches the server on an internal address (`http://orbitid:4000`) but tokens are issued for the public one. |
 | `ORBITID_AUDIENCE` | no | `@orbitid/node` | Required token audience, if you set one. |
 | `ORBITID_PUBLISHABLE_KEY` | no | `@orbitid/node` | A stand-in for `ORBITID_API_URL`: the server URL is read from it. |
 

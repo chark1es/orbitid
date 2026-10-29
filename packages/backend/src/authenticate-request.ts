@@ -53,6 +53,16 @@ function noStoreHeaders(): Record<string, string> {
   return { "Cache-Control": "private, no-store" };
 }
 
+/** The public URL encoded in the publishable key: what tokens carry as `iss`, even when `apiUrl` is an internal address. */
+function publishableKeyUrl(options: AuthenticateRequestOptions): string | null {
+  if (!options.publishableKey) return null;
+  try {
+    return decodePublishableKey(options.publishableKey).frontendApi.replace(/\/+$/, "");
+  } catch {
+    return null;
+  }
+}
+
 /** Frontend API base URL: explicit `apiUrl` first, then the URL encoded in the publishable key. */
 function frontendApiUrl(options: AuthenticateRequestOptions): string | null {
   if (options.apiUrl) return options.apiUrl.replace(/\/+$/, "");
@@ -127,7 +137,7 @@ export async function authenticateRequest(request: Request, options: Authenticat
 
   try {
     // Tokens are issued by the Frontend API, so that URL (explicit or from the publishable key) is the expected issuer.
-    const claims = await verifyToken(token, { ...options, issuer: options.issuer ?? frontendApiUrl(options) ?? undefined });
+    const claims = await verifyToken(token, { ...options, issuer: options.issuer ?? publishableKeyUrl(options) ?? frontendApiUrl(options) ?? undefined });
     currentSessionId = claims.sid;
     return {
       status: "signed-in",

@@ -99,20 +99,32 @@ function OAuthConsentInner(props: OAuthConsentProps) {
     if (typeof window === "undefined") return new URLSearchParams();
     return new URLSearchParams(window.location.search);
   }, []);
-  const clientId = props.clientId ?? query.get("client_id") ?? "";
-  const scope = props.scope ?? query.get("scope") ?? "openid profile email";
-  const redirectUri = props.redirectUri ?? query.get("redirect_uri") ?? "";
-  const state = props.state ?? query.get("state") ?? "";
+  // The server sends the visitor here with the original authorize request packed into `redirect_url`
+  // (`/oauth/authorize?redirect_uri=…&state=…&code_challenge=…`); read the request's own parameters from it.
+  const authorizeParams = useMemo(() => {
+    const raw = query.get("redirect_url");
+    if (!raw || typeof window === "undefined") return new URLSearchParams();
+    try {
+      return new URL(raw, window.location.origin).searchParams;
+    } catch {
+      return new URLSearchParams();
+    }
+  }, [query]);
+  const param = (name: string) => query.get(name) ?? authorizeParams.get(name);
+  const clientId = props.clientId ?? param("client_id") ?? "";
+  const scope = props.scope ?? param("scope") ?? "openid profile email";
+  const redirectUri = props.redirectUri ?? param("redirect_uri") ?? "";
+  const state = props.state ?? param("state") ?? "";
   const origin = (props.frontendApiUrl ?? apiOrigin(orbit)).replace(/\/$/, "");
   const user = currentUser(orbit);
   const extraParams = useMemo(() => {
-    const entries = Object.fromEntries(query.entries());
+    const entries = { ...Object.fromEntries(authorizeParams.entries()), ...Object.fromEntries(query.entries()) };
     delete entries.client_id;
     delete entries.scope;
     delete entries.redirect_uri;
     delete entries.state;
     return entries;
-  }, [query]);
+  }, [query, authorizeParams]);
 
   const [info, setInfo] = useState<ConsentInfo | null>(null);
   const [error, setError] = useState<string | null>(null);

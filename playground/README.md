@@ -70,4 +70,4 @@ The unit tests cover the feature matrix builder against an `EnvironmentJSON` fix
 
 ## Local only
 
-The playground holds your secret key and calls Backend API helpers (seed data, webhook registration, email test), so it answers only on `localhost`, `127.0.0.1` and `[::1]`. Any other host gets a 403. Set `ORBITID_PLAYGROUND_ALLOW_REMOTE=true` (WEBSITE · BACKEND) only on a network you trust.
+The playground holds your secret key and calls Backend API helpers (seed data, webhook registration, email test), so it is meant to run on your own machine. `bun run dev` and `bun run start` bind to `127.0.0.1`, which is the real boundary: nothing on your network can reach it. As a second guard it answers only when the request's `Host` header is `localhost`, `127.0.0.1` or `[::1]`; that header is client-controlled, so it protects against mistakes (a reverse proxy, a changed bind address), not against someone who can already reach the port. To expose it anyway, change the bind address yourself and set `ORBITID_PLAYGROUND_ALLOW_REMOTE=true` (WEBSITE · BACKEND), and only on a network you trust.

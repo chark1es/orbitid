@@ -34,6 +34,7 @@ never returned.
 |---|---|---|---|
 | `secretKey` | `ORBITID_SECRET_KEY` | **Yes** | `sk_test_…` / `sk_live_…`. A `pk_…` key is rejected: that one belongs in the browser. |
 | `apiUrl` | `ORBITID_API_URL` | **Yes**, unless a publishable key is given | URL of your OrbitID server. There is no hosted default: without it (or a publishable key to read it from) `createOrbitId()` throws. |
+| `issuer` | `ORBITID_ISSUER` | No | The server's public URL, which tokens carry as `iss`. Defaults to the URL in the publishable key, else `apiUrl`. Set it when `apiUrl` is an internal address (`http://orbitid:4000`) and tokens are issued for the public one. |
 | `jwksUrl` | `ORBITID_JWKS_URL` | No | Defaults to `${apiUrl}/.well-known/jwks.json`. |
 | `publishableKey` | `ORBITID_PUBLISHABLE_KEY` | No | A stand-in for `apiUrl`: the server URL is read from it. |
 | `audience` | `ORBITID_AUDIENCE` | No | Expected `aud`. Leave unset for session tokens, which carry none. |

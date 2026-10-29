@@ -318,6 +318,13 @@ describe("OIDC provider — consent", () => {
     expect(query.client_id).toBe(app.client_id);
     expect(query.scope).toBe("openid profile");
     expect(query.redirect_url).toContain("/oauth/authorize?");
+    // The consent screen has nothing else to read the request from: pin that everything it must send back is in here.
+    const carried = new URL(query.redirect_url, "http://localhost").searchParams;
+    expect(carried.get("redirect_uri")).toBe(REDIRECT_URI);
+    expect(carried.get("state")).toBe("s1");
+    expect(carried.get("code_challenge")).toBe(challengeFor(pkce));
+    expect(carried.get("code_challenge_method")).toBe("S256");
+    expect(carried.get("response_type")).toBe("code");
 
     const info = await h.app.request(`/oauth/consent_info?client_id=${app.client_id}&scope=openid%20profile`, { headers: { cookie: session.cookie } });
     expect(info.status).toBe(200);

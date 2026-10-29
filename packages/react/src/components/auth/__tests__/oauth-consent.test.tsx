@@ -69,6 +69,32 @@ describe("OAuthConsent", () => {
     expect(await screen.findByText(/not found/i)).toBeTruthy();
   });
 
+  it("reads the authorize request from redirect_url, which is all the server sends", async () => {
+    const authorize = "/oauth/authorize?client_id=oa_1&redirect_uri=https%3A%2F%2Fapp.example.com%2Fcallback&response_type=code&state=xyz&code_challenge=abc&code_challenge_method=S256&scope=openid";
+    window.history.pushState({}, "", `/oauth-consent?client_id=oa_1&client_name=Acme&scope=openid&redirect_url=${encodeURIComponent(authorize)}`);
+    try {
+      const posted: unknown[] = [];
+      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes("/oauth/consent_info")) {
+          return jsonResponse({ response: { application: { client_id: "oa_1", name: "Acme", logo_url: null }, scopes: [{ scope: "openid", description: "Confirm your identity" }] } });
+        }
+        posted.push(JSON.parse(String(init?.body)));
+        return jsonResponse({ response: { redirect_url: "/consent-done" } });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      const harness = setupAuth();
+      renderAuth(<OAuthConsent frontendApiUrl="https://auth.example.com" />, harness);
+      fireEvent.click(await screen.findByRole("button", { name: "Allow" }));
+      await waitFor(() => expect(posted).toHaveLength(1));
+      expect(posted[0]).toMatchObject({
+        client_id: "oa_1", approve: true, redirect_uri: "https://app.example.com/callback", state: "xyz",
+        code_challenge: "abc", code_challenge_method: "S256", response_type: "code",
+      });
+    } finally {
+      window.history.pushState({}, "", "/");
+    }
+  });
+
   it("shows an invalid-request state without parameters", async () => {
     const harness = setupAuth();
     renderAuth(<OAuthConsent />, harness);
