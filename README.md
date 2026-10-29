@@ -186,6 +186,9 @@ bun run test        # every workspace (vitest)
 - Passkeys are tested with a software authenticator against the real API, not with a hardware security key or a platform authenticator in a real browser.
 - Tokens delivered by the handshake appear in the API host's access log for one request. See [docs/HANDSHAKE.md](docs/HANDSHAKE.md).
 - Cross-site POST callbacks (SAML ACS, Apple `form_post`) need an https base URL: the browser-binding cookie is `SameSite=None; Secure` only over https. This is a browser rule, not something the server can relax.
+- The dashboard signs in with the instance secret key, which it keeps in `sessionStorage`; there are no operator accounts yet. A strict CSP and no raw-HTML rendering are what protect it ([docs/SECURITY.md](docs/SECURITY.md)).
+- `zod` 3 carries one advisory (memory use on huge constrained arrays). Request bodies are capped at 1 MB first, which bounds it; moving to zod 4 would change validation across every endpoint. Everything else `bun audit` reports is fixed.
+- The council review (two DeepSeek V4.1 Flash reviewers and one GPT 6.1 Sol reviewer) ran three rounds. Every verified finding was fixed, but none of the three reviewers had signed off after round 3, and the last round's fixes were not reviewed again. Treat a first production deployment as needing its own security review.
 - Switching databases copies data with `export`/`import`; uploaded images are not part of the export and must be copied separately ([docs/DATA_MOVE.md](docs/DATA_MOVE.md)).
 
 ## License
