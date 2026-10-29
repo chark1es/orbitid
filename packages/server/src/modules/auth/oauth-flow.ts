@@ -7,6 +7,7 @@ import type { AppContext } from "../../context";
 import * as s from "../../db/schema";
 import { getOAuthAdapter, providerConfig } from "../../services/oauth-providers";
 import { bindBrowser } from "./browser-binding";
+import { randomToken } from "../../lib/crypto";
 import { first } from "../../lib/db";
 
 export interface OAuthFlow {
@@ -29,22 +30,24 @@ export async function createOAuthAuthorization(ctx: AppContext, c: Context, prov
   if (!adapter) throw new OrbitError(400, ErrorCodes.oauth_provider_not_enabled, `Social provider "${provider}" is not supported`, { param_name: "strategy" });
   const state = generateState();
   const codeVerifier = generateCodeVerifier();
+  // OIDC providers get a nonce, which the ID token must repeat (replay protection for the token itself).
+  const nonce = adapter.usesNonce ? randomToken(16) : null;
   const scopes = [...cfg.scopes, ...(flow.additionalScopes ?? [])].filter((v, i, arr) => arr.indexOf(v) === i);
-  const url = await adapter.createAuthorizationUrl({ state, codeVerifier, scopes });
+  const url = await adapter.createAuthorizationUrl({ state, codeVerifier, scopes, nonce: nonce ?? undefined });
   // The callback must arrive in the browser that started the flow, or anyone could feed a victim our URL.
   const browserHash = bindBrowser(ctx, c);
   await ctx.db.insert(s.oauthStates).values({
             state,
             provider,
             codeVerifier,
-            nonce: null,
+            nonce,
             flow: { ...flow, additionalScopes: flow.additionalScopes ?? [], browserHash },
             expiresAt: Date.now() + STATE_TTL_MS,
           });
   return { url: url.toString(), state };
 }
 
-export interface StoredOAuthFlow extends OAuthFlow { provider: string; codeVerifier: string; browserHash: string }
+export interface StoredOAuthFlow extends OAuthFlow { provider: string; codeVerifier: string; nonce: string | null; browserHash: string }
 
 export async function takeOAuthState(ctx: AppContext, state: string, provider: string): Promise<StoredOAuthFlow> {
   const now = Date.now();
@@ -61,5 +64,11 @@ export async function takeOAuthState(ctx: AppContext, state: string, provider: s
   if (!consumed) throw new OrbitError(400, ErrorCodes.oauth_callback_error, "The OAuth state is invalid or has expired");
   // Persisted JSON: the row is written only by createOAuthAuthorization above.
   const flow = consumed.flow as unknown as OAuthFlow & { browserHash?: string };
-  return { ...flow, browserHash: flow.browserHash ?? "", provider: consumed.provider, codeVerifier: consumed.codeVerifier ?? "" };
+  return {
+    ...flow,
+    browserHash: flow.browserHash ?? "",
+    provider: consumed.provider,
+    codeVerifier: consumed.codeVerifier ?? "",
+    nonce: consumed.nonce ?? null,
+  };
 }
