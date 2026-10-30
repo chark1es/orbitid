@@ -67,7 +67,7 @@ export interface OrganizationSwitcherProps extends CommonOrgProps {
  */
 export function OrganizationSwitcher(props: OrganizationSwitcherProps) {
   return (
-    <OrgRoot appearance={props.appearance} className={props.className}>
+    <OrgRoot appearance={props.appearance} className={props.className} whenDisabled="hidden">
       <OrganizationSwitcherView {...props} />
     </OrgRoot>
   );

@@ -1,5 +1,5 @@
 import type { ClientJSON, EnvironmentJSON, OrganizationJSON } from "@orbitid/shared";
-import { FapiClient, SDK_VERSION, type FetchLike } from "./fapi";
+import { FapiClient, SDK_VERSION } from "./fapi";
 import { TokenCache } from "./token-cache";
 import { CrossTabSync, type SyncMessage } from "./cross-tab-sync";
 import { Client } from "./resources/client";
@@ -11,92 +11,44 @@ import { Organization } from "./resources/organization";
 import { Session } from "./resources/session";
 import { ApiKey, type CreateApiKeyParams } from "./resources/api-key";
 import { unwrap } from "./resources/base";
-import { appendQuery, buildRedirectUrl } from "./util/url";
 import { inBrowser } from "./util/browser";
 import { clearAuthCookies, setClientUatCookie, setSessionCookie, type CookieOptions } from "./util/cookies";
 import type { PaginatedResponse, PaginationParams } from "./util/pagination";
+import { OrbitIDNavigation } from "./orbit/navigation-base";
+import { handleRedirectCallback as runRedirectCallback } from "./orbit/redirect-callback";
+import type {
+  HandleRedirectCallbackParams,
+  HandleRedirectCallbackResult,
+  OrbitIDListener,
+  OrbitIDOptions,
+  OrbitIDState,
+  SetActiveParams,
+  SetActiveResult,
+} from "./orbit/types";
 
-type RouterFn = (url: string) => void;
-
-export interface OrbitIDNavigateOptions {
-  push?: RouterFn;
-  replace?: RouterFn;
-}
-
-export interface OrbitIDOptions {
-  /** Frontend API domain (`auth.example.com`) when not using the publishable key's encoded URL. */
-  domain?: string;
-  /** Reverse-proxy base URL (`https://app.example.com/__orbit`). */
-  proxyUrl?: string;
-  /** Explicit Frontend API URL (local development/tests). */
-  frontendApi?: string;
-  fetch?: FetchLike;
-  signInUrl?: string;
-  signUpUrl?: string;
-  userProfileUrl?: string;
-  createOrganizationUrl?: string;
-  organizationProfileUrl?: string;
-  waitlistUrl?: string;
-  afterSignInUrl?: string;
-  afterSignUpUrl?: string;
-  afterSignOutUrl?: string;
-  navigate?: OrbitIDNavigateOptions;
-  routerPush?: RouterFn;
-  routerReplace?: RouterFn;
-  cookie?: Pick<CookieOptions, "domain" | "secure">;
-  retry?: { attempts?: number; delayMs?: number };
-  /** Session-token refresh cadence (default 50 s, i.e. 10 s before the 60 s JWT expiry). */
-  tokenRefreshIntervalMs?: number;
-}
-
-export interface OrbitIDState {
-  client: Client | null;
-  session: Session | null;
-  user: User | null;
-  organization: Organization | null;
-}
-
-export type OrbitIDListener = (state: OrbitIDState) => void;
-
-export interface SetActiveParams {
-  session?: string | null;
-  organization?: string | Organization | null;
-  beforeEmit?: (state: OrbitIDState) => void | Promise<void>;
-  redirectUrl?: string;
-}
-
-export interface SetActiveResult {
-  session: Session | null;
-}
-
-export interface HandleRedirectCallbackParams {
-  signInForceRedirectUrl?: string;
-  signInFallbackRedirectUrl?: string;
-  signUpForceRedirectUrl?: string;
-  signUpFallbackRedirectUrl?: string;
-  firstFactorUrl?: string;
-  secondFactorUrl?: string;
-  resetPasswordUrl?: string;
-  continueSignInUrl?: string;
-  continueSignUpUrl?: string;
-}
-
-export interface HandleRedirectCallbackResult {
-  signIn: SignIn | null;
-  signUp: SignUp | null;
-}
+export type {
+  HandleRedirectCallbackParams,
+  HandleRedirectCallbackResult,
+  OrbitIDListener,
+  OrbitIDNavigateOptions,
+  OrbitIDOptions,
+  OrbitIDState,
+  RouterFn,
+  SetActiveParams,
+  SetActiveResult,
+} from "./orbit/types";
 
 /**
  * Framework-agnostic OrbitID client.
  * All state updates flow through the `{ response, client }` envelope: every response carrying `client`
  * rebuilds resources and notifies listeners, so React consumers always observe fresh references.
  */
-export class OrbitID {
+export class OrbitID extends OrbitIDNavigation {
   static readonly version = SDK_VERSION;
   readonly version = SDK_VERSION;
   readonly fapi: FapiClient;
   private readonly tokenCache: TokenCache;
-  private readonly options: OrbitIDOptions;
+  protected readonly options: OrbitIDOptions;
   private readonly cookieOptions: CookieOptions;
   private readonly listeners = new Set<OrbitIDListener>();
   private readonly organizationCache = new Map<string, Organization>();
@@ -104,6 +56,7 @@ export class OrbitID {
   private crossTab: CrossTabSync | null = null;
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
   private loadPromise: Promise<void> | null = null;
+  private refreshPromise: Promise<Client | null> | null = null;
 
   private _client: Client | null = null;
   private _session: Session | null = null;
@@ -112,8 +65,10 @@ export class OrbitID {
   private _environment: Environment | null = null;
   private _loaded = false;
   private loading = false;
+  private disposed = false;
 
   constructor(publishableKey: string, options: OrbitIDOptions = {}) {
+    super();
     this.options = options;
     this.cookieOptions = { domain: options.cookie?.domain, secure: options.cookie?.secure };
     this.tokenCache = new TokenCache({
@@ -191,7 +146,7 @@ export class OrbitID {
   on = this.addListener;
 
   private emit(): void {
-    if (!this.listeners.size) return;
+    if (this.disposed || !this.listeners.size) return;
     const state = this.state;
     for (const listener of [...this.listeners]) {
       try {
@@ -207,10 +162,15 @@ export class OrbitID {
     this._session = this._client.session;
     this._user = this._session?.user ?? null;
     const organizationId = this._session?.lastActiveOrganizationId ?? null;
+    // Signing out (or switching to a session with no organization) must not leave the previous
+    // organization's members and metadata reachable through this instance.
+    if (!organizationId) this.organizationCache.clear();
     this._organization = organizationId ? (this.organizationCache.get(organizationId) ?? null) : null;
   }
 
   private handleClient(raw: ClientJSON): void {
+    // A response that lands after `dispose()` must not repopulate a torn-down instance.
+    if (this.disposed) return;
     this.applyClient(raw);
     if (this.loading || !this._loaded) return;
     if (this._session?.lastActiveOrganizationId && !this._organization) void this.ensureOrganization();
@@ -220,6 +180,7 @@ export class OrbitID {
 
   /** Loads `GET /v1/client` + `/v1/client/environment`, starts the refresh timer and writes cookies. */
   async load(_options?: { signInUrl?: string; signUpUrl?: string }): Promise<void> {
+    if (this.disposed) throw new Error("This OrbitID instance has been disposed");
     if (this._loaded) return;
     if (this.loadPromise) return this.loadPromise;
     this.loading = true;
@@ -228,12 +189,16 @@ export class OrbitID {
         this.fapi.get<unknown>("/v1/client"),
         this.fapi.get<unknown>("/v1/client/environment"),
       ]);
+      // `dispose()` may have run while these requests were in flight: do not resurrect state or timers.
+      if (this.disposed) return;
       this._environment = Environment.fromJSON(unwrap<EnvironmentJSON>(environmentRaw).data);
       this.applyClient(unwrap<ClientJSON>(clientRaw).data);
-      await this.ensureOrganization();
+      // The organization fetch and the first token mint only depend on the client, not on each other: run them
+      // together so a signed-in visit does not pay for two sequential round trips before first paint.
+      await Promise.all([this.ensureOrganization(), this.syncAuthCookies()]);
+      if (this.disposed) return;
       this.loading = false;
       this._loaded = true;
-      await this.syncAuthCookies();
       this.startTokenRefresh();
       this.startCrossTabSync();
       this.emit();
@@ -246,12 +211,23 @@ export class OrbitID {
     return this.loadPromise;
   }
 
-  /** Re-fetches the client (after redirects, cross-tab sign-out, etc.). */
+  /** Re-fetches the client (after redirects, cross-tab sign-out, etc.). Concurrent callers share one request. */
   async refreshClient(): Promise<Client | null> {
-    const raw = await this.fapi.get<unknown>("/v1/client");
-    this.applyClient(unwrap<ClientJSON>(raw).data);
-    await this.ensureOrganization();
-    return this._client;
+    // A disposed instance must not issue requests: `signOut()` calls this in its `finally`, and a torn-down
+    // client that still hits `/v1/client` re-creates state the caller just dropped.
+    if (this.disposed) return this._client;
+    // A sign-out broadcast, a `setActive` and a redirect callback can all fire together; one request answers all.
+    if (this.refreshPromise) return this.refreshPromise;
+    this.refreshPromise = (async () => {
+      const raw = await this.fapi.get<unknown>("/v1/client");
+      if (this.disposed) return this._client;
+      this.applyClient(unwrap<ClientJSON>(raw).data);
+      await this.ensureOrganization();
+      return this._client;
+    })().finally(() => {
+      this.refreshPromise = null;
+    });
+    return this.refreshPromise;
   }
 
   private async ensureOrganization(): Promise<void> {
@@ -273,10 +249,16 @@ export class OrbitID {
   // ---------------------------------------------------------------------------
 
   private handleToken(info: { sessionId: string; template: string | null; token: string; expiresAt: number }): void {
+    // A token fetch can resolve after `dispose()`; it must not write cookies or broadcast from a dead instance.
+    if (this.disposed) return;
     if (this._session?.id !== info.sessionId) return;
     if (!info.template) setSessionCookie(info.token, this.cookieOptions);
     this.writeClientUat();
-    this.crossTab?.broadcast({ type: "token", sessionId: info.sessionId, template: info.template, token: info.token });
+    // Template tokens are least-privilege credentials for another service; a tab that wants one can mint
+    // its own. Only the default session token — the one every tab of this app already holds — is shared.
+    if (!info.template) {
+      this.crossTab?.broadcast({ type: "token", sessionId: info.sessionId, template: null, token: info.token });
+    }
   }
 
   private writeClientUat(): void {
@@ -285,6 +267,7 @@ export class OrbitID {
   }
 
   private async syncAuthCookies(): Promise<void> {
+    if (this.disposed) return;
     if (!this._session || this._session.status !== "active") {
       clearAuthCookies(this.cookieOptions);
       return;
@@ -295,8 +278,8 @@ export class OrbitID {
     const session = this._session;
     try {
       const token = await session.getToken();
-      // The user may have signed out or switched session while the request was in flight.
-      if (this.isCurrentActiveSession(session)) setSessionCookie(token, this.cookieOptions);
+      // The user may have signed out, switched session, or torn the instance down while the request was in flight.
+      if (!this.disposed && this.isCurrentActiveSession(session)) setSessionCookie(token, this.cookieOptions);
     } catch {
       /* leave the existing `__session` untouched: the next refresh retries */
     }
@@ -337,14 +320,17 @@ export class OrbitID {
   }
 
   private startCrossTabSync(): void {
-    if (this.crossTab || !inBrowser) return;
-    this.crossTab = new CrossTabSync((message) => this.handleSyncMessage(message));
+    if (this.crossTab || this.disposed || !inBrowser) return;
+    this.crossTab = new CrossTabSync((message) => {
+      if (this.disposed) return;
+      this.handleSyncMessage(message);
+    });
   }
 
   private handleSyncMessage(message: SyncMessage): void {
     switch (message.type) {
       case "token":
-        this.tokenCache.setFromSync(message.sessionId, message.template, message.token);
+        if (!this.tokenCache.setFromSync(message.sessionId, message.template, message.token)) return;
         if (!message.template && this._session?.id === message.sessionId) setSessionCookie(message.token, this.cookieOptions);
         return;
       case "signout":
@@ -445,144 +431,39 @@ export class OrbitID {
     const request = (async () => {
       const raw = await this.fapi.get<unknown>(`/v1/client/organizations/${organizationId}`);
       const organization = Organization.fromJSON(this.fapi, unwrap<OrganizationJSON>(raw).data);
-      this.organizationCache.set(organization.id, organization);
+      // A fetch that lands after `dispose()` must not repopulate the cache the teardown just cleared.
+      if (!this.disposed) this.organizationCache.set(organization.id, organization);
       return organization;
     })().finally(() => this.organizationFetches.delete(organizationId));
     this.organizationFetches.set(organizationId, request);
     return request;
   }
 
-  // ---------------------------------------------------------------------------
-  // Navigation
-  // ---------------------------------------------------------------------------
-
-  navigate(to: string, options: { replace?: boolean } = {}): void {
-    const push = this.options.navigate?.push ?? this.options.routerPush;
-    const replace = this.options.navigate?.replace ?? this.options.routerReplace;
-    if (options.replace && replace) {
-      replace(to);
-      return;
-    }
-    if (push) {
-      push(to);
-      return;
-    }
-    if (inBrowser) {
-      if (options.replace) window.location.replace(to);
-      else window.location.assign(to);
-    }
-  }
-
-  buildSignInUrl(params: { redirectUrl?: string } = {}): string {
-    return buildRedirectUrl(this.options.signInUrl ?? "/sign-in", params.redirectUrl ?? this.options.afterSignInUrl);
-  }
-  buildSignUpUrl(params: { redirectUrl?: string } = {}): string {
-    return buildRedirectUrl(this.options.signUpUrl ?? "/sign-up", params.redirectUrl ?? this.options.afterSignUpUrl);
-  }
-  buildUserProfileUrl(params: { redirectUrl?: string } = {}): string {
-    return buildRedirectUrl(this.options.userProfileUrl ?? "/user", params.redirectUrl);
-  }
-  buildCreateOrganizationUrl(): string {
-    return this.options.createOrganizationUrl ?? "/create-organization";
-  }
-  buildOrganizationProfileUrl(params: { organizationId?: string } = {}): string {
-    const base = this.options.organizationProfileUrl ?? "/organization";
-    return params.organizationId ? appendQuery(base, { organization_id: params.organizationId }) : base;
-  }
-  buildWaitlistUrl(): string {
-    return this.options.waitlistUrl ?? "/waitlist";
-  }
-  buildAfterSignInUrl(): string {
-    return this.options.afterSignInUrl ?? "/";
-  }
-  buildAfterSignUpUrl(): string {
-    return this.options.afterSignUpUrl ?? "/";
-  }
-  buildAfterSignOutUrl(): string {
-    return this.options.afterSignOutUrl ?? "/";
-  }
-
-  redirectToSignIn(params: { redirectUrl?: string } = {}): void {
-    this.navigate(this.buildSignInUrl(params));
-  }
-  redirectToSignUp(params: { redirectUrl?: string } = {}): void {
-    this.navigate(this.buildSignUpUrl(params));
-  }
-  redirectToUserProfile(params: { redirectUrl?: string } = {}): void {
-    this.navigate(this.buildUserProfileUrl(params));
-  }
-  redirectToCreateOrganization(): void {
-    this.navigate(this.buildCreateOrganizationUrl());
-  }
-  redirectToOrganizationProfile(params: { organizationId?: string } = {}): void {
-    this.navigate(this.buildOrganizationProfileUrl(params));
-  }
-  redirectToAfterSignIn(): void {
-    this.navigate(this.buildAfterSignInUrl(), { replace: true });
-  }
-  redirectToAfterSignUp(): void {
-    this.navigate(this.buildAfterSignUpUrl(), { replace: true });
-  }
-  redirectToAfterSignOut(): void {
-    this.navigate(this.buildAfterSignOutUrl(), { replace: true });
-  }
-
-  /**
-   * Handles the OAuth/SAML return on the app's origin (the server has already set the client cookie):
-   * completes the pending sign-in/up, follows transferable OAuth attempts into sign-up, and routes
-   * `needs_second_factor` / `needs_new_password` attempts back into the sign-in UI.
-   */
   async handleRedirectCallback(params: HandleRedirectCallbackParams = {}): Promise<HandleRedirectCallbackResult> {
-    await this.refreshClient();
-    const signIn = this._client?.signIn ?? null;
-    const signUp = this._client?.signUp ?? null;
-    const signInRedirect = params.signInForceRedirectUrl ?? this.options.afterSignInUrl ?? params.signInFallbackRedirectUrl ?? "/";
-    const signUpRedirect = params.signUpForceRedirectUrl ?? this.options.afterSignUpUrl ?? params.signUpFallbackRedirectUrl ?? signInRedirect;
-
-    if (signUp?.status === "complete" && signUp.createdSessionId) {
-      await this.setActive({ session: signUp.createdSessionId });
-      this.navigate(signUpRedirect, { replace: true });
-      return { signIn, signUp };
-    }
-    if (signIn?.status === "complete" && signIn.createdSessionId) {
-      await this.setActive({ session: signIn.createdSessionId });
-      this.navigate(signInRedirect, { replace: true });
-      return { signIn, signUp };
-    }
-    if (signIn?.firstFactorVerification?.status === "transferable") {
-      const transferred = await this.signUp.create({ transfer: true });
-      this.navigate(params.signUpForceRedirectUrl ?? this.options.signUpUrl ?? "/sign-up", { replace: true });
-      return { signIn, signUp: transferred };
-    }
-    if (signIn?.status === "needs_second_factor") {
-      this.navigate(appendQuery(params.secondFactorUrl ?? params.continueSignInUrl ?? this.options.signInUrl ?? "/sign-in", { redirect_url: signInRedirect }), {
-        replace: true,
-      });
-      return { signIn, signUp };
-    }
-    if (signIn?.status === "needs_new_password") {
-      this.navigate(appendQuery(params.resetPasswordUrl ?? this.options.signInUrl ?? "/sign-in", { redirect_url: signInRedirect }), { replace: true });
-      return { signIn, signUp };
-    }
-    if (signIn) {
-      this.navigate(appendQuery(params.firstFactorUrl ?? params.continueSignInUrl ?? this.options.signInUrl ?? "/sign-in", { redirect_url: signInRedirect }), {
-        replace: true,
-      });
-      return { signIn, signUp };
-    }
-    if (signUp) {
-      this.navigate(appendQuery(params.continueSignUpUrl ?? this.options.signUpUrl ?? "/sign-up", { redirect_url: signUpRedirect }), { replace: true });
-      return { signIn, signUp };
-    }
-    this.navigate(params.signInFallbackRedirectUrl ?? this.options.afterSignInUrl ?? "/", { replace: true });
-    return { signIn, signUp };
+    return runRedirectCallback(
+      {
+        options: this.options,
+        client: () => this._client,
+        signUp: () => this.signUp,
+        refreshClient: () => this.refreshClient(),
+        setActive: (activeParams) => this.setActive(activeParams),
+        navigate: (to, navOptions) => this.navigate(to, navOptions),
+      },
+      params,
+    );
   }
 
   /** Stops the refresh timer and cross-tab channel (for tests and client-side teardown). */
   dispose(): void {
+    this.disposed = true;
     this.stopTokenRefresh();
     this.crossTab?.close();
     this.crossTab = null;
+    this.loadPromise = null;
+    this.refreshPromise = null;
+    this.organizationFetches.clear();
+    this.organizationCache.clear();
+    this.tokenCache.clear();
     this.listeners.clear();
   }
 

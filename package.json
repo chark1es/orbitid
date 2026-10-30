@@ -16,7 +16,10 @@
     "typecheck": "bun run --filter \"*\" typecheck",
     "test": "bun run --filter \"*\" test",
     "db:generate": "bun run --filter @orbitid/server db:generate",
-    "dev:example-node": "bun run --filter example-node dev"
+    "dev:example-node": "bun run --filter example-node dev",
+    "check:files": "node scripts/check-repository.mjs sizes",
+    "check:docs": "node scripts/check-repository.mjs docs",
+    "test:maintenance": "node --test scripts/check-repository.test.mjs"
   },
   "engines": {
     "node": ">=20"

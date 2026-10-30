@@ -51,6 +51,20 @@ describe("SignUp", () => {
     expect(harness.instance.navigations.at(-1)?.to).toBe("/welcome");
   });
 
+  it("marks a missing required field as invalid and ties its message to the input", async () => {
+    const harness = setupAuth({ signedIn: false });
+    const signUp = makeSignUp(harness.instance, {});
+    renderAuth(<SignUp routing="virtual" />, harness);
+
+    const email = await screen.findByLabelText(/Email address/);
+    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
+
+    await waitFor(() => expect(email.getAttribute("aria-invalid")).toBe("true"));
+    const describedBy = email.getAttribute("aria-describedby") ?? "";
+    expect(document.getElementById(describedBy)?.getAttribute("role")).toBe("alert");
+    expect(signUp.create).not.toHaveBeenCalled();
+  });
+
   it("enrols a second factor when required MFA leaves the session pending", async () => {
     const harness = setupAuth({ signedIn: false });
     const user = authUser({

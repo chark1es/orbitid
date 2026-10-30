@@ -4,7 +4,18 @@ import type {
   ReverificationConfig,
   SessionClaims,
 } from "@orbitid/shared";
-import { buildAuthUrl, getServerEnv, type ResolvedServerEnv } from "./env";
+import { buildAuthUrl, getServerEnv, toAbsoluteUrl, type ResolvedServerEnv } from "./env";
+
+/**
+ * `protect()` targets come from app code, which may build them from a query parameter. Resolve them the same
+ * way the middleware does, so `redirect()` never receives `//evil.test`, `/\evil.test` or `javascript:`.
+ */
+function safeRedirectTarget(target: string, requestUrl: string | undefined, fallback: string): string {
+  if (requestUrl) return toAbsoluteUrl(target, requestUrl);
+  // No request URL to resolve against: only an unambiguous same-app path is accepted.
+  if (!target.startsWith("/") || target.startsWith("//") || /[\u0000-\u001f\u007f\\]/.test(target)) return fallback;
+  return target;
+}
 
 /** Status carried from middleware to `auth()` through request headers. */
 export type AuthStatus = "signed-in" | "signed-out" | "handshake";
@@ -148,6 +159,22 @@ function featureList(claims: SessionClaims): string[] {
   return [];
 }
 
+/** Instance role keys (`app:...`) from the token; the union of their permissions is `role_permissions`. */
+function instanceRoleKeys(claims: SessionClaims | null): string[] {
+  const raw = claims?.roles;
+  return Array.isArray(raw) ? raw.filter((role): role is string => typeof role === "string") : [];
+}
+
+function instanceRolePermissions(claims: SessionClaims | null): string[] {
+  const raw = claims?.role_permissions;
+  return Array.isArray(raw) ? raw.filter((permission): permission is string => typeof permission === "string") : [];
+}
+
+/** True when a granted list covers `requested`, honouring a `prefix:*` wildcard grant. */
+function grantsPermission(granted: string[], requested: string): boolean {
+  return granted.some((permission) => permission === requested || (permission.endsWith(":*") && requested.startsWith(permission.slice(0, -1))));
+}
+
 /** Build the public `has()` predicate from verified claims. */
 export function createHasChecker(
   claims: SessionClaims | null,
@@ -156,10 +183,29 @@ export function createHasChecker(
   return (check) => {
     if (!claims) return false;
     if (sessionStatus === "pending") return false;
-    if (check.role !== undefined && claims.org_role !== check.role) return false;
+    // `has({})` asks nothing; answering `true` would let a gate built from missing parameters pass. `protect()`
+    // with no checks is unaffected: it calls `has()` only for the checks the caller actually passed.
+    if (
+      check.role === undefined &&
+      check.permission === undefined &&
+      check.feature === undefined &&
+      check.reverification === undefined
+    ) {
+      return false;
+    }
+    if (check.role !== undefined) {
+      // Instance roles (`app:...`) are independent of the organization role; `{ role }` matches either.
+      const owned = new Set(instanceRoleKeys(claims));
+      if (typeof claims.org_role === "string") owned.add(claims.org_role);
+      if (!owned.has(check.role)) return false;
+    }
     if (check.permission !== undefined) {
-      const permissions = claims.org_permissions ?? [];
-      if (!permissions.includes(check.permission)) return false;
+      if (
+        !grantsPermission(claims.org_permissions ?? [], check.permission) &&
+        !grantsPermission(instanceRolePermissions(claims), check.permission)
+      ) {
+        return false;
+      }
     }
     if (check.feature !== undefined) {
       if (!featureList(claims).includes(check.feature)) return false;
@@ -199,6 +245,9 @@ export function createAuthObject(params: CreateAuthObjectParams): AuthObject {
     orgRole: authenticated?.org_role ?? null,
     orgSlug: authenticated?.org_slug ?? null,
     orgPermissions: authenticated?.org_permissions ?? null,
+    // Instance-wide roles (`app:...`) are separate from the organization role; a pending session has neither.
+    roles: instanceRoleKeys(authenticated),
+    rolePermissions: instanceRolePermissions(authenticated),
     actor: authenticated?.act ?? null,
     sessionClaims: claims,
     sessionStatus,
@@ -219,19 +268,20 @@ export function createAuthObject(params: CreateAuthObjectParams): AuthObject {
           );
         }
         const redirectUrl =
-          protectParams.redirectUrl ??
-          buildAuthUrl(
-            env.signInUrl,
-            protectParams.returnBackUrl ?? params.url ?? null,
-          );
+          protectParams.redirectUrl !== undefined
+            ? safeRedirectTarget(protectParams.redirectUrl, params.url, env.signInUrl)
+            : buildAuthUrl(
+                env.signInUrl,
+                protectParams.returnBackUrl ?? params.url ?? null,
+              );
         redirect(redirectUrl);
       }
 
       if (protectParams.unauthorizedUrl) {
-        redirect(protectParams.unauthorizedUrl);
+        redirect(safeRedirectTarget(protectParams.unauthorizedUrl, params.url, env.signInUrl));
       }
       if (protectParams.unauthorized === "redirect") {
-        redirect(protectParams.redirectUrl ?? env.signInUrl);
+        redirect(safeRedirectTarget(protectParams.redirectUrl ?? env.signInUrl, params.url, env.signInUrl));
       }
       if (protectParams.unauthorized === "throw") {
         throw new Error("Not authorized");

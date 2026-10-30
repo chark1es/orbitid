@@ -198,6 +198,8 @@ export class Session {
 
   /** Returns the session JWT (cached, refreshed 10 s before expiry, deduplicated across concurrent callers). */
   async getToken(options: GetTokenOptions = {}): Promise<string> {
+    // A session resource without an id is a placeholder; POSTing to `sessions//tokens` is never intended.
+    if (!this.id) throw new Error("Session has no id: create or reload the session before requesting a token");
     const template = options.template ?? null;
     return this.tokenCache.getToken(
       this.id,
@@ -256,12 +258,25 @@ export class Session {
     return SessionVerification.fromJSON(this.fapi, this.id, verification);
   }
 
-  /** `has({ role, permission, feature, reverification })` — reads role/permissions from the last session JWT. */
+  /**
+   * `has({ role, permission, feature, reverification })` — reads role/permissions from the last session JWT.
+   *
+   * Only a token minted for *this* session and an active (not pending, not expired) session grants anything:
+   * a stale `last_active_token` from another session or a half-authenticated pending session must never
+   * satisfy a client-side authorization gate.
+   */
   checkAuthorization(check: HasCheckParams): boolean {
+    if (this.status !== "active" || this.isExpired) return false;
     const claims = this.lastActiveToken?.jwt ? decodeJwtPayload(this.lastActiveToken.jwt) : null;
+    if (!claims || claims.sid !== this.id) return false;
+    const strings = (value: unknown): string[] | null =>
+      Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : null;
     const has = createHasCheck({
-      orgRole: typeof claims?.org_role === "string" ? claims.org_role : null,
-      orgPermissions: Array.isArray(claims?.org_permissions) ? (claims.org_permissions as string[]) : null,
+      orgRole: typeof claims.org_role === "string" ? claims.org_role : null,
+      orgPermissions: strings(claims.org_permissions),
+      // Instance roles (`app:...`) travel beside the organization ones and are equally operator-assigned.
+      roles: strings(claims.roles),
+      rolePermissions: strings(claims.role_permissions),
       fva: this.factorVerificationAge,
     });
     return has(check);

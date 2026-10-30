@@ -43,13 +43,17 @@ export function loadEnv(overrides: Partial<Env> = {}): Env {
   if (!encryptionKey && (!local || /^postgres(ql)?:/.test(databaseUrl ?? ""))) {
     throw new Error("ORBITID_ENCRYPTION_KEY is required with Postgres or a public ORBITID_BASE_URL. Without it the built-in development key would protect stored secrets. Use `openssl rand -base64 32`.");
   }
+  const secretKey = overrides.secretKey ?? e.ORBITID_SECRET_KEY ?? "";
+  if (nodeEnv === "production" && secretKey && secretKey.length < 32) {
+    throw new Error("ORBITID_SECRET_KEY must be at least 32 random characters in production. Omit it to derive a strong key from ORBITID_ENCRYPTION_KEY.");
+  }
   return {
     port,
     baseUrl,
     databaseUrl: databaseUrl ?? (e.ORBITID_DATABASE_PATH ? `sqlite:${e.ORBITID_DATABASE_PATH}` : `sqlite:${resolve(dataDir, "orbitid.db")}`),
     encryptionKey: encryptionKey ?? "dev-only-insecure-encryption-key-change-me!!",
     encryptionKeyProvided: !!encryptionKey,
-    secretKey: overrides.secretKey ?? e.ORBITID_SECRET_KEY ?? "",
+    secretKey,
     dataDir,
     dashboardDir: resolve(overrides.dashboardDir ?? e.ORBITID_DASHBOARD_DIR ?? new URL("../../../apps/dashboard/dist", import.meta.url).pathname),
     nodeEnv,

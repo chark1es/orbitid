@@ -3,8 +3,8 @@ import { ID_PREFIX, type PaginatedList, type WaitlistEntryJSON } from "@orbitid/
 import { markInvitationAccepted, redeemTicket } from "../../src/services/restrictions";
 import { createUser, json, testApp, ticketFromUrl, type ErrorBody } from "./helpers";
 
-type SendEmail = (ctx: unknown, input: { to: string; template: string; vars: Record<string, string> }) => Promise<void>;
-const { sendEmail } = vi.hoisted(() => ({ sendEmail: vi.fn<SendEmail>(async () => undefined) }));
+type SendEmail = (ctx: unknown, input: { to: string; template: string; vars: Record<string, string> }) => Promise<{ delivered: boolean }>;
+const { sendEmail } = vi.hoisted(() => ({ sendEmail: vi.fn<SendEmail>(async () => ({ delivered: true })) }));
 vi.mock("../../src/services/mail", () => ({ sendEmail, sendSms: vi.fn(async () => undefined) }));
 
 describe("waitlist", () => {

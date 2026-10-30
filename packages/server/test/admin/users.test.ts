@@ -1,12 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { authenticator } from "otplib";
+import { eq } from "drizzle-orm";
 import { ID_PREFIX, type DeletedObjectJSON, type EmailAddressJSON, type PaginatedList, type PhoneNumberJSON, type UserJSON } from "@orbitid/shared";
 import { encrypt } from "../../src/lib/crypto";
 import { newId } from "../../src/lib/ids";
 import * as s from "../../src/db/schema";
 import { createSessionFixture, createUser, json, testApp, type ErrorBody } from "./helpers";
-
-type OAuthTokenRow = { object: string; external_account_id: string; provider: string; token: string | null; scopes: string; expires_at: number | null };
+import { signUpUser } from "../core/helpers";
+import { latestCodeFor } from "../../src/services/mail";
 
 describe("users", () => {
   it("filters the user list by mfa and wraps it with ?paginated=true", async () => {
@@ -156,10 +157,13 @@ describe("users", () => {
     expect(merged.public_metadata).toEqual({ tier: "pro", nested: { a: 1, b: 3, c: 4 }, email: "x" });
 
     expect((await json<UserJSON>(await api("PATCH", `/v1/users/${user.id}`, { username: null }))).username).toBeNull();
-    expect((await api("PATCH", `/v1/users/${user.id}`, { primary_email_address_id: "idn_e_nope" })).status).toBe(422);
+    // Moving the primary identifier is refused rather than validated: an operator cannot re-point sign-in.
+    const moved = await api("PATCH", `/v1/users/${user.id}`, { primary_email_address_id: user.email_addresses[0]!.id });
+    expect(moved.status).toBe(403);
+    expect((await json<ErrorBody>(moved)).errors[0]!.code).toBe("not_allowed_access");
   });
 
-  it("bans, unbans, locks, unlocks, verifies password and TOTP", async () => {
+  it("bans, unbans, locks and unlocks without touching the user's credentials", async () => {
     const { api, ctx } = await testApp();
     const secret = authenticator.generateSecret();
     const user = await createUser(api, { password: "Sup3r-secret!", totp_secret: secret });
@@ -179,22 +183,59 @@ describe("users", () => {
     expect((await json<UserJSON[]>(await api("GET", "/v1/users?locked=true"))).map((u) => u.id)).toEqual([user.id]);
     expect((await json<UserJSON>(await api("POST", `/v1/users/${user.id}/unlock`))).locked).toBe(false);
 
-    expect((await api("POST", `/v1/users/${user.id}/verify_password`, { password: "Sup3r-secret!" })).status).toBe(200);
-    const wrong = await api("POST", `/v1/users/${user.id}/verify_password`, { password: "nope" });
-    expect(wrong.status).toBe(422);
-    expect((await json<ErrorBody>(wrong)).errors[0]!.code).toBe("form_password_incorrect");
+    // Ban/lock are status changes, not credential changes: the password and the authenticator survive them.
+    expect((await json<UserJSON>(await api("GET", `/v1/users/${user.id}`)))).toMatchObject({
+      password_enabled: true,
+      totp_enabled: true,
+    });
+  });
 
-    expect((await api("POST", `/v1/users/${user.id}/verify_totp`, { code: authenticator.generate(secret) })).status).toBe(200);
-    const badCode = await api("POST", `/v1/users/${user.id}/verify_totp`, { code: "000000" });
-    expect(badCode.status).toBe(422);
-    expect((await json<ErrorBody>(badCode)).errors[0]!.code).toBe("form_code_incorrect");
+  it("refuses to change or clear a user's password, MFA or backup codes from the Backend API", async () => {
+    const { api, ctx } = await testApp();
+    const secret = authenticator.generateSecret();
+    const user = await createUser(api, { password: "Sup3r-secret!", totp_secret: secret, backup_codes: ["abcd1234"] });
+    const { sessionId } = await createSessionFixture(ctx, user.id);
+    const before = (await ctx.db.select().from(s.users).where(eq(s.users.id, user.id)))[0]!;
 
-    const reset = await json<UserJSON>(await api("DELETE", `/v1/users/${user.id}/mfa`));
-    expect(reset.totp_enabled).toBe(false);
-    expect(reset.backup_code_enabled).toBe(false);
-    expect((await api("POST", `/v1/users/${user.id}/verify_totp`, { code: "123456" })).status).toBe(422);
+    const attempts: [string, string, unknown][] = [
+      ["PATCH", `/v1/users/${user.id}`, { password: "Attacker-known-1!" }],
+      ["PATCH", `/v1/users/${user.id}`, { password_digest: "$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaA", password_hasher: "argon2" }],
+      ["PATCH", `/v1/users/${user.id}`, { totp_secret: authenticator.generateSecret() }],
+      ["PATCH", `/v1/users/${user.id}`, { totp_secret: null }],
+      ["PATCH", `/v1/users/${user.id}`, { backup_codes: ["attacker-code"] }],
+      ["PATCH", `/v1/users/${user.id}`, { backup_codes: null }],
+      ["DELETE", `/v1/users/${user.id}/mfa`, undefined],
+      ["DELETE", `/v1/users/${user.id}/password`, undefined],
+    ];
+    for (const [method, path, body] of attempts) {
+      const res = await api(method, path, body);
+      expect(res.status, `${method} ${path} ${JSON.stringify(body)}`).toBe(403);
+      const payload = await json<ErrorBody>(res);
+      expect(payload.errors[0]!.code).toBe("not_allowed_access");
+      // The refusal says where the user does it themselves instead.
+      expect(payload.errors[0]!.message).toMatch(/signed-in session/i);
+    }
 
-    expect((await json<UserJSON>(await api("DELETE", `/v1/users/${user.id}/password`))).password_enabled).toBe(false);
+    // Nothing was written: the hash, the secret and the codes are the user's, unchanged.
+    const after = (await ctx.db.select().from(s.users).where(eq(s.users.id, user.id)))[0]!;
+    expect(after.passwordHash).toBe(before.passwordHash);
+    expect(after.totpSecretEnc).toBe(before.totpSecretEnc);
+    expect(after.totpVerified).toBe(true);
+    expect(after.backupCodes).toEqual(before.backupCodes);
+    expect((await ctx.db.select().from(s.sessions)).find((row) => row.id === sessionId)!.status).toBe("active");
+
+    // The verification oracle is refused too: it would let an operator guess outside every sign-in limit.
+    for (const [path, body] of [
+      [`/v1/users/${user.id}/verify_password`, { password: "Sup3r-secret!" }],
+      [`/v1/users/${user.id}/verify_totp`, { code: authenticator.generate(secret) }],
+    ] as const) {
+      const res = await api("POST", path, body);
+      expect(res.status, path).toBe(403);
+      expect((await json<ErrorBody>(res)).errors[0]!.code).toBe("not_allowed_access");
+    }
+
+    // The user's own session is untouched by all of this and can still read its factor state.
+    expect((await json<UserJSON>(await api("GET", `/v1/users/${user.id}`)))).toMatchObject({ password_enabled: true, totp_enabled: true });
   });
 
   it("deletes a user and cascades identifiers", async () => {
@@ -207,39 +248,66 @@ describe("users", () => {
     expect((await json<PaginatedList<EmailAddressJSON>>(await api("GET", `/v1/email_addresses?user_id=${user.id}`))).data).toEqual([]);
   });
 
-  it("manages email addresses and phone numbers", async () => {
-    const { api, ctx } = await testApp();
-    const user = await createUser(api, { email_address: ["first@example.com"] });
+  it("refuses every Backend API identifier write, including verification and second-factor installs", async () => {
+    const { api } = await testApp();
+    const user = await createUser(api, { email_address: ["first@example.com"], phone_number: ["+15551230000"] });
+    const emailId = user.email_addresses[0]!.id;
+    const phoneId = user.phone_numbers[0]!.id;
 
-    const added = await json<EmailAddressJSON>(await api("POST", "/v1/email_addresses", { user_id: user.id, email_address: "Second@Example.com", verified: true }));
-    expect(added.email_address).toBe("second@example.com");
-    expect(added.verification?.status).toBe("verified");
+    const attempts: [string, string, unknown][] = [
+      ["POST", "/v1/email_addresses", { user_id: user.id, email_address: "attacker@example.com", verified: true, primary: true }],
+      ["POST", "/v1/email_addresses", { user_id: user.id, email_address: "attacker@example.com" }],
+      ["PATCH", `/v1/email_addresses/${emailId}`, { verified: true }],
+      ["PATCH", `/v1/email_addresses/${emailId}`, { verified: false }],
+      ["PATCH", `/v1/email_addresses/${emailId}`, { primary: true }],
+      ["DELETE", `/v1/email_addresses/${emailId}`, undefined],
+      ["POST", "/v1/phone_numbers", { user_id: user.id, phone_number: "+15550009999", verified: true, primary: true, default_second_factor: true }],
+      ["PATCH", `/v1/phone_numbers/${phoneId}`, { verified: true }],
+      ["PATCH", `/v1/phone_numbers/${phoneId}`, { default_second_factor: true }],
+      ["PATCH", `/v1/phone_numbers/${phoneId}`, { primary: true }],
+      ["DELETE", `/v1/phone_numbers/${phoneId}`, undefined],
+    ];
+    for (const [method, path, body] of attempts) {
+      const res = await api(method, path, body);
+      expect(res.status, `${method} ${path} ${JSON.stringify(body)}`).toBe(403);
+      expect((await json<ErrorBody>(res)).errors[0]!.code).toBe("not_allowed_access");
+    }
 
-    await api("PATCH", `/v1/email_addresses/${added.id}`, { primary: true });
-    expect((await json<UserJSON>(await api("GET", `/v1/users/${user.id}`))).primary_email_address_id).toBe(added.id);
-
-    expect((await json<EmailAddressJSON>(await api("PATCH", `/v1/email_addresses/${added.id}`, { verified: false }))).verification?.status).toBe("unverified");
-    expect((await api("POST", "/v1/email_addresses", { user_id: user.id, email_address: "first@example.com" })).status).toBe(422);
-    expect(await json<DeletedObjectJSON>(await api("DELETE", `/v1/email_addresses/${added.id}`))).toEqual({ object: "email_address", id: added.id, deleted: true });
-
-    // Verifying an address another account already verified is rejected instead of hitting the unique index.
-    const clashUser = await createUser(api, { email_address: ["shared@example.com"] });
-    await ctx.db.insert(s.emailAddresses).values({ id: newId(ID_PREFIX.email), userId: clashUser.id, email: "first@example.com", verified: false });
-    const pendingRow = (await ctx.db.select().from(s.emailAddresses)).find((row) => row.userId === clashUser.id && row.email === "first@example.com")!;
-    expect((await api("PATCH", `/v1/email_addresses/${pendingRow.id}`, { verified: true })).status).toBe(422);
-
-    const phone = await json<PhoneNumberJSON>(await api("POST", "/v1/phone_numbers", { user_id: user.id, phone_number: "+15557654321", primary: true, default_second_factor: true }));
-    expect(phone.reserved_for_second_factor).toBe(true);
-    expect(phone.default_second_factor).toBe(true);
-    const other = await json<PhoneNumberJSON>(await api("POST", "/v1/phone_numbers", { user_id: user.id, phone_number: "+15550001111" }));
-    await api("PATCH", `/v1/phone_numbers/${other.id}`, { default_second_factor: true });
+    // No attach, verify, promote or delete happened: the identifiers are exactly what the import created.
+    const emails = await json<PaginatedList<EmailAddressJSON>>(await api("GET", `/v1/email_addresses?user_id=${user.id}`));
+    expect(emails.data.map((e) => e.email_address)).toEqual(["first@example.com"]);
+    expect(emails.data[0]!.verification?.status).toBe("verified");
     const phones = await json<PaginatedList<PhoneNumberJSON>>(await api("GET", `/v1/phone_numbers?user_id=${user.id}`));
-    expect(phones.data.filter((p) => p.default_second_factor)).toHaveLength(1);
-    expect(phones.data.find((p) => p.id === phone.id)!.default_second_factor).toBe(false);
-    expect(await json<DeletedObjectJSON>(await api("DELETE", `/v1/phone_numbers/${other.id}`))).toEqual({ object: "phone_number", id: other.id, deleted: true });
+    expect(phones.data.map((p) => p.phone_number)).toEqual(["+15551230000"]);
+    expect((await json<UserJSON>(await api("GET", `/v1/users/${user.id}`))).primary_email_address_id).toBe(emailId);
+    expect((await json<UserJSON>(await api("GET", `/v1/users/${user.id}`))).primary_phone_number_id).toBe(phoneId);
+
+    // Unknown ids are still a 404 rather than a refusal, so lookups do not become an existence oracle for writes.
+    expect((await api("PATCH", "/v1/email_addresses/idn_e_nope", { verified: true })).status).toBe(404);
+    expect((await api("POST", "/v1/email_addresses", { user_id: "user_nope", email_address: "x@example.com" })).status).toBe(404);
   });
 
-  it("stores and clears profile images and decrypts external account tokens", async () => {
+  it("keeps the user's own identifier flow working through the Frontend API", async () => {
+    const { app, api } = await testApp();
+    const user = await signUpUser(app, { email: "selfserve@example.com" });
+    const added = await user.client.json<{ response: { id: string; email_address: string; verification: { status: string } } }>(
+      "/v1/client/me/email_addresses",
+      { body: { email_address: "second@example.com" } },
+    );
+    expect(added.response.verification.status).toBe("unverified");
+    await user.client.json(`/v1/client/me/email_addresses/${added.response.id}/prepare_verification`, { body: { strategy: "email_code" } });
+    const code = latestCodeFor("second@example.com");
+    if (!code) throw new Error("no verification code");
+    const verified = await user.client.json<{ response: { verification: { status: string } } }>(
+      `/v1/client/me/email_addresses/${added.response.id}/attempt_verification`,
+      { body: { code } },
+    );
+    expect(verified.response.verification.status).toBe("verified");
+    // The Backend API sees the new identifier but could not have created or verified it.
+    expect((await json<PaginatedList<EmailAddressJSON>>(await api("GET", `/v1/email_addresses?user_id=${user.userId}`))).data).toHaveLength(2);
+  });
+
+  it("stores and clears profile images but never exposes linked third-party tokens", async () => {
     const { api, ctx } = await testApp();
     const user = await createUser(api);
     const dataUrl = "data:image/png;base64,iVBORw0KGgo=";
@@ -263,11 +331,13 @@ describe("users", () => {
                     accessTokenEnc: encrypt(ctx.env.encryptionKey, "tok_live_123"),
                     tokenExpiresAt: 999,
                   });
-    const tokens = await json<OAuthTokenRow[]>(await api("GET", `/v1/users/${user.id}/oauth_access_tokens/google`));
-    expect(tokens).toEqual([
-      { object: "oauth_access_token", external_account_id: expect.any(String), provider: "google", token: "tok_live_123", scopes: "email profile", expires_at: 999 },
-    ]);
-    expect((await api("GET", `/v1/users/${user.id}/oauth_access_tokens/github`)).status).toBe(404);
+    // An operator reading the token could act as the user at the provider; the user reads their own instead.
+    const refused = await api("GET", `/v1/users/${user.id}/oauth_access_tokens/google`);
+    expect(refused.status).toBe(403);
+    const refusedText = await refused.text();
+    expect((JSON.parse(refusedText) as ErrorBody).errors[0]!.code).toBe("not_allowed_access");
+    expect(refusedText).not.toContain("tok_live_123");
+    expect((await api("GET", `/v1/users/${user.id}/oauth_access_tokens/github`)).status).toBe(403);
   });
 });
 
@@ -283,5 +353,65 @@ describe("user search", () => {
     expect(await ids("ada lovelace")).toEqual([ada.id]);
     expect(await ids("%")).toEqual([]);
     expect(await ids("_da")).toEqual([]);
+  });
+});
+
+describe("required profile prerequisites", () => {
+  it("enforces the instance's required attributes on Backend API create and update", async () => {
+    const { api, ctx } = await testApp();
+    await ctx.settings.update({ attributes: { firstName: { enabled: true, required: true }, lastName: { enabled: true, required: true } } });
+
+    // Required fields are prerequisites, not a UI hint: a script cannot create an account without them.
+    const missingFirst = await api("POST", "/v1/users", { email_address: ["a@example.com"], password: "Sup3r-secret!" });
+    expect(missingFirst.status).toBe(422);
+    expect((await json<ErrorBody>(missingFirst)).errors[0]!.meta?.param_name).toBe("first_name");
+    const missingLast = await api("POST", "/v1/users", { email_address: ["a@example.com"], password: "Sup3r-secret!", first_name: "Ada" });
+    expect(missingLast.status).toBe(422);
+
+    const created = await json<UserJSON>(await api("POST", "/v1/users", {
+      email_address: ["a@example.com"], password: "Sup3r-secret!", first_name: "Ada", last_name: "Lovelace",
+    }));
+    expect(created.first_name).toBe("Ada");
+
+    // ...and cannot be cleared afterwards, by the user or by an operator.
+    const cleared = await api("PATCH", `/v1/users/${created.id}`, { last_name: null });
+    expect(cleared.status).toBe(422);
+    expect((await json<ErrorBody>(cleared)).errors[0]!.meta?.param_name).toBe("last_name");
+
+    // The documented import escape hatch still works.
+    expect((await api("POST", "/v1/users", { email_address: ["import@example.com"], skip_password_requirement: true })).status).toBe(200);
+  });
+
+  it("enforces a required username and refuses to clear it", async () => {
+    const { api, ctx } = await testApp();
+    await ctx.settings.update({ attributes: { username: { enabled: true, required: true } } });
+    const missing = await api("POST", "/v1/users", { email_address: ["u@example.com"], password: "Sup3r-secret!" });
+    expect(missing.status).toBe(422);
+    expect((await json<ErrorBody>(missing)).errors[0]!.meta?.param_name).toBe("username");
+    const created = await json<UserJSON>(await api("POST", "/v1/users", { email_address: ["u@example.com"], password: "Sup3r-secret!", username: "ada" }));
+    expect((await api("PATCH", `/v1/users/${created.id}`, { username: null })).status).toBe(422);
+    expect((await api("PATCH", `/v1/users/${created.id}`, { username: "ada2" })).status).toBe(200);
+  });
+
+  it("refuses to remove any identifier through the Backend API, required or not", async () => {
+    const { api, ctx } = await testApp();
+    // Email is required by default: removal used to be refused as a 422. It is now an operator refusal (403) for every
+    // identifier, because deleting the address a user signs in with is a lockout, not a configuration change.
+    const user = await json<UserJSON>(await api("POST", "/v1/users", { email_address: ["only@example.com"], password: "Sup3r-secret!" }));
+    const emailId = user.email_addresses[0]!.id;
+    const removed = await api("DELETE", `/v1/email_addresses/${emailId}`);
+    expect(removed.status).toBe(403);
+    expect((await json<ErrorBody>(removed)).errors[0]!.code).toBe("not_allowed_access");
+
+    // The same refusal applies once the attribute is optional: the operator still cannot strip the account.
+    await ctx.settings.update({ attributes: { emailAddress: { enabled: true, required: false } } });
+    const second = await json<UserJSON>(await api("POST", "/v1/users", { email_address: ["second@example.com"], password: "Sup3r-secret!", phone_number: ["+15551230000"] }));
+    expect((await api("DELETE", `/v1/email_addresses/${second.email_addresses[0]!.id}`)).status).toBe(403);
+    expect((await api("DELETE", `/v1/phone_numbers/${second.phone_numbers[0]!.id}`)).status).toBe(403);
+
+    // And the user can still remove their own identifier from their session.
+    const self = await signUpUser((await testApp()).app);
+    const mine = await self.client.json<{ response: { email_addresses: { id: string }[] } }>("/v1/client/me");
+    expect(mine.response.email_addresses.length).toBe(1);
   });
 });

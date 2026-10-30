@@ -63,10 +63,17 @@ export function WebhookLive() {
       }
     }
     void load();
-    const timer = window.setInterval(() => void load(), 4000);
+    const timer = window.setInterval(() => {
+      if (!document.hidden) void load();
+    }, 4000);
+    const onVisible = () => {
+      if (!document.hidden) void load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [nonce]);
 

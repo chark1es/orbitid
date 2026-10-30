@@ -292,7 +292,7 @@
                   },
                   "ticket": {
                     "type": "string",
-                    "description": "One-time ticket from an actor token, a sign-in token or an invitation."
+                    "description": "Invitation ticket for sign-up. Tickets cannot replace authentication during sign-in; actor and operator-minted sign-in tokens are not accepted."
                   },
                   "redirect_url": {
                     "type": "string"
@@ -10297,7 +10297,7 @@
         ],
         "summary": "Create a role",
         "operationId": "createRole",
-        "description": "Custom role keys must be namespaced as `org:<feature>` (or `org:<feature>:<permission>`).",
+        "description": "Custom role keys are namespaced: `org:<feature>[:<permission>]` is an organization role (assigned through a membership) and `app:<feature>[:<permission>]` is an instance role (assigned to a user with `PUT /v1/users/{id}/roles`). `org:sys_*` and `app:sys_*` are reserved for seeded entries.",
         "security": [
           {
             "SecretKey": []
@@ -10311,7 +10311,8 @@
                 "type": "object",
                 "properties": {
                   "key": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "`org:<feature>[:<action>]` for an organization role, `app:<feature>[:<action>]` for an instance role."
                   },
                   "name": {
                     "type": "string"
@@ -10320,14 +10321,15 @@
                     "type": "string"
                   },
                   "is_creator_eligible": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Organization roles only: may be picked as `organizations.creatorRole`."
                   },
                   "permissions": {
                     "type": "array",
                     "items": {
                       "type": "string"
                     },
-                    "description": "Permission keys to grant."
+                    "description": "Permission keys to grant; they must be in the same scope as the role."
                   }
                 },
                 "required": [
@@ -10613,6 +10615,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
@@ -10670,6 +10675,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -11490,7 +11498,7 @@
         ],
         "summary": "Update a user",
         "operationId": "updateUser",
-        "description": "Updates profile fields, metadata, MFA secrets and limits. Changing the password can end the user's other sessions (`sign_out_of_other_sessions`). Emits `user.updated`.",
+        "description": "Updates profile fields, metadata and limits. Sign-in material is not operator-editable: `password`, `password_digest`, `totp_secret`, `backup_codes` and the `primary_*_id` fields are refused with `403 not_allowed_access`, because the user changes them from their own session. `sign_out_of_other_sessions` still ends their sessions. Emits `user.updated`.",
         "security": [
           {
             "SecretKey": []
@@ -11640,6 +11648,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -11980,9 +11991,9 @@
         "tags": [
           "Users (backend)"
         ],
-        "summary": "Check a user's password",
+        "summary": "Check a user's password (removed)",
         "operationId": "verifyUserPassword",
-        "description": "Answers `{ object, id, verified }`; it never returns the hash. Rate limited.",
+        "description": "Removed: an unmetered check outside the sign-in lockout is a password-guessing oracle. Always answers `403` `not_allowed_access`; the sign-in flow does this with failure accounting.",
         "security": [
           {
             "SecretKey": []
@@ -12018,46 +12029,20 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "Success.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "object": {
-                      "const": "user"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "verified": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "object",
-                    "id",
-                    "verified"
-                  ]
-                }
-              }
-            }
-          },
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
           "422": {
             "$ref": "#/components/responses/UnprocessableEntity"
-          },
-          "429": {
-            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       }
@@ -12067,8 +12052,9 @@
         "tags": [
           "Users (backend)"
         ],
-        "summary": "Check a user's TOTP code",
+        "summary": "Check a user's TOTP code (removed)",
         "operationId": "verifyUserTotp",
+        "description": "Removed for the same reason as `verifyUserPassword`: a 30-second code must not be brute-forceable. Always answers `403` `not_allowed_access`.",
         "security": [
           {
             "SecretKey": []
@@ -12104,46 +12090,20 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "Success.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "object": {
-                      "const": "user"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "verified": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "object",
-                    "id",
-                    "verified"
-                  ]
-                }
-              }
-            }
-          },
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
           "422": {
             "$ref": "#/components/responses/UnprocessableEntity"
-          },
-          "429": {
-            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       }
@@ -12258,9 +12218,9 @@
         "tags": [
           "Users (backend)"
         ],
-        "summary": "Reset a user's MFA",
+        "summary": "Reset a user's MFA (removed)",
         "operationId": "resetUserMfa",
-        "description": "Disables the authenticator app and deletes backup codes, so the user can enrol again.",
+        "description": "Removed: clearing somebody's second factor is what an account takeover starts with. Always answers `403` `not_allowed_access`; the user removes their factor from their own session (`DELETE /me/totp`).",
         "security": [
           {
             "SecretKey": []
@@ -12278,21 +12238,14 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Success.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/User"
-                }
-              }
-            }
-          },
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -12305,8 +12258,9 @@
         "tags": [
           "Users (backend)"
         ],
-        "summary": "Remove a user's password",
+        "summary": "Remove a user's password (removed)",
         "operationId": "removeUserPassword",
+        "description": "Removed: always answers `403` `not_allowed_access`. The user removes their own password with `POST /me/remove_password`.",
         "security": [
           {
             "SecretKey": []
@@ -12324,21 +12278,14 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Success.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/User"
-                }
-              }
-            }
-          },
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -12464,9 +12411,9 @@
         "tags": [
           "Users (backend)"
         ],
-        "summary": "Read a user's provider tokens",
+        "summary": "Read a user's provider tokens (removed)",
         "operationId": "getUserOAuthTokens",
-        "description": "Returns the stored access token, scopes and expiry for each external account of that provider.",
+        "description": "Removed: a third-party access token lets the holder act as the user at the provider. Always answers `403` `not_allowed_access`. The user reads their own token with `GET /me/external_accounts/:id/access_token`.",
         "security": [
           {
             "SecretKey": []
@@ -12493,49 +12440,52 @@
           }
         ],
         "responses": {
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/users/{id}/roles": {
+      "get": {
+        "tags": [
+          "Users (backend)"
+        ],
+        "summary": "List a user's instance roles",
+        "operationId": "listUserRoles",
+        "description": "Instance-wide (`app:...`) roles assigned to the user. They travel in the session token as `roles` and `role_permissions`, independent of `org_role`.",
+        "security": [
+          {
+            "SecretKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "User id (`user_…`).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
           "200": {
             "description": "Success.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "object": {
-                        "const": "oauth_access_token"
-                      },
-                      "external_account_id": {
-                        "type": "string"
-                      },
-                      "provider": {
-                        "type": "string"
-                      },
-                      "token": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "scopes": {
-                        "type": "string"
-                      },
-                      "expires_at": {
-                        "type": [
-                          "integer",
-                          "null"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "object",
-                      "external_account_id",
-                      "provider",
-                      "token",
-                      "scopes",
-                      "expires_at"
-                    ]
-                  }
+                  "$ref": "#/components/schemas/UserRoles"
                 }
               }
             }
@@ -12548,6 +12498,77 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Users (backend)"
+        ],
+        "summary": "Replace a user's instance roles",
+        "operationId": "setUserRoles",
+        "description": "Operator-only. `roles` replaces the whole set; only `app:...` roles that are not system roles are accepted. The user's sessions are revoked so the next token carries the new claims.",
+        "security": [
+          {
+            "SecretKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "User id (`user_…`).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "roles": {
+                    "maxItems": 50,
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Instance role keys (`app:...`). Replaces the whole set; an empty array clears it."
+                  }
+                },
+                "required": [
+                  "roles"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRoles"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
           }
         }
       }
@@ -12703,9 +12724,9 @@
         "tags": [
           "Users (backend)"
         ],
-        "summary": "Add an email address to a user",
+        "summary": "Add an email address to a user (removed)",
         "operationId": "createEmailAddress",
-        "description": "`verified` and `primary` default to `true`; a duplicate address returns 409.",
+        "description": "Removed: an address the operator can attach and verify is one they control, so it becomes a sign-in and password-reset destination they own. Always answers `403` `not_allowed_access`. Identifiers are created with `POST /v1/users`; afterwards the user manages them at `/v1/client/me/email_addresses`.",
         "security": [
           {
             "SecretKey": []
@@ -12742,21 +12763,14 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "Success.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EmailAddress"
-                }
-              }
-            }
-          },
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -12816,8 +12830,9 @@
         "tags": [
           "Users (backend)"
         ],
-        "summary": "Update an email address",
+        "summary": "Verify or promote an email address (removed)",
         "operationId": "updateEmailAddress",
+        "description": "Removed: `verified: true` claims a mailbox the operator does not hold, and `primary` re-points sign-in. Always answers `403` `not_allowed_access`.",
         "security": [
           {
             "SecretKey": []
@@ -12855,21 +12870,14 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "Success.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EmailAddress"
-                }
-              }
-            }
-          },
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -12883,8 +12891,9 @@
         "tags": [
           "Users (backend)"
         ],
-        "summary": "Delete an email address",
+        "summary": "Delete an email address (removed)",
         "operationId": "deleteEmailAddress",
+        "description": "Removed: deleting a sign-in identifier locks the user out. Always answers `403` `not_allowed_access`; the user removes it from their own session.",
         "security": [
           {
             "SecretKey": []
@@ -12902,32 +12911,14 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Success.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "object": {
-                      "const": "email_address"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "deleted": {
-                      "const": true
-                    }
-                  }
-                }
-              }
-            }
-          },
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -13015,8 +13006,9 @@
         "tags": [
           "Users (backend)"
         ],
-        "summary": "Add a phone number to a user",
+        "summary": "Add a phone number to a user (removed)",
         "operationId": "createPhoneNumber",
+        "description": "Removed: attaching a verified number, and especially `default_second_factor`, installs a second factor the operator holds. Always answers `403` `not_allowed_access`; the user adds and verifies numbers from their own session.",
         "security": [
           {
             "SecretKey": []
@@ -13057,21 +13049,14 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "Success.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PhoneNumber"
-                }
-              }
-            }
-          },
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -13131,9 +13116,9 @@
         "tags": [
           "Users (backend)"
         ],
-        "summary": "Update a phone number",
+        "summary": "Verify or promote a phone number (removed)",
         "operationId": "updatePhoneNumber",
-        "description": "`default_second_factor: true` also marks the number as reserved for the second factor and clears the flag on the user's other numbers.",
+        "description": "Removed: verification and second-factor promotion are user actions. Always answers `403` `not_allowed_access`.",
         "security": [
           {
             "SecretKey": []
@@ -13179,21 +13164,14 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "Success.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PhoneNumber"
-                }
-              }
-            }
-          },
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -13207,8 +13185,9 @@
         "tags": [
           "Users (backend)"
         ],
-        "summary": "Delete a phone number",
+        "summary": "Delete a phone number (removed)",
         "operationId": "deletePhoneNumber",
+        "description": "Removed: always answers `403` `not_allowed_access`; the user removes their own number.",
         "security": [
           {
             "SecretKey": []
@@ -13226,32 +13205,14 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Success.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "object": {
-                      "const": "phone_number"
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "deleted": {
-                      "const": true
-                    }
-                  }
-                }
-              }
-            }
-          },
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -13803,9 +13764,9 @@
         "tags": [
           "Sessions"
         ],
-        "summary": "Mark a session as verified",
+        "summary": "Mark a session as verified (removed)",
         "operationId": "verifySession",
-        "description": "Records a fresh first factor (and second factor when the user has MFA) without a browser round trip.",
+        "description": "Removed: an operator must not assert a factor the user never presented. Always answers `403` `not_allowed_access`; the browser reverifies with `POST /v1/client/sessions/{id}/verify/attempt_*`.",
         "security": [
           {
             "SecretKey": []
@@ -13823,21 +13784,14 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Success.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Session"
-                }
-              }
-            }
-          },
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -13852,7 +13806,7 @@
         ],
         "summary": "Mint a session JWT",
         "operationId": "createSessionTokenBackend",
-        "description": "Signs a fresh RS256 session token for an active session.",
+        "description": "Signs a fresh RS256 session token for an active session. Requires `X-OrbitID-Session-Token` carrying that session's own, currently valid JWT: a secret key alone cannot mint a user's session (`403` without it). The browser refreshes through `POST /v1/client/sessions/{id}/tokens`, authenticated by its client cookie.",
         "security": [
           {
             "SecretKey": []
@@ -13885,6 +13839,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -13954,6 +13911,7 @@
         ],
         "summary": "Read a client",
         "operationId": "getClientBackend",
+        "description": "Sessions are returned without `last_active_token`: the Backend API does not mint JWTs for another client.",
         "security": [
           {
             "SecretKey": []
@@ -14000,7 +13958,7 @@
         ],
         "summary": "Resolve a client token",
         "operationId": "verifyClientToken",
-        "description": "Looks up the client that owns an opaque client token, for server-side session checks.",
+        "description": "Looks up the client that owns an opaque client token, for server-side session checks. No session JWT is minted.",
         "security": [
           {
             "SecretKey": []
@@ -14055,9 +14013,9 @@
         "tags": [
           "Sign in"
         ],
-        "summary": "Create a sign-in token",
+        "summary": "Create a sign-in token (removed)",
         "operationId": "createSignInToken",
-        "description": "One-time link that signs a user in without a password. The `token` and the ready-made `url` are returned once; they expire after the given lifetime. Redeem it through `POST /v1/client/sign_ins` with `strategy: \"ticket\"`.",
+        "description": "Removed: an operator credential must not be redeemable for another user's session. Always answers `403` `not_allowed_access`. Let the user sign in, or send a password-reset or invitation email instead.",
         "security": [
           {
             "SecretKey": []
@@ -14086,30 +14044,17 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "Success.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SignInToken"
-                }
-              }
-            }
-          },
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "422": {
             "$ref": "#/components/responses/UnprocessableEntity"
-          },
-          "429": {
-            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       }
@@ -14119,7 +14064,7 @@
         "tags": [
           "Sign in"
         ],
-        "summary": "Revoke a sign-in token",
+        "summary": "Revoke a sign-in token (removed)",
         "operationId": "revokeSignInToken",
         "security": [
           {
@@ -14138,21 +14083,14 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Success.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SignInToken"
-                }
-              }
-            }
-          },
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -14165,9 +14103,9 @@
         "tags": [
           "Sessions"
         ],
-        "summary": "Create an impersonation token",
+        "summary": "Create an impersonation token (removed)",
         "operationId": "createActorToken",
-        "description": "Creates a token that signs a session in as another actor. Redeem it with `POST /v1/client/sign_ins` (`strategy: \"ticket\"`); the resulting session carries the `act` claim and is marked as impersonated.",
+        "description": "Removed: impersonation let an operator take over a user's account, bypassing their password, second factor and trusted-device policy. Always answers `403` `not_allowed_access`.",
         "security": [
           {
             "SecretKey": []
@@ -14184,6 +14122,7 @@
                     "type": "string"
                   },
                   "actor": {
+                    "description": "Ignored: impersonation was removed.",
                     "type": "object",
                     "properties": {
                       "sub": {
@@ -14193,51 +14132,34 @@
                     "required": [
                       "sub"
                     ],
-                    "additionalProperties": {},
-                    "description": "Extra claims copied into the session's `act` claim."
+                    "additionalProperties": {}
                   },
                   "expires_in_seconds": {
-                    "description": "Between 10 seconds and 12 hours. Defaults to one hour.",
                     "type": "integer"
                   },
                   "session_max_duration_in_seconds": {
-                    "description": "Lifetime of the impersonated session. Defaults to 30 minutes.",
                     "type": "integer"
                   }
                 },
                 "required": [
-                  "user_id",
-                  "actor"
+                  "user_id"
                 ]
               }
             }
           }
         },
         "responses": {
-          "200": {
-            "description": "Success.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ActorToken"
-                }
-              }
-            }
-          },
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "422": {
             "$ref": "#/components/responses/UnprocessableEntity"
-          },
-          "429": {
-            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       }
@@ -14247,7 +14169,7 @@
         "tags": [
           "Sessions"
         ],
-        "summary": "Revoke an actor token",
+        "summary": "Revoke an actor token (removed)",
         "operationId": "revokeActorToken",
         "security": [
           {
@@ -14266,21 +14188,14 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Success.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ActorToken"
-                }
-              }
-            }
-          },
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -15311,7 +15226,7 @@
         ],
         "summary": "Send a test email",
         "operationId": "sendTestEmail",
-        "description": "Sends a test message through the configured mail transport to check the settings.",
+        "description": "Sends a test message through the configured mail transport. Malformed recipients answer 422; missing or failed delivery answers 503. No console or file fallback.",
         "security": [
           {
             "SecretKey": []
@@ -15365,6 +15280,9 @@
           },
           "422": {
             "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         }
       }
@@ -15376,7 +15294,7 @@
         ],
         "summary": "Send a test email and report the provider used",
         "operationId": "testEmailDelivery",
-        "description": "Sends a message through the resolved transport (Resend, SMTP or the server log) and reports which one it used. A delivery failure answers 502 with a message that never contains the provider key. Rate limited per address and overall.",
+        "description": "Sends a message through the resolved transport (Resend or SMTP) and reports which one it used. No provider means 503, never console or file delivery. A delivery failure answers 502 with a message that never contains the provider key. Rate limited per address and overall.",
         "security": [
           {
             "SecretKey": []
@@ -15413,8 +15331,7 @@
                       "type": "string",
                       "enum": [
                         "resend",
-                        "smtp",
-                        "console"
+                        "smtp"
                       ]
                     },
                     "ok": {
@@ -20955,6 +20872,20 @@
               "null"
             ]
           },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "Instance-wide role keys assigned by an operator (`app:...`). Never editable by the user."
+            }
+          },
+          "role_permissions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "Union of the permissions granted by `roles`."
+            }
+          },
           "last_sign_in_at": {
             "type": [
               "integer",
@@ -21010,6 +20941,8 @@
           "delete_self_enabled",
           "create_organization_enabled",
           "create_organizations_limit",
+          "roles",
+          "role_permissions",
           "last_sign_in_at",
           "last_active_at",
           "legal_accepted_at",
@@ -21060,7 +20993,7 @@
               "null"
             ],
             "additionalProperties": true,
-            "description": "Set when a Backend API actor token created the session during impersonation."
+            "description": "Historical impersonation context; impersonation was removed and no new session carries it."
           },
           "user": {
             "anyOf": [
@@ -22109,6 +22042,18 @@
           "description": {
             "type": "string"
           },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "organization",
+              "instance"
+            ],
+            "description": "`organization` roles are memberships; `instance` roles are attached to a user and travel in the session's `roles` claim."
+          },
+          "is_system": {
+            "type": "boolean",
+            "description": "Seeded `org:admin` / `org:member`; cannot be edited, deleted or assigned as an instance role."
+          },
           "is_creator_eligible": {
             "type": "boolean"
           },
@@ -22133,6 +22078,8 @@
           "key",
           "name",
           "description",
+          "scope",
+          "is_system",
           "is_creator_eligible",
           "permissions",
           "created_at",
@@ -22165,6 +22112,14 @@
               "user"
             ]
           },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "organization",
+              "instance"
+            ],
+            "description": "`organization` for `org:*` keys, `instance` for `app:*` keys."
+          },
           "created_at": {
             "type": "integer",
             "description": "Epoch milliseconds."
@@ -22181,6 +22136,7 @@
           "name",
           "description",
           "type",
+          "scope",
           "created_at",
           "updated_at"
         ]
@@ -22432,57 +22388,6 @@
           "updated_at"
         ]
       },
-      "ActorToken": {
-        "type": "object",
-        "properties": {
-          "object": {
-            "const": "actor_token"
-          },
-          "id": {
-            "type": "string"
-          },
-          "user_id": {
-            "type": "string"
-          },
-          "actor": {
-            "type": "object",
-            "additionalProperties": true,
-            "description": "Claims copied into the session's `act` claim."
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "pending",
-              "accepted",
-              "revoked"
-            ]
-          },
-          "token": {
-            "type": "string",
-            "description": "One-time token, returned only from the creating request."
-          },
-          "url": {
-            "type": "string"
-          },
-          "created_at": {
-            "type": "integer",
-            "description": "Epoch milliseconds."
-          },
-          "updated_at": {
-            "type": "integer",
-            "description": "Epoch milliseconds."
-          }
-        },
-        "required": [
-          "object",
-          "id",
-          "user_id",
-          "actor",
-          "status",
-          "created_at",
-          "updated_at"
-        ]
-      },
       "SignInToken": {
         "type": "object",
         "properties": {
@@ -22527,6 +22432,38 @@
           "created_at",
           "updated_at"
         ]
+      },
+      "UserRoles": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "const": "user_roles"
+          },
+          "user_id": {
+            "type": "string"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "Instance role keys, sorted."
+            }
+          },
+          "role_permissions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "Union of the permissions those roles grant, sorted."
+            }
+          }
+        },
+        "required": [
+          "object",
+          "user_id",
+          "roles",
+          "role_permissions"
+        ],
+        "description": "The instance-wide roles of a user. Written only by the operator's Backend API call."
       },
       "WebhookEndpoint": {
         "type": "object",

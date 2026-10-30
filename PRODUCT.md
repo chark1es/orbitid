@@ -10,7 +10,7 @@ web
 Two groups, equal weight.
 
 - Developers who run their own OrbitID instance for a product they are building. They open the dashboard while building: to see who signed up, inspect a session, turn a sign-in method on, copy a key, check a webhook delivery.
-- Operations and support staff who look after end users day to day: find a user, ban or unlock them, reset their MFA, impersonate them to reproduce a problem, invite someone to an organization.
+- Operations and support staff who look after end users day to day: find a user, ban or unlock them, revoke compromised sessions, invite someone to an organization.
 
 Both are comfortable with technical terms. Neither wants to learn a vendor's vocabulary.
 
@@ -23,7 +23,7 @@ Success is a developer who starts the container, opens the dashboard, copies two
 The user's database, the user's server. There is no hosted service, no vendor account and no billing. Nothing phones home. The code is open source (MIT). It provides the pieces a hosted authentication product provides, but user data stays in the operator's database; the only outbound calls are to integrations the operator turns on.
 
 ## Operating Context
-- Self-hosted: one container (or a plain `bun` process) plus Postgres. The dashboard is served by the server itself.
+- Self-hosted: one container (or a Node.js process) plus Postgres. The dashboard is served by the server itself.
 - The dashboard signs in with the instance secret key once, then holds an httpOnly, same-origin operator session (8 hours, revocable). There are no named operator accounts yet.
 - Applications talk to the server with a publishable key (browser) and a secret key (backend).
 - Settings are stored as instance settings and edited in the dashboard. Environment variables cover only infrastructure (URL, database, encryption key).
@@ -32,6 +32,8 @@ The user's database, the user's server. There is no hosted service, no vendor ac
 - Databases: Postgres is the main backend. SQLite is supported. Both are covered by the test suite.
 - Sign-in: password, email code, email link, SMS code, passkeys, social OAuth, custom OIDC, enterprise SAML and OIDC, TOTP and backup codes.
 - Organizations with roles, permissions, invitations, domains and membership requests.
+- Instance-wide roles work without an organization. Only users can change existing account credentials, factors and identifiers.
+- Email/SMS authentication requires configured delivery; codes are never printed or stored in mail files.
 - Also: API keys, machine-to-machine tokens, an OIDC provider, webhooks, JWT templates, audit logs.
 - Out of scope: billing and subscriptions. The product does not handle money.
 - Not planned: Web3 wallets, Google One Tap, native mobile SDKs.
@@ -47,7 +49,7 @@ No customers, testimonials or benchmarks exist, so none may be invented. Real da
 1. Show what the instance actually has. Counts, methods and keys come from the running server, never from placeholders.
 2. Say where the data lives. Make the database and the URL visible so an operator always knows what they are managing.
 3. Do the common thing in one step. Copying a key, banning a user, enabling a method should take a click or two.
-4. Dangerous actions say what they do and can be undone where possible. Impersonation, deletion and key rotation are marked as such.
+4. Dangerous actions say what they do and can be undone where possible. Deletion and key rotation are marked as such.
 5. Terms stay consistent across the dashboard, the SDKs and the docs.
 
 ## Accessibility & Inclusion

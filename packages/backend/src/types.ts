@@ -1,5 +1,4 @@
 import type {
-  ActorTokenJSON,
   AllowlistIdentifierJSON,
   ApiKeyJSON,
   AuditLogJSON,
@@ -26,6 +25,7 @@ import type {
   SessionJSON,
   SignInTokenJSON,
   UserJSON,
+  UserRolesJSON,
   WaitlistEntryJSON,
   WebhookDeliveryJSON,
   WebhookEndpointJSON,
@@ -51,8 +51,8 @@ export type WaitlistEntry = Camelize<WaitlistEntryJSON>;
 export type AllowlistIdentifier = Camelize<AllowlistIdentifierJSON>;
 export type BlocklistIdentifier = Camelize<BlocklistIdentifierJSON>;
 export type JwtTemplate = Camelize<JwtTemplateJSON>;
-export type ActorToken = Camelize<ActorTokenJSON>;
 export type SignInToken = Camelize<SignInTokenJSON>;
+export type UserRoles = Camelize<UserRolesJSON>;
 export type WebhookEndpoint = Camelize<WebhookEndpointJSON>;
 export type WebhookDelivery = Camelize<WebhookDeliveryJSON>;
 export type ApiKey = Camelize<ApiKeyJSON>;

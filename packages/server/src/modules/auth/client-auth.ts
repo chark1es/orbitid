@@ -119,8 +119,15 @@ async function inflightSignUp(ctx: AppContext, clientId: string) {
   return row && row.status !== "complete" && row.status !== "abandoned" ? row : undefined;
 }
 
-/** Wire representation of a client including its sessions (with users) and freshly minted session tokens. */
-export async function serializeClient(ctx: AppContext, client: ClientRow, opts: { azp?: string } = {}): Promise<ClientJSON> {
+/**
+ * Wire representation of a client including its sessions (with users).
+ *
+ * Session JWTs are minted only for the client that is asking for itself: `opts.mintTokens` is set by the
+ * Frontend API routes after they have authenticated the caller's own `__client` cookie. The Backend API's
+ * `GET /v1/clients/:id` serializes the same shape with `mintTokens: false`, because returning fresh, valid
+ * session JWTs for arbitrary clients would hand an operator a working session without any user action.
+ */
+export async function serializeClient(ctx: AppContext, client: ClientRow, opts: { azp?: string; mintTokens?: boolean } = {}): Promise<ClientJSON> {
   const fresh = first(await ctx.db.select().from(s.clients).where(eq(s.clients.id, client.id))) ?? client;
   const rows = (await ctx.db.select().from(s.sessions).where(eq(s.sessions.clientId, fresh.id)).orderBy(desc(s.sessions.createdAt)));
   const sessions: SessionJSON[] = [];
@@ -129,7 +136,7 @@ export async function serializeClient(ctx: AppContext, client: ClientRow, opts: 
     if (status === "expired") continue;
     const row = { ...stored, status };
     let token: string | null = null;
-    if ((status === "active" || status === "pending") && !isSessionExpired(ctx, row)) {
+    if (opts.mintTokens && (status === "active" || status === "pending") && !isSessionExpired(ctx, row)) {
       try {
         token = await signSessionToken(ctx, row.id, { azp: opts.azp });
       } catch {

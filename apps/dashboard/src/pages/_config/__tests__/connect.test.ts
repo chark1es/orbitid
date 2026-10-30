@@ -87,7 +87,7 @@ describe("environment blocks", () => {
     const secret = backend.variables.find((variable) => variable.name === "ORBITID_SECRET_KEY")!;
 
     expect(secret.value).toBe(SECRET_KEY_PLACEHOLDER);
-    expect(secret.comment).toMatch(/server log/);
+    expect(secret.comment).toMatch(/keys command/);
     // No real key can be copied out of the page: the only value is the placeholder.
     expect(renderEnvBlock(backend)).toContain(`ORBITID_SECRET_KEY=${SECRET_KEY_PLACEHOLDER}`);
     expect(renderEnvBlock(backend)).not.toMatch(/sk_(live|test)_[A-Za-z0-9]{8,}/);
@@ -130,7 +130,7 @@ describe("server summary", () => {
     expect(labels).toEqual(["Database", "Base URL", "Email delivery", "Private networks"]);
     expect(rows[0]!.value).toBe("SQLite");
     expect(rows[1]!.value).toBe("http://localhost:4000");
-    expect(rows[2]!.value).toBe("Print to server log");
+    expect(rows[2]!.value).toBe("Not configured");
     expect(rows[3]!.value).toBe("Blocked");
     expect(JSON.stringify(rows)).not.toMatch(/encryption/i);
   });
@@ -191,7 +191,7 @@ describe("setup checks", () => {
     const checks = setupChecks({ ...base, settings });
     const byId = Object.fromEntries(checks.map((check) => [check.id, check]));
     expect(byId.email?.state).toBe("warn");
-    expect(byId.email?.detail).toMatch(/printed to the server log/);
+    expect(byId.email?.detail).toMatch(/delivery is disabled/);
     expect(byId.origins?.state).toBe("warn");
     expect(byId.origins?.detail).toContain("https://app.example.com");
   });

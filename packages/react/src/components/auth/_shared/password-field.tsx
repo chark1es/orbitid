@@ -116,7 +116,6 @@ export function PasswordInput({
         type="button"
         variant="ghost"
         size="icon"
-        tabIndex={-1}
         disabled={disabled}
         onClick={() => setVisible((current) => !current)}
         aria-label={visible ? t("common.hidePassword") : t("common.showPassword")}

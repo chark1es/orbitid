@@ -47,10 +47,22 @@ function includesPermission(granted: string[], requested: string): boolean {
   });
 }
 
-/** `has()` backed by a session token's `org_role`, `org_permissions` and `fva` claims. */
+/**
+ * `has()` backed by a session token's claims.
+ *
+ * Two role namespaces exist and stay independent:
+ * - **organization**: `org_role` + `org_permissions`, from the session's active organization membership;
+ * - **instance**: `roles` + `role_permissions`, assigned to the user by an operator (`app:...` keys), with no
+ *   organization involved.
+ *
+ * `{ role }` and `{ permission }` match either namespace, so an app can grant access by membership role or by an
+ * instance role without knowing which one the operator chose. `{ feature }` is organization-scoped as before.
+ */
 export function createClaimsHasCheck(claims: SessionClaims | null): AuthObject["has"] {
   const orgRole = typeof claims?.org_role === "string" ? claims.org_role : null;
   const orgPermissions = Array.isArray(claims?.org_permissions) ? (claims.org_permissions as string[]) : [];
+  const instanceRoles = Array.isArray(claims?.roles) ? (claims.roles.filter((role): role is string => typeof role === "string")) : [];
+  const instancePermissions = Array.isArray(claims?.role_permissions) ? (claims.role_permissions.filter((permission): permission is string => typeof permission === "string")) : [];
   const fva = Array.isArray(claims?.fva) && claims.fva.length === 2 ? (claims.fva as [number, number]) : null;
 
   return (check) => {
@@ -61,11 +73,12 @@ export function createClaimsHasCheck(claims: SessionClaims | null): AuthObject["
     }
     if (check.role !== undefined) {
       const roles = Array.isArray(check.role) ? check.role : [check.role];
-      if (!orgRole || !roles.includes(orgRole)) return false;
+      const owned = orgRole ? [...instanceRoles, orgRole] : instanceRoles;
+      if (!roles.some((role) => owned.includes(role))) return false;
     }
     if (check.permission !== undefined && check.feature === undefined) {
       const permissions = Array.isArray(check.permission) ? check.permission : [check.permission];
-      if (!permissions.every((permission) => includesPermission(orgPermissions, permission))) return false;
+      if (!permissions.every((permission) => includesPermission(orgPermissions, permission) || includesPermission(instancePermissions, permission))) return false;
     }
     if (check.feature !== undefined) {
       const feature = check.feature.startsWith("org:") ? check.feature : `org:${check.feature}`;
@@ -106,6 +119,8 @@ export function buildAuthObject(
     orgRole: authenticated?.org_role ?? null,
     orgSlug: authenticated?.org_slug ?? null,
     orgPermissions: authenticated?.org_permissions ?? null,
+    roles: authenticated && Array.isArray(authenticated.roles) ? authenticated.roles : [],
+    rolePermissions: authenticated && Array.isArray(authenticated.role_permissions) ? authenticated.role_permissions : [],
     actor: authenticated?.act ?? null,
     sessionClaims: claims,
     sessionStatus: claims?.sts ?? (claims ? "active" : null),

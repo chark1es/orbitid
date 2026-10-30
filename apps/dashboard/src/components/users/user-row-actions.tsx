@@ -19,19 +19,16 @@ import {
   MoreHorizontal,
   Trash2,
   Unlock,
-  UserRound,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useCopyToClipboard } from "../../lib/hooks";
 import { userLabel } from "../../lib/format";
 import { useUserAdmin } from "../../lib/user-admin";
-import { useImpersonate } from "../../lib/impersonation";
 import { ConfirmDialog } from "../shared/confirm-dialog";
 
 export function UserRowActions({ user, onDeleted }: { user: UserJSON; onDeleted?: () => void }) {
   const navigate = useNavigate();
   const admin = useUserAdmin(user.id, { onDeleted });
-  const { impersonate, pending: impersonating } = useImpersonate();
   const copy = useCopyToClipboard();
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -50,9 +47,6 @@ export function UserRowActions({ user, onDeleted }: { user: UserJSON; onDeleted?
         <DropdownMenuContent align="end" className="w-52 rounded-[4px] border-border">
           <DropdownMenuItem onSelect={() => navigate(`/users/${user.id}`)}>
             <Eye aria-hidden /> View details
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => void impersonate(user.id)} disabled={impersonating}>
-            <UserRound aria-hidden /> Impersonate
           </DropdownMenuItem>
           <DropdownMenuItem
             onSelect={async () => {

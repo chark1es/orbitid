@@ -11,4 +11,5 @@ export {
   SignUp,
   UserProfile,
   Waitlist,
+  useOrganizationsEnabled,
 } from "@orbitid/react";

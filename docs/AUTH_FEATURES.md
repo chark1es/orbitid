@@ -102,12 +102,15 @@ for users who have already enrolled a factor.
 
 All of a user's trusted devices are revoked when the user:
 
-- changes or sets a password (`POST /me/change_password`, `PATCH /v1/users/:id`),
-- removes their password (`POST /me/remove_password`, `DELETE /v1/users/:id/password`),
-- removes a second factor (`DELETE /me/totp`, turning off the last second-factor phone number,
-  `DELETE /v1/users/:id/mfa`),
+- changes or sets a password (`POST /me/change_password`),
+- removes their password (`POST /me/remove_password`),
+- removes a second factor (`DELETE /me/totp`, or turning off the last second-factor phone number),
 - resets a password through the sign-in flow,
 - is banned or locked (`POST /v1/users/:id/ban`, `/lock`, or automatically after too many failed attempts).
+
+An operator cannot clear a password or a second factor on someone else's behalf: `DELETE /v1/users/:id/password`,
+`DELETE /v1/users/:id/mfa` and the credential fields of `PATCH /v1/users/:id` answer `403 not_allowed_access`
+(see [API.md](API.md)). Ban and lock remain operator actions and revoke credentials' shortcuts by ending trust.
 
 ### Endpoints
 

@@ -45,14 +45,16 @@ describe("auth().getToken()", () => {
     expect(getToken).not.toHaveBeenCalled();
   });
 
-  it("mints custom JWT templates through the Backend API", async () => {
+  it("mints custom JWT templates through the Backend API, proving possession of the session", async () => {
     headerStore.set("x-orbitid-auth-status", "signed-in");
-    headerStore.set("x-orbitid-auth-token", await signTestToken({ sid: "sess_42" }));
+    const token = await signTestToken({ sid: "sess_42" });
+    headerStore.set("x-orbitid-auth-token", token);
     getToken.mockResolvedValue({ jwt: "template-token" });
 
     const session = await auth();
     await expect(session.getToken({ template: "hasura" })).resolves.toBe("template-token");
-    expect(getToken).toHaveBeenCalledWith("sess_42", { template: "hasura" });
+    // The verified session token is forwarded: the server refuses to mint from a secret key alone.
+    expect(getToken).toHaveBeenCalledWith("sess_42", { template: "hasura", sessionToken: token });
   });
 
   it("returns null for templates when signed out", async () => {

@@ -95,8 +95,12 @@ export interface OperationInput {
   parameters?: AnyParameter[];
   /** Request body schema (JSON Schema, or a zod schema that is converted); adds `400` and `422` to the documented errors. */
   body?: { schema: Schema | ZodTypeAny; contentType?: string; description?: string; required?: boolean };
-  /** The success status and its body. `302` is used by the browser redirect endpoints. */
-  success?: { status: 200 | 201 | 202 | 204 | 302; schema?: Schema; contentType?: string; description?: string; headers?: Record<string, Schema> };
+  /**
+   * The status the operation always answers with, and its body. `302` is used by the browser redirect endpoints.
+   * `403` is used only by the operations that were deliberately withdrawn: every call is refused, so the refusal
+   * is the whole contract and it is documented as such.
+   */
+  success?: { status: 200 | 201 | 202 | 204 | 302 | 403; schema?: Schema; contentType?: string; description?: string; headers?: Record<string, Schema> };
   /** Additional error statuses. `400`, `401`, `404` and `422` are inferred from the operation. */
   errors?: (400 | 401 | 403 | 404 | 409 | 410 | 422 | 429 | 502 | 503)[];
   /** Defaults to the OrbitID envelope. OAuth protocol endpoints answer with the OAuth error shape instead. */
@@ -170,6 +174,10 @@ export function operation(input: OperationInput): DocumentedOperation {
 
   const responses: Record<string, unknown> = {};
   if (!success) throw new Error(`${input.operationId}: an operation needs a success response`);
+  // A withdrawn operation always fails: its documented response is the shared 403, not an invented success.
+  if (success.status === 403) {
+    responses["403"] = errorResponse(403, input.errorShape ?? "orbit");
+  } else
   responses[String(success.status)] = {
     description: success.description ?? (success.status === 204 ? "No content." : success.status === 302 ? "Redirect." : "Success."),
     ...(success.schema

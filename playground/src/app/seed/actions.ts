@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import type { ActionResult } from "@/lib/action-state";
-import { createBackend, currentOrigin, readSecretKey } from "@/lib/env";
+import { createBackend, readSecretKey } from "@/lib/env";
 import { describeError } from "@/lib/errors";
 import { makeSeedIdentity } from "@/lib/seed";
 import { primaryEmailOf } from "@/lib/user";
@@ -150,38 +150,6 @@ export async function deleteAllPlaygroundUsers(_previous: ActionResult, _formDat
       ok: failures.length === 0,
       message: `Deleted ${deleted} of ${targets.length} playground users.`,
       detail: failures.length ? failures.join(" · ") : "Organizations these users created keep their other members.",
-    };
-  } catch (error) {
-    return { ok: false, message: describeError(error) };
-  }
-}
-
-export async function createTicket(_previous: ActionResult, formData: FormData): Promise<ActionResult> {
-  if (!readSecretKey()) return NO_SECRET;
-  const userId = String(formData.get("userId") ?? "").trim();
-  if (!userId) return { ok: false, message: "No user id was sent." };
-
-  try {
-    const backend = createBackend();
-    const user = await backend.users.getUser(userId);
-    if (user.publicMetadata?.playground !== true) {
-      return {
-        ok: false,
-        message: "That user is not marked as a playground user.",
-        detail: "Create a user on this page, then request a sign-in link for it.",
-      };
-    }
-    const token = await backend.signInTokens.createSignInToken({ userId, expiresInSeconds: 600 });
-    if (!token.token) {
-      return { ok: false, message: "The instance created a token but did not return it." };
-    }
-    const href = `${await currentOrigin()}/sign-in?__orbit_ticket=${encodeURIComponent(token.token)}`;
-    revalidatePath("/seed");
-    return {
-      ok: true,
-      message: `Sign-in link for ${primaryEmailOf(user) ?? user.id}.`,
-      detail: "The SignIn component redeems the ticket on load. It works once and expires in 10 minutes.",
-      href,
     };
   } catch (error) {
     return { ok: false, message: describeError(error) };

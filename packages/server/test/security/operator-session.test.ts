@@ -78,7 +78,7 @@ describe("dashboard operator session: key exchange", () => {
     expect(res.headers.getSetCookie().some((value) => value.startsWith(`${COOKIES.operator}=`))).toBe(false);
   });
 
-  it("rate limits failed exchanges per address and still lets the right key through", async () => {
+  it("locks out credential comparisons after the failure budget is exhausted", async () => {
     const { app } = await boot();
     const statuses: number[] = [];
     for (let i = 0; i < 14; i++) {
@@ -92,8 +92,8 @@ describe("dashboard operator session: key exchange", () => {
     }
     expect(statuses.filter((status) => status === 401).length).toBeGreaterThan(0);
     expect(statuses).toContain(429);
-    // The lockout is per address, not a lock on the instance: the correct key still signs in.
-    expect((await signIn(app)).res.status).toBe(201);
+    // Even the correct key must wait for this address's failed-guess window to expire.
+    expect((await signIn(app)).res.status).toBe(429);
   });
 
   it("never logs the presented key", async () => {

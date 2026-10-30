@@ -1,6 +1,7 @@
+import { mutateAuthorization } from "./authorization-transaction";
 // Role/permission resolution used by both APIs.
 import { filterAsync } from "../lib/async";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { ErrorCodes, OrbitError, type PermissionJSON, type RoleJSON } from "@orbitid/shared";
 import type { AppContext } from "../context";
 import * as s from "../db/schema";
@@ -22,6 +23,19 @@ export const PERMISSIONS = {
 
 export const ADMIN_ROLE_KEY = "org:admin";
 export const MEMBER_ROLE_KEY = "org:member";
+
+/**
+ * Role/permission scopes. Organization keys are `org:<feature>[:<permission>]` and are assigned through a
+ * membership; instance keys are `app:<feature>[:<permission>]` and are assigned to a user by an operator.
+ * The prefix is the source of truth, so no extra column can drift from the key.
+ */
+export type RoleScope = "organization" | "instance";
+export const ORG_KEY_PREFIX = "org:";
+export const INSTANCE_KEY_PREFIX = "app:";
+
+export const roleScope = (key: string): RoleScope => (key.startsWith(INSTANCE_KEY_PREFIX) ? "instance" : "organization");
+/** The two seeded organization roles. They can neither be edited nor assigned as instance roles. */
+export const systemRoleKey = (key: string): boolean => key === ADMIN_ROLE_KEY || key === MEMBER_ROLE_KEY;
 
 export const SYSTEM_PERMISSIONS: { key: string; name: string; description: string }[] = [
   { key: PERMISSIONS.PROFILE_MANAGE, name: "Manage organization profile", description: "Update the organization name, slug, logo and metadata." },
@@ -50,8 +64,9 @@ export const SYSTEM_ROLES: { key: string; name: string; description: string; isC
   },
 ];
 
-/** Custom role/permission keys are `org:<...>`; `org:sys_` is reserved for system entries. */
+/** Custom role/permission keys are namespaced: `org:` for organization, `app:` for instance-wide. */
 export const RESERVED_KEY_PREFIX = "org:sys_";
+export const RESERVED_INSTANCE_KEY_PREFIX = "app:sys_";
 
 export async function permissionsForRoleId(ctx: AppContext, roleId: string): Promise<string[]> {
   const rows = (await ctx.db
@@ -94,13 +109,25 @@ export function assertPermission(membership: MembershipRow, permissions: string[
   }
 }
 
-export async function assertAssignableRole(ctx: AppContext, roleKey: string): Promise<RoleRow> {
+/**
+ * A role that can be placed on an organization membership or invitation: it must exist and be an
+ * organization role. Instance roles (`app:*`) belong to `user_roles` and are assigned by an operator to a
+ * user; putting one on a membership would grant nothing and would leak an instance-scoped key into `org_role`.
+ */
+export async function assertOrganizationRole(ctx: AppContext, roleKey: string, paramName = "role"): Promise<RoleRow> {
   const role = await roleByKey(ctx, roleKey);
-  if (!role) throw new OrbitError(422, ErrorCodes.org_role_not_found, `Role ${roleKey} does not exist`, { param_name: "role" });
+  if (!role) throw new OrbitError(422, ErrorCodes.org_role_not_found, `Role ${roleKey} does not exist`, { param_name: paramName });
+  if (roleScope(role.key) !== "organization") {
+    throw new OrbitError(
+      422,
+      ErrorCodes.form_param_value_invalid,
+      `${role.key} is an instance role and cannot be assigned to an organization. Assign it to the user instead.`,
+      { param_name: paramName },
+    );
+  }
   return role;
 }
 
-/** A role counts as "admin" when it can manage memberships. Used for last-admin protection. */
 export async function isAdminRole(ctx: AppContext, roleKey: string): Promise<boolean> {
   return (await permissionsForRole(ctx, roleKey)).includes(PERMISSIONS.MEMBERSHIPS_MANAGE);
 }
@@ -123,15 +150,73 @@ export async function assertNotLastAdmin(ctx: AppContext, membership: Membership
   }
 }
 
+/**
+ * Custom key syntax for a role or permission. `org:<feature>[:<action>]` is an organization role; the same
+ * shape under `app:` is an instance-wide role. `sys_` is reserved in both namespaces for seeded entries.
+ *
+ * Keys are opaque identifiers: they are compared for equality (and `prefix:*` permissions by prefix), never parsed
+ * into route or SQL fragments. Hyphens are therefore allowed — `org:team-lead` is the shape the dashboard's own
+ * validator accepts — as are underscores, digits and `:` segments. Reserved prefixes are checked case-insensitively
+ * so `org:Sys_admin` cannot slip past the guard.
+ */
 export function assertCustomKey(key: string, kind: "role" | "permission"): void {
-  if (!key.startsWith("org:")) {
-    throw new OrbitError(422, ErrorCodes.form_param_format_invalid, `${kind} key must start with "org:"`, { param_name: "key" });
+  const scopePrefix = key.startsWith(INSTANCE_KEY_PREFIX) ? INSTANCE_KEY_PREFIX : key.startsWith(ORG_KEY_PREFIX) ? ORG_KEY_PREFIX : null;
+  if (!scopePrefix) {
+    throw new OrbitError(422, ErrorCodes.form_param_format_invalid, `${kind} key must start with "org:" or "app:"`, { param_name: "key" });
   }
-  if (key.startsWith(RESERVED_KEY_PREFIX)) {
-    throw new OrbitError(422, ErrorCodes.form_param_format_invalid, `Keys starting with "${RESERVED_KEY_PREFIX}" are reserved for system ${kind}s`, { param_name: "key" });
+  const lowered = key.toLowerCase();
+  if (lowered.startsWith(RESERVED_KEY_PREFIX) || lowered.startsWith(RESERVED_INSTANCE_KEY_PREFIX)) {
+    throw new OrbitError(422, ErrorCodes.form_param_format_invalid, `Keys starting with "org:sys_" or "app:sys_" are reserved for system ${kind}s`, { param_name: "key" });
   }
-  if (!/^org:[a-zA-Z0-9_-]+(:[a-zA-Z0-9_-]+)*$/.test(key)) {
-    throw new OrbitError(422, ErrorCodes.form_param_format_invalid, `${kind} key may only contain letters, digits, "_" and ":" segments`, { param_name: "key" });
+  if (!key.slice(scopePrefix.length)) {
+    throw new OrbitError(422, ErrorCodes.form_param_format_invalid, `${kind} key needs a name after "${scopePrefix}"`, { param_name: "key" });
+  }
+  // Lower-case only, like the dashboard's own validator, so `org:Support` and `org:support` cannot both exist as
+  // two roles that read the same. Each `:` segment is `[a-z0-9][a-z0-9_-]*`; a doubled or trailing colon is not a name.
+  for (const segment of key.slice(scopePrefix.length).split(":")) {
+    if (!/^[a-z0-9][a-z0-9_-]*$/.test(segment)) {
+      throw new OrbitError(
+        422,
+        ErrorCodes.form_param_format_invalid,
+        `${kind} key segments must be lowercase letters, digits, "_" or "-", starting with a letter or digit`,
+        { param_name: "key" },
+      );
+    }
+  }
+}
+
+/**
+ * Checks that every permission can be attached to this role *before* anything is written, so a rejected request
+ * cannot leave a role row (or a half-replaced permission set) behind. `setRolePermissions` performs the same check
+ * as a last line of defence.
+ */
+export function assertPermissionScopes(roleKey: string, permissions: { key: string }[]): void {
+  const roleScopeKind = roleScope(roleKey);
+  for (const permission of permissions) {
+    if (roleScope(permission.key) !== roleScopeKind) {
+      throw new OrbitError(
+        422,
+        ErrorCodes.form_param_value_invalid,
+        `${permission.key} is an ${roleScope(permission.key)} permission; ${roleKey} is an ${roleScopeKind} role`,
+        { param_name: "permissions" },
+      );
+    }
+  }
+}
+
+/**
+ * `is_creator_eligible` only means something for an organization role: it makes the role selectable as
+ * `organizations.creatorRole`. An instance role can never be a creator role, so the flag is refused rather than
+ * stored and ignored.
+ */
+export function assertCreatorEligible(roleKey: string, eligible: boolean | undefined): void {
+  if (eligible && roleScope(roleKey) !== "organization") {
+    throw new OrbitError(
+      422,
+      ErrorCodes.form_param_value_invalid,
+      `${roleKey} is an instance role and cannot be creator eligible; creatorRole must be an organization role`,
+      { param_name: "is_creator_eligible" },
+    );
   }
 }
 
@@ -150,7 +235,7 @@ export async function resolvePermissions(ctx: AppContext, keysOrIds: string[]): 
 export function serializePermission(row: PermissionRow): PermissionJSON {
   return {
     object: "permission", id: row.id, key: row.key, name: row.name, description: row.description,
-    type: row.type === "system" ? "system" : "user", created_at: row.createdAt, updated_at: row.updatedAt,
+    type: row.type === "system" ? "system" : "user", scope: roleScope(row.key), created_at: row.createdAt, updated_at: row.updatedAt,
   };
 }
 
@@ -164,6 +249,7 @@ export async function serializeRole(ctx: AppContext, row: RoleRow): Promise<Role
     .sort((a, b) => a.key.localeCompare(b.key));
   return {
     object: "role", id: row.id, key: row.key, name: row.name, description: row.description,
+    scope: roleScope(row.key), is_system: row.isSystem,
     is_creator_eligible: row.isCreatorEligible, permissions: perms, created_at: row.createdAt, updated_at: row.updatedAt,
   };
 }
@@ -177,33 +263,55 @@ export async function roleUsageCount(ctx: AppContext, roleKey: string): Promise<
   return (await ctx.db.select().from(s.organizationMemberships).where(eq(s.organizationMemberships.roleKey, roleKey))).length;
 }
 
-/** Ensure a role is not referenced by orgs/settings before deletion. */
+/** Ensure a role is not referenced by memberships, user assignments or settings before deletion. */
 export async function assertRoleDeletable(ctx: AppContext, role: RoleRow): Promise<void> {
   if (role.isSystem) throw new OrbitError(403, ErrorCodes.not_allowed_access, "System roles cannot be deleted");
-  const assigned = await roleUsageCount(ctx, role.key);
-  if (assigned > 0) {
-    throw new OrbitError(403, ErrorCodes.not_allowed_access, `Role is assigned to ${assigned} organization member${assigned === 1 ? "" : "s"} and cannot be deleted`);
+  const assignments = (await ctx.db.select({ userId: s.userRoles.userId }).from(s.userRoles).where(eq(s.userRoles.roleKey, role.key))).length;
+  if (assignments > 0) {
+    throw new OrbitError(403, ErrorCodes.not_allowed_access, `Role is assigned to ${assignments} user${assignments === 1 ? "" : "s"} and cannot be deleted`);
   }
-  const creatorRole = ctx.settings.get().organizations.creatorRole;
-  if (role.isCreatorEligible && creatorRole === role.key) {
-    throw new OrbitError(403, ErrorCodes.not_allowed_access, "Role is the configured creator role and cannot be deleted");
+  if (roleScope(role.key) === "organization") {
+    const assigned = await roleUsageCount(ctx, role.key);
+    if (assigned > 0) {
+      throw new OrbitError(403, ErrorCodes.not_allowed_access, `Role is assigned to ${assigned} organization member${assigned === 1 ? "" : "s"} and cannot be deleted`);
+    }
+    const organizations = ctx.settings.get().organizations;
+    if (role.key === organizations.creatorRole || role.key === organizations.defaultRole) {
+      throw new OrbitError(403, ErrorCodes.not_allowed_access, "Role is the configured creator or default role and cannot be deleted");
+    }
+    // A pending invitation would accept into a membership whose role no longer exists (no foreign key on
+    // `role_key`), leaving an organization member with no permissions at all.
+    const invited = (await ctx.db
+      .select({ id: s.organizationInvitations.id })
+      .from(s.organizationInvitations)
+      .where(and(eq(s.organizationInvitations.roleKey, role.key), eq(s.organizationInvitations.status, "pending")))).length;
+    if (invited > 0) {
+      throw new OrbitError(403, ErrorCodes.not_allowed_access, `Role is used by ${invited} pending invitation${invited === 1 ? "" : "s"} and cannot be deleted`);
+    }
   }
 }
 
 /** Replace the permission set of a role. Caller emits the webhook. */
 export async function setRolePermissions(ctx: AppContext, role: RoleRow, permissionKeys: string[]): Promise<void> {
   const perms = await resolvePermissions(ctx, permissionKeys);
-  await ctx.db.delete(s.rolePermissions).where(eq(s.rolePermissions.roleId, role.id));
-  for (const p of perms) await ctx.db.insert(s.rolePermissions).values({ roleId: role.id, permissionId: p.id }).onConflictDoNothing();
-  await ctx.db.update(s.roles).set({ updatedAt: Date.now() }).where(eq(s.roles.id, role.id));
+  assertPermissionScopes(role.key, perms);
+  await mutateAuthorization(ctx,
+    sql`update ${s.roles} set updated_at = ${Date.now()} where id = ${role.id}`,
+    [sql`delete from ${s.rolePermissions} where role_id = ${role.id}`,
+      ...(perms.length ? [sql`insert into ${s.rolePermissions} (role_id, permission_id) values ${sql.join(perms.map((permission) => sql`(${role.id}, ${permission.id})`), sql`, `)}`] : [])],
+  );
 }
 
 export async function addRolePermission(ctx: AppContext, role: RoleRow, permission: PermissionRow): Promise<void> {
-  await ctx.db.insert(s.rolePermissions).values({ roleId: role.id, permissionId: permission.id }).onConflictDoNothing();
-  await ctx.db.update(s.roles).set({ updatedAt: Date.now() }).where(eq(s.roles.id, role.id));
+  await mutateAuthorization(ctx,
+    sql`update ${s.roles} set updated_at = ${Date.now()} where id = ${role.id}`,
+    [sql`insert into ${s.rolePermissions} (role_id, permission_id) values (${role.id}, ${permission.id}) on conflict do nothing`],
+  );
 }
 
 export async function removeRolePermission(ctx: AppContext, role: RoleRow, permissionId: string): Promise<void> {
-  await ctx.db.delete(s.rolePermissions).where(and(eq(s.rolePermissions.roleId, role.id), eq(s.rolePermissions.permissionId, permissionId)));
-  await ctx.db.update(s.roles).set({ updatedAt: Date.now() }).where(eq(s.roles.id, role.id));
+  await mutateAuthorization(ctx,
+    sql`update ${s.roles} set updated_at = ${Date.now()} where id = ${role.id}`,
+    [sql`delete from ${s.rolePermissions} where role_id = ${role.id} and permission_id = ${permissionId}`],
+  );
 }

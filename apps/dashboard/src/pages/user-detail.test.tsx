@@ -7,6 +7,8 @@ import UserDetailPage from "./user-detail";
 
 const USER: UserJSON = {
   object: "user",
+  roles: [],
+  role_permissions: [],
   id: "user_1",
   external_id: null,
   username: "ada",
@@ -99,6 +101,7 @@ interface MockOptions {
   deviceStatus?: number;
   emailSecondFactor?: boolean;
   trustedDevicesEnabled?: boolean;
+  organizationsEnabled?: boolean;
 }
 
 /** Answers the user, instance, trusted-device and session calls the detail page makes. */
@@ -128,6 +131,7 @@ function mockUserDetail(options: MockOptions = {}) {
       return json({
         attributes: { emailAddress: { usedForSecondFactor: options.emailSecondFactor ?? false } },
         session: { trustedDevicesEnabled: options.trustedDevicesEnabled ?? true, trustedDeviceDays: 30 },
+        organizations: { enabled: options.organizationsEnabled ?? false },
       });
     }
     if (url.includes("/v1/users/user_1")) {
@@ -259,4 +263,44 @@ describe("user detail: second factor summary", () => {
 
     expect(await screen.findByText("Second factor skipped: trusted device")).toBeTruthy();
   });
+});
+
+describe("user detail: operator actions", () => {
+  it("offers no impersonation, in the header or the actions menu", async () => {
+    mockUserDetail();
+    renderDetail();
+
+    expect(await screen.findByRole("heading", { name: "Ada Lovelace" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Impersonate" })).toBeNull();
+
+    fireEvent.keyDown(screen.getByRole("button", { name: "Actions for Ada Lovelace" }), { key: "Enter" });
+    expect(await screen.findByRole("menuitem", { name: /Copy user ID/ })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: /Impersonate/ })).toBeNull();
+  });
+});
+
+describe("user detail: organizations tab", () => {
+  it("is hidden while organizations are off, and a deep link falls back to the profile", async () => {
+    mockUserDetail({ organizationsEnabled: false });
+    renderDetail("/users/user_1?tab=organizations");
+
+    expect(await screen.findByRole("heading", { name: "Ada Lovelace" })).toBeTruthy();
+    expect(screen.queryByRole("tab", { name: "Organizations" })).toBeNull();
+    expect(await screen.findByLabelText("First name")).toBeTruthy();
+  });
+
+  it("is shown once organizations are on", async () => {
+    mockUserDetail({ organizationsEnabled: true });
+    renderDetail();
+
+    expect(await screen.findByRole("tab", { name: "Organizations" })).toBeTruthy();
+  });
+});
+
+it("offers no operator password or MFA replacement controls", async () => {
+  mockUserDetail();
+  renderDetail("/users/user_1?tab=security");
+  expect(await screen.findByText(/Password changes and recovery must be completed by the user/)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /Change password|Set password|Remove password|Reset MFA/ })).toBeNull();
+  expect(screen.getByRole("button", { name: "Sign out everywhere" })).toBeTruthy();
 });

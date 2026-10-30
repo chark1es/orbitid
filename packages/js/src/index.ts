@@ -28,36 +28,36 @@ export {
   type AttemptVerificationParams,
   type AuthenticateWithRedirectParams as SignUpAuthenticateWithRedirectParams,
 } from "./resources/sign-up";
+export { User, type UpdateUserParams } from "./resources/user";
+export { EmailAddress, PhoneNumber, type PhoneNumberParams } from "./resources/contact";
 export {
-  User,
-  EmailAddress,
-  PhoneNumber,
   ExternalAccount,
   Passkey,
   TOTP,
   BackupCodeResource,
   TrustedDevice,
-  type UpdateUserParams,
-  type PhoneNumberParams,
   type ReauthorizeParams,
   type TOTPJSON,
   type TrustedDeviceJSON,
-} from "./resources/user";
+} from "./resources/identity";
 export {
   Organization,
   OrganizationMembership,
-  OrganizationInvitation,
-  OrganizationDomain,
-  OrganizationMembershipRequest,
-  OrganizationSuggestion,
-  UserOrganizationInvitation,
-  Role,
-  Permission,
   type UpdateOrganizationParams,
+} from "./resources/organization";
+export { OrganizationInvitation } from "./resources/organization-invitation";
+export { OrganizationDomain } from "./resources/organization-domain";
+export { OrganizationMembershipRequest } from "./resources/organization-membership-request";
+export { OrganizationSuggestion } from "./resources/organization-suggestion";
+export {
+  UserOrganizationInvitation,
   type UserOrganizationInvitationWireJSON,
+} from "./resources/organization-user-invitation";
+export {
   type OrganizationPublicUserData,
   type PublicOrganizationData,
-} from "./resources/organization";
+} from "./resources/organization-shared";
+export { Role, Permission } from "./resources/permission";
 export { ApiKey, type CreateApiKeyParams, type ListApiKeysParams } from "./resources/api-key";
 export {
   Environment,

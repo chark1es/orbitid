@@ -70,6 +70,12 @@ instance's JWKS. The browser SDK refreshes it about every 50 seconds and writes 
 app's origin; `__client_uat` carries the session start time in Unix seconds so server rendering can tell whether
 anyone is signed in without verifying a token.
 
+The Frontend API route authenticates the browser's own `__client` cookie. The Backend API has the same path
+(`POST /v1/sessions/:id/tokens`, used by `@orbitid/backend`'s `sessions.getToken`) but requires the caller to prove
+it holds that session: send the session's current JWT in `X-OrbitID-Session-Token`. A secret key alone cannot mint
+a user's session, because the result is a full application session for that user. `GET /v1/clients/:id` and
+`POST /v1/clients/verify` return session metadata with `last_active_token: null` for the same reason.
+
 Verify tokens offline:
 
 - `GET /.well-known/jwks.json` (also `/v1/jwks`) for the public keys.
@@ -110,7 +116,7 @@ Every JSON endpoint answers errors with the same envelope:
 - `message` is short and safe to show to an end user.
 - `long_message` and `meta` are optional. `meta.param_name` names the offending field.
 - A validation failure can return several entries in `errors`.
-- `trace_id` identifies the request in the server log. Include it in bug reports.
+- `trace_id` identifies the response for troubleshooting. Non-authentication unexpected-error logs include it; authentication errors are silent. Include it in bug reports, without credentials or tokens.
 
 | Status | Meaning |
 |---|---|
@@ -363,8 +369,30 @@ so you can exercise your signature check.
   membership requests), `/v1/organizations/*` for the Backend API. Role changes emit
   `organizationMembership.updated`, and the JWT carries `org_id`, `org_role` and `org_permissions` so your app can
   check permissions without another request.
-- **Impersonation**: `POST /v1/actor_tokens` creates a one-time token; redeem it through `POST /v1/client/sign_ins`
-  with `strategy: "ticket"`. The resulting session carries the `act` claim naming the actor.
+- **No impersonation**: actor (impersonation) tokens and Backend-issued sign-in tokens were removed. Both minting
+  endpoints still exist and always answer `403 not_allowed_access`; a ticket that is already in the database is refused
+  as invalid. An operator credential must not become another user's session: that would bypass the user's password,
+  second factor and trusted-device policy. Historical sessions keep their `actor` field so old activity still displays.
+- **No operator credential edits**: the Backend API is for administration, not for becoming a user. These writes on an
+  existing account all answer `403 not_allowed_access` and name the user-facing route instead:
+
+  | Refused through the Backend API | What the user does in their own session |
+  |---|---|
+  | `PATCH /v1/users/:id` with `password` / `password_digest` / `totp_secret` / `backup_codes` | `POST /me/change_password`, `POST /me/totp`, `POST /me/backup_codes` |
+  | `PATCH /v1/users/:id` with `primary_email_address_id` / `primary_phone_number_id` | `PATCH /me` after verifying the identifier |
+  | `DELETE /v1/users/:id/password`, `DELETE /v1/users/:id/mfa` | `POST /me/remove_password`, `DELETE /me/totp` |
+  | `POST|PATCH|DELETE /v1/email_addresses…` (attach, verify, promote, delete) | `/me/email_addresses`, with an emailed code |
+  | `POST|PATCH|DELETE /v1/phone_numbers…` (attach, verify, second factor, delete) | `/me/phone_numbers`, with an SMS code |
+  | `POST /v1/users/:id/verify_password`, `verify_totp` (unmetered guessing) | the sign-in flow, which locks the account |
+  | `POST /v1/sessions/:id/verify` (assert a factor) | `POST /v1/client/sessions/:id/verify/attempt_*` |
+  | `GET /v1/users/:id/oauth_access_tokens/:provider` | `GET /me/external_accounts/:id/access_token` |
+
+  Initial provisioning is unaffected: `POST /v1/users` still creates an account with verified identifiers, a password,
+  a TOTP secret and backup codes (that is an import, not a takeover of an existing person). Names, usernames, metadata,
+  ban/lock status, roles, profile images and trusted-device revocation remain operator-managed.
+- **Instance-wide custom roles**: `POST /v1/roles` with an `app:` key creates an instance role (as opposed to an
+  `org:` organization role). `PUT /v1/users/{id}/roles` assigns them to a user; the session token then carries
+  `roles` and `role_permissions`, independent of `org_role` / `org_permissions`. See [RBAC.md](RBAC.md).
 - **API keys**: create them for a user or an organization and verify a presented key with
   `POST /v1/api_keys/verify`. The secret is shown once; only a hash is stored.
 - **Machines (M2M)**: `POST /v1/m2m/machines` returns the machine secret once. The machine mints its own tokens with
@@ -385,3 +413,11 @@ so you can exercise your signature check.
   file is stale, and a test fails when a registered route is missing from the document.
 - Versioning: the API is `0.1.0`. Additive changes (new fields, new endpoints, new enum values) can land in a patch
   release; read fields you know and branch on error `code`s.
+
+### Session versus template verification
+
+Normal instance session tokens use RS256 and the instance JWKS. JWT-template algorithms (including custom
+HS256) are separate integration credentials, not additional instance session modes. Backend `verifyToken`
+uses an asymmetric public key/JWKS; its deprecated `secretKey` option is unused and never enables HMAC.
+Next.js accepts HMAC only through explicit `hs256:` key configuration. SDKs reject unsupported algorithms
+rather than silently interpreting a public key as a symmetric secret.

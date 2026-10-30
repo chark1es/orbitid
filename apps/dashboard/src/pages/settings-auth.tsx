@@ -1,13 +1,5 @@
 import type { AttributeConfig } from "@orbitid/shared";
-import {
-  Input,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-  Switch,
-} from "@orbitid/ui";
+import { Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@orbitid/ui";
 import {
   CheckboxRow,
   ErrorAlert,
@@ -20,95 +12,15 @@ import {
   SettingsSection,
   SwitchRow,
 } from "./_config/ui";
-import { secretInputValue, secretIsConfigured, humanDuration } from "./_config/settings";
+import {
+  attributeProblems,
+  secretInputValue,
+  secretIsConfigured,
+  humanDuration,
+  type AttributeKey,
+} from "./_config/settings";
 import { useSettingsEditor } from "./_config/use-settings";
-
-const ATTRIBUTE_KEYS = ["emailAddress", "phoneNumber", "username", "firstName", "lastName", "password", "passkey", "backupCode", "authenticatorApp"] as const;
-type AttributeKey = (typeof ATTRIBUTE_KEYS)[number];
-
-function AttributeBlock({
-  title,
-  description,
-  config,
-  onChange,
-  verificationOptions,
-  showVerification = true,
-  showVerifyAtSignUp = true,
-}: {
-  title: string;
-  description: string;
-  config: AttributeConfig;
-  onChange: (patch: Partial<AttributeConfig>) => void;
-  verificationOptions?: { value: string; label: string }[];
-  showVerification?: boolean;
-  showVerifyAtSignUp?: boolean;
-}) {
-  const disabled = !config.enabled;
-  return (
-    <div className="space-y-3 border-b border-border pb-5 last:border-b-0 last:pb-0">
-      <div className="flex items-start justify-between gap-6">
-        <div className="min-w-0 space-y-0.5">
-          <p className="text-sm font-medium">{title}</p>
-          <p className="text-[0.8125rem] leading-relaxed text-muted-foreground">{description}</p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2.5">
-          <span className="text-xs text-muted-foreground">{config.enabled ? "On" : "Off"}</span>
-          <Switch checked={config.enabled} onCheckedChange={(enabled) => onChange({ enabled })} aria-label={`Enable ${title}`} />
-        </div>
-      </div>
-      <div className="grid gap-x-8 gap-y-1 sm:grid-cols-2">
-        <CheckboxRow
-          label="Required"
-          description="Users must supply this attribute at sign-up."
-          checked={config.required}
-          disabled={disabled}
-          onCheckedChange={(required) => onChange({ required })}
-        />
-        <CheckboxRow
-          label="Used for sign-in"
-          description="The sign-in form accepts this identifier."
-          checked={config.usedForFirstFactor}
-          disabled={disabled}
-          onCheckedChange={(usedForFirstFactor) => onChange({ usedForFirstFactor })}
-        />
-        {showVerifyAtSignUp ? (
-          <CheckboxRow
-            label="Verify at sign-up"
-            description="Sign-up completes only after verification."
-            checked={config.verifyAtSignUp}
-            disabled={disabled}
-            onCheckedChange={(verifyAtSignUp) => onChange({ verifyAtSignUp })}
-          />
-        ) : null}
-      </div>
-      {showVerification && verificationOptions?.length ? (
-        <fieldset className="space-y-1 border-t border-border pt-3">
-          <legend className="text-xs font-medium uppercase tracking-[0.04em] text-muted-foreground">Verification methods</legend>
-          <div className="grid gap-x-8 gap-y-1 sm:grid-cols-2">
-            {verificationOptions.map((option) => (
-              <CheckboxRow
-                key={option.value}
-                label={option.label}
-                checked={config.verifications.includes(option.value)}
-                disabled={disabled}
-                onCheckedChange={(checked) =>
-                  onChange({
-                    verifications: checked
-                      ? [...config.verifications, option.value]
-                      : config.verifications.filter((value) => value !== option.value),
-                  })
-                }
-              />
-            ))}
-          </div>
-          {config.verifications.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No method selected. Users cannot verify this attribute, so sign-up will block when verification is required.</p>
-          ) : null}
-        </fieldset>
-      ) : null}
-    </div>
-  );
-}
+import { AttributeBlock } from "./_settings-auth/attribute-block";
 
 export default function Page() {
   const editor = useSettingsEditor();
@@ -135,6 +47,13 @@ export default function Page() {
     errors.push("Add a captcha site key when bot protection is enabled.");
   if (settings.security.captchaProvider !== "none" && settings.security.botProtection && !secretIsConfigured(settings.security.captchaSecret))
     errors.push("Add a captcha secret when bot protection is enabled.");
+
+  const problems = attributeProblems(settings);
+  for (const problem of problems) errors.push(problem.message);
+  const problemsFor = (key: AttributeKey) =>
+    problems.filter((problem) => problem.attribute === key).map((problem) => problem.message);
+  const SHOWN_IN_BLOCK: (AttributeKey | null)[] = ["emailAddress", "phoneNumber", "username"];
+  const otherProblems = problems.filter((problem) => !SHOWN_IN_BLOCK.includes(problem.attribute));
 
   const updateAttribute = (key: AttributeKey, patch: Partial<AttributeConfig>) => {
     editor.patch({ attributes: { [key]: patch } });
@@ -167,11 +86,19 @@ export default function Page() {
         title="Identifiers"
         description="Each identifier can be enabled, required, and accepted on the sign-in form. Verification methods apply to sign-up and sign-in."
       >
+        {otherProblems.length > 0 ? (
+          <ul role="alert" className="space-y-1 text-[0.8125rem] leading-relaxed text-signal">
+            {otherProblems.map((problem) => (
+              <li key={problem.message}>{problem.message}</li>
+            ))}
+          </ul>
+        ) : null}
         <AttributeBlock
           title="Email address"
           description="The primary identifier for most applications."
           config={settings.attributes.emailAddress}
           onChange={(patch) => updateAttribute("emailAddress", patch)}
+          problems={problemsFor("emailAddress")}
           verificationOptions={[
             { value: "email_code", label: "Email code" },
             { value: "email_link", label: "Email link" },
@@ -182,6 +109,7 @@ export default function Page() {
           description="SMS-based sign-in and verification."
           config={settings.attributes.phoneNumber}
           onChange={(patch) => updateAttribute("phoneNumber", patch)}
+          problems={problemsFor("phoneNumber")}
           verificationOptions={[{ value: "phone_code", label: "SMS code" }]}
         />
         <AttributeBlock
@@ -189,6 +117,7 @@ export default function Page() {
           description="A unique handle users can sign in with."
           config={settings.attributes.username}
           onChange={(patch) => updateAttribute("username", patch)}
+          problems={problemsFor("username")}
           showVerification={false}
           showVerifyAtSignUp={false}
         />
@@ -225,7 +154,7 @@ export default function Page() {
           label="Allow password sign-in"
           description="Turn off to require passwordless or social sign-in."
           checked={settings.attributes.password.enabled}
-          onCheckedChange={(enabled) => updateAttribute("password", { enabled })}
+          onCheckedChange={(enabled) => updateAttribute("password", enabled ? { enabled } : { enabled, required: false })}
         />
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Minimum length" htmlFor="password-min">
@@ -419,7 +348,7 @@ export default function Page() {
               <SwitchRow
                 label={label}
                 checked={settings.attributes[key].enabled}
-                onCheckedChange={(enabled) => updateAttribute(key, { enabled })}
+                onCheckedChange={(enabled) => updateAttribute(key, enabled ? { enabled } : { enabled, required: false })}
               />
               <CheckboxRow
                 label="Required"

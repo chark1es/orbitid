@@ -7,6 +7,7 @@ export { OrganizationProfile, type OrganizationProfileProps } from "./Organizati
 export { OrganizationList, type OrganizationListProps } from "./OrganizationList";
 export { CreateOrganization, type CreateOrganizationProps } from "./CreateOrganization";
 export { APIKeys, type APIKeysProps } from "./APIKeys";
+export { useOrganizationsEnabled } from "./_shared/hooks";
 export type {
   CommonOrgProps,
   OrgProfileCustomLinkProps,

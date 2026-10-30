@@ -263,10 +263,12 @@ export class SignUp {
       startEmailLinkFlow: async (params = {}) => {
         await this.prepareEmailAddressVerification({ strategy: "email_link", redirectUrl: params.redirectUrl });
         let cancelled = false;
-        let elapsed = 0;
         let timer: ReturnType<typeof setTimeout> | undefined;
-        const interval = params.pollingIntervalMs ?? options.pollingIntervalMs ?? 500;
+        // Honour a caller-provided cadence; only an unusable value (0, NaN, negative) falls back to the default.
+        const requestedInterval = params.pollingIntervalMs ?? options.pollingIntervalMs ?? 500;
+        const interval = Number.isFinite(requestedInterval) && requestedInterval > 0 ? requestedInterval : 500;
         const maxPolling = options.maxPollingMs ?? 10 * 60 * 1000;
+        const startedAt = Date.now();
         const poll = async () => {
           if (cancelled) return;
           try {
@@ -274,9 +276,9 @@ export class SignUp {
           } catch {
             /* transient network errors: keep polling */
           }
+          // `cancel()` may have run while the request was in flight.
           if (cancelled || this.status !== "missing_requirements") return;
-          elapsed += interval;
-          if (elapsed >= maxPolling) return;
+          if (Date.now() - startedAt >= maxPolling) return;
           timer = setTimeout(poll, interval);
         };
         timer = setTimeout(poll, interval);
@@ -284,6 +286,7 @@ export class SignUp {
           cancel: () => {
             cancelled = true;
             clearTimeout(timer);
+            timer = undefined;
           },
         };
       },

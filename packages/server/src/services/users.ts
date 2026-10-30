@@ -270,10 +270,44 @@ export async function assertNotLastIdentification(ctx: AppContext, userId: strin
   }
 }
 
+/**
+ * A required attribute is a prerequisite for the account, not a suggestion: an identifier the instance requires
+ * cannot be removed, even when the caller is an operator editing somebody else. Without this the settings tree
+ * would promise a field every user must have while a request could silently delete it.
+ */
+export async function assertRequiredIdentifierRemains(ctx: AppContext, userId: string, kind: "email_address" | "phone_number"): Promise<void> {
+  const attrs = ctx.settings.get().attributes;
+  const required = kind === "email_address" ? attrs.emailAddress : attrs.phoneNumber;
+  if (!required.enabled || !required.required) return;
+  const remaining = kind === "email_address"
+    ? (await ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.userId, userId))).length
+    : (await ctx.db.select().from(s.phoneNumbers).where(eq(s.phoneNumbers.userId, userId))).length;
+  if (remaining <= 1) {
+    throw new OrbitError(
+      422,
+      ErrorCodes.form_param_value_invalid,
+      `${kind === "email_address" ? "An email address" : "A phone number"} is required for every account and cannot be removed.`,
+      { param_name: kind },
+    );
+  }
+}
+
+/** A required name/username must stay filled in when the user edits the profile. */
+export function assertRequiredProfileField(ctx: AppContext, field: "firstName" | "lastName" | "username", value: string | null | undefined): void {
+  const attr = ctx.settings.get().attributes[field];
+  if (!attr.enabled || !attr.required || value === undefined) return;
+  if (value === null || !value.trim()) {
+    const param = field === "firstName" ? "first_name" : field === "lastName" ? "last_name" : "username";
+    throw new OrbitError(422, ErrorCodes.form_param_missing, `${param} is required on this instance and cannot be cleared`, { param_name: param });
+  }
+}
+
 export async function deleteEmailAddress(ctx: AppContext, userId: string, emailId: string) {
   const row = first(await ctx.db.select().from(s.emailAddresses).where(and(eq(s.emailAddresses.id, emailId), eq(s.emailAddresses.userId, userId))));
   if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Email address not found");
+  // "Last identification" is the stronger, older guarantee: keep its error code when both apply.
   await assertNotLastIdentification(ctx, userId);
+  await assertRequiredIdentifierRemains(ctx, userId, "email_address");
   await ctx.db.delete(s.emailAddresses).where(eq(s.emailAddresses.id, emailId));
   const user = (await getUserById(ctx, userId))!;
   if (user.primaryEmailAddressId === emailId) {
@@ -286,6 +320,7 @@ export async function deletePhoneNumber(ctx: AppContext, userId: string, phoneId
   const row = first(await ctx.db.select().from(s.phoneNumbers).where(and(eq(s.phoneNumbers.id, phoneId), eq(s.phoneNumbers.userId, userId))));
   if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Phone number not found");
   await assertNotLastIdentification(ctx, userId);
+  await assertRequiredIdentifierRemains(ctx, userId, "phone_number");
   await ctx.db.delete(s.phoneNumbers).where(eq(s.phoneNumbers.id, phoneId));
   const user = (await getUserById(ctx, userId))!;
   if (user.primaryPhoneNumberId === phoneId) {

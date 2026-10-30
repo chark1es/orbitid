@@ -9,10 +9,11 @@ import { first } from "../lib/db";
 
 export interface IdentifiersToCheck { emails?: string[]; phones?: string[]; invitationTicket?: string | null }
 
-export type TicketGrant =
-  | { kind: "sign_in_token"; userId: string }
-  | { kind: "actor_token"; userId: string; actor: Record<string, unknown>; sessionMaxDurationSeconds: number }
-  | { kind: "invitation"; invitationId: string; email: string; publicMetadata: Record<string, unknown> };
+/**
+ * A ticket only ever grants an invitation. Operator-minted sign-in tokens are no longer honoured anywhere
+ * (see `modules/admin/tokens.ts`), so no code path turns an operator credential into a user session.
+ */
+export type TicketGrant = { kind: "invitation"; invitationId: string; email: string; publicMetadata: Record<string, unknown> };
 
 /** Frequently abused throwaway providers; only consulted when `settings.restrictions.blockDisposableEmailDomains`. */
 export const DISPOSABLE_EMAIL_DOMAINS: Record<string, true> = {
@@ -83,30 +84,13 @@ export function serializeInvitation(row: typeof s.invitations.$inferSelect): Inv
   };
 }
 
-/** Validates a one-time ticket without consuming it (used while screening sign-ups). */
+/** Validates a one-time invitation ticket without consuming it (used while screening sign-ups). */
 export async function validateTicket(ctx: AppContext, ticket: string): Promise<TicketGrant> {
   const tokenHash = sha256(ticket);
   const now = Date.now();
 
-  const signInToken = first(await ctx.db.select().from(s.signInTokens).where(eq(s.signInTokens.tokenHash, tokenHash)));
-  if (signInToken) {
-    if (signInToken.status !== "pending") throw new OrbitError(422, ErrorCodes.ticket_invalid, "This sign-in ticket has already been used or revoked.");
-    if (signInToken.expiresAt <= now) throw new OrbitError(422, ErrorCodes.ticket_expired, "This sign-in ticket has expired.");
-    return { kind: "sign_in_token", userId: signInToken.userId };
-  }
-
-  const actorToken = first(await ctx.db.select().from(s.actorTokens).where(eq(s.actorTokens.tokenHash, tokenHash)));
-  if (actorToken) {
-    if (actorToken.status !== "pending") throw new OrbitError(422, ErrorCodes.ticket_invalid, "This actor ticket has already been used or revoked.");
-    if (actorToken.expiresAt <= now) throw new OrbitError(422, ErrorCodes.ticket_expired, "This actor ticket has expired.");
-    return {
-      kind: "actor_token",
-      userId: actorToken.userId,
-      actor: (actorToken.actor ?? {}) as Record<string, unknown>,
-      sessionMaxDurationSeconds: actorToken.sessionMaxDurationSeconds,
-    };
-  }
-
+  // Rows of the removed kinds (sign_in_tokens, actor_tokens) are deliberately not consulted: a ticket minted
+  // before the upgrade must not keep working after it. They fall through to "invalid ticket" below.
   const invitation = first(await ctx.db.select().from(s.invitations).where(eq(s.invitations.tokenHash, tokenHash)));
   if (invitation) {
     if (invitation.status !== "pending") throw new OrbitError(422, ErrorCodes.ticket_invalid, "This invitation has already been used or revoked.");
@@ -148,7 +132,7 @@ export async function assertIdentifiersAllowed(
 
   if (_opts.signIn) return {};
 
-  // A valid ticket proves the user was invited (or is being impersonated) and bypasses every sign-up restriction.
+  // A valid ticket proves the user was invited and bypasses every sign-up restriction.
   if (_ids.invitationTicket) {
     const grant = await validateTicket(ctx, _ids.invitationTicket);
     return grant.kind === "invitation" ? { invitationId: grant.invitationId } : {};
@@ -182,34 +166,12 @@ export async function assertIdentifiersAllowed(
   throw new OrbitError(422, ErrorCodes.waitlist_mode, "You need an invitation to sign up for this application.");
 }
 
-/** Validates + consumes sign_in_token / actor_token / app-invitation tickets (strategy "ticket"). Returns what the ticket grants. */
-export async function redeemTicket(
-  ctx: AppContext,
-  _ticket: string,
-): Promise<{ kind: "sign_in_token" | "actor_token"; userId: string; actor?: Record<string, unknown>; sessionMaxDurationSeconds?: number } | { kind: "invitation"; invitationId: string; email: string; publicMetadata: Record<string, unknown> }> {
-  const tokenHash = sha256(_ticket);
-  const now = Date.now();
-  // Redeeming is the single statement that decides the winner; a loser gets the same errors as a reused ticket.
-  const signInToken = first(await ctx.db.update(s.signInTokens).set({ status: "accepted" })
-    .where(and(eq(s.signInTokens.tokenHash, tokenHash), eq(s.signInTokens.status, "pending"), gt(s.signInTokens.expiresAt, now)))
-    .returning());
-  if (signInToken) return { kind: "sign_in_token", userId: signInToken.userId };
-  const actorToken = first(await ctx.db.update(s.actorTokens).set({ status: "accepted" })
-    .where(and(eq(s.actorTokens.tokenHash, tokenHash), eq(s.actorTokens.status, "pending"), gt(s.actorTokens.expiresAt, now)))
-    .returning());
-  if (actorToken) {
-    return {
-      kind: "actor_token",
-      userId: actorToken.userId,
-      actor: (actorToken.actor ?? {}) as Record<string, unknown>,
-      sessionMaxDurationSeconds: actorToken.sessionMaxDurationSeconds,
-    };
-  }
-  // Only an invitation can still be live here; validateTicket raises the exact error otherwise.
-  const grant = await validateTicket(ctx, _ticket);
-  if (grant.kind !== "invitation") throw new OrbitError(422, ErrorCodes.ticket_invalid, "This ticket has already been used or revoked.");
-  // Invitations stay `pending` until the sign-up completes (markInvitationAccepted).
-  return { kind: "invitation", invitationId: grant.invitationId, email: grant.email, publicMetadata: grant.publicMetadata };
+/**
+ * Validates an app-invitation ticket (strategy `ticket` on the sign-up route). Invitations stay `pending` until the
+ * sign-up completes (`markInvitationAccepted`), which makes the exchange safely idempotent.
+ */
+export async function redeemTicket(ctx: AppContext, _ticket: string): Promise<TicketGrant> {
+  return validateTicket(ctx, _ticket);
 }
 
 /** Mark an invitation accepted & waitlist entry completed after a successful sign-up. */

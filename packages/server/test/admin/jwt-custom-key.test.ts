@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createLocalJWKSet, importJWK, jwtVerify, decodeProtectedHeader, type JWK } from "jose";
 import type { JwtTemplateJSON } from "@orbitid/shared";
 import { getJwks } from "../../src/services/tokens";
-import { createSessionFixture, createUser, json, testApp } from "./helpers";
+import { createSessionFixture, createUser, json, sessionJwtFor, testApp } from "./helpers";
 
 async function mint(algorithm: "HS256" | "RS256") {
   const { api, ctx } = await testApp();
@@ -11,7 +11,8 @@ async function mint(algorithm: "HS256" | "RS256") {
   const template = await json<JwtTemplateJSON>(
     await api("POST", "/v1/jwt_templates", { name: "partner", claims: { email: "{{user.primary_email_address}}" }, custom_signing_key: true, signing_algorithm: algorithm }),
   );
-  const { jwt } = await json<{ jwt: string }>(await api("POST", `/v1/sessions/${sessionId}/tokens/partner`));
+  const proof = await sessionJwtFor(ctx, sessionId, user.id);
+  const { jwt } = await json<{ jwt: string }>(await api("POST", `/v1/sessions/${sessionId}/tokens/partner`, undefined, { "x-orbitid-session-token": proof }));
   return { ctx, jwt, template, userId: user.id };
 }
 

@@ -21,6 +21,8 @@ import {
 import { Plus, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, useApi } from "../lib/api";
+import { useShowOrganizations } from "../lib/features";
+import { useDebounced } from "../lib/hooks";
 import { oneTimeSecret, unwrapList } from "./_config/data";
 import { errorMessage, formatDate, fromDateInput, textToList, toDateInput } from "./_config/settings";
 import {
@@ -57,6 +59,8 @@ export default function Page() {
   const [createOpen, setCreateOpen] = useState(false);
   const [subjectType, setSubjectType] = useState<SubjectType>("user");
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounced(search.trim(), 250);
+  const showOrganizations = useShowOrganizations();
   const [choice, setChoice] = useState<SubjectChoice | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -75,14 +79,14 @@ export default function Page() {
   const [verifying, setVerifying] = useState(false);
 
   const userSearch = useApi<PaginatedList<UserJSON>>(
-    ["api-key-user-search", search],
-    `/users?query=${encodeURIComponent(search.trim())}&limit=8&paginated=true`,
-    { enabled: createOpen && subjectType === "user" && search.trim().length > 0 },
+    ["api-key-user-search", debouncedSearch],
+    `/users?query=${encodeURIComponent(debouncedSearch)}&limit=8&paginated=true`,
+    { enabled: createOpen && subjectType === "user" && debouncedSearch.length > 0 },
   );
   const orgSearch = useApi<PaginatedList<OrganizationJSON>>(
-    ["api-key-org-search", search],
-    `/organizations?query=${encodeURIComponent(search.trim())}&limit=8`,
-    { enabled: createOpen && subjectType === "org" && search.trim().length > 0 },
+    ["api-key-org-search", debouncedSearch],
+    `/organizations?query=${encodeURIComponent(debouncedSearch)}&limit=8`,
+    { enabled: createOpen && showOrganizations && subjectType === "org" && debouncedSearch.length > 0 },
   );
 
   const filteredKeys = keys.filter((key) => {
@@ -209,7 +213,7 @@ export default function Page() {
           <SelectContent>
             <SelectItem value="all">All subjects</SelectItem>
             <SelectItem value="user">Users</SelectItem>
-            <SelectItem value="org">Organizations</SelectItem>
+            {showOrganizations || filterType === "org" ? <SelectItem value="org">Organizations</SelectItem> : null}
           </SelectContent>
         </Select>
         <div className="relative flex-1">
@@ -358,7 +362,7 @@ export default function Page() {
           >
             <TabsList>
               <TabsTrigger value="user">User</TabsTrigger>
-              <TabsTrigger value="org">Organization</TabsTrigger>
+              {showOrganizations ? <TabsTrigger value="org">Organization</TabsTrigger> : null}
             </TabsList>
           </Tabs>
           {choice ? (
@@ -383,7 +387,7 @@ export default function Page() {
               </Field>
               {search.trim().length === 0 ? (
                 <p className="text-xs text-muted-foreground">Type at least one character to search.</p>
-              ) : (subjectType === "user" ? userSearch.isLoading : orgSearch.isLoading) ? (
+              ) : search.trim() !== debouncedSearch || (subjectType === "user" ? userSearch.isLoading : orgSearch.isLoading) ? (
                 <p className="text-xs text-muted-foreground">Searching…</p>
               ) : subjectResults.length === 0 ? (
                 <p className="text-xs text-muted-foreground">No matches.</p>

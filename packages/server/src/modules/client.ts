@@ -56,7 +56,7 @@ export default function routes(ctx: AppContext) {
 
   app.get("/", async (c) => {
     const client = await getOrCreateClient(ctx, c);
-    const json = await serializeClient(ctx, client, { azp: clientAzp(c) });
+    const json = await serializeClient(ctx, client, { azp: clientAzp(c), mintTokens: true });
     return c.json({ response: json, client: json });
   });
 
@@ -69,7 +69,7 @@ export default function routes(ctx: AppContext) {
     await ctx.db.update(s.clients).set({ lastActiveSessionId: null, updatedAt: Date.now() }).where(eq(s.clients.id, client.id));
     clearClientCookie(c, ctx);
     const fresh = first(await ctx.db.select().from(s.clients).where(eq(s.clients.id, client.id)))!;
-    const json = await serializeClient(ctx, fresh, { azp: clientAzp(c) });
+    const json = await serializeClient(ctx, fresh, { azp: clientAzp(c), mintTokens: true });
     return c.json({ response: json, client: json });
   });
 
@@ -95,7 +95,7 @@ export default function routes(ctx: AppContext) {
     const row = await requireSession(ctx, client.id, sessionParam(c));
     const body = await parseBody(c, touchSchema);
     const updated = await touchSession(ctx, row, { organizationId: body.active_organization_id });
-    const json = await serializeClient(ctx, client, { azp: clientAzp(c) });
+    const json = await serializeClient(ctx, client, { azp: clientAzp(c), mintTokens: true });
     return c.json({ response: await serializeSession(ctx, updated, { withUser: true }), client: json });
   });
 
@@ -103,7 +103,7 @@ export default function routes(ctx: AppContext) {
     const client = await requireClientRow(ctx, c);
     const row = await requireSession(ctx, client.id, sessionParam(c));
     const updated = await endSession(ctx, row, status);
-    const json = await serializeClient(ctx, client, { azp: clientAzp(c) });
+    const json = await serializeClient(ctx, client, { azp: clientAzp(c), mintTokens: true });
     return c.json({ response: await serializeSession(ctx, updated, { withUser: true }), client: json });
   };
   app.post("/sessions/:id/end", end("ended"));
@@ -127,7 +127,7 @@ export default function routes(ctx: AppContext) {
     const client = await requireClientRow(ctx, c);
     const row = await requireSession(ctx, client.id, sessionParam(c));
     await parseBody(c, verifySchema);
-    const clientJson = await serializeClient(ctx, client, { azp: clientAzp(c) });
+    const clientJson = await serializeClient(ctx, client, { azp: clientAzp(c), mintTokens: true });
     return c.json({
       response: await withVerification(ctx, await serializeSession(ctx, row, { withUser: true }), { status: "unverified", strategy: "first_factor", attempts: null, expire_at: null }),
       client: clientJson,
@@ -160,7 +160,7 @@ export default function routes(ctx: AppContext) {
       if (!user.passwordHash) throw new OrbitError(400, ErrorCodes.strategy_for_user_invalid, "This user has no password");
       verification = { status: "unverified", strategy: "password", attempts: null, expire_at: null };
     }
-    const clientJson = await serializeClient(ctx, client, { azp: clientAzp(c) });
+    const clientJson = await serializeClient(ctx, client, { azp: clientAzp(c), mintTokens: true });
     return c.json({ response: verification, client: clientJson });
   });
 
@@ -186,7 +186,7 @@ export default function routes(ctx: AppContext) {
     const verification = strategy === "password"
       ? { status: "verified" as const, strategy: "password", attempts: null, expire_at: null }
       : verificationJSON(await getVerification(ctx, "reverify_first_factor", row.id));
-    const clientJson = await serializeClient(ctx, client, { azp: clientAzp(c) });
+    const clientJson = await serializeClient(ctx, client, { azp: clientAzp(c), mintTokens: true });
     return c.json({ response: verification, client: clientJson });
   });
 
@@ -209,7 +209,7 @@ export default function routes(ctx: AppContext) {
     } else if (body.strategy === "backup_code" && !user.backupCodes?.length) {
       throw new OrbitError(400, ErrorCodes.mfa_not_enabled, "No backup codes available");
     }
-    const clientJson = await serializeClient(ctx, client, { azp: clientAzp(c) });
+    const clientJson = await serializeClient(ctx, client, { azp: clientAzp(c), mintTokens: true });
     return c.json({ response: verification, client: clientJson });
   });
 
@@ -233,7 +233,7 @@ export default function routes(ctx: AppContext) {
     const verification = body.strategy === "phone_code"
       ? verificationJSON(await getVerification(ctx, "reverify_second_factor", row.id))
       : { status: "verified" as const, strategy: body.strategy, attempts: null, expire_at: null };
-    const clientJson = await serializeClient(ctx, client, { azp: clientAzp(c) });
+    const clientJson = await serializeClient(ctx, client, { azp: clientAzp(c), mintTokens: true });
     return c.json({ response: verification, client: clientJson });
   });
 

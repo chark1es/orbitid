@@ -17,6 +17,8 @@ export interface HasContext {
   isSignedIn: boolean;
   orgRole: string | null;
   orgPermissions: string[] | null;
+  roles?: string[];
+  rolePermissions?: string[];
   features: string[];
   factorVerificationAge: [number, number] | null;
 }
@@ -72,9 +74,11 @@ export function checkHas(params: HasParams, context: HasContext): boolean {
         : false;
     case "role":
       // Custom roles are matched verbatim (`org:admin`, `org:acme:billing`).
-      return Boolean(params.role) && context.orgRole === params.role;
+      return Boolean(params.role) && (params.role!.startsWith("org:") ? context.orgRole === params.role : (context.roles ?? []).includes(params.role!));
     case "permission":
-      return Boolean(params.permission) && (context.orgPermissions ?? []).includes(params.permission!);
+      return Boolean(params.permission) && (params.permission!.startsWith("org:") ? context.orgPermissions ?? [] : context.rolePermissions ?? []).some(
+        (granted) => granted === params.permission || (granted.endsWith(":*") && params.permission!.startsWith(granted.slice(0, -1))),
+      );
     case "feature":
       return Boolean(params.feature) && context.features.includes(params.feature!);
     default:
@@ -166,12 +170,18 @@ export function createAuthState(input: AuthStateInput): AuthState {
   const orgRole = claims?.org_role ?? initialState?.orgRole ?? null;
   const orgSlug = claims?.org_slug ?? initialState?.orgSlug ?? organization?.slug ?? null;
   const orgPermissions = claims?.org_permissions ?? initialState?.orgPermissions ?? null;
+  const roleClaims = claims?.roles ?? initialState?.roles;
+  const roles = Array.isArray(roleClaims) ? roleClaims.filter((role): role is string => typeof role === "string") : [];
+  const permissionClaims = claims?.role_permissions ?? initialState?.rolePermissions;
+  const rolePermissions = Array.isArray(permissionClaims) ? permissionClaims.filter((permission): permission is string => typeof permission === "string") : [];
   const actor: Actor | null = claims?.act ?? session?.actor ?? null;
 
   const hasContext: HasContext = {
     isSignedIn: Boolean(isSignedIn),
     orgRole,
     orgPermissions,
+    roles,
+    rolePermissions,
     features: readFeatures(claims, user?.publicMetadata),
     factorVerificationAge: claims?.fva ?? session?.factorVerificationAge ?? null,
   };
@@ -186,6 +196,8 @@ export function createAuthState(input: AuthStateInput): AuthState {
     orgRole,
     orgSlug,
     orgPermissions,
+    roles,
+    rolePermissions,
     sessionClaims: claims,
     sessionStatus,
     has: (params: HasParams) => checkHas(params, hasContext),

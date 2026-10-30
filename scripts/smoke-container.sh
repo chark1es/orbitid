@@ -6,7 +6,7 @@
 #
 # What it checks, against the built image and not a source checkout:
 #   health, the served dashboard, non-root uid, the operator-session key exchange and its cookie,
-#   user sign-up (email code), password sign-in, and that both survive a restart.
+#   password sign-up (delivery-dependent factors disabled), password sign-in, and that both survive a restart.
 #
 # Every container, volume, network, image and compose project is named for this run and removed at the end.
 # The script never touches a Docker resource it did not create.
@@ -50,13 +50,12 @@ compose_for_project() {
   local project="$1"
   shift
   env \
-    WSLENV="${WSLENV:+$WSLENV:}ORBITID_IMAGE:ORBITID_ENCRYPTION_KEY:ORBITID_SECRET_KEY:ORBITID_BASE_URL:ORBITID_PORT:ORBITID_ALLOW_CONSOLE_EMAIL:POSTGRES_PASSWORD:ORBITID_TRUST_PROXY:ORBITID_RESEND_API_KEY:ORBITID_SMTP_URL:ORBITID_EMAIL_FROM" \
+    WSLENV="${WSLENV:+$WSLENV:}ORBITID_IMAGE:ORBITID_ENCRYPTION_KEY:ORBITID_SECRET_KEY:ORBITID_BASE_URL:ORBITID_PORT:POSTGRES_PASSWORD:ORBITID_TRUST_PROXY:ORBITID_RESEND_API_KEY:ORBITID_SMTP_URL:ORBITID_EMAIL_FROM" \
     ORBITID_IMAGE="$PG_IMAGE" \
     ORBITID_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef \
     ORBITID_SECRET_KEY="$SECRET" \
     ORBITID_BASE_URL="$PG_BASE" \
     ORBITID_PORT="$PG_PORT" \
-    ORBITID_ALLOW_CONSOLE_EMAIL=true \
     POSTGRES_PASSWORD="smoke-$STAMP" \
     ORBITID_TRUST_PROXY=0 \
     ORBITID_RESEND_API_KEY= \
@@ -114,27 +113,16 @@ wait_health() {
   return 1
 }
 
-# The console transport prints each message (code included) to the log; read the newest code for an address.
-# `docker compose logs` prefixes every line (`orbitid-1  | `), so the code is matched anywhere in the line.
-code_from_logs() {
-  local logs_fn="$1" email="$2" i code
-  for i in $(seq 1 20); do
-    code="$("$logs_fn" | awk -v addr="to=$email" '
-      index($0, addr) { found = 1 }
-      found && match($0, /Code: [0-9]{4,8}/) { print substr($0, RSTART + 6, RLENGTH - 6); exit }
-    ')"
-    if [[ -n "$code" ]]; then printf '%s\n' "$code"; return 0; fi
-    sleep 0.5
-  done
-  return 1
-}
+# There is no console or file mail transport: the server never prints a code and never writes one to disk. The
+# smoke test therefore turns email verification off for its throwaway instance (an ordinary operator setting) and
+# never needs to read a secret out of a log.
 
 # The behaviour every instance must show, whatever the database behind it.
 #   $1 base URL   $2 a function that prints the instance's logs   $3 secret key   $4 label
 smoke_instance() {
   local base="$1" logs_fn="$2" secret="$3" label="$4"
   local email="smoke-$label-$STAMP@example.test"
-  local jar="$WORKDIR/$label.jar" code body status signup_id session image_url
+  local jar="$WORKDIR/$label.jar" operator_jar="$WORKDIR/$label.operator.jar" code body status signup_id session image_url
 
   say "$label: health"
   body="$(curl -fsS -m 5 "$base/health")"
@@ -152,7 +140,7 @@ smoke_instance() {
     -H 'content-type: application/json' -H "origin: $base" -d '{"secret_key":"sk_live_wrong_key_000000000000000000000"}')"
   assert_eq "$status" "401" "$label: a wrong secret key is refused"
 
-  status="$(curl -sS -m 5 -D "$WORKDIR/$label.exchange" -o "$WORKDIR/$label.exchange.json" -c "$jar" -w '%{http_code}' \
+  status="$(curl -sS -m 5 -D "$WORKDIR/$label.exchange" -o "$WORKDIR/$label.exchange.json" -c "$operator_jar" -w '%{http_code}' \
     -X POST "$base/v1/operator_sessions" -H 'content-type: application/json' -H "origin: $base" \
     -d "{\"secret_key\":\"$secret\"}")"
   assert_eq "$status" "201" "$label: the secret key is exchanged for a session"
@@ -161,33 +149,30 @@ smoke_instance() {
   grep -qi 'set-cookie:.*path=/v1' "$WORKDIR/$label.exchange" && ok "$label: cookie is scoped to /v1" || bad "$label: cookie path is not /v1"
   if grep -qF "$secret" "$WORKDIR/$label.exchange.json"; then bad "$label: exchange echoed the secret key"; else ok "$label: exchange does not echo the secret key"; fi
 
-  status="$(curl -sS -m 5 -o "$WORKDIR/$label.users" -w '%{http_code}' -b "$jar" -H "origin: $base" "$base/v1/users?limit=1")"
+  status="$(curl -sS -m 5 -o "$WORKDIR/$label.users" -w '%{http_code}' -b "$operator_jar" -H "origin: $base" "$base/v1/users?limit=1")"
   assert_eq "$status" "200" "$label: the cookie authenticates a Backend API call"
-  status="$(curl -sS -m 5 -o /dev/null -w '%{http_code}' -b "$jar" -H "origin: http://not-this-instance.example" "$base/v1/users?limit=1")"
+  status="$(curl -sS -m 5 -o /dev/null -w '%{http_code}' -b "$operator_jar" -H "origin: http://not-this-instance.example" "$base/v1/users?limit=1")"
   assert_eq "$status" "403" "$label: the cookie is refused from another origin"
-  status="$(curl -sS -m 5 -o /dev/null -w '%{http_code}' -X DELETE -b "$jar" -c "$jar" -H "origin: $base" "$base/v1/operator_sessions/current")"
+  status="$(curl -sS -m 5 -o /dev/null -w '%{http_code}' -X DELETE -b "$operator_jar" -c "$operator_jar" -H "origin: $base" "$base/v1/operator_sessions/current")"
   assert_eq "$status" "204" "$label: the operator session can be revoked"
-  status="$(curl -sS -m 5 -o /dev/null -w '%{http_code}' -b "$jar" -H "origin: $base" "$base/v1/operator_sessions/current")"
+  status="$(curl -sS -m 5 -o /dev/null -w '%{http_code}' -b "$operator_jar" -H "origin: $base" "$base/v1/operator_sessions/current")"
   assert_eq "$status" "401" "$label: a revoked cookie no longer authenticates"
 
   say "$label: sign-up"
   : > "$jar"
+  # A production instance refuses an email flow with no provider, so the smoke instance verifies no email: the
+  # code never has to leave the server (and the server never prints it). Everything else is the ordinary path.
+  status="$(curl -sS -m 10 -o "$WORKDIR/$label.instance.json" -w '%{http_code}' -b "$jar" -H "origin: $base" \
+    -X PATCH "$base/v1/instance" -H "authorization: Bearer $secret" -H 'content-type: application/json' \
+    -d '{"attributes":{"emailAddress":{"verifyAtSignUp":false,"usedForFirstFactor":false,"usedForSecondFactor":false}}}')"
+  assert_eq "$status" "200" "$label: email verification can be turned off by the operator"
   status="$(curl -sS -m 10 -o "$WORKDIR/$label.signup.json" -w '%{http_code}' -c "$jar" -b "$jar" \
     -X POST "$base/v1/client/sign_ups" -H 'content-type: application/json' \
     -d "{\"email_address\":\"$email\",\"password\":\"Sup3rSecret!\"}")"
   assert_eq "$status" "200" "$label: sign-up starts"
   signup_id="$(json response.id < "$WORKDIR/$label.signup.json")"
-  assert_eq "$(json response.status < "$WORKDIR/$label.signup.json")" "missing_requirements" "$label: sign-up asks for verification"
   [[ "$signup_id" == sua_* ]] || { bad "$label: sign-up returned no id"; SMOKE_EMAIL="$email"; SMOKE_SESSION=""; return; }
-  status="$(curl -sS -m 10 -o /dev/null -w '%{http_code}' -c "$jar" -b "$jar" -X POST "$base/v1/client/sign_ups/$signup_id/prepare_verification" \
-    -H 'content-type: application/json' -d '{"strategy":"email_code"}')"
-  assert_eq "$status" "200" "$label: the email code is sent"
-  if code="$(code_from_logs "$logs_fn" "$email")"; then ok "$label: the email code reached the server log"; else bad "$label: no email code in the server log"; code="000000"; fi
-  status="$(curl -sS -m 10 -o "$WORKDIR/$label.verify.json" -w '%{http_code}' -c "$jar" -b "$jar" \
-    -X POST "$base/v1/client/sign_ups/$signup_id/attempt_verification" \
-    -H 'content-type: application/json' -d "{\"strategy\":\"email_code\",\"code\":\"$code\"}")"
-  assert_eq "$status" "200" "$label: the email code is accepted"
-  session="$(json response.created_session_id < "$WORKDIR/$label.verify.json")"
+  session="$(json response.created_session_id < "$WORKDIR/$label.signup.json")"
   [[ "$session" == sess_* ]] && ok "$label: sign-up completes with a session" || bad "$label: sign-up did not complete"
   status="$(curl -sS -m 5 -o "$WORKDIR/$label.me" -w '%{http_code}' -b "$jar" "$base/v1/client/me")"
   assert_eq "$status" "200" "$label: the new session reads its own user"
@@ -263,15 +248,14 @@ SQLITE_NAME="orbitid-smoke-sqlite-$STAMP"
 SQLITE_VOL="orbitid-smoke-sqlite-data-$STAMP"
 SQLITE_PORT="$(pick_port)"
 SQLITE_BASE="http://localhost:$SQLITE_PORT"
-SECRET="sk_live_smoke_$STAMP"
+SECRET="$(node -p 'require("node:crypto").randomBytes(32).toString("hex")')"
 CONTAINERS+=("$SQLITE_NAME")
 VOLUMES+=("$SQLITE_VOL")
 
 sqlite_logs() { "$DOCKER" logs "$SQLITE_NAME" 2>&1; }
 sqlite_env=(-e "ORBITID_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef"
             -e "ORBITID_SECRET_KEY=$SECRET"
-            -e "ORBITID_BASE_URL=$SQLITE_BASE"
-            -e "ORBITID_ALLOW_CONSOLE_EMAIL=true")
+            -e "ORBITID_BASE_URL=$SQLITE_BASE")
 
 "$DOCKER" run -d --name "$SQLITE_NAME" "${sqlite_env[@]}" -p "$SQLITE_PORT:4000" -v "$SQLITE_VOL:/data" "$IMAGE" >/dev/null
 if wait_health "$SQLITE_BASE" 120; then ok "SQLite container is healthy"; else bad "SQLite container never became healthy"; sqlite_logs | tail -30 >&2; exit 1; fi
@@ -330,7 +314,6 @@ ORBITID_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef
 ORBITID_SECRET_KEY=$SECRET
 ORBITID_BASE_URL=$PG_BASE
 ORBITID_PORT=$PG_PORT
-ORBITID_ALLOW_CONSOLE_EMAIL=true
 POSTGRES_PASSWORD=smoke-$STAMP
 EOF
 

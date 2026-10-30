@@ -65,7 +65,13 @@ export function generateBackupCodes(count = 10): { plain: string[]; hashed: stri
   return { plain, hashed: plain.map(normalizeBackupCodeHash) };
 }
 
-const normalizeBackupCodeHash = (code: string) => sha256(code.trim().toLowerCase().replace(/[^a-z0-9]/g, ""));
+/**
+ * Backup codes are 50-bit random strings, so a plain sha256 is enough (there is no table to find them in). The
+ * normalization means `ABCDE-12345`, `abcde12345` and `abcde 12345` are the same code, which is what a user typing
+ * one back expects. Every writer must use this, or its rows would never match a presented code.
+ */
+export const hashBackupCode = (code: string) => sha256(code.trim().toLowerCase().replace(/[^a-z0-9]/g, ""));
+const normalizeBackupCodeHash = hashBackupCode;
 
 /** Checks a backup code and removes it from the user's unused set. */
 export async function consumeBackupCode(ctx: AppContext, user: UserRow, code: string): Promise<boolean> {

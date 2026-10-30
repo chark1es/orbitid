@@ -79,7 +79,7 @@ describe("atomic single-use and counted operations", () => {
     await expect(checkCode(ctx, row, issued.code)).rejects.toMatchObject({ code: ErrorCodes.too_many_attempts });
   });
 
-  it("redeems a sign-in ticket exactly once", async () => {
+  it("never redeems a removed sign-in ticket, however many callers try", async () => {
     const { ctx } = await setup();
     const user = await insertUser(ctx, { email: "ticket@example.com" });
     const now = Date.now();
@@ -89,10 +89,10 @@ describe("atomic single-use and counted operations", () => {
       expiresAt: now + 60_000, createdAt: now, updatedAt: now,
     });
     const results = await settle(Array.from({ length: PARALLEL }, () => redeemTicket(ctx, ticket)));
-    const winners = fulfilled(results);
-    expect(winners).toHaveLength(1);
-    expect(winners[0]!.value).toEqual({ kind: "sign_in_token", userId: user.userId });
-    expect(orbitCodes(results)).toEqual(Array.from({ length: PARALLEL - 1 }, () => ErrorCodes.ticket_invalid));
+    expect(fulfilled(results)).toHaveLength(0);
+    expect(orbitCodes(results)).toEqual(Array.from({ length: PARALLEL }, () => ErrorCodes.ticket_invalid));
+    // The row is untouched: no caller could consume (and therefore use) it.
+    expect(first(await ctx.db.select().from(s.signInTokens))!.status).toBe("pending");
   });
 
   it("spends a backup code exactly once", async () => {

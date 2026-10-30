@@ -62,8 +62,8 @@ export function apiInit(method: string, body?: unknown): RequestInit {
 }
 
 /** Backend API call. `path` like "/users?limit=10". Throws ApiError. Returns parsed JSON (undefined for 204). */
-export async function api<T = any>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${getApiUrl()}/v1${path}`, apiInit(method, body));
+export async function api<T = any>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(`${getApiUrl()}/v1${path}`, signal ? { ...apiInit(method, body), signal } : apiInit(method, body));
   if (res.status === 204) return undefined as T;
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -81,7 +81,8 @@ export async function api<T = any>(method: string, path: string, body?: unknown)
 
 /** `const { data } = useApi<PaginatedList<UserJSON>>(["users", q], `/users?query=${q}`)` */
 export function useApi<T>(key: unknown[], path: string, opts: Partial<UseQueryOptions<T>> = {}) {
-  return useQuery<T>({ queryKey: key, queryFn: () => api<T>("GET", path), ...opts });
+  // The query's signal cancels the request when its key changes or its component unmounts.
+  return useQuery<T>({ queryKey: key, queryFn: ({ signal }) => api<T>("GET", path, undefined, signal), ...opts });
 }
 /** `const m = useApiMutation("POST", "/users", { invalidate: [["users"]] }); m.mutate(body)`; for dynamic paths pass a function. */
 export function useApiMutation<TBody = unknown, TRes = any>(method: string, path: string | ((b: TBody) => string), o: { invalidate?: unknown[][]; onSuccess?: (r: TRes) => void } = {}) {

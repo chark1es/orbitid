@@ -5,13 +5,13 @@ import * as s from "../../src/db/schema";
 import { markInvitationAccepted, redeemTicket } from "../../src/services/restrictions";
 import { createUser, json, testApp, ticketFromUrl, type ErrorBody } from "./helpers";
 
-type SendEmail = (ctx: unknown, input: { to: string; template: string; vars: Record<string, string> }) => Promise<void>;
-const { sendEmail } = vi.hoisted(() => ({ sendEmail: vi.fn<SendEmail>(async () => undefined) }));
+type SendEmail = (ctx: unknown, input: { to: string; template: string; vars: Record<string, string> }) => Promise<{ delivered: boolean; error?: { code: string; message: string } }>;
+const { sendEmail } = vi.hoisted(() => ({ sendEmail: vi.fn<SendEmail>(async () => ({ delivered: true })) }));
 vi.mock("../../src/services/mail", () => ({ sendEmail, sendSms: vi.fn(async () => undefined) }));
 
 beforeEach(() => {
   sendEmail.mockClear();
-  sendEmail.mockResolvedValue(undefined);
+  sendEmail.mockResolvedValue({ delivered: true });
 });
 
 describe("instance invitations", () => {
@@ -43,10 +43,9 @@ describe("instance invitations", () => {
     expect((await json<ErrorBody>(duplicate)).errors[0]!.code).toBe("duplicate_record");
     expect((await api("POST", "/v1/invitations", { email_address: "dup@example.com", ignore_existing: true })).status).toBe(200);
 
-    const quiet = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    sendEmail.mockRejectedValueOnce(new Error("smtp down"));
+    // Delivery is reported, not thrown: a failing transport still leaves the invitation created.
+    sendEmail.mockResolvedValueOnce({ delivered: false, error: { code: "email_delivery_failed", message: "smtp down" } });
     const stillCreated = await api("POST", "/v1/invitations", { email_address: "smtp@example.com" });
-    quiet.mockRestore();
     expect(stillCreated.status).toBe(200);
     expect((await json<InvitationJSON>(stillCreated)).status).toBe("pending");
   });

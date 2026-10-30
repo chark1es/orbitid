@@ -119,6 +119,47 @@ describe("OpenAPI drift guard", () => {
     }
   });
 
+  it("serves the viewer's module graph from the same origin", async () => {
+    const { app } = await boot();
+    const html = await (await app.request("/docs")).text();
+    expect(html).toContain('type="module"');
+
+    // Walk every relative import the browser would follow, starting at the entry module.
+    const origin = "https://auth.example.com";
+    const modules = new Map<string, string>();
+    const queue = [new URL("/docs/assets/viewer.js", origin)];
+    while (queue.length) {
+      const url = queue.shift() as URL;
+      if (modules.has(url.pathname)) continue;
+
+      const response = await app.request(url.pathname);
+      expect(response.status, url.pathname).toBe(200);
+      expect(response.headers.get("content-type"), url.pathname).toContain("javascript");
+      expect(response.headers.get("content-security-policy"), url.pathname).toContain("script-src 'self'");
+      const body = await response.text();
+      modules.set(url.pathname, body);
+
+      for (const match of body.matchAll(/(?:from\s+|import\s*\()\s*["']([^"']+)["']/g)) {
+        const specifier = match[1];
+        expect(specifier.startsWith("."), `${url.pathname} imports non-relative ${specifier}`).toBe(true);
+        queue.push(new URL(specifier, url));
+      }
+    }
+
+    // The viewer is split into several modules; the route table must have picked all of them up.
+    expect(modules.size).toBeGreaterThan(3);
+    for (const [path, body] of modules) {
+      expect(body, path).not.toContain("eval(");
+      expect(body, path).not.toContain("new Function");
+      expect(body, path).not.toMatch(/\.innerHTML\s*=/);
+      expect(body, path).not.toMatch(/(fetch|importScripts)\s*\(\s*["']https?:/i);
+    }
+    // An unknown module is still a JSON 404, never a directory listing or the SPA fallback.
+    const missing = await app.request("/docs/assets/viewer/nope.js");
+    expect(missing.status).toBe(404);
+    expect(missing.headers.get("content-type")).toContain("application/json");
+  });
+
   it("is not swallowed by the dashboard catch-all", async () => {
     // Same setup as the dashboard tests: a built SPA that answers index.html for any path.
     const dir = mkdtempSync(join(tmpdir(), "orbitid-docs-dashboard-"));

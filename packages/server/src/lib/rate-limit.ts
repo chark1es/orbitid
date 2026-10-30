@@ -1,10 +1,19 @@
 import type { MiddlewareHandler } from "hono";
-import { lte, sql } from "drizzle-orm";
+import { eq, lte, sql } from "drizzle-orm";
 import { OrbitError, ErrorCodes } from "@orbitid/shared";
 import type { AppContext } from "../context";
 import { rateLimits } from "../db/schema";
 import { clientIp } from "./http";
 import { first } from "./db";
+
+/** Check a failure budget before comparing a credential; valid traffic does not consume the budget. */
+export async function assertNotBlocked(ctx: AppContext, key: string, max: number): Promise<void> {
+  if (!ctx.settings.get().security.rateLimitEnabled) return;
+  const row = first(await ctx.db.select().from(rateLimits).where(eq(rateLimits.key, key)));
+  if (row && row.resetAt > Date.now() && row.count >= max) {
+    throw new OrbitError(429, ErrorCodes.rate_limit_exceeded, "Too many requests. Please try again later.", { retry_after: Math.ceil((row.resetAt - Date.now()) / 1000) });
+  }
+}
 
 /** Fixed-window counter. Throws 429 when exceeded. */
 export async function hit(ctx: AppContext, key: string, max: number, windowMs: number) {

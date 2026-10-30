@@ -10,8 +10,8 @@ colors:
   rail: "oklch(0.2 0.008 60)"
   rail-ink: "oklch(0.93 0.006 85)"
   signal: "oklch(0.58 0.235 28)"
-  go: "oklch(0.55 0.15 150)"
-  caution: "oklch(0.74 0.15 80)"
+  go: "oklch(0.49 0.12 150)"
+  caution: "oklch(0.49 0.1 80)"
   info: "oklch(0.55 0.12 245)"
   paper-dark: "oklch(0.17 0.008 60)"
   card-dark: "oklch(0.21 0.008 60)"
@@ -149,7 +149,7 @@ Do
 - Show real instance data: counts, methods, keys, the database in use and the URL.
 - Keep red scarce. If more than one thing per screen is red, something is wrong.
 - Use sentence case everywhere. Name the action on every button.
-- Mark dangerous actions (impersonate, delete, rotate key) with a plain sentence of what happens.
+- Mark dangerous actions (delete, rotate key) with a plain sentence of what happens.
 - Respect `prefers-reduced-motion`: the board's slide becomes an instant swap.
 
 Don't

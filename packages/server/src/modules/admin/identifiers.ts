@@ -1,16 +1,20 @@
 // Backend API identifiers: email addresses, phone numbers, allowlist & blocklist.
+//
+// Reads are operator-visible; every write to a user's identifiers is refused. An address or number that the
+// operator can attach, verify or delete is a sign-in identifier they control (or a factor they can clear), which
+// turns the Backend API into "become this user". Identifiers are provisioned with the account (`POST /v1/users`)
+// and afterwards belong to the user, who adds, verifies and removes them from their own signed-in session.
 import { Hono } from "hono";
-import { and, count, eq, sql, type SQL } from "drizzle-orm";
+import { and, count, eq, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { ErrorCodes, ID_PREFIX, OrbitError } from "@orbitid/shared";
 import { parseBody } from "../../lib/http";
 import { newId } from "../../lib/ids";
 import * as s from "../../db/schema";
-import { serializeEmail, serializePhone, serializeUser } from "../../serializers";
-import { emitEvent } from "../../services/webhooks";
+import { serializeEmail, serializePhone } from "../../serializers";
 import { audit } from "../../services/audit";
 import type { AppContext } from "../../context";
-import { bool, deleted, getUserOrThrow, listParams, metadataSchema, normalizeEmail, page } from "./shared";
+import { bool, deleted, getUserOrThrow, listParams, metadataSchema, normalizeEmail, page, refuseUserCredentialMutation } from "./shared";
 import { createInvitation } from "./invitations";
 import { first } from "../../lib/db";
 
@@ -21,12 +25,8 @@ function identifierType(identifier: string): "email_address" | "phone_number" | 
   return "web3_wallet";
 }
 
-/** Bumps `updated_at` and emits `user.updated` after an identifier change. */
-async function touchUser(ctx: AppContext, userId: string): Promise<void> {
-  await ctx.db.update(s.users).set({ updatedAt: Date.now() }).where(eq(s.users.id, userId));
-  const user = first(await ctx.db.select().from(s.users).where(eq(s.users.id, userId)));
-  if (user) await emitEvent(ctx, "user.updated", await serializeUser(ctx, user, { backend: true }));
-}
+const refuseIdentifierWrite = (what: string): never =>
+  refuseUserCredentialMutation(what, "the /email_addresses and /phone_numbers routes of the Frontend API (/me)");
 
 export default function routes(ctx: AppContext) {
   const app = new Hono();
@@ -61,75 +61,22 @@ export default function routes(ctx: AppContext) {
         primary: bool.default(false),
       }),
     );
-    const user = await getUserOrThrow(ctx, body.user_id);
-    const email = normalizeEmail(body.email_address);
-    const existing = first(await ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.email, email)));
-    if (existing) {
-      const code = existing.userId === user.id ? ErrorCodes.duplicate_record : ErrorCodes.form_identifier_exists;
-      throw new OrbitError(422, code, `${email} is already in use.`, { param_name: "email_address" });
-    }
-    const now = Date.now();
-    const row = first(await ctx.db
-          .insert(s.emailAddresses)
-          .values({
-            id: newId(ID_PREFIX.email),
-            userId: user.id,
-            email,
-            verified: body.verified,
-            verifiedAt: body.verified ? now : null,
-            verifiedStrategy: body.verified ? "email_code" : null,
-            createdAt: now,
-            updatedAt: now,
-          })
-          .returning())!;
-    if (body.primary || !user.primaryEmailAddressId) {
-      await ctx.db.update(s.users).set({ primaryEmailAddressId: row.id, updatedAt: now }).where(eq(s.users.id, user.id));
-    }
-    await touchUser(ctx, user.id);
-    await audit(ctx, { actor: "secret_key", action: "email_address.created", targetType: "email_address", targetId: row.id, metadata: { user_id: user.id, email_address: email } });
-    return c.json(serializeEmail(row));
+    await getUserOrThrow(ctx, body.user_id);
+    refuseIdentifierWrite("attach an email address to an existing user (verified or not)");
   });
 
   app.patch("/email_addresses/:id", async (c) => {
     const row = first(await ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.id, c.req.param("id"))));
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Email address not found.");
-    const body = await parseBody(c, z.object({ verified: bool.optional(), primary: bool.optional() }));
-    if (body.verified) {
-      const clash = first(await ctx.db
-              .select()
-              .from(s.emailAddresses)
-              .where(and(eq(s.emailAddresses.email, row.email), eq(s.emailAddresses.verified, true))));
-      if (clash && clash.id !== row.id) {
-        throw new OrbitError(422, ErrorCodes.form_identifier_exists, `${row.email} is already verified on another account.`, { param_name: "email_address" });
-      }
-    }
-    const now = Date.now();
-    const patch: Partial<typeof s.emailAddresses.$inferInsert> = { updatedAt: now };
-    if (body.verified !== undefined) {
-      patch.verified = body.verified;
-      patch.verifiedAt = body.verified ? now : null;
-      patch.verifiedStrategy = body.verified ? (row.verifiedStrategy ?? "email_code") : null;
-    }
-    await ctx.db.update(s.emailAddresses).set(patch).where(eq(s.emailAddresses.id, row.id));
-    if (body.primary) {
-      await ctx.db.update(s.users).set({ primaryEmailAddressId: row.id, updatedAt: now }).where(eq(s.users.id, row.userId!));
-    }
-    await touchUser(ctx, row.userId!);
-    const updated = first(await ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.id, row.id)))!;
-    return c.json(serializeEmail(updated));
+    // `verified: true` would claim possession of somebody's mailbox without a code; `primary` would make it the
+    // address the sign-in and password-reset flows use. Neither is operator-settable.
+    refuseIdentifierWrite("verify, unverify or promote an email address as the primary sign-in identifier");
   });
 
   app.delete("/email_addresses/:id", async (c) => {
     const row = first(await ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.id, c.req.param("id"))));
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Email address not found.");
-    const user = row.userId ? first(await ctx.db.select().from(s.users).where(eq(s.users.id, row.userId))) : undefined;
-    await ctx.db.delete(s.emailAddresses).where(eq(s.emailAddresses.id, row.id));
-    if (user?.primaryEmailAddressId === row.id) {
-      await ctx.db.update(s.users).set({ primaryEmailAddressId: null, updatedAt: Date.now() }).where(eq(s.users.id, user.id));
-    }
-    if (row.userId) await touchUser(ctx, row.userId);
-    await audit(ctx, { actor: "secret_key", action: "email_address.deleted", targetType: "email_address", targetId: row.id, metadata: { email_address: row.email } });
-    return c.json(deleted("email_address", row.id));
+    refuseIdentifierWrite("delete one of the user's email addresses");
   });
 
   // ───────────── phone numbers ─────────────
@@ -164,82 +111,22 @@ export default function routes(ctx: AppContext) {
         default_second_factor: bool.default(false),
       }),
     );
-    const user = await getUserOrThrow(ctx, body.user_id);
-    const phone = body.phone_number.trim();
-    const existing = first(await ctx.db.select().from(s.phoneNumbers).where(eq(s.phoneNumbers.phone, phone)));
-    if (existing) {
-      const code = existing.userId === user.id ? ErrorCodes.duplicate_record : ErrorCodes.form_identifier_exists;
-      throw new OrbitError(422, code, `${phone} is already in use.`, { param_name: "phone_number" });
-    }
-    const now = Date.now();
-    const row = first(await ctx.db
-          .insert(s.phoneNumbers)
-          .values({
-            id: newId(ID_PREFIX.phone),
-            userId: user.id,
-            phone,
-            verified: body.verified,
-            verifiedAt: body.verified ? now : null,
-            reservedForSecondFactor: body.reserved_for_second_factor || body.default_second_factor,
-            defaultSecondFactor: body.default_second_factor,
-            createdAt: now,
-            updatedAt: now,
-          })
-          .returning())!;
-    if (body.primary || !user.primaryPhoneNumberId) {
-      await ctx.db.update(s.users).set({ primaryPhoneNumberId: row.id, updatedAt: now }).where(eq(s.users.id, user.id));
-    }
-    await touchUser(ctx, user.id);
-    await audit(ctx, { actor: "secret_key", action: "phone_number.created", targetType: "phone_number", targetId: row.id, metadata: { user_id: user.id, phone_number: phone } });
-    return c.json(serializePhone(row));
+    await getUserOrThrow(ctx, body.user_id);
+    // `default_second_factor: true` on a number the operator owns is exactly "install my second factor on their
+    // account"; a verified number also makes phone-code sign-in and password reset deliverable to the operator.
+    refuseIdentifierWrite("attach a phone number to an existing user, including as a second factor");
   });
 
   app.patch("/phone_numbers/:id", async (c) => {
     const row = first(await ctx.db.select().from(s.phoneNumbers).where(eq(s.phoneNumbers.id, c.req.param("id"))));
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Phone number not found.");
-    const body = await parseBody(
-      c,
-      z.object({
-        verified: bool.optional(),
-        primary: bool.optional(),
-        reserved_for_second_factor: bool.optional(),
-        default_second_factor: bool.optional(),
-      }),
-    );
-    const now = Date.now();
-    const patch: Partial<typeof s.phoneNumbers.$inferInsert> = { updatedAt: now };
-    if (body.verified !== undefined) {
-      patch.verified = body.verified;
-      patch.verifiedAt = body.verified ? now : null;
-    }
-    if (body.reserved_for_second_factor !== undefined) patch.reservedForSecondFactor = body.reserved_for_second_factor;
-    if (body.default_second_factor !== undefined) {
-      patch.defaultSecondFactor = body.default_second_factor;
-      if (body.default_second_factor) patch.reservedForSecondFactor = true;
-    }
-    await ctx.db.update(s.phoneNumbers).set(patch).where(eq(s.phoneNumbers.id, row.id));
-    if (body.default_second_factor) {
-      await ctx.db.update(s.phoneNumbers).set({ defaultSecondFactor: false }).where(and(eq(s.phoneNumbers.userId, row.userId!), sql`${s.phoneNumbers.id} != ${row.id}`));
-    }
-    if (body.primary) {
-      await ctx.db.update(s.users).set({ primaryPhoneNumberId: row.id, updatedAt: now }).where(eq(s.users.id, row.userId!));
-    }
-    await touchUser(ctx, row.userId!);
-    const updated = first(await ctx.db.select().from(s.phoneNumbers).where(eq(s.phoneNumbers.id, row.id)))!;
-    return c.json(serializePhone(updated));
+    refuseIdentifierWrite("verify, promote or turn a phone number into the user's second factor");
   });
 
   app.delete("/phone_numbers/:id", async (c) => {
     const row = first(await ctx.db.select().from(s.phoneNumbers).where(eq(s.phoneNumbers.id, c.req.param("id"))));
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Phone number not found.");
-    const user = row.userId ? first(await ctx.db.select().from(s.users).where(eq(s.users.id, row.userId))) : undefined;
-    await ctx.db.delete(s.phoneNumbers).where(eq(s.phoneNumbers.id, row.id));
-    if (user?.primaryPhoneNumberId === row.id) {
-      await ctx.db.update(s.users).set({ primaryPhoneNumberId: null, updatedAt: Date.now() }).where(eq(s.users.id, user.id));
-    }
-    if (row.userId) await touchUser(ctx, row.userId);
-    await audit(ctx, { actor: "secret_key", action: "phone_number.deleted", targetType: "phone_number", targetId: row.id, metadata: { phone_number: row.phone } });
-    return c.json(deleted("phone_number", row.id));
+    refuseIdentifierWrite("delete one of the user's phone numbers");
   });
 
   // ───────────── allowlist ─────────────

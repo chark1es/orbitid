@@ -39,6 +39,30 @@ describe("webhooks", () => {
     expect(event.id).toBe("evt_1");
   });
 
+  it("reads plain-object headers case-insensitively", async () => {
+    const signed = signWebhook(EVENT, { signingSecret: SECRET, id: "msg_case", timestamp: 1_700_000_000 });
+    const headers = {
+      "Svix-Id": signed.headers["svix-id"]!,
+      "SVIX-TIMESTAMP": signed.headers["svix-timestamp"]!,
+      // Some frameworks expose repeated request headers as an array.
+      "Svix-Signature": [signed.headers["svix-signature"]!],
+    };
+    const event = await verifyWebhook({ body: signed.body, headers }, { signingSecret: SECRET, now: () => 1_700_000_000_000 });
+    expect(event.id).toBe("evt_1");
+  });
+
+  it("treats missing headers as missing, not as a crash", async () => {
+    const signed = signWebhook(EVENT, { signingSecret: SECRET, timestamp: 1_700_000_000 });
+    await expectReason(
+      verifyWebhook({ body: signed.body, headers: null }, { signingSecret: SECRET, now: () => 1_700_000_000_000 }),
+      "missing-headers",
+    );
+    await expectReason(
+      verifyWebhook({ body: signed.body, headers: undefined }, { signingSecret: SECRET, now: () => 1_700_000_000_000 }),
+      "missing-headers",
+    );
+  });
+
   it("rejects tampered bodies and signatures", async () => {
     const signed = signWebhook(EVENT, { signingSecret: SECRET, id: "msg_3", timestamp: 1_700_000_000 });
     await expectReason(

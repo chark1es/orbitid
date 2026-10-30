@@ -34,7 +34,7 @@ describe("relying party derivation", () => {
   });
 
   it("falls back to the configured app URL for an untrusted Origin", async () => {
-    const { ctx } = await setup({ baseUrl: "https://api.example.com", nodeEnv: "production", encryptionKey: "k".repeat(40) });
+    const { ctx } = await setup({ baseUrl: "https://api.example.com", nodeEnv: "production", secretKey: "sk_test_production_0123456789abcdef", encryptionKey: "k".repeat(40) });
     await ctx.settings.update({ application: { homeUrl: "https://app.example.com", developmentMode: false, allowedOrigins: [] } });
     expect(relyingParty(ctx, "https://evil.example")).toEqual({ rpID: "app.example.com", origin: "https://app.example.com" });
     expect(relyingParty(ctx, null)).toEqual({ rpID: "app.example.com", origin: "https://app.example.com" });

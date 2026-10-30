@@ -11,7 +11,7 @@ import {
 import { TriangleAlert } from "lucide-react";
 import { CopyButton } from "./copy-button";
 
-/** One-time secret display (API key, impersonation token, invite URL). */
+/** One-time secret display (API key, invite URL). */
 export function SecretReveal({
   open,
   onOpenChange,

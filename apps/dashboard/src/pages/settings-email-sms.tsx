@@ -65,13 +65,17 @@ export default function Page() {
   const resendConfigured = secretIsConfigured(email.resendApiKey);
   const smtpConfigured = secretIsConfigured(email.smtpUrl);
   const twilioSecretConfigured = secretIsConfigured(sms.twilioAuthToken);
-  const fromError = emailFromError(email.from);
+  const fromError = resolved.provider === "console" ? null : emailFromError(email.from);
   const errors: string[] = [];
   if (!isHttpUrl(app.homeUrl)) errors.push("Home URL must be an http(s) URL.");
   if (app.termsUrl && !isHttpUrl(app.termsUrl)) errors.push("Terms URL must be an http(s) URL.");
   if (app.privacyUrl && !isHttpUrl(app.privacyUrl)) errors.push("Privacy URL must be an http(s) URL.");
   if (app.logoUrl && !isHttpUrl(app.logoUrl)) errors.push("Logo URL must be an http(s) URL.");
   if (fromError) errors.push(fromError);
+  const emailAttribute = settings.attributes.emailAddress;
+  if (resolved.provider === "console" && emailAttribute.enabled && (emailAttribute.usedForFirstFactor || emailAttribute.usedForSecondFactor || emailAttribute.verifyAtSignUp)) errors.push("Configure Resend or SMTP before enabling email sign-in or verification.");
+  const phoneAttribute = settings.attributes.phoneNumber;
+  if (sms.provider === "console" && phoneAttribute.enabled && (phoneAttribute.usedForFirstFactor || phoneAttribute.usedForSecondFactor || phoneAttribute.verifyAtSignUp)) errors.push("Configure Twilio or an SMS webhook before enabling phone sign-in or verification.");
   if (email.codeLength < 4 || email.codeLength > 10) errors.push("Verification codes must be 4 to 10 digits.");
   if (email.codeLifetimeSeconds <= 0) errors.push("Code lifetime must be greater than zero.");
   if (email.linkLifetimeSeconds <= 0) errors.push("Magic link lifetime must be greater than zero.");
@@ -92,6 +96,7 @@ export default function Page() {
   };
 
   const sendTest = async () => {
+    if (resolved.provider === "console") return;
     const to = testEmail.trim();
     if (!to) {
       setTest({ state: "error", to, message: "Enter an email address to send the test to." });
@@ -177,7 +182,7 @@ export default function Page() {
         <Field
           label="Provider"
           htmlFor="email-provider"
-          description="Automatic uses Resend when a key is set, then SMTP when a URL is set, then the server log."
+          description="Automatic uses Resend when a key is set, then SMTP when a URL is set, otherwise delivery stays disabled."
           className="max-w-md"
         >
           <Select
@@ -191,7 +196,7 @@ export default function Page() {
               <SelectItem value="auto">Automatic</SelectItem>
               <SelectItem value="resend">Resend</SelectItem>
               <SelectItem value="smtp">SMTP</SelectItem>
-              <SelectItem value="console">Print to server log</SelectItem>
+              <SelectItem value="console">Not configured</SelectItem>
             </SelectContent>
           </Select>
         </Field>
@@ -201,21 +206,16 @@ export default function Page() {
           <span className="font-medium text-foreground">{EMAIL_PROVIDER_LABELS[resolved.provider]}</span>
           {resolved.provider === "resend" ? " sends over HTTPS with the stored API key." : null}
           {resolved.provider === "smtp" ? " sends through the stored SMTP server." : null}
-          {resolved.provider === "console" ? " prints every message, codes included, to the server log." : null}
+          {resolved.provider === "console" ? " refuses delivery until a provider is configured." : null}
         </p>
 
         {resolved.provider === "console" ? (
           <Notice
             tone="caution"
             role="alert"
-            title="Email is printed to the server log, not delivered"
+            title="Email delivery is not configured"
           >
-            <p>
-              Sign-in codes and magic links appear in plain text in the server log, so anyone who can read it can sign
-              in as your users. Choose Resend or SMTP with a working credential before you invite real users, or set
-              <code className="mx-1 font-data text-xs">ORBITID_RESEND_API_KEY</code> or
-              <code className="mx-1 font-data text-xs">ORBITID_SMTP_URL</code> on the server.
-            </p>
+            <p>Choose Resend or SMTP and add the required credentials. Sign-in codes and magic links are never written to logs or files.</p>
           </Notice>
         ) : null}
 
@@ -228,7 +228,7 @@ export default function Page() {
           </Notice>
         ) : null}
 
-        <Field
+        {resolved.provider !== "console" ? <Field
           label="From address"
           htmlFor="email-from"
           required
@@ -241,7 +241,7 @@ export default function Page() {
             onChange={(event) => editor.patch({ email: { from: event.target.value } })}
             aria-invalid={Boolean(fromError)}
           />
-        </Field>
+        </Field> : null}
 
         {email.provider === "resend" || email.provider === "auto" ? (
           <SecretInput
@@ -275,7 +275,7 @@ export default function Page() {
           />
         ) : null}
 
-        <div className="space-y-2 border-t border-border pt-3">
+        {resolved.provider !== "console" ? <div className="space-y-2 border-t border-border pt-3">
           <div>
             <p className="text-sm font-medium">Send a test email</p>
             <p className="text-xs leading-relaxed text-muted-foreground">
@@ -315,7 +315,7 @@ export default function Page() {
               </span>
             </p>
           ) : null}
-        </div>
+        </div> : null}
 
         <div className="grid gap-4 border-t border-border pt-3 sm:grid-cols-3">
           <Field label="Code length" htmlFor="email-code-length">
@@ -356,7 +356,7 @@ export default function Page() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="console">Print to server log</SelectItem>
+              <SelectItem value="console">Not configured</SelectItem>
               <SelectItem value="twilio">Twilio</SelectItem>
               <SelectItem value="webhook">Webhook</SelectItem>
             </SelectContent>
@@ -406,7 +406,7 @@ export default function Page() {
         ) : null}
         {sms.provider === "console" ? (
           <p className="text-xs leading-relaxed text-muted-foreground">
-            The console provider writes messages, codes included, to the server log. Switch to Twilio or a webhook before production.
+            SMS delivery is disabled. Configure Twilio or an SMS webhook before enabling phone verification or sign-in.
           </p>
         ) : null}
       </SettingsSection>

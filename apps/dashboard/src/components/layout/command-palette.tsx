@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Button,
@@ -16,7 +16,8 @@ import { useApi } from "../../lib/api";
 import { useDebounced } from "../../lib/hooks";
 import { primaryEmail, userLabel } from "../../lib/format";
 import { UserAvatar } from "../shared/user-avatar";
-import { ALL_NAV_ITEMS } from "./nav";
+import { useShowOrganizations } from "../../lib/features";
+import { visibleNavGroups } from "./nav";
 
 export function CommandPalette() {
   const navigate = useNavigate();
@@ -24,6 +25,11 @@ export function CommandPalette() {
   const [search, setSearch] = useState("");
   const debounced = useDebounced(search.trim(), 250);
   const enabled = debounced.length >= 2;
+  const organizations = useShowOrganizations();
+  const navItems = useMemo(
+    () => visibleNavGroups({ organizations }).flatMap((group) => group.items),
+    [organizations],
+  );
 
   const { data, isFetching } = useApi<{ data: UserJSON[] }>(
     ["command-users", debounced],
@@ -92,7 +98,7 @@ export function CommandPalette() {
             </>
           ) : null}
           <CommandGroup heading="Navigate">
-            {ALL_NAV_ITEMS.map((item) => (
+            {navItems.map((item) => (
               <CommandItem key={item.href} value={`${item.title} ${item.href}`} onSelect={() => go(item.href)}>
                 <item.icon className="size-4 text-muted-foreground" aria-hidden />
                 {item.title}

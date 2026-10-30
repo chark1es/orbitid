@@ -1,113 +1,35 @@
-// Backend API one-time sign-in tokens and actor (impersonation) tokens.
+// Backend API one-time sign-in tokens.
+//
+// The ability to mint a session as another user was removed. Both paths that existed are gone:
+//
+// - actor (impersonation) tokens, which carried an `act` claim and bypassed the user's MFA;
+// - sign-in tokens, which minted a session for whatever `user_id` the operator named.
+//
+// A credential held by an operator (or by anyone who obtains the instance secret key) must not be redeemable
+// for somebody else's session through the Frontend API: that is impersonation regardless of the claim it
+// leaves behind, and it silently defeats the user's password, second factor and trusted-device policy.
+//
+// The routes stay mounted so an existing integration gets a clear, typed refusal instead of a confusing 404,
+// and historical `sessions.actor` values are still serialized for the dashboard's activity view.
 import { Hono } from "hono";
-import { eq } from "drizzle-orm";
-import { z } from "zod";
-import { ErrorCodes, ID_PREFIX, OrbitError, type ActorTokenJSON, type SignInTokenJSON } from "@orbitid/shared";
-import { parseBody } from "../../lib/http";
-import { randomToken, sha256 } from "../../lib/crypto";
-import { newId } from "../../lib/ids";
-import * as s from "../../db/schema";
-import { audit } from "../../services/audit";
+import { ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../../context";
-import { getUserOrThrow, ticketUrl } from "./shared";
-import { first } from "../../lib/db";
 
-const signInTokenSchema = z.object({
-  user_id: z.string(),
-  /** 10s .. 30 days; default 30 days. */
-  expires_in_seconds: z.coerce.number().int().min(10).max(2_592_000).default(2_592_000),
-});
+const refusal = () => new OrbitError(
+  403,
+  ErrorCodes.not_allowed_access,
+  "Impersonation and one-time sign-in tokens were removed. An operator cannot mint a session for another user. " +
+    "Ask the user to sign in, or send them a password-reset or invitation email.",
+);
 
-const actorTokenSchema = z.object({
-  user_id: z.string(),
-  actor: z.object({ sub: z.string() }).passthrough(),
-  /** 10s .. 12h; default 1h. */
-  expires_in_seconds: z.coerce.number().int().min(10).max(43_200).default(3_600),
-  session_max_duration_in_seconds: z.coerce.number().int().min(1).max(604_800).default(1_800),
-});
-
-function signInTokenJson(row: typeof s.signInTokens.$inferSelect, token?: string, url?: string): SignInTokenJSON {
-  const json: SignInTokenJSON = {
-    object: "sign_in_token",
-    id: row.id,
-    user_id: row.userId,
-    status: row.status as SignInTokenJSON["status"],
-    created_at: row.createdAt,
-    updated_at: row.updatedAt,
-  };
-  if (token) json.token = token;
-  if (url) json.url = url;
-  return json;
-}
-
-function actorTokenJson(row: typeof s.actorTokens.$inferSelect, token?: string): ActorTokenJSON {
-  const json: ActorTokenJSON = {
-    object: "actor_token",
-    id: row.id,
-    user_id: row.userId,
-    actor: row.actor as ActorTokenJSON["actor"],
-    status: row.status as ActorTokenJSON["status"],
-    created_at: row.createdAt,
-    updated_at: row.updatedAt,
-  };
-  if (token) json.token = token;
-  return json;
-}
-
-export default function routes(ctx: AppContext) {
+export default function routes(_ctx: AppContext) {
   const app = new Hono();
 
-  app.post("/sign_in_tokens", async (c) => {
-    const body = await parseBody(c, signInTokenSchema);
-    const user = await getUserOrThrow(ctx, body.user_id);
-    const token = randomToken(32);
-    const now = Date.now();
-    const row = first(await ctx.db
-          .insert(s.signInTokens)
-          .values({ id: newId(ID_PREFIX.signInToken), userId: user.id, tokenHash: sha256(token), status: "pending", expiresAt: now + body.expires_in_seconds * 1000, createdAt: now, updatedAt: now })
-          .returning())!;
-    await audit(ctx, { actor: "secret_key", action: "sign_in_token.created", targetType: "user", targetId: user.id, metadata: { sign_in_token_id: row.id } });
-    return c.json(signInTokenJson(row, token, ticketUrl(ctx, "/sign-in", token)));
-  });
-
-  app.post("/sign_in_tokens/:id/revoke", async (c) => {
-    const row = first(await ctx.db.select().from(s.signInTokens).where(eq(s.signInTokens.id, c.req.param("id"))));
-    if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Sign-in token not found.");
-    await ctx.db.update(s.signInTokens).set({ status: "revoked", updatedAt: Date.now() }).where(eq(s.signInTokens.id, row.id));
-    await audit(ctx, { actor: "secret_key", action: "sign_in_token.revoked", targetType: "user", targetId: row.userId, metadata: { sign_in_token_id: row.id } });
-    return c.json(signInTokenJson(first(await ctx.db.select().from(s.signInTokens).where(eq(s.signInTokens.id, row.id)))!));
-  });
-
-  app.post("/actor_tokens", async (c) => {
-    const body = await parseBody(c, actorTokenSchema);
-    const user = await getUserOrThrow(ctx, body.user_id);
-    const token = randomToken(32);
-    const now = Date.now();
-    const row = first(await ctx.db
-          .insert(s.actorTokens)
-          .values({
-            id: newId(ID_PREFIX.actorToken),
-            userId: user.id,
-            actor: body.actor,
-            tokenHash: sha256(token),
-            status: "pending",
-            expiresAt: now + body.expires_in_seconds * 1000,
-            sessionMaxDurationSeconds: body.session_max_duration_in_seconds,
-            createdAt: now,
-            updatedAt: now,
-          })
-          .returning())!;
-    await audit(ctx, { actor: "secret_key", action: "actor_token.created", targetType: "user", targetId: user.id, metadata: { actor_token_id: row.id, actor_sub: body.actor.sub } });
-    return c.json(actorTokenJson(row, token));
-  });
-
-  app.post("/actor_tokens/:id/revoke", async (c) => {
-    const row = first(await ctx.db.select().from(s.actorTokens).where(eq(s.actorTokens.id, c.req.param("id"))));
-    if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Actor token not found.");
-    await ctx.db.update(s.actorTokens).set({ status: "revoked", updatedAt: Date.now() }).where(eq(s.actorTokens.id, row.id));
-    await audit(ctx, { actor: "secret_key", action: "actor_token.revoked", targetType: "user", targetId: row.userId, metadata: { actor_token_id: row.id } });
-    return c.json(actorTokenJson(first(await ctx.db.select().from(s.actorTokens).where(eq(s.actorTokens.id, row.id)))!));
-  });
+  // Both the collection and the revoke routes answer the same way: nothing here can create or affect a session.
+  app.post("/sign_in_tokens", () => { throw refusal(); });
+  app.post("/sign_in_tokens/:id/revoke", () => { throw refusal(); });
+  app.post("/actor_tokens", () => { throw refusal(); });
+  app.post("/actor_tokens/:id/revoke", () => { throw refusal(); });
 
   return app;
 }

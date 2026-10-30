@@ -10,11 +10,12 @@ import { newId } from "../../lib/ids";
 import * as s from "../../db/schema";
 import { audit } from "../../services/audit";
 import type { AppContext } from "../../context";
+import { RESERVED_SESSION_CLAIMS } from "../../lib/reserved-claims";
 import { bool, deleted, listParams, metadataSchema, page } from "./shared";
 import { first } from "../../lib/db";
 
 /** Claims owned by the session token machinery; templates must not be able to override them. */
-const RESERVED_CLAIMS = ["iss", "sub", "exp", "iat", "nbf", "jti", "azp", "sid", "act", "sts", "fva", "org_id", "org_slug", "org_role", "org_permissions"];
+const RESERVED_CLAIMS = RESERVED_SESSION_CLAIMS;
 const SIGNING_ALGORITHMS = ["RS256", "ES256", "HS256"] as const;
 
 function assertAllowedClaims(claims: Record<string, unknown>): void {

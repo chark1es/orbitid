@@ -169,6 +169,9 @@ describe("createOrbitIdClient", () => {
 
     expect((await orbit.sessions.getToken("sess_1")).jwt).toBe("session.jwt.token");
     expect((await orbit.sessions.getToken("sess_1", { template: "custom" })).jwt).toBe("custom.jwt.token");
+    // Possession of the session is forwarded so the server can refuse a bare secret key.
+    await orbit.sessions.getToken("sess_1", { sessionToken: "user.jwt.token" });
+    expect(backend.last("POST", "/v1/sessions/sess_1/tokens")?.headers["X-OrbitID-Session-Token"]).toBe("user.jwt.token");
 
     expect((await orbit.apiKeys.verifyApiKey({ secret: "ak_live_x" })).subject).toBe("user_1");
     expect(backend.last("POST", "/v1/api_keys/verify")?.body).toEqual({ secret: "ak_live_x" });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createOrbitId } from "../src/client";
 import type { ExpressRequest } from "../src/adapters/express";
-import { startRealServer, createUserWithSession } from "./helpers/server";
+import { startRealServer, createUserWithSession, signInCookie, fetchJson } from "./helpers/server";
 
 describe("authenticate()", () => {
   it("reads a bearer token from a Fetch Request", async () => {
@@ -110,6 +110,40 @@ describe("auth context", () => {
       expect(auth?.has({ role: "org:member" })).toBe(false);
       expect(auth?.has({ permission: "org:sys_memberships:manage" })).toBe(true);
       expect(auth?.has({ permission: "org:billing:manage" })).toBe(false);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("carries operator-assigned instance roles in the token and in has()", async () => {
+    const server = await startRealServer();
+    try {
+      const { backend } = await import("./helpers/server");
+      const user = await createUserWithSession(server, { email: "instance-roles@example.com" });
+      const orbit = createOrbitId({ secretKey: server.secretKey, apiUrl: server.url });
+
+      // The operator creates an instance role and assigns it to the user; no organization is involved.
+      await backend(server, "POST", "/v1/roles", { key: "app:support", name: "Support" });
+      const roles = await backend(server, "GET", "/v1/roles?query=app:support");
+      const roleId = (roles.body as { data: { id: string }[] }).data[0]!.id;
+      await backend(server, "POST", `/v1/roles/${roleId}/permissions`, { permissions: ["org:sys_memberships:read"] }).catch(() => null);
+      const assigned = await backend(server, "PUT", `/v1/users/${user.userId}/roles`, { roles: ["app:support"] });
+      expect(assigned.status).toBe(200);
+
+      // Assigning roles revokes existing sessions, so the user signs in again and the new token carries the claim.
+      const fresh = await createUserWithSession(server, { email: "instance-roles-2@example.com" });
+      await backend(server, "PUT", `/v1/users/${fresh.userId}/roles`, { roles: ["app:support"] });
+      const newCookie = await signInCookie(server, fresh.email, fresh.password);
+      const state = await fetchJson(`${server.url}/v1/client`, { headers: { cookie: newCookie } });
+      const sessionId = (state.body as { response: { sessions: { id: string }[] } }).response.sessions[0]!.id;
+      const { mintSessionToken } = await import("./helpers/server");
+      const token = await mintSessionToken(server, sessionId, newCookie);
+
+      const auth = await orbit.authenticate({ headers: { authorization: `Bearer ${token}` } });
+      expect(auth?.roles).toEqual(["app:support"]);
+      expect(auth?.orgRole).toBeNull();
+      expect(auth?.has({ role: "app:support" })).toBe(true);
+      expect(auth?.has({ role: "org:admin" })).toBe(false);
     } finally {
       await server.close();
     }

@@ -4,7 +4,7 @@ import { ErrorCodes, OrbitError, type VerificationJSON } from "@orbitid/shared";
 import type { AppContext } from "../../context";
 import * as s from "../../db/schema";
 import { newId } from "../../lib/ids";
-import { randomCode, randomToken, safeEqual, sha256 } from "../../lib/crypto";
+import { hashLowEntropy, randomCode, randomToken, sha256, verifyLowEntropy } from "../../lib/crypto";
 import { first } from "../../lib/db";
 
 export type VerificationRow = typeof s.verifications.$inferSelect;
@@ -54,7 +54,7 @@ export async function issueVerification(ctx: AppContext, input: IssueVerificatio
             strategy: input.strategy,
             identifier: input.identifier,
             ownerId: input.ownerId,
-            codeHash: code ? sha256(code) : null,
+            codeHash: code ? hashLowEntropy(ctx.env.encryptionKey, code) : null,
             tokenHash: token ? sha256(token) : null,
             attempts: 0,
             maxAttempts: input.maxAttempts ?? 5,
@@ -122,7 +122,8 @@ export async function checkCode(ctx: AppContext, row: VerificationRow | undefine
     throw new OrbitError(422, ErrorCodes.too_many_attempts, "Too many incorrect attempts. Request a new code.");
   }
   const trimmed = (code ?? "").trim();
-  const ok = !!claimed.codeHash && !!trimmed && safeEqual(sha256(trimmed), claimed.codeHash);
+  // Codes are keyed digests: a database dump alone cannot brute-force a pending 6-digit code offline.
+  const ok = !!trimmed && verifyLowEntropy(ctx.env.encryptionKey, trimmed, claimed.codeHash);
   if (!ok) {
     if (claimed.attempts >= claimed.maxAttempts) throw new OrbitError(422, ErrorCodes.too_many_attempts, "Too many incorrect attempts. Request a new code.");
     throw new OrbitError(422, ErrorCodes.form_code_incorrect, "That verification code is incorrect", { param_name: "code" });

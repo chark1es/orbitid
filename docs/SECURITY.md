@@ -173,6 +173,41 @@ and `Content-Security-Policy: sandbox`. The existing path-traversal guard on the
 - Backup codes are 10 characters from a 32-symbol alphabet (50 bits each), single-use, stored as SHA-256 hashes.
 - Every token, code and signature comparison uses `safeEqual`.
 
+**No operator path to a user's session.** Holding the secret key is not the same as being any user, and the Backend
+API is built so that administration cannot be turned into a sign-in:
+
+- Impersonation (actor) tokens and one-time sign-in tokens were removed; their routes always answer `403`, and a
+  ticket already in the database is refused. No new session is created with an `actor`.
+- An existing account's credentials and sign-in identifiers are not operator-editable. `PATCH /v1/users/:id` refuses
+  `password`, `password_digest`, `totp_secret`, `backup_codes`, `primary_email_address_id` and
+  `primary_phone_number_id`; `DELETE /v1/users/:id/password` and `DELETE /v1/users/:id/mfa` refuse; the
+  `email_addresses` and `phone_numbers` write routes (attach, verify, promote, second factor, delete) refuse. Each
+  answers `403 not_allowed_access` and names the user-facing `/me` route. A password the operator sets, an
+  authenticator they enrol, an address they verify or a factor they clear would each let them sign in as that user.
+- `verify_password` and `verify_totp` are refused for the same reason plus one more: they run outside the sign-in
+  lockout, so they would be unmetered oracles against a password or a 30-second code.
+- Minting a session JWT for an arbitrary session id is refused. `POST /v1/sessions/:id/tokens` requires
+  `X-OrbitID-Session-Token` to carry that session's own valid JWT (the SDK forwards the token it just verified), and
+  the client serializers the Backend API uses never include a freshly signed JWT. Reading a user's provider access
+  token is refused too, since it is another way to act as them.
+- `POST /v1/sessions/:id/verify` is refused: the operator cannot assert a first or second factor the browser never
+  presented, which is what an MFA bypass looks like in the token's `fva` claim.
+- Initial provisioning is unchanged: `POST /v1/users` still imports verified identifiers, a password digest and MFA
+  material for a *new* account. What the API will not do is reach into an account that already belongs to someone.
+
+This is an application-level boundary, not a cryptographic one against the machine's owner: whoever runs the server
+controls the database, the encryption key, the mail and SMS credentials and the process memory, so they can always
+recover an account out of band. The point is that the *product's own API and console* offer no shortcut to signing in
+as a user; an operator who needs to help uses a password reset or an invitation to the address the user controls.
+
+**The server does not narrate authentication.** A rejected secret key, a failed dashboard key exchange, a failed
+sign-in, an undeliverable code and an unexpected error on an auth route all produce no console output. Delivery
+failures are returned to the caller as typed results and recorded as audit entries carrying the template and reason
+only — never a code, link, recipient or provider secret. Startup prints no secret key: `orbitid start` reports that
+it is hidden and points at `orbitid keys`, which the operator runs deliberately. Diagnostics that would otherwise
+land in shared logs (which are read by more people and kept longer than the rows they concern) are simply not
+written.
+
 ### 8. Secrets
 
 `GET /v1/instance` (and any settings response) masks credentials — `smtpUrl`, `resendApiKey`, `captchaSecret`,
@@ -214,7 +249,8 @@ The server hardens what it controls; these parts are yours.
      Keep it stable and back it up separately from the database: changing it makes every stored secret unreadable.
    - The secret key (`sk_live_…`) is generated on first boot (derived from the encryption key, or written to
      `<dataDir>/keys.json` with mode 600). Treat it like a root password: it grants the entire Backend API.
-     Rotate it if it leaks, and do not put it in a browser.
+     Rotate it if it leaks, and do not put it in a browser. `orbitid start` does not print it — run
+     `orbitid keys` when you need the value, rather than reading it out of a captured startup log.
    - Keep the data directory (`ORBITID_DATA_DIR`) on a private volume; it holds keys and uploaded images.
 4. **Database.** Store the database credentials in the environment, not in the settings UI. Use a dedicated
    database user with access only to the OrbitID database, and keep Postgres patched.
@@ -224,7 +260,7 @@ The server hardens what it controls; these parts are yours.
 6. **Upgrades.** Watch dependency advisories and upgrade. Run `bun audit` (or your registry's equivalent) as part
    of maintenance, and rebuild the image when a fix lands.
 7. **Backups and logs.** Back up the database and the data directory together. Scrub logs before sharing them:
-   trace ids and user ids are fine, tokens and codes are never logged by the server (the one opt-in exception is `ORBITID_ALLOW_CONSOLE_EMAIL=true`, which exists for trials) but may appear in your proxy's
+   trace ids and user ids are fine, tokens and codes are never logged by the server and never written to disk by it — there is no console or file mail transport at all — but may appear in your proxy's
    logs if a client puts them in a URL.
 
 ## Behind a reverse proxy
@@ -309,3 +345,16 @@ Please do not open a public issue for a security problem.
   in the release notes if you want to be named.
 - Please give us a reasonable window to ship a fix before public disclosure, and do not test against instances you
   do not own.
+
+Secret-key failure budgets are checked before comparing subsequent bearer or operator-exchange credentials.
+Once an address exhausts the budget, even a correct key must wait until the failure window expires. Successful
+traffic does not consume that budget. Explicit production secret keys require at least 32 random characters;
+omitting the override uses the strong derived key.
+
+Imported password digests are validated before storage and again before verification. Digests are at most
+1,024 characters. Argon2 accepts at most 64 MiB, 8 iterations, 4 lanes and 256 MiB-rounds; bcrypt cost is 4–14;
+scrypt accepts power-of-two N up to 65,536, r up to 16, p up to 4, at most 128 MiB and N*r*p up to 2,097,152.
+Scrypt verification uses the asynchronous crypto API instead of blocking the event loop. Imports exceeding the
+limits return 422; existing unsupported/high-cost digests fail closed and require a user password-reset flow.
+Initial user provisioning/import may supply password digests and MFA material for a new account; existing-account
+credential replacement is still refused. This distinction is intentional, not an impersonation escape hatch.

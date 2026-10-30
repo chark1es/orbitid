@@ -79,7 +79,7 @@ export default function routes(ctx: AppContext) {
 
   const respond = async (c: Context, clientId: string, row: SignUpRow) => {
     const client = first(await ctx.db.select().from(s.clients).where(eq(s.clients.id, clientId)))!;
-    const clientJson = await serializeClient(ctx, client, { azp: clientAzp(c) });
+    const clientJson = await serializeClient(ctx, client, { azp: clientAzp(c), mintTokens: true });
     return c.json({ response: await buildSignUpJSON(ctx, row), client: clientJson });
   };
 
@@ -345,7 +345,7 @@ export default function routes(ctx: AppContext) {
     await maybeCompleteSignUp(ctx, await reload(row.id), { ip: clientIp(c), userAgent: c.req.header("user-agent") ?? undefined, rotateClientToken: () => rotateClientTokenOnSignIn(ctx, c, client.id) });
     const finalRow = await reload(row.id);
     const response = await buildSignUpJSON(ctx, finalRow);
-    const clientJson = await serializeClient(ctx, client, { azp: clientAzp(c) });
+    const clientJson = await serializeClient(ctx, client, { azp: clientAzp(c), mintTokens: true });
     return c.json({ response, client: clientJson });
   });
 

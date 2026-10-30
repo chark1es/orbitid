@@ -56,6 +56,20 @@ describe("sessions & tokens", () => {
     expect(decoded.payload.email).toBe(user.email);
   });
 
+  it("never lets configured custom claims grant an instance role", async () => {
+    // `roles` / `role_permissions` are reserved: an operator's convenience claim must not become an escalation
+    // path into an authorization decision.
+    const { app, ctx } = await setup();
+    await ctx.settings.update({ session: { customClaims: { roles: ["app:admin"], role_permissions: ["*"], plan: "pro" } } });
+    const user = await signUpUser(app);
+    const minted = await user.client.json<{ jwt: string }>(`/v1/client/sessions/${user.sessionId}/tokens`, { method: "POST", body: {} });
+    const jwks = (await (await app.request("/.well-known/jwks.json")).json()) as { keys: JWK[] };
+    const { payload } = await jwtVerify(minted.jwt, createLocalJWKSet(jwks), { issuer: ctx.env.baseUrl });
+    expect(payload.roles).toEqual([]);
+    expect(payload.role_permissions).toEqual([]);
+    expect(payload.plan).toBe("pro");
+  });
+
   it("keeps verifying old tokens after key rotation and signs new ones with the new key", async () => {
     const { app, ctx } = await setup();
     const user = await signUpUser(app);
@@ -86,31 +100,29 @@ describe("sessions & tokens", () => {
     expect(body.response.status).toBe("complete");
   });
 
-  it("redeems sign-in and actor tokens, including impersonation claims", async () => {
+  it("refuses operator-minted sign-in and actor tickets instead of creating a session", async () => {
+    // Impersonation was removed. A row that exists in the database must not become somebody else's session.
     const { app, ctx } = await setup();
     const user = await signUpUser(app);
     const now = Date.now();
     await ctx.db.insert(schema.signInTokens).values({
                   id: "sit_test", userId: user.userId, tokenHash: sha256("sit-ticket"), status: "pending", expiresAt: now + 60_000, createdAt: now, updatedAt: now,
                 });
-    const sitClient = testClient(app);
-    const sit = await sitClient.json<{ response: { status: string; created_session_id: string } }>("/v1/client/sign_ins", { body: { ticket: "sit-ticket" } });
-    expect(sit.response.status).toBe("complete");
-    expect(sit.response.created_session_id).toMatch(/^sess_/);
-
     await ctx.db.insert(schema.actorTokens).values({
                   id: "act_test", userId: user.userId, actor: { sub: "admin_42" }, tokenHash: sha256("actor-ticket"), status: "pending",
                   expiresAt: now + 60_000, sessionMaxDurationSeconds: 600, createdAt: now, updatedAt: now,
                 });
-    const actorClient = testClient(app);
-    const actorSignIn = await actorClient.json<{ response: { status: string; created_session_id: string } }>("/v1/client/sign_ins", { body: { ticket: "actor-ticket" } });
-    expect(actorSignIn.response.status).toBe("complete");
-    const state = await getClient(actorClient);
-    const session = state.response.sessions.find((s) => s.id === actorSignIn.response.created_session_id)!;
-    const jwks = (await (await app.request("/.well-known/jwks.json")).json()) as { keys: JWK[] };
-    const { payload } = await jwtVerify(session.last_active_token!.jwt, createLocalJWKSet(jwks), { issuer: ctx.env.baseUrl });
-    expect(payload.act).toMatchObject({ sub: "admin_42" });
-    expect(session.expire_at - Date.now()).toBeLessThanOrEqual(601_000);
+    const sessionsBefore = (await ctx.db.select().from(schema.sessions)).length;
+    for (const ticket of ["sit-ticket", "actor-ticket"]) {
+      const client = testClient(app);
+      const res = await client.request("/v1/client/sign_ins", { body: { ticket } });
+      expect(res.status, ticket).toBe(422);
+      expect(((await res.json()) as { errors: { code: string }[] }).errors[0]!.code).toBe("ticket_invalid");
+      const state = await getClient(client);
+      expect(state.response.sessions).toHaveLength(0);
+    }
+    // The sign-up already made one session; no ticket added another.
+    expect((await ctx.db.select().from(schema.sessions)).length).toBe(sessionsBefore);
   });
 
   it("authenticates the client from an Authorization bearer token", async () => {
@@ -127,6 +139,7 @@ describe("sessions & tokens", () => {
 
   it("includes organization claims for the session's active organization", async () => {
     const { app, ctx } = await setup();
+    await ctx.settings.update({ organizations: { enabled: true } });
     const user = await signUpUser(app);
     const now = Date.now();
     await ctx.db.insert(schema.organizations).values({ id: "org_claims", name: "Claims Inc", slug: "claims-inc", createdAt: now, updatedAt: now });

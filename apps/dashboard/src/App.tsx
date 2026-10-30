@@ -3,6 +3,7 @@ import { Route, Routes } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { AppShell } from "./components/layout/app-shell";
 import { RequireAuth } from "./lib/auth";
+import { RequireOrganizations } from "./components/shared/feature-locked";
 
 const LoginPage = lazy(() => import("./pages/login"));
 const OverviewPage = lazy(() => import("./pages/overview"));
@@ -63,8 +64,22 @@ export default function App() {
           <Route index element={<OverviewPage />} />
           <Route path="users" element={<UsersPage />} />
           <Route path="users/:id" element={<UserDetailPage />} />
-          <Route path="organizations" element={<OrganizationsPage />} />
-          <Route path="organizations/:id" element={<OrganizationDetailPage />} />
+          <Route
+            path="organizations"
+            element={
+              <RequireOrganizations title="Organizations">
+                <OrganizationsPage />
+              </RequireOrganizations>
+            }
+          />
+          <Route
+            path="organizations/:id"
+            element={
+              <RequireOrganizations title="Organization">
+                <OrganizationDetailPage />
+              </RequireOrganizations>
+            }
+          />
           <Route path="sessions" element={<SessionsPage />} />
           <Route path="invitations" element={<InvitationsPage />} />
           <Route path="waitlist" element={<WaitlistPage />} />

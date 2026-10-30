@@ -17,13 +17,14 @@ docker compose up -d
 docker compose logs orbitid      # prints the dashboard URL and your publishable key
 ```
 
-The compose file passes only the variables it lists (the ones in `.env.example`) into the container, so a variable you add to `.env` has no effect until it is also listed under `environment:` in `docker-compose.yml`. It starts Postgres 17 and OrbitID, runs the migrations on boot, and keeps data in two named volumes. Open `http://localhost:4000` and sign in to the dashboard with the secret key; it is exchanged once for an httpOnly session cookie stored in your database. A production instance shows only the end of the secret key in its log; print the whole key with:
+The compose file passes only the variables it lists (the ones in `.env.example`) into the container, so a variable you add to `.env` has no effect until it is also listed under `environment:` in `docker-compose.yml`. It starts Postgres 17 and OrbitID, runs the migrations on boot, and keeps data in two named volumes. Open `http://localhost:4000` and sign in to the dashboard with the secret key; it is exchanged once for an httpOnly session cookie stored in your database. Startup never prints any part of the secret key. Retrieve it explicitly with:
 
 ```bash
 docker compose exec orbitid node node_modules/tsx/dist/cli.mjs packages/server/src/cli.ts keys
 ```
 
-The secret key is derived from `ORBITID_ENCRYPTION_KEY`, so it is the same after every restart.
+The secret key is derived from `ORBITID_ENCRYPTION_KEY`, so it is the same after every restart. If you override it
+with `ORBITID_SECRET_KEY`, production requires at least 32 random characters.
 
 `ORBITID_PORT` in `.env` publishes the server on another host port. `ORBITID_BASE_URL` defaults to `http://localhost:<ORBITID_PORT>`, so the two stay in step; set it explicitly when a proxy or public hostname reaches the instance. `ORBITID_IMAGE` only sets the tag compose gives the image it builds. Because the service has a `build:` section, compose builds this checkout; to run an image from a registry instead, delete `build: .` from the `orbitid` service and set `ORBITID_IMAGE` to that image's tag.
 
@@ -71,10 +72,14 @@ The table below is the **SERVER** label: variables for the machine that runs Orb
 
 ## First steps in the dashboard
 
+Until you configure a delivery provider, saves that leave an email/SMS-dependent authentication flow enabled
+are refused. Configure delivery first, or explicitly disable all delivery-dependent factors and sign-up verification
+in one settings update. The smoke script uses the latter only for its throwaway test instance.
+
 1. Open the dashboard and sign in with the secret key. The dashboard keeps only a revocable httpOnly session, and signs out when you rotate the key.
-2. Under Authentication, choose the identifiers and sign-in methods you want.
+2. Under **Email & SMS**, configure Resend or SMTP and send a test email before enabling an email-dependent flow. Configure Twilio or an HTTPS webhook before enabling phone verification or sign-in. See [EMAIL.md](EMAIL.md).
 3. Under Appearance, add the origin of each app that will call OrbitID, for example `https://app.example.com`. A new production instance trusts no origins until you do.
-4. Under Email and SMS, choose Resend or SMTP (or set `ORBITID_RESEND_API_KEY` / `ORBITID_SMTP_URL` for the server) and send a test email. Until then a production instance cannot send email (sign-in codes and links are not delivered, and nothing is printed to the log). To trial it anyway, set `ORBITID_ALLOW_CONSOLE_EMAIL=true`. See [EMAIL.md](EMAIL.md).
+4. Under **Authentication**, choose identifiers and methods. Saves with missing delivery/provider prerequisites are refused. Passwords and other methods that do not require delivery can be tested without email verification.
 5. Open **Connect your app**: it prints copy-ready blocks, labelled by where they go. The publishable key goes into your website's browser environment and the secret key into its backend environment ([ENVIRONMENT.md](ENVIRONMENT.md)).
 
 ## Moving between SQLite and Postgres
@@ -95,13 +100,13 @@ Set `ORBITID_BASE_URL` to the public URL, terminate TLS at the proxy, and set `O
 
 ## What the container check does and does not prove
 
-`scripts/smoke-container.sh` runs the real image on both databases. It proves the image builds, that `better-sqlite3` and `@node-rs/argon2` load on the image's Node 20 ABI, that the server runs as uid 1000 with a read-only `/app`, and that health, the dashboard, sign-up with an email code, password sign-in and the operator-session key exchange all work — including across a restart and a fresh container on the same volume.
+`scripts/smoke-container.sh` runs the real image on both databases. It proves the image builds, that `better-sqlite3` and `@node-rs/argon2` load on the image's Node 20 ABI, that the server runs as uid 1000 with a read-only `/app`, and that health, the dashboard, password-based sign-up with email verification disabled on the throwaway smoke instance, password sign-in and the operator-session key exchange all work — including across a restart and a fresh container on the same volume.
 
 Some things need infrastructure or hardware it does not have, so they stay unverified here:
 
 - **Social sign-in** is exercised against a stand-in provider, not a live one. The suite drives the full OAuth flow with a fake adapter, so authorization URLs, state/PKCE handling, code exchange, profile mapping, linking and error paths are covered. No run in CI contacts Google, GitHub or any other provider, because that needs registered applications, real client secrets and redirect URIs owned by whoever deploys. Before relying on a provider, turn it on in the dashboard with your own credentials and sign in once.
 - **Passkeys** are exercised with a software authenticator, not a hardware one. The ceremonies (registration, authentication, discoverable credentials, origin and RP ID checks, failure cases) run end to end over HTTP. No physical security key or platform authenticator is present, so device-specific behaviour — a key that requires a PIN, an authenticator that rejects the RP ID your domain uses, cross-device flows — is untested here. The RP ID follows the origin the browser reports, so check passkeys on the domain you actually serve before enabling them for users.
-- **Email and SMS** are verified with local stand-ins and the console transport. Real Resend, SMTP and Twilio accounts are not used.
+- **Email and SMS** delivery is not exercised by the container smoke script. Unit/integration suites use local stand-ins and the test-only in-memory outbox. Real Resend, SMTP and Twilio accounts are not used.
 - **Enterprise SAML** is covered against test identity providers, not a live one.
 
 The fixtures cannot prove compatibility with a live service or a physical authenticator. Verify the providers,

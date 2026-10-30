@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export function useDebounced<T>(value: T, delay = 300): T {
   const [debounced, setDebounced] = useState(value);
@@ -7,6 +7,24 @@ export function useDebounced<T>(value: T, delay = 300): T {
     return () => clearTimeout(timer);
   }, [value, delay]);
   return debounced;
+}
+
+/**
+ * A flag that turns itself off after `ms`, such as the "Copied" tick on a copy button. One timer at a time, so a
+ * second click restarts the interval instead of cutting it short, and it is cleared on unmount.
+ */
+export function useFlash(ms = 1500): [boolean, () => void] {
+  const [on, setOn] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+  const flash = useCallback(() => {
+    setOn(true);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setOn(false), ms);
+  }, [ms]);
+  return [on, flash];
 }
 
 export function useCopyToClipboard(): (text: string) => Promise<boolean> {

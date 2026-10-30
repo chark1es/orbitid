@@ -1,6 +1,6 @@
 import { createRouteMatcher, orbitIdMiddleware } from "@orbitid/nextjs/server";
 
-const isProtectedRoute = createRouteMatcher(["/dashboard(.*)", "/user(.*)", "/api/me"]);
+const isProtectedPage = createRouteMatcher(["/dashboard(.*)", "/user(.*)"]);
 const isAdminRoute = createRouteMatcher(["/admin(.*)"]);
 
 export default orbitIdMiddleware(
@@ -11,7 +11,7 @@ export default orbitIdMiddleware(
         unauthorizedUrl: "/dashboard",
       });
     }
-    if (isProtectedRoute(req)) {
+    if (isProtectedPage(req)) {
       await auth.protect();
     }
   },

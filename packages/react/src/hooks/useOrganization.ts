@@ -1,3 +1,4 @@
+import { organizationsEnabled as readOrganizationsEnabled } from "./internal/organizationFeature";
 import { useCallback, useContext, useMemo } from "react";
 import { AuthContext, OrganizationContext, UserContext } from "../provider/contexts";
 import type {
@@ -18,6 +19,8 @@ import {
   fetchOrganizationMemberships,
 } from "./internal/adapters";
 import { resolvePageOptions, type UseOrganizationParam } from "./internal/pageOptions";
+import { useOrbitID } from "./useOrbitID";
+import { resourceIdentity } from "./internal/requestCache";
 import { useAsyncValue } from "./internal/useAsyncValue";
 import { usePagedResource, type PagedResource } from "./internal/usePagedResource";
 
@@ -55,7 +58,10 @@ export interface UseOrganizationReturn {
  * ```
  */
 export function useOrganization(params: UseOrganizationParams = {}): UseOrganizationReturn {
-  const organization = useContext(OrganizationContext);
+  const instance = useOrbitID();
+  const organizationsEnabled = readOrganizationsEnabled(instance.environment);
+  const activeOrganization = useContext(OrganizationContext);
+  const organization = organizationsEnabled ? activeOrganization : null;
   const user = useContext(UserContext);
   const { isLoaded } = useContext(AuthContext);
 
@@ -94,7 +100,7 @@ export function useOrganization(params: UseOrganizationParams = {}): UseOrganiza
   );
 
   const memberships = usePagedResource<OrganizationMembershipResource>({
-    key: `org:${organizationId}:memberships`,
+    key: `org:${organizationId}:${organization ? resourceIdentity(organization) : "none"}:memberships`,
     fetcher: fetchMembershipsPage,
     params: { role: membershipsOptions.role, query: membershipsOptions.query },
     pageSize: membershipsOptions.pageSize,
@@ -105,7 +111,7 @@ export function useOrganization(params: UseOrganizationParams = {}): UseOrganiza
   });
 
   const invitations = usePagedResource<OrganizationInvitationResource>({
-    key: `org:${organizationId}:invitations`,
+    key: `org:${organizationId}:${organization ? resourceIdentity(organization) : "none"}:invitations`,
     fetcher: fetchInvitationsPage,
     params: { query: invitationsOptions.query },
     pageSize: invitationsOptions.pageSize,
@@ -116,7 +122,7 @@ export function useOrganization(params: UseOrganizationParams = {}): UseOrganiza
   });
 
   const domains = usePagedResource<OrganizationDomainResource>({
-    key: `org:${organizationId}:domains`,
+    key: `org:${organizationId}:${organization ? resourceIdentity(organization) : "none"}:domains`,
     fetcher: fetchDomainsPage,
     pageSize: domainsOptions.pageSize,
     initialPage: domainsOptions.initialPage,
@@ -126,7 +132,7 @@ export function useOrganization(params: UseOrganizationParams = {}): UseOrganiza
   });
 
   const membershipRequests = usePagedResource<OrganizationMembershipRequestResource>({
-    key: `org:${organizationId}:membership-requests`,
+    key: `org:${organizationId}:${organization ? resourceIdentity(organization) : "none"}:membership-requests`,
     fetcher: fetchRequestsPage,
     pageSize: requestsOptions.pageSize,
     initialPage: requestsOptions.initialPage,
@@ -136,7 +142,7 @@ export function useOrganization(params: UseOrganizationParams = {}): UseOrganiza
   });
 
   const apiKeys = usePagedResource<ApiKeyResource>({
-    key: `org:${organizationId}:api-keys`,
+    key: `org:${organizationId}:${organization ? resourceIdentity(organization) : "none"}:api-keys`,
     fetcher: fetchApiKeysPage,
     pageSize: apiKeysOptions.pageSize,
     initialPage: apiKeysOptions.initialPage,
@@ -153,7 +159,7 @@ export function useOrganization(params: UseOrganizationParams = {}): UseOrganiza
     [userId, organizationId, user],
   );
   const activeMembership = useAsyncValue<OrganizationMembershipResource>({
-    key: `org:${organizationId}:membership:${userId}`,
+    key: `org:${organizationId}:${organization ? resourceIdentity(organization) : "none"}:membership:${userId}`,
     fetcher: userId && organizationId ? fetchMembership : null,
     enabled: Boolean(userId && organizationId),
   });

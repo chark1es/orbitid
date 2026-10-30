@@ -9,6 +9,10 @@ import { decrypt, encrypt, randomToken } from "../lib/crypto";
 import { serializeUser } from "../serializers";
 import { getMembershipContext } from "./orgs";
 import { renderTemplateClaims } from "./jwt-templates";
+import { roleClaimsForUser } from "./user-roles";
+import { RESERVED_SESSION_CLAIMS } from "../lib/reserved-claims";
+
+export { RESERVED_SESSION_CLAIMS };
 import { first } from "../lib/db";
 
 const ALG = "RS256";
@@ -143,7 +147,7 @@ function resolveClaimMap(map: Record<string, unknown>, source: Record<string, un
 interface OrgMembershipContext { orgId: string; slug: string | null; role: string; permissions: string[] }
 
 async function membershipFor(ctx: AppContext, userId: string, orgId: string | null) {
-  if (!orgId) return null;
+  if (!orgId || !ctx.settings.get().organizations.enabled) return null;
   const membership: OrgMembershipContext | null = await getMembershipContext(ctx, userId, orgId);
   if (!membership) return null;
   const org = first(await ctx.db.select().from(s.organizations).where(eq(s.organizations.id, orgId)));
@@ -162,6 +166,9 @@ interface TokenContext {
   sessionId: string;
   actor: Record<string, unknown> | null;
 }
+
+/** Claims owned by the session machinery; only the server decides them. */
+const PROTECTED_CLAIMS = new Set(RESERVED_SESSION_CLAIMS);
 
 function shortcodeSource(tc: TokenContext): Record<string, unknown> {
   const emails = tc.userJson.email_addresses;
@@ -247,6 +254,11 @@ export async function signSessionToken(ctx: AppContext, sessionId: string, opts:
     base.org_role = org.role;
     base.org_permissions = org.permissions;
   }
+  // Instance-wide roles are read from `user_roles` on every mint, so a role change applies to the next token
+  // without a session round trip. They are independent of the active organization (`org_role`).
+  const instanceRoles = await roleClaimsForUser(ctx, user.id);
+  base.roles = instanceRoles.roles;
+  base.role_permissions = instanceRoles.permissions;
   if (actor) base.act = actor;
 
   // Configured or templated claims may add to the token, never redefine who or what the session is.
@@ -263,8 +275,6 @@ export async function signSessionToken(ctx: AppContext, sessionId: string, opts:
     .setProtectedHeader({ alg: row.alg, kid: row.kid, typ: "JWT" })
     .sign(privateKey);
 }
-
-const PROTECTED_CLAIMS = new Set(["iss", "sub", "sid", "iat", "nbf", "exp", "jti", "azp", "act", "sts", "fva", "anonymous", "org_id", "org_slug", "org_role", "org_permissions"]);
 
 /** Template keys are stored encrypted: an HMAC secret (HS256) or a private JWK (RS256/ES256). */
 async function importTemplateKey(ctx: AppContext, encrypted: string, algorithm: string): Promise<KeyLike | Uint8Array> {

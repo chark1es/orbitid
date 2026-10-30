@@ -1,3 +1,4 @@
+import { trimCache } from "./trimCache";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PaginatedResult, PaginationQuery } from "../../provider/types";
 
@@ -146,6 +147,7 @@ export function usePagedResource<T>(options: UsePagedResourceOptions<T>): PagedR
         });
         if (requestIdRef.current !== requestId) return;
         cache.set(cacheKeyFor(targetPage), { data: result.data, count: result.totalCount, at: Date.now() });
+        trimCache(cache, CACHE_TTL_MS);
 
         if (infinite) {
           pagesRef.current.set(targetPage, result.data);
@@ -192,6 +194,7 @@ export function usePagedResource<T>(options: UsePagedResourceOptions<T>): PagedR
       error: null,
     });
     void load(initialPage, "initial");
+    return () => { requestIdRef.current += 1; };
   }, [cacheKeyFor, initialPage, enabled, load]);
 
   const pageCount = state.count > 0 ? Math.ceil(state.count / pageSize) : 0;

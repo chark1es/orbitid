@@ -94,7 +94,7 @@ export default function LoginPage() {
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 401) {
         setError(
-          `The server rejected that secret key. Copy the key that starts with sk_ from the server log or from ./data/keys.json, then sign in again.`,
+          `The server rejected that secret key. Copy the key that starts with sk_ from ./data/keys.json or the explicit keys command, then sign in again.`,
         );
       } else {
         setError(errorMessage(cause, "The instance did not answer. Check the URL and that the server is running."));

@@ -12,12 +12,21 @@ export interface DecodedJwtPayload {
 function base64UrlDecode(input: string): string | null {
   const normalized = input.replace(/-/g, "+").replace(/_/g, "/");
   const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+  if (typeof atob !== "function") return null;
+  let binary: string;
   try {
-    if (typeof atob === "function") return atob(padded);
-    return null;
+    binary = atob(padded);
   } catch {
     return null;
   }
+  // JWT payloads are UTF-8, but `atob` yields one character per *byte*. Decode the bytes so a
+  // non-ASCII claim (a name, custom metadata) does not arrive as mojibake and break comparisons.
+  if (typeof TextDecoder === "function") {
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    return new TextDecoder().decode(bytes);
+  }
+  return binary;
 }
 
 /** Decodes (without verifying) a JWT payload. Returns null for malformed tokens. */

@@ -12,7 +12,7 @@ bun run dev:server
 
 # terminal 2 — this app
 cd apps/example-next
-cp .env.example .env.local   # fill in the keys from the server/dashboard
+cp .env.example .env.local   # fill in the publishable key and retrieve the secret with orbitid keys
 bun run dev
 ```
 
@@ -38,8 +38,8 @@ Open http://localhost:3000.
 ## Environment
 
 See `.env.example`. At minimum set `NEXT_PUBLIC_ORBITID_PUBLISHABLE_KEY` and
-`ORBITID_SECRET_KEY`; set `ORBITID_JWT_KEY` (PEM public key) to verify sessions offline in
-middleware instead of fetching `/.well-known/jwks.json`.
+`ORBITID_SECRET_KEY`; set `ORBITID_JWT_KEY` (PEM public key, SPKI or X.509 certificate) to verify
+sessions offline in middleware instead of fetching `/.well-known/jwks.json`.
 
 Typecheck without running Next:
 

@@ -1,8 +1,15 @@
 # Email delivery
 
 OrbitID sends every transactional email — sign-in codes, magic links, sign-up verification, invitations, password
-changed and new sign-in notices — through one service, `packages/server/src/services/mail.ts`. There are three
-transports: Resend (HTTP API), SMTP (any mail server) and the console.
+changed and new sign-in notices — through one service, `packages/server/src/services/mail.ts`. There are two
+transports: Resend (HTTP API) and SMTP (any mail server).
+
+There is deliberately no console or file transport. A sign-in code or magic link is a credential: printed to stdout
+it lands in terminal scrollback, CI logs and support pastes, and written to a file on the server it is the same secret
+with a longer half-life. So when no provider is configured the server **fails closed**: the message is not delivered
+(and not persisted), delivery returns a typed failure, and the startup banner says email is not configured.
+Authentication can only complete when its required factors succeed; password, passkey and TOTP flows that do not
+require email delivery remain available.
 
 ## Choosing a transport
 
@@ -10,10 +17,10 @@ transports: Resend (HTTP API), SMTP (any mail server) and the console.
 
 | Value | Behaviour |
 | --- | --- |
-| `auto` (default) | Resend when an API key exists, else SMTP when a URL exists, else the console. |
-| `resend` | Always Resend. Fails at send time if no API key is configured. |
-| `smtp` | Always SMTP. Fails at send time if no URL is configured. |
-| `console` | Prints the message, including any code or link, to the server log. |
+| `auto` (default) | Resend when an API key exists, else SMTP when a URL exists, else nothing. |
+| `resend` | Always Resend. A save without an API key is refused. |
+| `smtp` | Always SMTP. A save without a URL is refused. |
+| `console` | **No delivery.** Kept as the persisted "not configured" value for compatibility; the server refuses it at send time and in production refuses to enable an email flow with it. |
 
 Settings are saved with `PATCH /v1/instance` (secret key) and live in the `email` object:
 
@@ -117,23 +124,32 @@ A magic link finishes a sign-in or sign-up only in the browser that started it. 
 refuses and redirects with `__orbit_status=different_browser`. Without this, anyone could start a sign-in for somebody
 else's address and have the real owner's click sign the attacker in. For sign-in across devices, use the email code.
 
-## Console mode
+## Without a provider
 
-Without Resend or SMTP, mail is printed to the server log. This is for local development only: anyone who can read
-the log can read sign-in codes and magic links, and use them until they expire.
+Without Resend or SMTP nothing is delivered and nothing is printed or written anywhere. This is true in development
+as well: there is no "dev mode" that leaks codes. The startup banner reports `EMAIL IS NOT CONFIGURED`, and
+`POST /v1/instance/email_test` answers `503 email_not_configured` with instructions. Passwords, passkeys, TOTP and
+every flow that does not need a mailbox keep working.
 
-In production (`NODE_ENV=production`, which the Docker image sets) the console transport is **refused**: nothing is
-printed, sign-in codes and links are not delivered, the startup banner says email is not configured, and the test
-endpoint answers `503 email_not_configured`. Passwords and every other flow keep working. To try a production build
-before you have a provider, set `ORBITID_ALLOW_CONSOLE_EMAIL=true` (scope: SERVER); the banner then warns loudly that
-codes are going to the log. Remove it before real users arrive.
+A failed send (no provider, SMTP down, provider rejection) does not print anything either. `sendEmail` returns
+`{ delivered: false, error }`; the calling auth flow still succeeds where it can, and an `email.delivery_failed` audit
+entry records the template and the reason code — never the recipient, the subject, the code or the provider's
+response. Use `GET /v1/audit_logs?action=email.delivery_failed` and the dashboard's email test to diagnose delivery.
+
+In production an email-dependent flow (email code/link as a first or second factor, or verification at sign-up)
+cannot be enabled without a provider: `PATCH /v1/instance` returns `422` naming `email.provider`. That is the point —
+an instance that promises email sign-in and cannot send email locks every user out.
+
+For tests, `services/mail.ts` exposes an in-memory outbox (`getMailOutbox`, `latestCodeFor`, `setMailTransport`). Those
+seams throw outside `NODE_ENV=test`/`VITEST`, so a deployed server has no code path that captures a message.
 
 ## How messages are built
 
-Templates live in `renderEmail` in `services/mail.ts`. Every variable that reaches the HTML is escaped, and only
+Templates are composed by the mail service and its extracted template helpers. Every variable that reaches the HTML is escaped, and only
 absolute `http(s)` URLs are turned into links; a `javascript:` or `data:` URL is dropped. Variables are stripped of
 control characters before they are used, the subject is stripped of CR/LF, and recipients must pass a strict address
 check, so user-supplied names (first name, organization name, inviter name) cannot inject headers or markup.
 
-Delivery failures never break an authentication flow: `sendEmail` logs a line without the recipient's code and
-continues. Use the test endpoint when you need to know whether delivery actually works.
+Delivery failure records no console output. Optional notification failures do not undo an already-completed
+authentication; flows requiring a delivered verification code cannot complete without it. Use the test endpoint
+and recipient-free delivery audit entries to diagnose configuration failures.

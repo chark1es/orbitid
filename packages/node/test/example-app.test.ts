@@ -65,7 +65,12 @@ beforeAll(async () => {
   const cookie = [...jar].map(([name, value]) => `${name}=${value}`).join("; ");
   const clientState = await jsonFetch(`${apiUrl}/v1/client`, { headers: { cookie } });
   const sessionId = (clientState.body.response.sessions as { id: string }[])[0]!.id;
-  const minted = await jsonFetch(`${apiUrl}/v1/sessions/${sessionId}/tokens`, { method: "POST", headers: auth });
+  // A session JWT comes from the browser's own client cookie; the Backend API will not mint one from an id alone.
+  const minted = await jsonFetch(`${apiUrl}/v1/client/sessions/${sessionId}/tokens`, {
+    method: "POST",
+    headers: { cookie, "content-type": "application/json" },
+    body: "{}",
+  });
   sessionToken = minted.body.jwt as string;
 
   const endpoint = await jsonFetch(`${apiUrl}/v1/webhooks/endpoints`, {

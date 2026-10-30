@@ -120,15 +120,17 @@ export async function authenticateRequest(request: Request, options: Authenticat
   }
 
   let currentSessionId: string | null = null;
+  let presentedToken: string | null = null;
 
   const getToken: AuthObject["getToken"] = async (tokenOptions) => {
     if (!options.secretKey || !options.apiUrl) return null;
-    if (!currentSessionId) return null;
+    if (!currentSessionId || !presentedToken) return null;
     const path = `/v1/sessions/${currentSessionId}/tokens${tokenOptions?.template ? `/${encodeURIComponent(tokenOptions.template)}` : ""}`;
     const doFetch = options.fetch ?? fetch;
     const response = await doFetch(`${options.apiUrl.replace(/\/+$/, "")}${path}`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${options.secretKey}`, Accept: "application/json" },
+      // Proves the caller holds the session being refreshed; a bare secret key cannot mint a user's session.
+      headers: { Authorization: `Bearer ${options.secretKey}`, Accept: "application/json", "X-OrbitID-Session-Token": presentedToken },
     });
     if (!response.ok) return null;
     const body = (await response.json()) as { jwt?: string } | null;
@@ -139,6 +141,7 @@ export async function authenticateRequest(request: Request, options: Authenticat
     // Tokens are issued by the Frontend API, so that URL (explicit or from the publishable key) is the expected issuer.
     const claims = await verifyToken(token, { ...options, issuer: options.issuer ?? publishableKeyUrl(options) ?? frontendApiUrl(options) ?? undefined });
     currentSessionId = claims.sid;
+    presentedToken = token;
     return {
       status: "signed-in",
       token,

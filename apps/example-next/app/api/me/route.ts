@@ -9,6 +9,8 @@ export async function GET() {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  // Only the fields this endpoint is meant to expose. `sessionClaims` also holds custom claims and the raw
+  // token metadata, which belong to the server's auth layer, not to an API response.
   return NextResponse.json({
     userId: session.userId,
     sessionId: session.sessionId,
@@ -17,6 +19,6 @@ export async function GET() {
     orgSlug: session.orgSlug,
     orgPermissions: session.orgPermissions,
     sessionStatus: session.sessionStatus,
-    sessionClaims: session.sessionClaims,
+    canManageMembers: session.has({ permission: "org:sys_memberships:manage" }),
   });
 }

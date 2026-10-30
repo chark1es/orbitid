@@ -135,7 +135,8 @@ describe("jwt template CRUD", () => {
 
   it("rejects reserved claims and out-of-range options", async () => {
     const { api } = await testApp();
-    for (const claim of ["sub", "iss", "exp", "azp", "sid", "act", "org_id", "org_role"]) {
+    // `roles` / `role_permissions` are the instance-role claims: a template must not be able to grant one.
+    for (const claim of ["sub", "iss", "exp", "azp", "sid", "act", "org_id", "org_role", "org_permissions", "roles", "role_permissions", "fva", "sts", "anonymous"]) {
       const res = await api("POST", "/v1/jwt_templates", { name: `t-${claim}`, claims: { [claim]: "x" } });
       expect(res.status).toBe(422);
       expect((await json<ErrorBody>(res)).errors[0]!.code).toBe("form_param_value_invalid");

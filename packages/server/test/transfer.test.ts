@@ -1,7 +1,7 @@
 // SQLite <-> Postgres data transfer: round-trips through spawned CLI processes, because one process can
 // only ever hold one dialect's schema. The side that is not the test's dialect is an embedded Postgres
 // (see support/global-postgres.ts); without it these tests skip with a clear message.
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import EmbeddedPostgres from "embedded-postgres";
@@ -199,6 +199,24 @@ afterAll(async () => {
 }, 120_000);
 
 describe("database transfer", () => {
+  it("labels an export with the current journal and recognises exports that predate later tables", async () => {
+    const { schemaVersion, exportPredates } = await import("../src/services/transfer");
+    const { dialect } = await import("../src/db/dialect");
+    const version = schemaVersion();
+    expect(version, "schemaVersion must read drizzle/<dialect>/meta/_journal.json").toMatch(new RegExp(`^${dialect}:\\d+:\\w+$`));
+    const migrations = Number(version.split(":")[1]);
+    expect(migrations).toBeGreaterThan(0);
+    // Later integrity migrations do not change when the table itself was introduced.
+    const journal = JSON.parse(readFileSync(new URL(`../drizzle/${dialect}/meta/_journal.json`, import.meta.url), "utf8")) as { entries: { tag: string }[] };
+    const introduced = journal.entries.findIndex((entry) => entry.tag.endsWith("_user_roles")) + 1;
+    expect(introduced).toBeGreaterThan(0);
+    expect(exportPredates("user_roles", `${dialect}:${introduced - 1}:previous`)).toBe(true);
+    expect(exportPredates("user_roles", `${dialect}:${introduced}:introduced`)).toBe(false);
+    expect(exportPredates("user_roles", version)).toBe(false);
+    // Tables that are not in the map are never claimed to be missing.
+    expect(exportPredates("users", `${dialect}:0:ancient`)).toBe(false);
+  });
+
   it("derives a foreign-key-safe table order and leaves ephemeral tables out", async () => {
     const { tableOrder, SKIPPED_TABLES } = await import("../src/services/transfer");
     const order = tableOrder();
@@ -252,6 +270,8 @@ describe("database transfer", () => {
     const header = JSON.parse(lines[0]!) as { orbitid_export: number; dialect: string; tables: string[]; key_check: string; schema_version: string };
     expect(header.orbitid_export).toBe(1);
     expect(header.dialect).toBe("sqlite");
+    // The header must name the real journal the export came from; `unknown` would hide schema drift on import.
+    expect(header.schema_version).toMatch(/^sqlite:\d+:\w+$/);
     expect(header.tables).toContain("users");
     expect(header.tables).toContain("webhook_deliveries");
     expect(header.tables).toContain("audit_logs");

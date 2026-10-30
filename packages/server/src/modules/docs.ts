@@ -2,14 +2,14 @@
  * `GET /docs` and `GET /v1/openapi.json`.
  *
  * The spec is generated from `src/openapi` at request time (it is cheap and always matches the code). The docs page
- * is a single HTML file plus one stylesheet and one script served from `/docs/assets/*`, so it works under a strict
- * CSP with `script-src 'self'` and `style-src 'self'`: no CDN, no inline handlers, no `eval`.
+ * is a single HTML file plus a stylesheet and a small JavaScript module graph served from `/docs/assets/*`, so it works
+ * under a strict CSP with `script-src 'self'` and `style-src 'self'`: no CDN, no inline handlers, no `eval`.
  */
 import { Hono } from "hono";
 import type { Context } from "hono";
 import type { AppContext } from "../context";
 import { buildOpenApi } from "../openapi";
-import { DOCS_CSS, DOCS_HTML, DOCS_JS } from "./docs-assets/assets";
+import { DOCS_ASSETS, DOCS_HTML } from "./docs-assets/assets";
 
 const SECURITY_HEADERS = {
   "x-content-type-options": "nosniff",
@@ -43,17 +43,13 @@ export default function routes(ctx: AppContext) {
     return c.html(DOCS_HTML);
   });
 
-  app.get("/docs/assets/viewer.css", (c) => {
-    for (const [name, value] of Object.entries(SECURITY_HEADERS)) c.header(name, value);
-    c.header("cache-control", "public, max-age=300");
-    return c.body(DOCS_CSS, 200, { "content-type": "text/css; charset=utf-8" });
-  });
-
-  app.get("/docs/assets/viewer.js", (c) => {
-    for (const [name, value] of Object.entries(SECURITY_HEADERS)) c.header(name, value);
-    c.header("cache-control", "public, max-age=300");
-    return c.body(DOCS_JS, 200, { "content-type": "text/javascript; charset=utf-8" });
-  });
+  for (const [name, asset] of Object.entries(DOCS_ASSETS)) {
+    app.get(`/docs/assets/${name}`, (c) => {
+      for (const [header, value] of Object.entries(SECURITY_HEADERS)) c.header(header, value);
+      c.header("cache-control", "public, max-age=300");
+      return c.body(asset.body, 200, { "content-type": asset.contentType });
+    });
+  }
 
   return app;
 }

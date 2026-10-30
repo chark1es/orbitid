@@ -9,7 +9,7 @@ import { serializeMembership, serializeOrganization } from "../serializers";
 import { serializeOrganizationDomain, serializeOrganizationInvitation } from "../modules/orgs/serializers";
 import { deleteLogoFile } from "../modules/orgs/assets";
 import { emailDomain, normalizeEmail } from "./org-domains";
-import { ADMIN_ROLE_KEY, MEMBER_ROLE_KEY, SYSTEM_PERMISSIONS, SYSTEM_ROLES, isAdminRole, permissionsForRole, roleByKey } from "./rbac";
+import { ADMIN_ROLE_KEY, MEMBER_ROLE_KEY, SYSTEM_PERMISSIONS, SYSTEM_ROLES, assertOrganizationRole, isAdminRole, permissionsForRole, roleByKey } from "./rbac";
 import { emitEvent } from "./webhooks";
 import { first } from "../lib/db";
 
@@ -22,6 +22,7 @@ export const INVITATION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** Role + permissions for user in org, or null if not a member. Used when minting session JWTs (org_id, org_role, org_permissions, org_slug). */
 export async function getMembershipContext(ctx: AppContext, userId: string, orgId: string): Promise<null | { id: string; orgId: string; slug: string | null; role: string; permissions: string[] }> {
+  if (!ctx.settings.get().organizations.enabled) return null;
   const membership = first(await ctx.db
       .select()
       .from(s.organizationMemberships)
@@ -299,8 +300,8 @@ export interface CreateInvitationInput {
 export async function createOrganizationInvitation(ctx: AppContext, input: CreateInvitationInput): Promise<{ invitation: InvitationRow; ticket: string }> {
   const email = normalizeEmail(input.email);
   const roleKey = input.roleKey ?? await defaultRoleKey(ctx);
-  const role = await roleByKey(ctx, roleKey);
-  if (!role) throw new OrbitError(422, ErrorCodes.org_role_not_found, `Role ${roleKey} does not exist`, { param_name: "role" });
+  // Invitations grant a membership, so the role must be an organization role (never an instance role).
+  await assertOrganizationRole(ctx, roleKey);
   const member = first(await ctx.db
       .select()
       .from(s.organizationMemberships)

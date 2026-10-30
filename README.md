@@ -27,15 +27,15 @@ You write `useUser`, `useAuth`, `<SignIn />`, `<UserButton />`, `auth()` and `ha
 | Area | Status |
 |---|---|
 | Email + password, username, phone identifiers | ✅ |
-| Email code, magic link ("email link"), SMS code | ✅ Email through Resend or SMTP; SMS via Twilio, webhook, or console |
+| Email code, magic link ("email link"), SMS code | ✅ Email through Resend or SMTP; SMS via Twilio or an HTTPS webhook; no console/file fallback |
 | Social OAuth (Google, GitHub, GitLab, Discord, Microsoft, Apple, Facebook, X, LinkedIn, Slack, Twitch, Spotify, …) + custom OIDC providers | ✅ |
 | Passkeys (WebAuthn) | ✅ tested end to end with a software authenticator |
 | MFA: TOTP authenticator, backup codes, SMS, email code, trusted devices | ✅ |
 | Anonymous (guest) accounts that upgrade in place | ✅ |
 | Password policy, HIBP breach check, lockout, rate limiting, CAPTCHA (Turnstile / hCaptcha) | ✅ |
-| Multi-session, session reverification, impersonation (actor tokens), sign-in tokens | ✅ |
+| Multi-session and session reverification | ✅; operator impersonation and sign-in-token minting are refused |
 | User profile: emails, phones, connected accounts, password, devices, delete account | ✅ |
-| Organizations: roles, custom roles and permissions, invitations, verified domains, membership requests, suggestions | ✅ |
+| Organizations: roles, invitations, verified domains, membership requests, suggestions; instance-wide custom roles also work without organizations | ✅ |
 | Allowlist, blocklist, waitlist, invitations, restricted sign-up | ✅ |
 | JWT templates with shortcodes and custom signing keys | ✅ |
 | Webhooks (Svix-compatible signing, retries, delivery log) | ✅ |
@@ -49,7 +49,7 @@ You write `useUser`, `useAuth`, `<SignIn />`, `<UserButton />`, `auth()` and `ha
 
 ## Quick start
 
-With Docker, see [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md): `docker compose up -d` starts Postgres and OrbitID, prints your keys, and serves the dashboard at `http://localhost:4000`.
+With Docker, see [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md): `docker compose up -d` starts Postgres and OrbitID, reports the dashboard URL and publishable key, and serves the dashboard at `http://localhost:4000`.
 
 From source (Bun for installing and scripts, Node 20 to run the server because the SQLite driver is a native addon):
 
@@ -57,7 +57,9 @@ From source (Bun for installing and scripts, Node 20 to run the server because t
 bun install
 export ORBITID_DATABASE_URL=postgres://user:password@localhost:5432/orbitid   # omit to use a local SQLite file
 export ORBITID_ENCRYPTION_KEY="$(openssl rand -base64 32)"   # required with Postgres; keep the same value across restarts
-bun run dev:server          # http://localhost:4000, prints your publishable and secret keys
+bun run dev:server          # http://localhost:4000; startup prints no secret key
+# In another terminal, explicitly print the keys for this same instance/environment:
+bun run --filter @orbitid/server start keys
 bun run dev:dashboard       # http://localhost:5173, proxies the API; sign in with the secret key
 ```
 
@@ -68,7 +70,7 @@ cp playground/.env.example playground/.env.local   # paste the keys from the ser
 bun run --filter orbitid-playground dev            # http://localhost:3300
 ```
 
-In the dashboard, open **Authentication** to choose identifiers and strategies, **Organizations** to turn organizations on, and **Social connections** to add provider credentials.
+In the dashboard, configure **Email & SMS** and send a test before enabling email/phone verification or sign-in. Then use **Authentication** to choose identifiers and strategies, **Organizations** to turn organizations on, and **Social connections** to add provider credentials. Missing required fields or provider configuration are refused by the server. **Roles & permissions** supports instance roles even when organizations are off.
 
 ## Use it in Next.js
 
@@ -163,7 +165,16 @@ Environment variables are split by where they go: **SERVER** (the machine runnin
 ```bash
 bun run typecheck   # every workspace
 bun run test        # every workspace (vitest)
+bun run test:maintenance # repository guard tests (Node)
+bun run check:files  # maintained text: at most 500 lines and 32 KiB per file
+bun run check:docs   # local Markdown link targets
 ```
+
+Maintained code, tests, scripts and Markdown must stay within both file-size limits. Split by responsibility;
+do not compress code to satisfy the check. Generated OpenAPI JSON, Drizzle migrations/snapshots, build output,
+lockfiles and binary assets keep their required formats and are exempt. Keep public entry points stable when
+extracting modules. Run the affected package tests and typechecks after refactoring, both server database
+suites after database/auth changes, and regenerate `docs/openapi.json` after API changes.
 
 ## Documentation
 
@@ -172,6 +183,7 @@ bun run test        # every workspace (vitest)
 | Run it yourself | [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md), [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md), [docs/DATA_MOVE.md](docs/DATA_MOVE.md) |
 | HTTP API | [docs/API.md](docs/API.md), the live reference at `/docs`, and [docs/openapi.json](docs/openapi.json) |
 | Security | [docs/SECURITY.md](docs/SECURITY.md) |
+| Roles and permissions | [docs/RBAC.md](docs/RBAC.md) |
 | Email | [docs/EMAIL.md](docs/EMAIL.md) |
 | Sign-in features | [docs/AUTH_FEATURES.md](docs/AUTH_FEATURES.md), [docs/PASSKEYS.md](docs/PASSKEYS.md), [docs/HANDSHAKE.md](docs/HANDSHAKE.md) |
 | Identity provider and federation | [docs/OIDC.md](docs/OIDC.md), [docs/FEDERATION.md](docs/FEDERATION.md) |

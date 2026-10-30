@@ -11,7 +11,6 @@ export type UserAdminAction =
   | "lock"
   | "unlock"
   | "delete"
-  | "reset-mfa"
   | "revoke-sessions";
 
 /**
@@ -48,7 +47,6 @@ export function useUserAdmin(userId: string, options: { onDeleted?: () => void }
     unban: () => run("unban", () => api("POST", `/users/${userId}/unban`), "User unbanned"),
     lock: () => run("lock", () => api("POST", `/users/${userId}/lock`), "User locked"),
     unlock: () => run("unlock", () => api("POST", `/users/${userId}/unlock`), "User unlocked"),
-    resetMfa: () => run("reset-mfa", () => api("DELETE", `/users/${userId}/mfa`), "MFA reset — authenticator and backup codes removed"),
     deleteUser: async () => {
       const result = await run("delete", () => api("DELETE", `/users/${userId}`), "User deleted");
       if (result !== undefined) options.onDeleted?.();
