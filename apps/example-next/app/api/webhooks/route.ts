@@ -4,7 +4,10 @@ import { verifyWebhook, WebhookVerificationError } from "@orbitid/nextjs/webhook
 export async function POST(request: Request) {
   try {
     const event = await verifyWebhook(request);
-    console.log(`[webhook] ${event.type}`, event.data);
+    // Log the envelope only. `event.data` carries user emails, metadata and session details, so echoing it
+    // would copy personal data into the server log on every delivery.
+    const id = typeof (event.data as { id?: unknown } | null)?.id === "string" ? (event.data as { id: string }).id : undefined;
+    console.log(`[webhook] ${event.type}${id ? ` ${id}` : ""}`);
     return NextResponse.json({ received: true, type: event.type });
   } catch (error) {
     if (error instanceof WebhookVerificationError) {

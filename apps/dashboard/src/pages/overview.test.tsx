@@ -7,6 +7,8 @@ import OverviewPage from "./overview";
 
 const USER: UserJSON = {
   object: "user",
+  roles: [],
+  role_permissions: [],
   id: "user_1",
   external_id: null,
   username: "ada",

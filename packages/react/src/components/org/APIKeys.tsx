@@ -100,7 +100,11 @@ const rowFromResource = (key: ApiKeyResource): ApiKeyRow => {
 /** API keys: list, create (one-time secret reveal), revoke. */
 export function APIKeys(props: APIKeysProps) {
   return (
-    <OrgRoot appearance={props.appearance} className={props.className}>
+    <OrgRoot
+      appearance={props.appearance}
+      className={props.className}
+      requiresOrganizations={props.type === "organization"}
+    >
       <APIKeysView {...props} />
     </OrgRoot>
   );

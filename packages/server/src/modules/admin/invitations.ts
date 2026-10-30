@@ -57,16 +57,13 @@ export async function createInvitation(ctx: AppContext, input: CreateInvitationI
 
   await emitEvent(ctx, "invitation.created", { ...serializeInvitation(row), url });
   if (input.notify !== false) {
-    try {
-      await sendEmail(ctx, {
-        to: email,
-        template: input.emailTemplate ?? "invitation",
-        vars: { invitation_url: url, app_name: ctx.settings.get().application.name },
-      });
-    } catch (err) {
-      // Email delivery problems must not fail the API call (the dashboard can copy the link instead).
-      console.error("[invitations] failed to send invitation email", err);
-    }
+    // `sendEmail` reports a delivery problem instead of throwing, so the API call still succeeds (the dashboard
+    // can copy the link). It is never narrated to the console: the invitation URL is a sign-up credential.
+    await sendEmail(ctx, {
+      to: email,
+      template: input.emailTemplate ?? "invitation",
+      vars: { invitation_url: url, app_name: ctx.settings.get().application.name },
+    });
   }
   await audit(ctx, { actor: "secret_key", action: "invitation.created", targetType: "invitation", targetId: row.id, metadata: { email_address: email } });
   return { row, url };

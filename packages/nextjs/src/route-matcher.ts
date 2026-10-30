@@ -115,7 +115,15 @@ export function createRouteMatcher(patterns: RouteMatcherParam): RouteMatcher {
   const list = Array.isArray(patterns) ? patterns : [patterns];
   const compiled = list.map((pattern) => {
     if (typeof pattern === "function") return pattern;
-    if (pattern instanceof RegExp) return (req: RouteMatcherRequest) => pattern.test(pathnameOf(req));
+    if (pattern instanceof RegExp) {
+      // `RegExp.prototype.test` advances `lastIndex` on a global/sticky regex, so a caller-supplied
+      // `/^\/admin(\/|$)/g` would answer true/false alternately for the same path and skip protection
+      // on every other request. Match without state.
+      const source = pattern.source;
+      const flags = pattern.flags.replace(/[gy]/g, "");
+      const regex = new RegExp(source, flags);
+      return (req: RouteMatcherRequest) => regex.test(pathnameOf(req));
+    }
     const regex = compileRoutePattern(pattern);
     return (req: RouteMatcherRequest) => regex.test(pathnameOf(req));
   });

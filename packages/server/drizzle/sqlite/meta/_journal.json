@@ -50,6 +50,20 @@
       "when": 1793267527961,
       "tag": "0006_operator_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1793329424645,
+      "tag": "0007_user_roles",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1793384520224,
+      "tag": "0008_authorization_integrity",
+      "breakpoints": true
     }
   ]
 }

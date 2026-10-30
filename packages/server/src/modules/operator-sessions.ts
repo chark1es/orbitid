@@ -9,8 +9,7 @@ import { COOKIES, ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../context";
 import { parseBody } from "../lib/http";
 import { clientIp } from "../lib/http";
-import { hit } from "../lib/rate-limit";
-import { logSafe } from "../lib/security";
+import { assertNotBlocked, hit } from "../lib/rate-limit";
 import { safeEqual } from "../lib/crypto";
 import { audit } from "../services/audit";
 import { OPERATOR_KEY_MAX_FAILURES, OPERATOR_KEY_WINDOW_MS, clearOperatorCookie, findOperatorSession, issueOperatorSession, operatorCookieOriginAllowed, revokeOperatorSession, setOperatorCookie } from "../services/operator-session";
@@ -42,9 +41,9 @@ export default function routes(ctx: AppContext) {
 
     // A wrong key is rate limited exactly like a wrong bearer token, against the same per-address budget:
     // the key is a root credential, and presenting it in two places must not double the guessing budget.
+    await assertNotBlocked(ctx, `secret_key_failure:${clientIp(c)}`, OPERATOR_KEY_MAX_FAILURES);
     if (!safeEqual(body.secret_key.trim(), ctx.env.secretKey)) {
       await hit(ctx, `secret_key_failure:${clientIp(c)}`, OPERATOR_KEY_MAX_FAILURES, OPERATOR_KEY_WINDOW_MS);
-      console.warn(`[auth] rejected dashboard key exchange from ${logSafe(clientIp(c))}`);
       throw new OrbitError(401, ErrorCodes.secret_key_invalid, "Invalid secret key");
     }
 

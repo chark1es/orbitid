@@ -50,7 +50,7 @@ export function UserActivityTab({ user }: { user: UserJSON }) {
         <ActivityBoard
           rows={[]}
           emptyTitle="No activity recorded"
-          emptyHint="Sessions and changes to this user appear here. Impersonation and admin actions are recorded too."
+          emptyHint="Sessions and changes to this user appear here. Admin actions are recorded too."
         />
       ) : (
         <div className="overflow-hidden rounded-[4px] border border-border bg-card">

@@ -52,14 +52,18 @@ export interface HasCheckParams {
 export interface HasCheckContext {
   orgRole?: string | null;
   orgPermissions?: string[] | null;
+  /** Instance-wide role keys (`app:...`) from the token's `roles` claim. */
+  roles?: string[] | null;
+  /** Permissions granted by those instance roles (`role_permissions`). */
+  rolePermissions?: string[] | null;
   fva?: [number, number] | null;
 }
 
 function includesPermission(granted: string[], requested: string): boolean {
   return granted.some((permission) => {
     if (permission === requested) return true;
+    // A grant of `org:team:*` covers every `org:team:`-prefixed request it names.
     if (permission.endsWith(":*")) return requested.startsWith(permission.slice(0, -1));
-    if (requested.endsWith(":*")) return permission.startsWith(requested.slice(0, -1));
     return false;
   });
 }
@@ -68,20 +72,41 @@ function includesPermission(granted: string[], requested: string): boolean {
  * Role/permission check shared by `session.has()`, `organizationMembership` helpers and the UI.
  * Supports system permissions (`org:sys_*`), custom `org:feature:permission`, wildcards (`org:team:*`)
  * and reverification presets.
+ *
+ * Two role namespaces stay independent: the active organization membership (`org_role` +
+ * `org_permissions`) and instance-wide roles assigned by an operator (`roles` + `role_permissions`).
+ * `{ role }` and `{ permission }` match either namespace so a caller does not have to know which one the
+ * operator used; `{ feature }` stays organization-scoped, as on the server.
+ *
+ * At least one check must be asked for: `has({})` is an empty question, and answering it `true` would let a
+ * caller that built its parameters from missing data render an admin control to a signed-out user.
  */
 export function createHasCheck(context: HasCheckContext): (check: HasCheckParams) => boolean {
   return (check) => {
+    if (
+      check.role === undefined &&
+      check.permission === undefined &&
+      check.feature === undefined &&
+      check.reverification === undefined
+    ) {
+      return false;
+    }
     if (check.reverification && !checkReverification(context.fva ? { firstFactor: context.fva[0], secondFactor: context.fva[1] } : null, check.reverification)) {
       return false;
     }
     if (check.role !== undefined) {
       const roles = Array.isArray(check.role) ? check.role : [check.role];
-      if (!context.orgRole || !roles.includes(context.orgRole)) return false;
+      const owned = new Set(context.roles ?? []);
+      if (context.orgRole) owned.add(context.orgRole);
+      if (!roles.some((role) => owned.has(role))) return false;
     }
     if (check.permission !== undefined && !check.feature) {
       const permissions = Array.isArray(check.permission) ? check.permission : [check.permission];
-      const granted = context.orgPermissions ?? [];
-      if (!permissions.every((permission) => includesPermission(granted, permission))) return false;
+      const orgGranted = context.orgPermissions ?? [];
+      const instanceGranted = context.rolePermissions ?? [];
+      if (!permissions.every((permission) => includesPermission(orgGranted, permission) || includesPermission(instanceGranted, permission))) {
+        return false;
+      }
     }
     if (check.feature) {
       const feature = check.feature.startsWith("org:") ? check.feature : `org:${check.feature}`;

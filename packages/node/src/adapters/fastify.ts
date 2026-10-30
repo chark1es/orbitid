@@ -1,5 +1,6 @@
 import type { AuthContext } from "../auth-context";
-import type { HeaderValue, RequestLike } from "../request";import {
+import type { HeaderValue, RequestLike } from "../request";
+import {
   authUnavailable,
   forbidden,
   forbiddenRole,

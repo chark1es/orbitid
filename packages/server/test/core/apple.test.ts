@@ -91,11 +91,25 @@ describe("Apple client secret", () => {
     await enableApple(ctx, { clientSecret: "pre-generated-secret" });
     expect(await appleClientSecret(configFor(ctx))).toBe("pre-generated-secret");
 
-    await enableApple(ctx, { clientSecret: "", appleTeamId: TEAM_ID, appleKeyId: KEY_ID, applePrivateKey: "not-a-key" });
-    await expect(appleClientSecret(configFor(ctx))).rejects.toThrow(/valid ES256/);
+    // Presence is checked at save time (a provider with no secret and no key is inert and refused)...
+    await expect(enableApple(ctx, { clientSecret: "", appleTeamId: "", appleKeyId: "", applePrivateKey: "" }))
+      .rejects.toMatchObject({ status: 422 });
+    expect(ctx.settings.get().social.apple!.clientSecret).toBe("pre-generated-secret");
 
-    await enableApple(ctx, { clientSecret: "", appleTeamId: "", appleKeyId: "", applePrivateKey: "" });
-    await expect(appleClientSecret(configFor(ctx))).rejects.toThrow(/needs a client secret/);
+    // ...while the key's cryptographic shape is checked when a secret is actually needed.
+    resetAppleClientSecretCache();
+    const malformed = {
+      ...ctx,
+      settings: { get: () => ({ ...ctx.settings.get(), social: { apple: { enabled: true, clientId: CLIENT_ID, clientSecret: "", scopes: ["name", "email"], appleTeamId: TEAM_ID, appleKeyId: KEY_ID, applePrivateKey: "not-a-key" } } }) },
+    } as unknown as typeof ctx;
+    await expect(appleClientSecret(configFor(malformed))).rejects.toThrow(/valid ES256/);
+
+    // The same guard covers a tree an older version stored (or a direct database edit).
+    const empty = {
+      ...ctx,
+      settings: { get: () => ({ ...ctx.settings.get(), social: { apple: { enabled: true, clientId: CLIENT_ID, clientSecret: "", scopes: ["name", "email"] } } }) },
+    } as unknown as typeof ctx;
+    await expect(appleClientSecret(configFor(empty))).rejects.toThrow(/needs a client secret/);
   });
 
   it("does not share a cached secret between different keys", async () => {

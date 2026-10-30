@@ -17,7 +17,6 @@ export { OrbitIdAPIError, isOrbitIdAPIError } from "./errors";
 export { camelizeDeep, snakeizeDeep, camelCaseKey, snakeCaseKey } from "./case";
 export type { Camelize, CamelCaseKey, SnakeCaseKey } from "./case";
 export type {
-  ActorToken,
   AllowlistIdentifier,
   ApiKey,
   AuditLog,
@@ -50,6 +49,7 @@ export type {
   Stats,
   TestingToken,
   User,
+  UserRoles,
   VerifyPasswordResult,
   VerifyTOTPResult,
   WaitlistEntry,

@@ -1,4 +1,4 @@
-import { COOKIES, type SessionClaims } from "@orbitid/shared";
+import { COOKIES } from "@orbitid/shared";
 import {
   AUTH_REASONS,
   authStateFromHeaders,
@@ -26,7 +26,11 @@ export async function resolveRequestAuthState(
   const forwarded = authStateFromHeaders(headers);
 
   if (forwarded) {
+    // Only a `signed-in` state carries a token, and it is verified like any other. A forwarded `signed-in`
+    // without one is a contradiction (and would be attacker-supplied on a route the middleware does not
+    // cover): it is reported as signed out rather than as an authenticated request with no session.
     if (forwarded.status !== "signed-in" || !forwarded.token) {
+      if (forwarded.status === "signed-in") return signedOut(url, "no-token");
       return { ...forwarded, url };
     }
     // The header may have been set by the client on a path the middleware does not cover, so the
@@ -70,7 +74,9 @@ export async function resolveRequestAuthState(
   if ((result.reason === "expired" || result.reason === "invalid") && uatActive) {
     return handshake(url, result.reason === "expired" ? AUTH_REASONS.expiredToken : AUTH_REASONS.invalidToken);
   }
-  return signedOut(url, result.reason, result.message, result.claims ?? null);
+  // Never forward claims from a token that did not verify: they are attacker-controlled text and callers
+  // that read `sessionClaims` would otherwise see a `sub`/`org_role` the signature never backed.
+  return signedOut(url, result.reason, result.message);
 }
 
 function handshake(url: string, reason: string): RequestAuthState {
@@ -81,7 +87,6 @@ function signedOut(
   url: string,
   reason: "no-token" | "expired" | "invalid" | "no-key" | "unauthorized-party",
   message?: string,
-  claims: SessionClaims | null = null,
 ): RequestAuthState {
   const mapped =
     reason === "no-token"
@@ -93,5 +98,7 @@ function signedOut(
           : reason === "unauthorized-party"
             ? AUTH_REASONS.unauthorizedParty
             : AUTH_REASONS.invalidToken;
-  return { status: "signed-out", token: null, claims, reason: mapped, message, url };
+  // Signed out means no token and no claims. A caller reading `sessionId`/`sessionClaims` must not see
+  // values copied out of an unverified JWT.
+  return { status: "signed-out", token: null, claims: null, reason: mapped, message, url };
 }

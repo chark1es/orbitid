@@ -65,6 +65,24 @@ export function parseOrderBy(raw: string | undefined, columns: Record<string, An
 
 export const normalizeEmail = (value: string) => value.trim().toLowerCase();
 
+/**
+ * Refuses an operator-initiated mutation of an existing user's sign-in material.
+ *
+ * A secret-key holder is an administrator of the instance, not of a user's account. Replacing a password,
+ * installing or clearing a second factor, verifying an address, or moving/deleting an identifier would let the
+ * operator sign in as that user (or lock them out) through the application, which is impersonation with extra
+ * steps. The same mutations remain available to the user from their own authenticated session, where the
+ * instance's reverification and possession checks apply.
+ */
+export function refuseUserCredentialMutation(what: string, selfService: string): never {
+  throw new OrbitError(
+    403,
+    ErrorCodes.not_allowed_access,
+    `The Backend API cannot ${what} for an existing user: an operator credential must not become a user's sign-in ` +
+      `credential or second factor. The user can do this from their own signed-in session (${selfService}).`,
+  );
+}
+
 export async function getUserOrThrow(ctx: AppContext, id: string): Promise<typeof s.users.$inferSelect> {
   const user = first(await ctx.db.select().from(s.users).where(eq(s.users.id, id)));
   if (!user) throw new OrbitError(404, ErrorCodes.resource_not_found, "User not found.", { param_name: "user_id" });

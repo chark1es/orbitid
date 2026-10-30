@@ -53,12 +53,13 @@ Contexts: `OrbitIDContext`, `ClientContext`, `SessionContext`, `UserContext`,
 | Hook | Returns |
 |---|---|
 | `useOrbitID()` | the SDK instance |
-| `useAuth()` | `{ isLoaded, isSignedIn, userId, sessionId, actor, orgId, orgRole, orgSlug, orgPermissions, sessionClaims, sessionStatus, has, getToken, signOut }` |
+| `useAuth()` | `{ isLoaded, isSignedIn, userId, sessionId, actor, orgId, orgRole, orgSlug, orgPermissions, roles, rolePermissions, sessionClaims, sessionStatus, has, getToken, signOut }` |
 | `useUser()` | `{ isLoaded, isSignedIn, user }` |
 | `useSession()` | `{ isLoaded, isSignedIn, session }` |
 | `useSessionList()` | `{ isLoaded, sessions, setActive, signOut }` |
 | `useSignIn()` / `useSignUp()` | `{ isLoaded, signIn \| signUp, setActive }` |
 | `useOrganization(params)` | `{ isLoaded, organization, membership, memberships, invitations, domains, membershipRequests, apiKeys }` |
+| `useOrganizationsEnabled()` | `boolean`: whether the instance has organizations on. The prebuilt organization components lock themselves (the switcher hides) while it is `false`; use it to hide your own links. |
 | `useOrganizationList(params)` | `{ isLoaded, userMemberships, userInvitations, userSuggestions, setActive, createOrganization }` |
 | `useReverification(fetcher)` | wrapped fetcher that handles `session_reverification_required` |
 | `useOrbitIDStatus()` | `{ isLoaded, isSignedIn, status: "loading" \| "signed-in" \| "signed-out" }` |
@@ -134,8 +135,8 @@ import { enUS, de, type LocalizationResource } from "@orbitid/react";
 
 `t(path, vars)` interpolates `{{placeholders}}` (unknown placeholders stay visible), resolves
 active locale → `enUS` → the dot-path, and `useLocalizations()` exposes `locale`/`resource`.
-`enUS` is the only English dictionary: `enUS.ts` holds the base strings and the component copy in
-`componentStrings.ts`, both merged into one lookup table. Partial locales fall back per key.
+`enUS` is the English dictionary entry point. It composes the base strings and component-copy section modules
+under `localization/` into one lookup table. Partial locales fall back per key.
 `TranslationKey` is the union of dot paths in that dictionary; the prebuilt components type their
 translate function with it, so a missing key is a compile error.
 
@@ -231,3 +232,5 @@ on the SDK instance. `onComplete` replaces the redirect when the host app handle
 ../../node_modules/.bin/vitest run       # jsdom, src/**/*.test.{ts,tsx}
 ../../node_modules/.bin/tsc -p tsconfig.json
 ```
+
+Instance roles (`app:...`) work without an organization. `useAuth()` exposes `roles` and `rolePermissions` from the session token, and `has({ role: "app:support" })` or `has({ permission: "app:reports:read" })` checks those grants. Organization checks (`org:...`) use the active membership separately. These browser checks control UI visibility; enforce authorization on the server using verified tokens. Assign roles through the operator Backend API, never through profile metadata.

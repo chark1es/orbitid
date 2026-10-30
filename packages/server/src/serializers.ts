@@ -5,6 +5,7 @@ import type {
 import type { AppContext } from "./context";
 import * as s from "./db/schema";
 import { first } from "./lib/db";
+import { roleClaimsForUser } from "./services/user-roles";
 
 type UserRow = typeof s.users.$inferSelect;
 /** Low-chroma tints, so a list of people reads as one set instead of a rainbow. */
@@ -68,6 +69,7 @@ export async function serializeUser(ctx: AppContext, u: UserRow, opts: { backend
   const st = ctx.settings.get();
   const lockedNow = u.locked && (!u.lockoutExpiresAt || u.lockoutExpiresAt > Date.now());
   const name = [u.firstName, u.lastName].filter(Boolean).join(" ") || u.username || emails[0]?.email || u.id;
+  const instanceRoles = await roleClaimsForUser(ctx, u.id);
   const json: UserJSON = {
     object: "user", id: u.id, external_id: u.externalId, username: u.username, first_name: u.firstName, last_name: u.lastName,
     image_url: u.imageUrl ?? DEFAULT_AVATAR(name), has_image: u.hasImage,
@@ -80,6 +82,7 @@ export async function serializeUser(ctx: AppContext, u: UserRow, opts: { backend
     banned: u.banned, locked: lockedNow, lockout_expires_in_seconds: lockedNow && u.lockoutExpiresAt ? Math.ceil((u.lockoutExpiresAt - Date.now()) / 1000) : null,
     verification_attempts_remaining: Math.max(0, st.mfa.maxAttempts - u.failedAttempts),
     delete_self_enabled: u.deleteSelfEnabled, create_organization_enabled: u.createOrganizationEnabled, create_organizations_limit: u.createOrganizationsLimit,
+    roles: instanceRoles.roles, role_permissions: instanceRoles.permissions,
     last_sign_in_at: u.lastSignInAt, last_active_at: u.lastActiveAt, legal_accepted_at: u.legalAcceptedAt, created_at: u.createdAt, updated_at: u.updatedAt,
   };
   if (opts.backend) json.private_metadata = u.privateMetadata;

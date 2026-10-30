@@ -127,8 +127,10 @@ async function main() {
   console.log(`\n  OrbitID is running at ${ctx.env.baseUrl}`);
   console.log(`  Dashboard       : ${(await import("node:fs")).existsSync(dashboard) ? ctx.env.baseUrl : "not built (run: bun run --filter @orbitid/dashboard build)"}`);
   console.log(`  Publishable key : ${ctx.publishableKey}`);
-  // Logs are widely readable, so a production instance shows only the end of the secret key.
-  console.log(`  Secret key      : ${ctx.env.nodeEnv === "production" ? `${ctx.env.secretKey.slice(0, 8)}…${ctx.env.secretKey.slice(-4)} (print it with: keys)` : ctx.env.secretKey}`);
+  // The secret key is never printed by `start`, in any environment: startup output is captured by process
+  // managers, container logs and terminal scrollback, and a root credential in that stream outlives the process.
+  // Writing it deliberately is a separate, explicit command whose output the operator asks for.
+  console.log(`  Secret key      : hidden. Print it with: orbitid keys`);
   console.log(`  JWKS            : ${ctx.env.baseUrl}/.well-known/jwks.json`);
   for (const line of describeDatabase(ctx.database.label, ctx.database.driver)) console.log(line);
   for (const line of emailStartupWarnings(ctx)) console.log(line);

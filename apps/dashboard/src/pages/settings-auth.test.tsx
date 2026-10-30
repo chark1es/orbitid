@@ -83,3 +83,54 @@ describe("session settings", () => {
     expect(screen.getByRole("button", { name: /save changes/i }).hasAttribute("disabled")).toBe(true);
   });
 });
+
+describe("authentication settings: unusable combinations", () => {
+  it("blocks saving a required attribute that is switched off, and says which one", async () => {
+    mockApi({
+      instance: instanceBody((settings) => {
+        settings.attributes.phoneNumber.enabled = false;
+        settings.attributes.phoneNumber.required = true;
+      }),
+    });
+    renderPage(<AuthPage />);
+
+    const messages = await screen.findAllByText("Phone number is required but turned off. Turn it on, or make it optional.");
+    expect(messages.length).toBeGreaterThan(0);
+    // Make the draft dirty, so a disabled button can only mean the problem is blocking it.
+    fireEvent.click(await screen.findByRole("switch", { name: /Allow anonymous sign-ups/ }));
+    expect((screen.getByRole("button", { name: /save changes/i }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("turning an attribute off also makes it optional, so no hidden requirement is saved", async () => {
+    const calls = mockApi({
+      instance: instanceBody((settings) => {
+        settings.attributes.phoneNumber.enabled = true;
+        settings.attributes.phoneNumber.required = true;
+      }),
+    });
+    renderPage(<AuthPage />);
+
+    fireEvent.click(await screen.findByRole("switch", { name: /Enable Phone number/ }));
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+    await waitFor(() => {
+      expect(calls.find((call) => call.method === "PATCH")?.body).toEqual({
+        attributes: { phoneNumber: { enabled: false, required: false } },
+      });
+    });
+  });
+
+  it("blocks saving when email, the only way to sign in, loses its verification and password is off", async () => {
+    mockApi({
+      instance: instanceBody((settings) => {
+        settings.attributes.password.enabled = false;
+        settings.attributes.password.required = false;
+        settings.attributes.emailAddress.verifications = [];
+        settings.attributes.emailAddress.verifyAtSignUp = false;
+      }),
+    });
+    renderPage(<AuthPage />);
+
+    expect(await screen.findAllByText(/Users would have no way to sign in/)).not.toHaveLength(0);
+  });
+});

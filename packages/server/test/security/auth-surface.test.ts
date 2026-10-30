@@ -46,8 +46,8 @@ describe("Backend API secret key", () => {
     }
     expect(statuses.filter((s) => s === 401).length).toBeGreaterThan(0);
     expect(statuses).toContain(429);
-    // The correct key still works: the lockout is on the failing client, not on the instance.
-    expect((await app.request("/secret", { headers: { authorization: `Bearer ${SECRET_KEY}` } })).status).toBe(200);
+    // The address is locked out before comparing even a subsequently correct key.
+    expect((await app.request("/secret", { headers: { authorization: `Bearer ${SECRET_KEY}` } })).status).toBe(429);
     expect(ctx.settings.get().security.rateLimitEnabled).toBe(true);
   });
 

@@ -95,6 +95,11 @@ export function useOrgSettings(): OrgEnvironmentSettings {
   return useMemo(() => readOrgSettings(instance.environment), [instance.environment]);
 }
 
+/** Whether the instance has organizations turned on. Use it to hide your own organization links and menus. */
+export function useOrganizationsEnabled(): boolean {
+  return useOrgSettings().enabled;
+}
+
 // ---------------------------------------------------------------------------------------------
 // User-side organization data
 // ---------------------------------------------------------------------------------------------

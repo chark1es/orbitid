@@ -1,3 +1,4 @@
+import { trimCache } from "./trimCache";
 /**
  * In-flight de-duplication and a short-lived response cache for the list endpoints the
  * organization components read.
@@ -55,6 +56,7 @@ export function cachedRequest<T>(
     (value) => {
       if (entries.get(key)?.promise === promise) {
         entries.set(key, { value, at: Date.now(), promise: null });
+        trimCache(entries, FRESH_MS);
       }
       return value;
     },
@@ -63,7 +65,8 @@ export function cachedRequest<T>(
       throw error;
     },
   );
-  entries.set(key, { value: existing?.value, at: existing?.at ?? 0, promise });
+  entries.set(key, { value: existing?.value, at: Date.now(), promise });
+  trimCache(entries, FRESH_MS);
   return promise;
 }
 

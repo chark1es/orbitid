@@ -28,6 +28,9 @@ export const DEFAULT_AFTER_SIGN_UP_URL = "/";
 export const DEFAULT_API_URL = "http://localhost:4000";
 export const JWKS_PATH = "/.well-known/jwks.json";
 
+/** C0 control characters and DEL, which browsers drop or truncate in a URL and so change what it means. */
+const UNSAFE_URL_CHARS = /[\u0000-\u001f\u007f]/;
+
 /** Literal reads: keep these so Next.js can statically inline them into the client bundle. */
 function readPublicEnvLiteral(): Record<string, string | undefined> {
   return {
@@ -180,8 +183,32 @@ export function getServerEnv(overrides: ServerEnvOverrides = {}): ResolvedServer
 
 /** Resolve a (possibly relative) app URL against the current origin. */
 export function toAbsoluteUrl(url: string, origin: string): string {
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) return url;
-  return new URL(url, origin).toString();
+  const base = new URL(origin);
+  const fallback = new URL("/", base).toString();
+  // An absolute URL is a configured value (sign-in page on another host), so it is used as given — but only
+  // over http(s): `javascript:`, `data:` and friends must never be handed to `NextResponse.redirect`, and a
+  // URL carrying credentials must not become the redirect target.
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) {
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return fallback;
+      if (parsed.username || parsed.password) return fallback;
+      return url;
+    } catch {
+      return fallback;
+    }
+  }
+  // Control characters are dropped or reinterpreted by the URL parser (`\t`, `\n`) and `\` is read as `/`,
+  // so `/\evil.test` and `/<TAB>/evil.test` become protocol-relative. Resolve first, then insist the result
+  // is still this origin — a string-prefix check cannot see that.
+  if (UNSAFE_URL_CHARS.test(url)) return fallback;
+  try {
+    const resolved = new URL(url, base);
+    if (resolved.origin !== base.origin) return fallback;
+    return resolved.toString();
+  } catch {
+    return fallback;
+  }
 }
 
 /** Build a sign-in/sign-up URL carrying `redirect_url`, the parameter the sign-in page reads. */

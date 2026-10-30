@@ -54,4 +54,14 @@ describe("CrossTabSync", () => {
     sync.close();
     setItem.mockRestore();
   });
+
+  it("never writes a session token to localStorage", () => {
+    vi.stubGlobal("BroadcastChannel", undefined);
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
+    const sync = new CrossTabSync(() => undefined);
+    sync.broadcast({ type: "token", sessionId: "sess_1", template: null, token: "secret-jwt" });
+    expect(setItem).not.toHaveBeenCalled();
+    sync.close();
+    setItem.mockRestore();
+  });
 });

@@ -7,6 +7,8 @@ import UsersPage from "./users";
 
 const USER: UserJSON = {
   object: "user",
+  roles: [],
+  role_permissions: [],
   id: "user_1",
   external_id: null,
   username: "ada",

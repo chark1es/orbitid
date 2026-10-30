@@ -1,20 +1,19 @@
-import { useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button, Skeleton, Tabs, TabsContent } from "@orbitid/ui";
-import { ArrowLeft, Ghost, Loader2, UserRound } from "lucide-react";
+import { ArrowLeft, Ghost, UserRound } from "lucide-react";
 import type { UserJSON } from "@orbitid/shared";
 import { useApi } from "../lib/api";
 import { errorMessage } from "../lib/errors";
+import { useShowOrganizations } from "../lib/features";
 import { primaryEmail, userLabel } from "../lib/format";
-import { useImpersonate } from "../lib/impersonation";
 import { StatusBadge } from "../components/shared/status-badge";
 import { UserAvatar } from "../components/shared/user-avatar";
 import { EmptyState } from "../components/shared/empty-state";
 import { CopyButton } from "../components/shared/copy-button";
-import { ConfirmDialog } from "../components/shared/confirm-dialog";
 import { TabStrip } from "../components/shared/tab-strip";
 import { UserRowActions } from "../components/users/user-row-actions";
+import { UserRolesTab } from "../components/users/user-roles-tab";
 import { UserProfileTab } from "../components/users/user-profile-tab";
 import { UserIdentifiersTab } from "../components/users/user-identifiers-tab";
 import { UserSecurityTab } from "../components/users/user-security-tab";
@@ -32,6 +31,7 @@ const TABS = [
   { value: "sessions", label: "Sessions" },
   { value: "devices", label: "Trusted devices" },
   { value: "organizations", label: "Organizations" },
+  { value: "roles", label: "Roles" },
   { value: "metadata", label: "Metadata" },
   { value: "activity", label: "Activity" },
   { value: "danger", label: "Danger zone" },
@@ -44,11 +44,11 @@ export default function UserDetailPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const impersonate = useImpersonate();
-  const [confirmImpersonate, setConfirmImpersonate] = useState(false);
 
+  const showOrganizations = useShowOrganizations();
+  const tabs = showOrganizations ? TABS : TABS.filter((entry) => entry.value !== "organizations");
   const tabParam = searchParams.get("tab") as TabValue | null;
-  const tab: TabValue = TABS.some((entry) => entry.value === tabParam) ? (tabParam as TabValue) : "profile";
+  const tab: TabValue = tabs.some((entry) => entry.value === tabParam) ? (tabParam as TabValue) : "profile";
 
   const userQuery = useApi<UserJSON>(["user", id], `/users/${id}`, { enabled: !!id });
   const user = userQuery.data;
@@ -151,15 +151,6 @@ export default function UserDetailPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setConfirmImpersonate(true)}
-            disabled={impersonate.pending}
-          >
-            {impersonate.pending ? <Loader2 className="animate-spin" aria-hidden /> : <UserRound aria-hidden />}
-            Impersonate
-          </Button>
           <UserRowActions user={user} onDeleted={() => navigate("/users", { replace: true })} />
         </div>
       </header>
@@ -180,7 +171,7 @@ export default function UserDetailPage() {
       ) : null}
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabStrip tabs={TABS} />
+        <TabStrip tabs={tabs} />
 
         <TabsContent value="profile">
           <UserProfileTab key={`profile-${user.updated_at}`} user={user} onUpdated={refresh} />
@@ -197,9 +188,12 @@ export default function UserDetailPage() {
         <TabsContent value="devices">
           <UserTrustedDevices userId={user.id} />
         </TabsContent>
-        <TabsContent value="organizations">
-          <UserOrganizationsTab user={user} onUpdated={refresh} />
-        </TabsContent>
+        {showOrganizations ? (
+          <TabsContent value="organizations">
+            <UserOrganizationsTab user={user} onUpdated={refresh} />
+          </TabsContent>
+        ) : null}
+        <TabsContent value="roles"><UserRolesTab user={user} /></TabsContent>
         <TabsContent value="metadata">
           <UserMetadataTab key={`metadata-${user.updated_at}`} user={user} onUpdated={refresh} />
         </TabsContent>
@@ -210,18 +204,6 @@ export default function UserDetailPage() {
           <UserDangerTab user={user} onDeleted={() => navigate("/users", { replace: true })} />
         </TabsContent>
       </Tabs>
-
-      <ConfirmDialog
-        open={confirmImpersonate}
-        onOpenChange={setConfirmImpersonate}
-        title={`Impersonate ${userLabel(user)}?`}
-        description="OrbitID opens your application in a new tab with a session for this user. Your dashboard stays signed in, and their own sessions are untouched."
-        confirmLabel="Open as this user"
-        onConfirm={() => {
-          setConfirmImpersonate(false);
-          void impersonate.impersonate(user.id);
-        }}
-      />
     </>
   );
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { WEBHOOK_EVENT_TYPES, defaultInstanceSettings } from "@orbitid/shared";
 import {
   SAMPLE_TEMPLATE_CONTEXT,
+  attributeProblems,
   buildSettingsPatch,
   emailFromError,
   groupWebhookEvents,
@@ -188,6 +189,7 @@ describe("JWT template shortcodes", () => {
 
   it("reports reserved claims that the server will reject", () => {
     expect(reservedJwtClaimErrors({ email: "{{user.primary_email_address}}" })).toEqual([]);
+    expect(reservedJwtClaimErrors({ roles: ["app:admin"], role_permissions: ["app:users:delete"] })).toHaveLength(2);
     expect(reservedJwtClaimErrors({ sub: "x", org_role: "org:admin", custom: true })).toEqual([
       '"sub" is reserved and cannot be set by a template.',
       '"org_role" is reserved and cannot be set by a template.',
@@ -217,6 +219,10 @@ describe("webhook event grouping", () => {
 describe("role and permission keys", () => {
   it("accepts custom role keys", () => {
     expect(roleKeyError("org:billing")).toBeNull();
+    expect(roleKeyError("app:support")).toBeNull();
+    expect(permissionKeyError("app:reports:read")).toBeNull();
+    expect(roleKeyError("app:sys_admin")).toMatch(/reserved/);
+    expect(permissionKeyError("app:sys_users:read")).toMatch(/reserved/);
     expect(roleKeyError("org:team-lead")).toBeNull();
     expect(roleKeyError("org:support_2")).toBeNull();
   });
@@ -317,5 +323,68 @@ describe("list helpers", () => {
     expect(humanDuration(60)).toBe("1 minute");
     expect(humanDuration(0)).toBe("disabled");
     expect(textToList("read:users, write:users\nadmin")).toEqual(["read:users", "write:users", "admin"]);
+  });
+});
+
+describe("attributeProblems", () => {
+  const settings = () => defaultInstanceSettings();
+
+  it("accepts the default sign-in setup", () => {
+    expect(attributeProblems(settings())).toEqual([]);
+  });
+
+  it("refuses a required attribute that is switched off", () => {
+    const draft = settings();
+    draft.attributes.phoneNumber.enabled = false;
+    draft.attributes.phoneNumber.required = true;
+    expect(attributeProblems(draft)).toEqual([
+      expect.objectContaining({ attribute: "phoneNumber", message: expect.stringContaining("required but turned off") }),
+    ]);
+  });
+
+  it("refuses verification at sign-up with no way to verify", () => {
+    const draft = settings();
+    draft.attributes.emailAddress.verifications = [];
+    expect(attributeProblems(draft)).toEqual([
+      expect.objectContaining({ attribute: "emailAddress", message: expect.stringContaining("no verification method") }),
+    ]);
+  });
+
+  it("refuses SMS as a second factor when phone numbers are off", () => {
+    const draft = settings();
+    draft.attributes.phoneNumber.enabled = false;
+    draft.attributes.phoneNumber.usedForSecondFactor = true;
+    expect(attributeProblems(draft).map((problem) => problem.attribute)).toEqual(["phoneNumber"]);
+  });
+
+  it("refuses an instance nobody can sign in to", () => {
+    const draft = settings();
+    draft.attributes.emailAddress.usedForFirstFactor = false;
+    expect(attributeProblems(draft)).toEqual([
+      expect.objectContaining({ attribute: null, message: expect.stringContaining("no way to sign in") }),
+    ]);
+  });
+
+  it("counts a verification method, a passkey, a social connection or guests as a way in", () => {
+    const withoutPassword = settings();
+    withoutPassword.attributes.password.enabled = false;
+    withoutPassword.attributes.password.required = false;
+    expect(attributeProblems(withoutPassword)).toEqual([]);
+
+    const passkeyOnly = settings();
+    passkeyOnly.attributes.emailAddress.usedForFirstFactor = false;
+    passkeyOnly.attributes.passkey.enabled = true;
+    passkeyOnly.attributes.passkey.usedForFirstFactor = true;
+    expect(attributeProblems(passkeyOnly)).toEqual([]);
+
+    const socialOnly = settings();
+    socialOnly.attributes.emailAddress.usedForFirstFactor = false;
+    socialOnly.social.google = { enabled: true, clientId: "id", clientSecret: "s", scopes: [], authenticatableAtSignIn: true };
+    expect(attributeProblems(socialOnly)).toEqual([]);
+
+    const guestsOnly = settings();
+    guestsOnly.attributes.emailAddress.usedForFirstFactor = false;
+    guestsOnly.anonymous.enabled = true;
+    expect(attributeProblems(guestsOnly)).toEqual([]);
   });
 });

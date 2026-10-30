@@ -26,6 +26,8 @@ export interface NavItem {
   title: string;
   href: string;
   icon: LucideIcon;
+  /** Hidden from the rail and the command palette while that feature is turned off for the instance. */
+  requires?: "organizations";
 }
 
 export interface NavGroup {
@@ -39,7 +41,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Manage",
     items: [
       { title: "Users", href: "/users", icon: Users },
-      { title: "Organizations", href: "/organizations", icon: Building2 },
+      { title: "Organizations", href: "/organizations", icon: Building2, requires: "organizations" },
       { title: "Sessions", href: "/sessions", icon: MonitorSmartphone },
     ],
   },
@@ -103,3 +105,11 @@ export const ROUTE_LABELS: Record<string, string> = {
 };
 
 export const ALL_NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap((group) => group.items);
+
+/** Nav groups without the entries whose feature is off. Groups left empty are dropped. */
+export function visibleNavGroups(features: { organizations: boolean }): NavGroup[] {
+  return NAV_GROUPS.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => item.requires !== "organizations" || features.organizations),
+  })).filter((group) => group.items.length > 0);
+}

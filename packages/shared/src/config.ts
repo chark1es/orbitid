@@ -141,7 +141,7 @@ export const instanceSettingsSchema = z.object({
     from: z.string().default("OrbitID <no-reply@localhost>"),
     /**
      * How mail leaves the server. `auto` uses Resend when an API key is set, else SMTP when a URL is set, else
-     * prints to the server log (development). Environment variables ORBITID_RESEND_API_KEY / ORBITID_SMTP_URL /
+     * refuses delivery. There is no console or file transport. Environment variables ORBITID_RESEND_API_KEY / ORBITID_SMTP_URL /
      * ORBITID_EMAIL_FROM fill these in when the setting is empty.
      */
     provider: z.enum(["auto", "console", "smtp", "resend"]).default("auto"),

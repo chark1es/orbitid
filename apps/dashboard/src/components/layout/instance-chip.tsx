@@ -4,7 +4,7 @@ import { Button } from "@orbitid/ui";
 import { toast } from "sonner";
 import { getApiUrl } from "../../lib/api";
 import { databaseLabel, fetchInstanceHealth, type InstanceHealth } from "../../lib/instance-health";
-import { useCopyToClipboard } from "../../lib/hooks";
+import { useCopyToClipboard, useFlash } from "../../lib/hooks";
 
 function hostOf(url: string): string {
   try {
@@ -20,7 +20,7 @@ export function InstanceChip({ className }: { className?: string }) {
   const copy = useCopyToClipboard();
   const [health, setHealth] = useState<InstanceHealth | null>(null);
   const [unreachable, setUnreachable] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copied, flashCopied] = useFlash(1500);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -67,9 +67,8 @@ export function InstanceChip({ className }: { className?: string }) {
             toast.error("Could not copy the API URL");
             return;
           }
-          setCopied(true);
+          flashCopied();
           toast.success("API URL copied");
-          setTimeout(() => setCopied(false), 1500);
         }}
       >
         {copied ? <Check aria-hidden /> : <Copy aria-hidden />}

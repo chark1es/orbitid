@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { InstanceSettings } from "@orbitid/shared";
-import { API_URL, getApiUrl, useApi } from "./api";
+import { API_URL, getApiUrl } from "./api";
+import { SETTINGS_QUERY_KEY, fetchInstanceSettings } from "../pages/_config/data";
 
 export interface HealthJSON {
   status: string;
@@ -23,11 +24,15 @@ export function useHealth() {
   return useQuery({ queryKey: ["health", getApiUrl()], queryFn: fetchHealth, staleTime: 60_000, retry: 1 });
 }
 
+/**
+ * Instance settings, normalized exactly as the settings editor does. Both read the same query key, so they must
+ * store the same shape: a raw response here would leave the editor and the navigation disagreeing about it.
+ */
 export function useInstance() {
-  return useApi<InstanceSettings>(["instance"], "/instance");
+  return useQuery<InstanceSettings>({ queryKey: SETTINGS_QUERY_KEY, queryFn: fetchInstanceSettings, staleTime: 15_000 });
 }
 
-/** App origin that impersonation/`sign_in_token` URLs redirect to. */
+/** App origin that `sign_in_token` URLs redirect to. */
 export function homeUrlOf(instance: InstanceSettings | undefined): string | undefined {
   const home = instance?.application?.homeUrl;
   return home && home.trim() ? home : undefined;

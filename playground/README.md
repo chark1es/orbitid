@@ -9,13 +9,15 @@ This site is not for production. It exposes the Backend API actions it is config
 Run these from the repository root.
 
 ```bash
-# 1. Start the server. It prints a publishable key and a secret key once.
+# 1. Start the server. It prints the public URL and publishable key, never the secret key.
 bun run --filter @orbitid/server start
 
 # 2. Create the environment file.
 cp playground/.env.example playground/.env.local
 
-# 3. Paste the printed keys into playground/.env.local, then start the test site.
+# 3. In another terminal, retrieve the keys explicitly for the same instance/environment.
+bun run --filter @orbitid/server start keys
+# Put the keys in playground/.env.local, then start the test site.
 bun run --filter orbitid-playground dev
 ```
 
@@ -43,7 +45,7 @@ The publishable key carries the Frontend API URL, so `ORBITID_API_URL` is option
 | Page | What it exercises |
 | --- | --- |
 | `/` | Connection state and a feature matrix built from `GET /v1/client/environment`, plus mail, OIDC provider, trusted-device, guest and handshake rows read with the secret key. Social providers start a real sign-in. |
-| `/sign-in`, `/sign-up` | Prebuilt `SignIn` and `SignUp` with path routing. A `__orbit_ticket` query parameter signs in as the ticket's user. |
+| `/sign-in`, `/sign-up` | Prebuilt `SignIn` and `SignUp` with path routing. Operator-minted sign-in links are not supported. |
 | `/guest` | `signUp.createAnonymous()` makes a guest session, `useUser().isAnonymous` and the `anonymous` claim are read back, and the same account is upgraded in place by verifying an email address. |
 | `/device` | Device authorization grant (RFC 8628): registers or picks an OAuth application through the Backend API, starts `POST /oauth/device_authorization` from the server, shows the code and link, and polls the token endpoint. |
 | `/account` | Prebuilt `UserProfile`: profile, emails, connected accounts, password, passkeys, MFA, sessions and trusted devices. |
@@ -53,9 +55,12 @@ The publishable key carries the Frontend API URL, so `ORBITID_API_URL` is option
 | `/inspector` | `useAuth`, `useUser`, `useSession`, the decoded session JWT with a countdown, `getToken({ template })`, a `has()` tester, sessions, trusted devices and an activity board. Sessions that skipped their second factor on a trusted device are marked. |
 | `/api-lab` | Calls `/api/public`, `/api/whoami` and `/api/admin` with and without a bearer token, plus `/api/handshake`, `/api/device` (discovery, probe, start) and `/api/email-test`. Shows status, headers and body. |
 | `/webhooks` | Svix signature verification, the last 100 received events, endpoint registration, a test event, deliveries. |
-| `/seed` | Creates users and an organization through the Backend API, creates sign-in links, lists and deletes the users it made. |
+| `/seed` | Creates users and an organization through the Backend API, then lists and deletes the users it made. Seeded users must complete a normal sign-in. |
 
 The middleware protects `/account`, `/organizations`, `/api-keys` and `/inspector`. `/`, `/sign-in`, `/sign-up`, `/guest`, `/device` and the lab pages stay public so a signed-out test is possible.
+
+Organization widgets and routes remain locked while organizations are disabled. User API keys stay available
+without an organization. Light/dark mode applies to both the site shell and embedded authentication widgets.
 
 ## Tests and checks
 

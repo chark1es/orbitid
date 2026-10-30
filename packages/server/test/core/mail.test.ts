@@ -1,6 +1,6 @@
+// Email settings, the instance test endpoint, template escaping and the "no secret leaves the server" guarantee.
+import { readdirSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createApp } from "../../src/app";
-import { createContext } from "../../src/bootstrap";
 import { loadEnv } from "../../src/env";
 import {
   clearMailOutbox,
@@ -12,59 +12,15 @@ import {
   resolveEmailTransport,
   sendEmail,
   sendTestEmail,
+  setMailTransport,
   setResendEndpointForTests,
 } from "../../src/services/mail";
-import { errorsOf, testClient } from "./helpers";
-import { codeIn, linkIn, rawHeaders, readableMessage, startFakeResend, startFakeSmtp } from "../support/fake-mail";
-
-const SECRET = "sk_test_testsecret";
-const RESEND_KEY = "re_live_test_key_do_not_leak";
+import * as s from "../../src/db/schema";
+import { errorsOf } from "./helpers";
+import { codeIn, readableMessage, startFakeResend } from "../support/fake-mail";
+import { RESEND_KEY, instance } from "./mail-helpers";
 
 afterEach(() => setResendEndpointForTests(null));
-
-async function instance(overrides: Parameters<typeof createContext>[0] = {}) {
-  const ctx = await createContext({
-    databaseUrl: ":memory:",
-    secretKey: SECRET,
-    baseUrl: "http://localhost:4000",
-    nodeEnv: "test",
-    ...overrides,
-  });
-  clearMailOutbox();
-  const app = createApp(ctx);
-  const api = (method: string, path: string, body?: unknown) =>
-    app.request(path, {
-      method,
-      headers: { authorization: `Bearer ${SECRET}`, ...(body === undefined ? {} : { "content-type": "application/json" }) },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-  return { ctx, app, api };
-}
-
-/** Verified user created through the Backend API, so sign-in flows do not need an email first. */
-async function verifiedUser(api: (method: string, path: string, body?: unknown) => Response | Promise<Response>, email: string) {
-  const res = await api("POST", "/v1/users", { email_address: [email], password: "Sup3rSecret!" });
-  if (res.status !== 200) throw new Error(`create user failed: ${res.status} ${await res.text()}`);
-  return (await res.json()) as { id: string; email_addresses: { email_address: string; id: string }[] };
-}
-
-/** Runs an `email_code` first-factor sign-in and returns the completed session, using `readCode` for the delivered code. */
-async function signInWithEmailCode(app: ReturnType<typeof createApp>, email: string, readCode: () => string) {
-  const client = testClient(app);
-  const created = await client.json<{ response: { id: string; status: string } }>("/v1/client/sign_ins", { body: { identifier: email } });
-  expect(created.response.status).toBe("needs_first_factor");
-  await client.json(`/v1/client/sign_ins/${created.response.id}/prepare_first_factor`, { body: { strategy: "email_code" } });
-  const code = readCode();
-  expect(code).toMatch(/^\d{6}$/);
-  const done = await client.json<{ response: { status: string; created_session_id: string } }>(
-    `/v1/client/sign_ins/${created.response.id}/attempt_first_factor`,
-    { body: { strategy: "email_code", code } },
-  );
-  expect(done.response.status).toBe("complete");
-  return done.response.created_session_id;
-}
-
-const pathOf = (link: string) => { const url = new URL(link); return `${url.pathname}${url.search}`; };
 
 describe("email settings", () => {
   it("accepts smtp(s) URLs and rejects anything else", () => {
@@ -132,10 +88,13 @@ describe("email settings", () => {
     // An explicit provider wins over what is configured.
     await ctx.settings.update({ email: { provider: "console" } });
     expect(resolveEmailTransport(ctx).provider).toBe("console");
-    await ctx.settings.update({ email: { provider: "smtp", smtpUrl: "" } });
-    expect(() => resolveEmailTransport(ctx)).toThrow(/smtp/i);
-    await ctx.settings.update({ email: { provider: "resend", resendApiKey: "" } });
-    expect(() => resolveEmailTransport(ctx)).toThrow(/API key/i);
+    // Naming a provider without its credential is refused at save time (the server could never deliver).
+    await expect(ctx.settings.update({ email: { provider: "smtp", smtpUrl: "" } })).rejects.toMatchObject({ status: 422 });
+    await expect(ctx.settings.update({ email: { provider: "resend", resendApiKey: "" } })).rejects.toMatchObject({ status: 422 });
+    expect(ctx.settings.get().email.provider).toBe("console");
+    // The resolver still reports the same problem for a tree an older version stored.
+    expect(() => resolveEmailTransport({ ...ctx, settings: { get: () => ({ ...ctx.settings.get(), email: { ...ctx.settings.get().email, provider: "smtp", smtpUrl: "" } }) } } as typeof ctx)).toThrow(/smtp/i);
+    expect(() => resolveEmailTransport({ ...ctx, settings: { get: () => ({ ...ctx.settings.get(), email: { ...ctx.settings.get().email, provider: "resend", resendApiKey: "" } }) } } as typeof ctx)).toThrow(/API key/i);
   });
 
   it("reads the email fallbacks from the environment", () => {
@@ -156,241 +115,85 @@ describe("email settings", () => {
     }
   });
 
-  it("never prints sign-in codes in production unless the operator opts in", async () => {
-    const production = await instance({ nodeEnv: "production", encryptionKey: "k".repeat(40), baseUrl: "https://auth.example.com" });
+  it("never prints or persists a sign-in code when no provider is configured", async () => {
+    // A development instance is the interesting case: it is where a "helpful" console transport used to exist.
+    const development = await instance({ nodeEnv: "development" });
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    delete process.env.ORBITID_ALLOW_CONSOLE_EMAIL;
-    // The test seam would bypass delivery; clear it so the real console path runs.
-    await sendEmail(production.ctx, { to: "ada@example.com", template: "verification_code", vars: { code: "424242" } });
+    const dir = readdirSync(development.ctx.env.dataDir, { recursive: true }).length;
+
+    await sendEmail(development.ctx, { to: "ada@example.com", template: "verification_code", vars: { code: "424242" } });
     expect(log.mock.calls.flat().join("\n")).not.toContain("424242");
-    await expect(sendTestEmail(production.ctx, "ada@example.com")).rejects.toThrow(/not configured/i);
+    // Nothing was written either: a plaintext code on disk is the same leak with a longer half-life.
+    expect(readdirSync(development.ctx.env.dataDir, { recursive: true }).length).toBe(dir);
+    await expect(sendTestEmail(development.ctx, "ada@example.com")).rejects.toMatchObject({ code: "email_not_configured" });
     log.mockRestore();
   });
 
-  it("warns loudly in production when mail goes to the console", async () => {
-    const production = await instance({ nodeEnv: "production", encryptionKey: "k".repeat(40), baseUrl: "https://auth.example.com" });
-    let warning = emailStartupWarnings(production.ctx).join("\n");
+  it("warns in production and development when no provider is configured", async () => {
+    const production = await instance({ nodeEnv: "production", secretKey: "sk_test_production_0123456789abcdef", encryptionKey: "k".repeat(40), baseUrl: "https://auth.example.com" });
+    const warning = emailStartupWarnings(production.ctx).join("\n");
     expect(warning).toContain("EMAIL IS NOT CONFIGURED");
-    expect(warning).toContain("ORBITID_RESEND_API_KEY");
-    process.env.ORBITID_ALLOW_CONSOLE_EMAIL = "true";
-    try {
-      warning = emailStartupWarnings(production.ctx).join("\n");
-    } finally {
-      delete process.env.ORBITID_ALLOW_CONSOLE_EMAIL;
-    }
-    expect(warning).toContain("EMAIL IS PRINTED TO THIS LOG");
-    expect(warning).toContain("Sign-in codes");
     expect(warning).toContain("ORBITID_RESEND_API_KEY");
     expect(warning).toContain("ORBITID_SMTP_URL");
     expect(warning).toContain("docs/EMAIL.md");
+    // There is no opt-in that turns the log into a delivery channel any more.
+    expect(warning).not.toContain("PRINTED");
 
     const development = await instance({ nodeEnv: "development" });
-    expect(emailStartupWarnings(development.ctx).join("\n")).toContain("console");
-    expect(emailStartupWarnings(development.ctx).join("\n")).not.toContain("!!");
+    expect(emailStartupWarnings(development.ctx).join("\n")).toContain("EMAIL IS NOT CONFIGURED");
 
     await production.ctx.settings.update({ email: { provider: "smtp", smtpUrl: "smtps://user:secret-pass@mail.example.com:465" } });
     const smtpLine = emailStartupWarnings(production.ctx).join("\n");
     expect(smtpLine).toContain("mail.example.com");
     expect(smtpLine).not.toContain("secret-pass");
   });
-});
 
-describe("Resend transport", () => {
-  it("delivers a sign-in code through Resend and the code completes sign-in", async () => {
-    const resend = await startFakeResend();
-    setResendEndpointForTests(resend.url);
-    const { ctx, app, api } = await instance();
-    await ctx.settings.update({ email: { provider: "resend", resendApiKey: RESEND_KEY, from: "Acme <no-reply@acme.test>" } });
-    await verifiedUser(api, "resend-code@example.com");
-
-    await signInWithEmailCode(app, "resend-code@example.com", () => codeIn(readableMessage(resend.requests.find((r) => /verification code$/.test(r.body.subject ?? ""))!.body.text ?? ""))!);
-
-    // The new-sign-in notification arrives after the code, so pick the code email by its subject.
-    const codeRequest = resend.requests.find((r) => /verification code$/.test(r.body.subject ?? ""));
-    const code = codeIn(readableMessage(codeRequest!.body.text ?? ""))!;
-    expect(codeRequest!.authorization).toBe(`Bearer ${RESEND_KEY}`);
-    expect(codeRequest!.contentType).toContain("application/json");
-    expect(codeRequest!.body.from).toBe(`"Acme" <no-reply@acme.test>`);
-    expect(codeRequest!.body.to).toBe("resend-code@example.com");
-    expect(codeRequest!.body.subject).toBe(`${code} is your OrbitID App verification code`);
-    expect(codeRequest!.body.html).toContain(code);
-    expect(codeRequest!.body.text).toContain(code);
-    await resend.close();
-  });
-
-  it("delivers a magic link through Resend and the link completes sign-in", async () => {
-    const resend = await startFakeResend();
-    setResendEndpointForTests(resend.url);
-    const { ctx, app, api } = await instance();
-    await ctx.settings.update({ email: { provider: "resend", resendApiKey: RESEND_KEY, from: "no-reply@acme.test" } });
-    await verifiedUser(api, "resend-link@example.com");
-
-    const client = testClient(app);
-    const created = await client.json<{ response: { id: string } }>("/v1/client/sign_ins", {
-      body: { identifier: "resend-link@example.com", strategy: "email_link" },
-    });
-    await client.json(`/v1/client/sign_ins/${created.response.id}/prepare_first_factor`, { body: { strategy: "email_link" } });
-
-    const link = linkIn(readableMessage(resend.last()!.body.text ?? ""))!;
-    expect(link).toContain("/v1/verify?token=");
-    const landing = await client.request(pathOf(link));
-    expect(landing.status).toBe(302);
-    expect(landing.headers.get("location")).toContain("__orbit_status=verified");
-    const done = await client.json<{ response: { status: string; created_session_id: string } }>(`/v1/client/sign_ins/${created.response.id}`);
-    expect(done.response.status).toBe("complete");
-    expect(done.response.created_session_id).toMatch(/^sess_/);
-    await resend.close();
-  });
-
-  it("verifies a sign-up email through Resend", async () => {
-    const resend = await startFakeResend();
-    setResendEndpointForTests(resend.url);
-    const { ctx, app } = await instance();
-    await ctx.settings.update({ email: { provider: "resend", resendApiKey: RESEND_KEY, from: "Acme <no-reply@acme.test>" } });
-
-    const client = testClient(app);
-    const created = await client.json<{ response: { id: string } }>("/v1/client/sign_ups", {
-      body: { email_address: "resend-signup@example.com", password: "Sup3rSecret!" },
-    });
-    await client.json(`/v1/client/sign_ups/${created.response.id}/prepare_verification`, { body: { strategy: "email_code" } });
-    const code = codeIn(readableMessage(resend.last()!.body.text ?? ""))!;
-    const done = await client.json<{ response: { status: string; created_session_id: string } }>(
-      `/v1/client/sign_ups/${created.response.id}/attempt_verification`,
-      { body: { strategy: "email_code", code } },
-    );
-    expect(done.response.status).toBe("complete");
-    expect(done.response.created_session_id).toMatch(/^sess_/);
-    await resend.close();
-  });
-
-  it("reports a safe error without the API key and with the body truncated", async () => {
-    const longBody = `${RESEND_KEY} ${"x".repeat(400)}`;
-    const resend = await startFakeResend({ status: 500, responseBody: `{"message":"boom ${longBody}"}` });
-    setResendEndpointForTests(resend.url);
-    const { ctx, api } = await instance();
-    await ctx.settings.update({ email: { provider: "resend", resendApiKey: RESEND_KEY, from: "no-reply@acme.test" } });
-
-    const res = await api("POST", "/v1/instance/email_test", { to: "ops@example.com" });
-    expect(res.status).toBe(502);
-    const body = (await res.json()) as { errors: { code: string; message: string }[] };
-    expect(body.errors[0]!.code).toBe("email_delivery_failed");
-    expect(body.errors[0]!.message).not.toContain(RESEND_KEY);
-    expect(body.errors[0]!.message).toContain("[redacted]");
-    // Everything after the fixed prefix is capped at 300 characters of provider text.
-    expect(body.errors[0]!.message.length).toBeLessThan(360);
-    await resend.close();
-  });
-});
-
-describe("SMTP transport", () => {
-  it("delivers a sign-in code with intact headers and the code completes sign-in", async () => {
-    const smtp = await startFakeSmtp();
-    const { ctx, app, api } = await instance();
-    await ctx.settings.update({ email: { provider: "smtp", smtpUrl: smtp.url, from: "Acme <no-reply@acme.test>" } });
-    await verifiedUser(api, "smtp-code@example.com");
-
-    const codeMessage = () =>
-      smtp.messages.find((m) => /verification code/.test(rawHeaders(m.raw).find((h) => h.name.toLowerCase() === "subject")?.value ?? ""))!;
-    await signInWithEmailCode(app, "smtp-code@example.com", () => codeIn(readableMessage(codeMessage().raw))!);
-
-    const message = codeMessage();
-    expect(message.recipients).toEqual(["smtp-code@example.com"]);
-    expect(message.mailFrom).toBe("no-reply@acme.test");
-    const headers = rawHeaders(message.raw);
-    expect(headers.filter((h) => h.name.toLowerCase() === "from")).toHaveLength(1);
-    expect(headers.filter((h) => h.name.toLowerCase() === "to")).toHaveLength(1);
-    expect(headers.filter((h) => h.name.toLowerCase() === "subject")).toHaveLength(1);
-    expect(headers.find((h) => h.name.toLowerCase() === "from")!.value).toContain("no-reply@acme.test");
-    expect(headers.find((h) => h.name.toLowerCase() === "subject")!.value).toMatch(/^\d{6} is your .* verification code$/);
-    await smtp.close();
-  });
-
-  it("delivers a magic link that completes sign-in, and rejects a bad scheme", async () => {
-    const smtp = await startFakeSmtp();
-    const { ctx, app, api } = await instance();
-    await ctx.settings.update({ email: { provider: "smtp", smtpUrl: smtp.url, from: "no-reply@acme.test" } });
-    await verifiedUser(api, "smtp-link@example.com");
-
-    const client = testClient(app);
-    const created = await client.json<{ response: { id: string } }>("/v1/client/sign_ins", {
-      body: { identifier: "smtp-link@example.com", strategy: "email_link" },
-    });
-    await client.json(`/v1/client/sign_ins/${created.response.id}/prepare_first_factor`, { body: { strategy: "email_link" } });
-    const link = linkIn(readableMessage(smtp.last()!.raw))!;
-    const landing = await client.request(pathOf(link));
-    expect(landing.status).toBe(302);
-    expect(landing.headers.get("location")).toContain("__orbit_status=verified");
-    const done = await client.json<{ response: { status: string } }>(`/v1/client/sign_ins/${created.response.id}`);
-    expect(done.response.status).toBe("complete");
-
-    // A stored URL with another scheme never reaches nodemailer.
-    await ctx.settings.update({ email: { smtpUrl: "http://mail.example.com" } });
-    const res = await api("POST", "/v1/instance/email_test", { to: "ops@example.com" });
-    expect(res.status).toBe(422);
-    await smtp.close();
-  });
-
-  it("verifies a sign-up email through SMTP with a link", async () => {
-    const smtp = await startFakeSmtp();
-    const { ctx, app } = await instance();
-    await ctx.settings.update({ email: { provider: "smtp", smtpUrl: smtp.url, from: "Acme <no-reply@acme.test>" } });
-
-    const client = testClient(app);
-    const created = await client.json<{ response: { id: string; status: string } }>("/v1/client/sign_ups", {
-      body: { email_address: "smtp-signup@example.com", password: "Sup3rSecret!" },
-    });
-    await client.json(`/v1/client/sign_ups/${created.response.id}/prepare_verification`, { body: { strategy: "email_link" } });
-
-    const message = smtp.last()!;
-    expect(message.recipients).toEqual(["smtp-signup@example.com"]);
-    const link = linkIn(readableMessage(message.raw))!;
-    expect(link).toContain("/v1/verify?token=");
-    const landing = await client.request(pathOf(link));
-    expect(landing.status).toBe(302);
-    expect(landing.headers.get("location")).toContain("__orbit_status=verified");
-
-    // Clicking the link completes the sign-up server-side, so the originating device sees a session.
-    const state = await client.json<{ response: { sessions: { id: string }[]; sign_up: unknown } }>("/v1/client");
-    expect(state.response.sign_up).toBeNull();
-    expect(state.response.sessions[0]?.id).toMatch(/^sess_/);
-    await smtp.close();
-  });
-
-  it("never lets a display name or the app name create extra headers", async () => {
-    const smtp = await startFakeSmtp();
-    const { ctx } = await instance();
-    await ctx.settings.update({ email: { provider: "smtp", smtpUrl: smtp.url, from: "Acme <no-reply@acme.test>" } });
-    await ctx.settings.update({ application: { name: "Acme\r\nBcc: leak@example.com" } });
-
-    await sendEmail(ctx, {
-      to: "target@example.com",
-      template: "new_sign_in",
-      vars: { user_name: "Ada\r\nBcc: attacker@example.com", ip_address: "203.0.113.7\r\nX-Injected: yes", user_agent: "Firefox" },
-    });
-
-    const message = smtp.last()!;
-    const headers = rawHeaders(message.raw);
-    expect(headers.some((h) => h.name.toLowerCase() === "bcc")).toBe(false);
-    expect(headers.some((h) => h.name.toLowerCase() === "x-injected")).toBe(false);
-    expect(message.raw).not.toContain("attacker@example.com\r\n");
-    expect(headers.find((h) => h.name.toLowerCase() === "subject")!.value).not.toMatch(/[\r\n]/);
-    expect(readableMessage(message.raw)).toContain("Ada Bcc: attacker@example.com");
-    await smtp.close();
-  });
-
-  it("refuses recipients that fail the strict address check", async () => {
-    const smtp = await startFakeSmtp();
-    const { ctx, api } = await instance();
-    await ctx.settings.update({ email: { provider: "smtp", smtpUrl: smtp.url, from: "no-reply@acme.test" } });
-
-    for (const to of ["a@b.c\r\nBcc: evil@example.com", "not-an-address", "a@localhost", ""]) {
-      const res = await api("POST", "/v1/instance/email_test", { to });
-      expect(res.status, to).toBe(422);
+  it("refuses the test-only capture seams outside the test environment", async () => {
+    const development = await instance({ nodeEnv: "development" });
+    const saved = { vitest: process.env.VITEST, nodeEnv: process.env.NODE_ENV };
+    delete process.env.VITEST;
+    process.env.NODE_ENV = "production";
+    try {
+      expect(() => getMailOutbox()).toThrow(/only available in tests/);
+      expect(() => setMailTransport(async () => undefined)).toThrow(/only available in tests/);
+      expect(() => clearMailOutbox()).toThrow(/only available in tests/);
+    } finally {
+      if (saved.vitest !== undefined) process.env.VITEST = saved.vitest;
+      if (saved.nodeEnv !== undefined) process.env.NODE_ENV = saved.nodeEnv;
+      else delete process.env.NODE_ENV;
     }
-    await sendEmail(ctx, { to: "a@b.c\r\nBcc: evil@example.com", template: "test_email", vars: {} });
-    expect(smtp.messages).toHaveLength(0);
-    expect(getMailOutbox()).toHaveLength(0);
-    await smtp.close();
+    expect(development.ctx.env.nodeEnv).toBe("development");
+  });
+});
+
+describe("no secret leaves the server", () => {
+  it("never puts a code or link in a log line or in the email.created event", async () => {
+    const resend = await startFakeResend();
+    setResendEndpointForTests(resend.url);
+    const { ctx, api } = await instance();
+    await ctx.settings.update({ email: { provider: "resend", resendApiKey: RESEND_KEY, from: "no-reply@acme.test" } });
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      // Every endpoint the server has configured receives the event; capturing it is how we read what went out.
+      const endpoint = await api("POST", "/v1/webhooks/endpoints", { url: "https://hooks.example.test/orbitid" });
+      expect(endpoint.status).toBe(200);
+      await sendEmail(ctx, { to: "quiet@example.com", template: "verification_code", vars: { code: "918273" } });
+
+      const code = codeIn(readableMessage(resend.last()!.body.text ?? ""))!;
+      expect(resend.last()!.body.subject).toContain(code);
+      const written = [...log.mock.calls, ...error.mock.calls].flat().join("\n");
+      expect(written).not.toContain(code);
+      // The webhook event names the template and the recipient, not the subject (which for a code template is the code).
+      const events = await ctx.db.select().from(s.webhookEvents);
+      const payload = JSON.stringify(events);
+      expect(payload).toContain("verification_code");
+      expect(payload).not.toContain(code);
+    } finally {
+      log.mockRestore();
+      error.mockRestore();
+      await resend.close();
+    }
   });
 });
 
@@ -428,9 +231,11 @@ describe("POST /v1/instance/email_test", () => {
     expect(await res.json()).toEqual({ provider: "resend", ok: true });
     expect(resend.last()!.body.subject).toContain("test email");
 
+    // `console` is the "no provider configured" value: the test reports it instead of claiming delivery.
     await ctx.settings.update({ email: { provider: "console" } });
     const consoleRes = await api("POST", "/v1/instance/email_test", { to: "ops@example.com" });
-    expect(await consoleRes.json()).toEqual({ provider: "console", ok: true });
+    expect(consoleRes.status).toBe(503);
+    expect((await consoleRes.json() as { errors: { code: string }[] }).errors[0]!.code).toBe("email_not_configured");
     await resend.close();
   });
 

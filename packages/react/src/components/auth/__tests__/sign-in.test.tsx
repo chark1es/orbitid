@@ -372,4 +372,47 @@ describe("SignIn", () => {
     fireEvent.click(screen.getByTestId("social-button-google"));
     await waitFor(() => expect(signIn.authenticateWithRedirect).toHaveBeenCalled());
   });
+  describe("when the instance has no email identifier to ask for", () => {
+    const socialOnlyEnvironment = () => {
+      const environment = authEnvironment();
+      const { emailAddress, password, ...rest } = environment.userSettings.attributes;
+      environment.userSettings.attributes = {
+        ...rest,
+        emailAddress: { ...emailAddress, enabled: false, required: false, usedForFirstFactor: false },
+        password: { ...password, enabled: false, required: false, usedForFirstFactor: false },
+      };
+      environment.userSettings.social = {
+        google: { enabled: true, name: "Google", strategy: "oauth_google", authenticatable: true, logoUrl: "" },
+      };
+      return environment;
+    };
+
+    it("shows the provider and no email field, no other-method link, and no password reset", async () => {
+      const harness = setupAuth({ signedIn: false, environment: socialOnlyEnvironment() });
+      makeSignIn(harness.instance);
+      renderSignIn(harness);
+
+      expect(await screen.findByTestId("social-button-google")).toBeTruthy();
+      expect(screen.queryByLabelText(/Email address/)).toBeNull();
+      expect(screen.queryByRole("textbox")).toBeNull();
+      expect(screen.queryByRole("button", { name: /another method/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /forgot/i })).toBeNull();
+    });
+
+    it("does not offer password reset when passwords are off but email sign-in is on", async () => {
+      const environment = authEnvironment();
+      environment.userSettings.attributes.password = {
+        ...environment.userSettings.attributes.password!,
+        enabled: false,
+        required: false,
+        usedForFirstFactor: false,
+      };
+      const harness = setupAuth({ signedIn: false, environment });
+      makeSignIn(harness.instance);
+      renderSignIn(harness);
+
+      expect(await screen.findByLabelText(/Email address/)).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /forgot/i })).toBeNull();
+    });
+  });
 });

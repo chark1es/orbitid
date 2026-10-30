@@ -1,22 +1,7 @@
-import { useState, type FormEvent } from "react";
-import {
-  Badge,
-  Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  Input,
-  Label,
-  Switch,
-} from "@orbitid/ui";
-import { Ban, KeyRound, Lock, LogOut, RotateCcw, ShieldCheck, ShieldOff, Unlock } from "lucide-react";
-import { toast } from "sonner";
+import { useState } from "react";
+import { Badge, Button } from "@orbitid/ui";
+import { Ban, KeyRound, Lock, LogOut, ShieldCheck, ShieldOff, Unlock } from "lucide-react";
 import type { UserJSON } from "@orbitid/shared";
-import { api } from "../../lib/api";
-import { errorMessage } from "../../lib/errors";
 import { useInstance } from "../../lib/instance";
 import { useUserAdmin } from "../../lib/user-admin";
 import { formatDateTime } from "../../lib/format";
@@ -24,50 +9,12 @@ import { ConfirmDialog } from "../shared/confirm-dialog";
 import { Panel, Section } from "../shared/section";
 import { StatusBadge } from "../shared/status-badge";
 
-export function UserSecurityTab({ user, onUpdated }: { user: UserJSON; onUpdated: () => void }) {
+export function UserSecurityTab({ user }: { user: UserJSON; onUpdated: () => void }) {
   const admin = useUserAdmin(user.id);
   const instance = useInstance();
   const emailSecondFactor = instance.data?.attributes?.emailAddress?.usedForSecondFactor === true;
   const trustedDevicesEnabled = instance.data?.session?.trustedDevicesEnabled;
-  const [passwordOpen, setPasswordOpen] = useState(false);
-  const [password, setPassword] = useState("");
-  const [skipChecks, setSkipChecks] = useState(false);
-  const [savingPassword, setSavingPassword] = useState(false);
-  const [confirmRemovePassword, setConfirmRemovePassword] = useState(false);
-  const [confirmResetMfa, setConfirmResetMfa] = useState(false);
   const [confirmRevoke, setConfirmRevoke] = useState(false);
-
-  async function submitPassword(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!password) return;
-    setSavingPassword(true);
-    try {
-      await api("PATCH", `/users/${user.id}`, {
-        password,
-        ...(skipChecks ? { skip_password_checks: true } : {}),
-      });
-      toast.success(user.password_enabled ? "Password updated" : "Password set");
-      setPasswordOpen(false);
-      setPassword("");
-      setSkipChecks(false);
-      onUpdated();
-    } catch (error) {
-      toast.error(errorMessage(error));
-    } finally {
-      setSavingPassword(false);
-    }
-  }
-
-  async function removePassword() {
-    try {
-      await api("PATCH", `/users/${user.id}`, { password: null });
-      toast.success("Password removed");
-      setConfirmRemovePassword(false);
-      onUpdated();
-    } catch (error) {
-      toast.error(errorMessage(error));
-    }
-  }
 
   return (
     <Section
@@ -97,21 +44,8 @@ export function UserSecurityTab({ user, onUpdated }: { user: UserJSON; onUpdated
               </span>
             </div>
           </div>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Button onClick={() => setPasswordOpen(true)}>
-              {user.password_enabled ? "Change password" : "Set password"}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!user.password_enabled}
-              onClick={() => setConfirmRemovePassword(true)}
-            >
-              Remove password
-            </Button>
-          </div>
-          <p className="mt-2 text-xs leading-5 text-muted-foreground">
-            Removing the password leaves the user with the remaining sign-in factors.
+          <p className="mt-4 text-xs leading-5 text-muted-foreground">
+            Password changes and recovery must be completed by the user through the sign-in or account settings flow.
           </p>
         </Panel>
 
@@ -161,14 +95,6 @@ export function UserSecurityTab({ user, onUpdated }: { user: UserJSON; onUpdated
             </p>
           ) : null}
           <div className="mt-4 flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setConfirmResetMfa(true)}
-              disabled={!user.totp_enabled && !user.backup_code_enabled}
-            >
-              <RotateCcw aria-hidden /> Reset MFA
-            </Button>
             {user.passkeys.length ? (
               <Badge variant="outline">
                 {user.passkeys.length} {user.passkeys.length === 1 ? "passkey" : "passkeys"}
@@ -176,7 +102,7 @@ export function UserSecurityTab({ user, onUpdated }: { user: UserJSON; onUpdated
             ) : null}
           </div>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">
-            Resetting removes the authenticator secret and every backup code. The user must enroll again.
+            Only the user can change their authenticator and backup codes after verifying their identity.
           </p>
         </Panel>
 
@@ -252,69 +178,6 @@ export function UserSecurityTab({ user, onUpdated }: { user: UserJSON; onUpdated
         </Panel>
       </div>
 
-      <Dialog open={passwordOpen} onOpenChange={setPasswordOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{user.password_enabled ? "Change password" : "Set password"}</DialogTitle>
-            <DialogDescription>The password is hashed with argon2id and never returned by the API.</DialogDescription>
-          </DialogHeader>
-          <form onSubmit={submitPassword} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="set-password">New password</Label>
-              <Input
-                id="set-password"
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                autoComplete="new-password"
-                autoFocus
-              />
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <div className="space-y-0.5">
-                <Label htmlFor="skip-password-checks">Skip policy checks</Label>
-                <p className="text-xs text-muted-foreground">Bypass length, complexity and pwned-password validation.</p>
-              </div>
-              <Switch id="skip-password-checks" checked={skipChecks} onCheckedChange={setSkipChecks} />
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setPasswordOpen(false)} disabled={savingPassword}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={!password || savingPassword}>
-                Save password
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      <ConfirmDialog
-        open={confirmRemovePassword}
-        onOpenChange={setConfirmRemovePassword}
-        title="Remove password?"
-        description="The user will only be able to sign in with another identifier or factor."
-        confirmLabel="Remove password"
-        destructive
-        onConfirm={() => void removePassword()}
-      />
-      <ConfirmDialog
-        open={confirmResetMfa}
-        onOpenChange={setConfirmResetMfa}
-        title="Reset multi-factor authentication?"
-        description="The authenticator secret and all backup codes will be deleted. The user must enroll again."
-        confirmLabel="Reset MFA"
-        destructive
-        pending={admin.pending === "reset-mfa"}
-        onConfirm={() =>
-          void admin.resetMfa().then((result) => {
-            if (result !== undefined) {
-              setConfirmResetMfa(false);
-              onUpdated();
-            }
-          })
-        }
-      />
       <ConfirmDialog
         open={confirmRevoke}
         onOpenChange={setConfirmRevoke}

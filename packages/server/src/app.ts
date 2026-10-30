@@ -66,7 +66,10 @@ export function createApp(ctx: AppContext) {
     }
     if (isUniqueViolation(err)) return c.json({ errors: [{ code: ErrorCodes.duplicate_record, message: "That record already exists" }], trace_id } satisfies ApiErrorBody, 409);
     if ((err as any)?.name === "SyntaxError") return c.json({ errors: [{ code: ErrorCodes.request_body_invalid, message: "Invalid JSON" }], trace_id }, 400);
-    console.error(`[${trace_id}]`, err);
+    // Error messages can contain provider responses, codes or credentials. Keep authentication failures
+    // silent, and emit only a fixed diagnostic with the response trace id elsewhere.
+    const authPath = /^\/(?:v1\/(?:client(?:\/|$)|operator_sessions(?:\/|$)|oauth_callback(?:\/|$)|verify(?:\/|$)|saml(?:\/|$))|oauth(?:\/|$))/.test(c.req.path);
+    if (!authPath) console.error(`[${trace_id}] Unexpected server error`);
     return c.json({ errors: [{ code: "internal_server_error", message: "Internal server error" }], trace_id } satisfies ApiErrorBody, 500);
   });
   app.notFound((c) => c.json({ errors: [{ code: ErrorCodes.resource_not_found, message: "Route not found" }] } satisfies ApiErrorBody, 404));

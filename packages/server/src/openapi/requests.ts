@@ -18,7 +18,7 @@ export const signInCreate = partial({
   identifier: z.string().describe("Email address, phone number or username. Required unless `strategy` is `oauth_*`, `enterprise_sso` or `ticket`."),
   strategy: z.string().describe("First-factor strategy to start with: `password`, `email_code`, `email_link`, `phone_code`, `passkey`, `ticket`, `enterprise_sso` or `oauth_<provider>`."),
   password: z.string(),
-  ticket: z.string().describe("One-time ticket from an actor token, a sign-in token or an invitation."),
+  ticket: z.string().describe("Invitation ticket for sign-up. Tickets cannot replace authentication during sign-in; actor and operator-minted sign-in tokens are not accepted."),
   redirect_url: z.string(),
   action_complete_redirect_url: z.string(),
   captcha_token: z.string(),
@@ -245,11 +245,12 @@ export const signInTokenCreate = partial({
   user_id: z.string(),
   expires_in_seconds: z.number().int().describe("Between 10 seconds and 30 days. Defaults to 30 days."),
 }).required({ user_id: true });
+/** Kept so the removed endpoint's request shape is still documented; it is refused with 403. */
 export const actorTokenCreate = z.object({
   user_id: z.string(),
-  actor: z.object({ sub: z.string() }).passthrough().describe("Extra claims copied into the session's `act` claim."),
-  expires_in_seconds: z.number().int().optional().describe("Between 10 seconds and 12 hours. Defaults to one hour."),
-  session_max_duration_in_seconds: z.number().int().optional().describe("Lifetime of the impersonated session. Defaults to 30 minutes."),
+  actor: z.object({ sub: z.string() }).passthrough().optional().describe("Ignored: impersonation was removed."),
+  expires_in_seconds: z.number().int().optional(),
+  session_max_duration_in_seconds: z.number().int().optional(),
 });
 export const jwtTemplateCreate = partial({
   name: z.string(),
@@ -329,12 +330,15 @@ export const backendDomainUpdate = partial({
   enrollment_mode: z.enum(["manual_invitation", "automatic_invitation", "automatic_suggestion"]),
   delete_pending: z.boolean(),
 });
+export const userRolesSet = z.object({
+  roles: z.array(z.string()).max(50).describe("Instance role keys (`app:...`). Replaces the whole set; an empty array clears it."),
+});
 export const roleCreate = partial({
-  key: z.string(),
+  key: z.string().describe("`org:<feature>[:<action>]` for an organization role, `app:<feature>[:<action>]` for an instance role."),
   name: z.string(),
   description: z.string(),
-  is_creator_eligible: z.boolean(),
-  permissions: z.array(z.string()).describe("Permission keys to grant."),
+  is_creator_eligible: z.boolean().describe("Organization roles only: may be picked as `organizations.creatorRole`."),
+  permissions: z.array(z.string()).describe("Permission keys to grant; they must be in the same scope as the role."),
 }).required({ key: true, name: true });
 export const roleUpdate = partial({
   name: z.string(),

@@ -22,7 +22,8 @@ export interface VerifyWebhookOptions {
 
 export interface WebhookRequestLike {
   body: string;
-  headers: Headers | Record<string, string | undefined>;
+  /** `null`/`undefined` (no headers at all) and repeated-header arrays are both accepted. */
+  headers: Headers | Record<string, string | string[] | null | undefined> | null | undefined;
 }
 
 export interface SignWebhookOptions {
@@ -38,9 +39,23 @@ export interface SignedWebhook {
 
 const DEFAULT_TOLERANCE_SECONDS = 300;
 
-function readHeader(headers: Headers | Record<string, string | undefined>, name: string): string | null {
-  if (headers instanceof Headers) return headers.get(name);
-  return headers[name] ?? headers[name.toLowerCase()] ?? null;
+function readHeader(
+  headers: Headers | Record<string, string | string[] | null | undefined> | null | undefined,
+  name: string,
+): string | null {
+  if (!headers) return null;
+  if (typeof (headers as Headers).get === "function") return (headers as Headers).get(name);
+  const bag = headers as Record<string, string | string[] | null | undefined>;
+  const wanted = name.toLowerCase();
+  // Fetch `Headers` and Node both lowercase names, but duck-typed bags and framework fixtures may not:
+  // match case-insensitively so `Svix-Id` is the same header as `svix-id` instead of a missing one.
+  for (const key of Object.keys(bag)) {
+    if (key.toLowerCase() !== wanted) continue;
+    const value = bag[key];
+    if (Array.isArray(value)) return value.length ? value.join(", ") : null;
+    return value ?? null;
+  }
+  return null;
 }
 
 function secretBytes(signingSecret: string): Buffer {

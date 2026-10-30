@@ -122,7 +122,9 @@ and never leaks the underlying error to the caller. Pass `onError` to an adapter
 ```ts
 {
   userId, sessionId, orgId, orgRole, orgSlug, orgPermissions,
-  actor,        // impersonation context, when an actor token created the session
+  roles,        // instance-wide ("app:...") role keys assigned by an operator
+  rolePermissions, // permissions granted by `roles`, independent of the organization
+  actor,        // historical impersonation context; no new session carries one
   claims,       // the raw SessionClaims
   has(check),   // { role?, permission?, feature?, reverification? } → boolean
 }

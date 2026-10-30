@@ -8,7 +8,8 @@ import { randomToken, sha256 } from "../../lib/crypto";
 import { maskSecrets, unmaskSettingsPatch } from "../../lib/secrets";
 import { newId } from "../../lib/ids";
 import * as s from "../../db/schema";
-import { parseEmailFrom, parseSmtpUrl, sendEmail, sendTestEmail } from "../../services/mail";
+import { parseEmailFrom, parseSmtpUrl } from "../../lib/email-format";
+import { sendEmail, sendTestEmail } from "../../services/mail";
 import { hit } from "../../lib/rate-limit";
 import { audit, listAuditLogs } from "../../services/audit";
 import { instanceStats } from "../../services/stats";
@@ -76,6 +77,27 @@ function assertEmailSettings(patch: SettingsTree): void {
   }
 }
 
+/**
+ * The organization creator/default role settings are keys, not free text: a key that does not name an existing
+ * organization role would make every new membership fall back silently (`creatorRoleKey`/`defaultRoleKey`), so the
+ * save is refused instead. Scope and syntax are checked by the pure settings policy; existence needs the database.
+ */
+async function assertOrganizationRoleSettings(ctx: AppContext, patch: SettingsTree): Promise<void> {
+  const organizations = patch.organizations as SettingsTree | undefined;
+  if (!organizations) return;
+  for (const field of ["creatorRole", "defaultRole"] as const) {
+    const key = organizations[field];
+    if (key === undefined) continue;
+    if (typeof key !== "string" || !key) {
+      throw new OrbitError(422, ErrorCodes.form_param_format_invalid, `organizations.${field} must be a role key`, { param_name: `organizations.${field}` });
+    }
+    const role = first(await ctx.db.select().from(s.roles).where(eq(s.roles.key, key)));
+    if (!role) {
+      throw new OrbitError(422, ErrorCodes.org_role_not_found, `organizations.${field} names "${key}", which does not exist. Create the role first.`, { param_name: `organizations.${field}` });
+    }
+  }
+}
+
 /** Accepts a partial settings tree (`settings.update` deep-merges it and validates against the schema). */
 function instanceJson(ctx: AppContext) {
   const settings = ctx.settings.get();
@@ -100,6 +122,7 @@ export default function routes(ctx: AppContext) {
     const patch = unmaskSettingsPatch(ctx.settings.get(), body);
     assertInstanceUrls(patch);
     assertEmailSettings(patch);
+    await assertOrganizationRoleSettings(ctx, patch);
     try {
       // `settings.update` deep-merges and re-validates the whole tree through the zod schema.
       await ctx.settings.update(patch as DeepPartial<InstanceSettings>);
@@ -114,8 +137,19 @@ export default function routes(ctx: AppContext) {
   app.post("/instance/test_email", async (c) => {
     const body = await parseBody(c, z.object({ to: z.string().email().optional() }));
     const settings = ctx.settings.get();
-    const to = body.to ?? settings.application.supportEmail ?? settings.email.from;
-    await sendEmail(ctx, { to, template: "verification_code", vars: { code: "123456", app_name: settings.application.name } });
+    // `email.from` is a formatted header ("OrbitID <no-reply@localhost>"), not a recipient; hand the send path the
+    // bare address so the default fallback is not rejected as malformed.
+    const fallback = parseEmailFrom(settings.email.from.trim() || ctx.env.emailFrom || "no-reply@localhost").address;
+    const to = body.to ?? settings.application.supportEmail ?? fallback;
+    // Legacy compatibility route: same send path, and it reports the typed outcome instead of claiming a delivery
+    // that did not happen. Nothing is written to the console either way.
+    const delivery = await sendEmail(ctx, { to, template: "verification_code", vars: { code: "123456", app_name: settings.application.name } });
+    if (!delivery.delivered) {
+      const code = delivery.error?.code ?? "email_delivery_failed";
+      // A bad recipient is the caller's mistake, not a broken transport: keep the 422 the OpenAPI contract promises.
+      const status = code === ErrorCodes.form_param_format_invalid || code === ErrorCodes.form_param_missing ? 422 : 503;
+      throw new OrbitError(status, code, delivery.error?.message ?? "Email delivery failed.");
+    }
     return c.json({ status: "ok", to });
   });
 

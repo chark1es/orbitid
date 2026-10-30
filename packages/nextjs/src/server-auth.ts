@@ -54,8 +54,8 @@ function buildAuthObject(state: RequestAuthState, env: ResolvedServerEnv): AuthO
     getTokenOverride: async (opts) => {
       if (!opts?.template) return state.token;
       const sessionId = state.claims?.sid;
-      if (!sessionId) return null;
-      const { jwt } = await orbitIdClient().sessions.getToken(sessionId, { template: opts.template });
+      if (!sessionId || !state.token) return null;
+      const { jwt } = await orbitIdClient().sessions.getToken(sessionId, { template: opts.template, sessionToken: state.token });
       return jwt;
     },
   });

@@ -9,7 +9,6 @@ import type { PlaygroundUser } from "@/lib/seed-types";
 import { formatDateTime } from "@/lib/format";
 import {
   createTestUsers,
-  createTicket,
   deleteAllPlaygroundUsers,
   deletePlaygroundUser,
 } from "@/app/seed/actions";
@@ -36,17 +35,10 @@ function UserActions({
   deleteAction: (formData: FormData) => void;
   deleting: boolean;
 }) {
-  const [ticketState, ticketAction, sendingTicket] = React.useActionState(createTicket, INITIAL);
 
   return (
     <div className="flex flex-col items-end gap-1">
       <div className="flex flex-wrap justify-end gap-2">
-        <form action={ticketAction}>
-          <input type="hidden" name="userId" value={user.id} />
-          <Button type="submit" variant="outline" size="xs" disabled={sendingTicket}>
-            {sendingTicket ? "Creating link" : "Create sign-in link"}
-          </Button>
-        </form>
         <form action={deleteAction}>
           <input type="hidden" name="userId" value={user.id} />
           <Button
@@ -61,15 +53,6 @@ function UserActions({
           </Button>
         </form>
       </div>
-      {ticketState.href ? (
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <Button asChild size="xs">
-            <a href={ticketState.href}>Sign in as</a>
-          </Button>
-          <CopyButton value={ticketState.href} label="Copy link" />
-        </div>
-      ) : null}
-      <Feedback state={ticketState} />
     </div>
   );
 }

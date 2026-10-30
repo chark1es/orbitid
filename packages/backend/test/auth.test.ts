@@ -72,10 +72,48 @@ describe("buildAuthObject", () => {
     expect(createClaimsHasCheck({ ...claims, org_permissions: ["org:billing:*"] })({ permission: "org:billing:manage" })).toBe(true);
   });
 
+  it("reads instance roles independently of the organization role", () => {
+    const instance: SessionClaims = {
+      ...claims,
+      org_id: undefined,
+      org_slug: undefined,
+      org_role: undefined,
+      org_permissions: undefined,
+      roles: ["app:support"],
+      role_permissions: ["app:reports:read"],
+    };
+    const signedIn = buildAuthObject(instance, async () => "token");
+    expect(signedIn.roles).toEqual(["app:support"]);
+    expect(signedIn.rolePermissions).toEqual(["app:reports:read"]);
+    expect(signedIn.orgRole).toBeNull();
+    // `has()` accepts either namespace, so an app can gate on a role or permission without knowing the scope.
+    expect(signedIn.has({ role: "app:support" })).toBe(true);
+    expect(signedIn.has({ permission: "app:reports:read" })).toBe(true);
+    expect(signedIn.has({ permission: "org:sys_memberships:manage" })).toBe(false);
+    // Organization features stay organization-scoped: an instance permission never satisfies `feature`.
+    expect(signedIn.has({ feature: "reports", permission: "read" })).toBe(false);
+
+    // Both namespaces can be present; neither leaks into the other's claim.
+    const both = buildAuthObject({ ...claims, roles: ["app:support"], role_permissions: ["app:reports:read"] }, async () => null);
+    expect(both.has({ role: "org:admin" })).toBe(true);
+    expect(both.has({ role: "app:support" })).toBe(true);
+    expect(both.has({ role: "app:missing" })).toBe(false);
+    expect(both.has({ permission: "org:sys_memberships:manage" })).toBe(true);
+    expect(both.has({ permission: "app:reports:read" })).toBe(true);
+  });
+
+  it("ignores malformed instance role claims instead of trusting them", () => {
+    const check = createClaimsHasCheck({ ...claims, roles: "app:support" as unknown as string[], role_permissions: [42, "app:reports:read"] as unknown as string[] });
+    expect(check({ role: "app:support" })).toBe(false);
+    expect(check({ permission: "app:reports:read" })).toBe(true);
+  });
+
   it("produces a signed-out AuthObject and a sign-in redirect", async () => {
     const signedOut = buildAuthObject(null, async () => null, { signInUrl: "/sign-in" });
     expect(signedOut.userId).toBeNull();
     expect(signedOut.orgRole).toBeNull();
+    expect(signedOut.roles).toEqual([]);
+    expect(signedOut.rolePermissions).toEqual([]);
     expect(signedOut.sessionStatus).toBeNull();
     expect(signedOut.isAuthenticated).toBe(false);
     expect(signedOut.has({ role: "org:admin" })).toBe(false);
@@ -194,6 +232,8 @@ describe("authenticateRequest", () => {
     const backendFetch = vi.fn(async (input: string, init?: RequestInit) => {
       expect(input).toBe("https://auth.example.com/v1/sessions/sess_1/tokens");
       expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer sk_test_123");
+      // The session being refreshed must be proven: the token the SDK just verified is presented with it.
+      expect((init?.headers as Record<string, string>)["X-OrbitID-Session-Token"]).toBe(token);
       return new Response(JSON.stringify({ jwt: "refreshed.jwt" }), { status: 200 });
     });
     const state = await authenticateRequest(requestWith({ authorization: `Bearer ${token}` }), {

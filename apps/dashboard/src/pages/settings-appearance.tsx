@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import {
+  cn,
   Input,
   Select,
   SelectContent,
@@ -20,7 +22,32 @@ import {
 } from "./_config/ui";
 import { useSettingsEditor } from "./_config/use-settings";
 
+type PreviewScheme = "light" | "dark";
+
+/** Follows the operating system's color scheme, for a branding theme of "system". */
+function useSystemScheme(): PreviewScheme {
+  const [scheme, setScheme] = useState<PreviewScheme>(() =>
+    typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light",
+  );
+  useEffect(() => {
+    const query = window.matchMedia?.("(prefers-color-scheme: dark)");
+    if (!query) return;
+    const update = () => setScheme(query.matches ? "dark" : "light");
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  return scheme;
+}
+
 const COLOR_PATTERN = /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+
+/** `<input type="color">` only accepts `#rrggbb`; the text field also takes `#rgb` and `#rrggbbaa`. */
+function toPickerValue(hex: string): string {
+  const digits = hex.replace("#", "");
+  if (digits.length === 3) return `#${digits.split("").map((d) => d + d).join("")}`;
+  return `#${digits.slice(0, 6)}`;
+}
 
 /** Black or white, whichever reads better on the chosen brand color (hex, 3 or 6 digits). */
 function readableInk(hex: string): string {
@@ -34,6 +61,9 @@ function readableInk(hex: string): string {
 export default function Page() {
   const editor = useSettingsEditor();
   const settings = editor.settings;
+  const systemScheme = useSystemScheme();
+  // The operator can flip the preview without touching the saved theme; picking a theme resets the flip.
+  const [schemeOverride, setSchemeOverride] = useState<PreviewScheme | null>(null);
 
   if (editor.isLoading) return <LoadingPage rows={4} />;
   if (!settings) {
@@ -55,6 +85,12 @@ export default function Page() {
 
   const previewColor = COLOR_PATTERN.test(branding.primaryColor) ? branding.primaryColor : "#2b2522";
   const previewInk = readableInk(previewColor);
+  const configuredScheme: PreviewScheme = branding.theme === "system" ? systemScheme : branding.theme;
+  const previewScheme = schemeOverride ?? configuredScheme;
+  // A dark brand color would vanish on the dark surface, so the hosted components fall back to the theme's primary there.
+  const brandVanishes = previewScheme === "dark" && previewInk === "#ffffff";
+  const brandFill = brandVanishes ? "var(--primary)" : previewColor;
+  const brandText = brandVanishes ? "var(--primary-foreground)" : previewInk;
 
   return (
     <div className="space-y-6">
@@ -78,7 +114,7 @@ export default function Page() {
                 id="primary-color-swatch"
                 type="color"
                 aria-label="Primary color picker"
-                value={previewColor}
+                value={toPickerValue(previewColor)}
                 onChange={(event) => editor.patch({ branding: { primaryColor: event.target.value } })}
                 className="h-[34px] w-12 cursor-pointer border border-input bg-transparent p-1"
               />
@@ -92,7 +128,11 @@ export default function Page() {
             </div>
           </Field>
           <Field label="Theme" htmlFor="branding-theme" description="Default theme for hosted components. Visitors can override it.">
-            <Select value={branding.theme} onValueChange={(theme) => editor.patch({ branding: { theme } })}>
+            <Select value={branding.theme} onValueChange={(theme) => {
+                setSchemeOverride(null);
+                editor.patch({ branding: { theme } });
+              }}
+            >
               <SelectTrigger id="branding-theme" className="w-full">
                 <SelectValue />
               </SelectTrigger>
@@ -113,14 +153,36 @@ export default function Page() {
         <div className="space-y-2 border-t border-border pt-3">
           <div className="flex items-baseline justify-between gap-3">
             <p className="text-sm font-medium">Preview</p>
-            <p className="text-xs text-muted-foreground">Current draft, before saving</p>
+            <div className="flex items-center gap-3">
+              <p className="hidden text-xs text-muted-foreground sm:block">Current draft, before saving</p>
+              <div role="group" aria-label="Preview color scheme" className="inline-flex border border-border">
+                {(["light", "dark"] as const).map((scheme) => (
+                  <button
+                    key={scheme}
+                    type="button"
+                    aria-pressed={previewScheme === scheme}
+                    onClick={() => setSchemeOverride(scheme === configuredScheme ? null : scheme)}
+                    className="px-2.5 py-1 text-xs font-medium capitalize text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring aria-pressed:bg-accent aria-pressed:text-foreground"
+                  >
+                    {scheme}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
-          <div className="border border-border bg-muted/30 p-6">
+          <div
+            data-testid="branding-preview"
+            data-scheme={previewScheme}
+            className={cn(
+              "border border-border bg-muted/30 p-6 text-foreground transition-colors duration-200 motion-reduce:transition-none",
+              previewScheme === "dark" ? "dark bg-background" : "light",
+            )}
+          >
             <div className="mx-auto w-full max-w-sm border border-border bg-card px-6 py-7">
               <div className="space-y-1 text-center">
                 <div
                   className="mx-auto grid size-9 place-items-center text-sm font-semibold"
-                  style={{ backgroundColor: previewColor, color: previewInk }}
+                  style={{ backgroundColor: brandFill, color: brandText }}
                   aria-hidden
                 >
                   {(app.name || "O").trim().charAt(0).toUpperCase()}
@@ -135,7 +197,7 @@ export default function Page() {
                 </div>
                 <div
                   className="grid h-[34px] place-items-center text-xs font-medium"
-                  style={{ backgroundColor: previewColor, color: previewInk }}
+                  style={{ backgroundColor: brandFill, color: brandText }}
                 >
                   Continue
                 </div>

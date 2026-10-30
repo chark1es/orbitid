@@ -13,7 +13,6 @@ import { first } from "../lib/db";
 export interface CreateSessionInput {
   clientId: string;
   userId: string;
-  actor?: Record<string, unknown>;
   ip?: string;
   userAgent?: string;
   maxLifetimeSeconds?: number;
@@ -43,8 +42,9 @@ export async function createSession(ctx: AppContext, input: CreateSessionInput):
   const lifetimeMs = Math.min(st.session.lifetimeSeconds, input.maxLifetimeSeconds ?? Number.POSITIVE_INFINITY) * 1000;
   const id = newId("sess");
   // Required MFA without an enrolled factor yields a "pending" session: it can enrol a factor, nothing else.
+  // There is no bypass: impersonation was removed, so no session is created outside this policy.
   const owner = first(await ctx.db.select().from(s.users).where(eq(s.users.id, input.userId)));
-  const pending = !input.actor && !!owner && await mfaEnrollmentRequired(ctx, owner);
+  const pending = !!owner && await mfaEnrollmentRequired(ctx, owner);
   await ctx.db.insert(s.sessions).values({
             id,
             clientId: input.clientId,
@@ -54,7 +54,8 @@ export async function createSession(ctx: AppContext, input: CreateSessionInput):
             lastActiveAt: now,
             expireAt: now + lifetimeMs,
             abandonAt: now + lifetimeMs,
-            actor: input.actor ?? null,
+            // `actor` stays null for every new session; the column is kept so historical rows still serialize.
+            actor: null,
             firstFactorVerifiedAt: input.firstFactor === false ? null : now,
             secondFactorVerifiedAt: input.secondFactor ? now : null,
             ip: input.ip ?? null,

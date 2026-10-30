@@ -96,6 +96,10 @@ export interface UserJSON {
   delete_self_enabled: boolean;
   create_organization_enabled: boolean;
   create_organizations_limit: number | null;
+  /** Instance-wide role keys assigned by an operator (`app:...`); never modifiable by the user. */
+  roles: string[];
+  /** Permissions granted by those instance roles. */
+  role_permissions: string[];
   last_sign_in_at: number | null;
   last_active_at: number | null;
   legal_accepted_at: number | null;
@@ -276,6 +280,14 @@ export interface RoleJSON {
   key: string;
   name: string;
   description: string;
+  /**
+   * Where this role can be assigned. `organization` roles (`org:...`) are memberships; `instance` roles
+   * are attached to a user by an operator and travel in the session token's `roles` claim.
+   */
+  scope: "organization" | "instance";
+  /** True for the seeded `org:admin` / `org:member` rows, which cannot be edited or deleted. */
+  is_system: boolean;
+  /** Instance roles may be picked as the `organizations.creatorRole` default. Organization-only. */
   is_creator_eligible: boolean;
   permissions: PermissionJSON[];
   created_at: number;
@@ -288,6 +300,8 @@ export interface PermissionJSON {
   name: string;
   description: string;
   type: "system" | "user";
+  /** `organization` for `org:*` keys, `instance` for everything else. */
+  scope: "organization" | "instance";
   created_at: number;
   updated_at: number;
 }
@@ -298,8 +312,12 @@ export interface WaitlistEntryJSON { object: "waitlist_entry"; id: string; email
 export interface AllowlistIdentifierJSON { object: "allowlist_identifier"; id: string; identifier: string; identifier_type: "email_address" | "phone_number" | "web3_wallet"; invitation_id: string | null; created_at: number; updated_at: number }
 export interface BlocklistIdentifierJSON { object: "blocklist_identifier"; id: string; identifier: string; identifier_type: "email_address" | "phone_number" | "web3_wallet"; created_at: number; updated_at: number }
 export interface JwtTemplateJSON { object: "jwt_template"; id: string; name: string; claims: Record<string, unknown>; lifetime: number; allowed_clock_skew: number; custom_signing_key: boolean; signing_algorithm: string; /** Verification key for custom-key templates: HS256 secret, or public JWK. */ signing_key?: string | Record<string, unknown>; created_at: number; updated_at: number }
-export interface ActorTokenJSON { object: "actor_token"; id: string; user_id: string; actor: { sub: string; [k: string]: unknown }; status: "pending" | "accepted" | "revoked"; token?: string; url?: string; created_at: number; updated_at: number }
 export interface SignInTokenJSON { object: "sign_in_token"; id: string; user_id: string; status: "pending" | "accepted" | "revoked"; token?: string; url?: string; created_at: number; updated_at: number }
+/**
+ * Instance-wide roles of a user (`GET`/`PUT /v1/users/{id}/roles`). Written only by an operator through the
+ * Backend API; the keys travel in the session token as the `roles` and `role_permissions` claims.
+ */
+export interface UserRolesJSON { object: "user_roles"; user_id: string; roles: string[]; role_permissions: string[] }
 export interface WebhookEndpointJSON { object: "webhook_endpoint"; id: string; url: string; description: string; event_types: string[]; disabled: boolean; secret?: string; created_at: number; updated_at: number }
 export interface WebhookDeliveryJSON { object: "webhook_delivery"; id: string; endpoint_id: string; event_id: string; event_type: string; status: "pending" | "success" | "failed"; attempt: number; response_code: number | null; response_body: string | null; next_attempt_at: number | null; created_at: number }
 export interface ApiKeyJSON { object: "api_key"; id: string; name: string; description: string | null; subject: string; prefix: string; secret?: string; scopes: string[]; claims: Record<string, unknown> | null; revoked: boolean; expiration: number | null; last_used_at: number | null; created_by: string | null; created_at: number; updated_at: number }

@@ -20,7 +20,7 @@ import {
 import { decodeJwt } from "../lib/jwt";
 import { useCountdown } from "../lib/useCountdown";
 import { withPublicUserDataAliases } from "../lib/resources";
-import { fakeSession, makeJwt, sessionClaims } from "./helpers";
+import { fakeSession, fakeUser, makeJwt, sessionClaims } from "./helpers";
 
 const t = createTranslator(enUS);
 
@@ -42,6 +42,31 @@ describe("has()", () => {
     expect(checkHas({ feature: "beta" }, context)).toBe(false);
     expect(checkHas({ condition: true }, context)).toBe(true);
     expect(checkHas({ condition: false }, context)).toBe(false);
+  });
+
+  it("checks instance grants separately from organization membership", () => {
+    const instanceContext = { ...context, orgRole: null, orgPermissions: [], roles: ["app:support"], rolePermissions: ["app:reports:*"] };
+    expect(checkHas({ role: "app:support" }, instanceContext)).toBe(true);
+    expect(checkHas({ permission: "app:reports:read" }, instanceContext)).toBe(true);
+    expect(checkHas({ permission: "app:users:delete" }, instanceContext)).toBe(false);
+    expect(checkHas({ role: "org:admin" }, instanceContext)).toBe(false);
+    expect(checkHas({ role: "app:support" }, { ...instanceContext, isSignedIn: false })).toBe(false);
+    expect(checkHas({ permission: "org:reports:read" }, { ...instanceContext, rolePermissions: ["org:reports:*"] })).toBe(false);
+  });
+
+  it("takes instance grants from session claims and ignores metadata", () => {
+    const state = createAuthState({ loaded: true, session: fakeSession(), user: null, organization: null, instance: null,
+      claims: sessionClaims({ roles: ["app:support"], role_permissions: ["app:reports:read"] }) });
+    expect(state.roles).toEqual(["app:support"]);
+    expect(state.rolePermissions).toEqual(["app:reports:read"]);
+    expect(state.has({ role: "app:support" })).toBe(true);
+    expect(state.has({ permission: "app:reports:read" })).toBe(true);
+    const metadataOnly = createAuthState({ loaded: true, session: fakeSession(), organization: null, instance: null,
+      user: fakeUser({ publicMetadata: { roles: ["app:support"], role_permissions: ["app:reports:read"] }, unsafeMetadata: { roles: ["app:support"] } }),
+      claims: sessionClaims() });
+    expect(metadataOnly.roles).toEqual([]);
+    expect(metadataOnly.has({ role: "app:support" })).toBe(false);
+    expect(metadataOnly.has({ permission: "app:reports:read" })).toBe(false);
   });
 
   it("checks reverification presets and custom levels", () => {

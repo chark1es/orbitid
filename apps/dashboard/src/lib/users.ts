@@ -1,3 +1,4 @@
+import type { InstanceSettings } from "@orbitid/shared";
 import { parseJsonObject } from "./format";
 
 export interface CreateUserForm {
@@ -79,4 +80,43 @@ export function buildCreateUserPayload(form: CreateUserForm): CreateUserPayload 
   if (form.skipPasswordChecks) payload.skip_password_checks = true;
 
   return payload;
+}
+
+export type RequiredUserField = "email" | "phone" | "username" | "firstName" | "lastName";
+
+export const REQUIRED_FIELD_LABELS: Record<RequiredUserField, string> = {
+  email: "Email address",
+  phone: "Phone number",
+  username: "Username",
+  firstName: "First name",
+  lastName: "Last name",
+};
+
+/**
+ * Profile attributes the instance requires: switched on and marked required. Passwords are left out on
+ * purpose: they are a credential an operator may leave unset for an invited or social-only user.
+ * Returns an empty set while settings are unknown, so a slow or failed settings load never blocks an operator.
+ */
+export function requiredUserFields(settings: InstanceSettings | undefined): ReadonlySet<RequiredUserField> {
+  const required = new Set<RequiredUserField>();
+  const attributes = settings?.attributes;
+  if (!attributes) return required;
+  const pairs: [RequiredUserField, { enabled: boolean; required: boolean }][] = [
+    ["email", attributes.emailAddress],
+    ["phone", attributes.phoneNumber],
+    ["username", attributes.username],
+    ["firstName", attributes.firstName],
+    ["lastName", attributes.lastName],
+  ];
+  for (const [field, config] of pairs) if (config.enabled && config.required) required.add(field);
+  return required;
+}
+
+/** Required fields whose value is blank, in form order. */
+export function missingRequiredFields(
+  values: Partial<Record<RequiredUserField, string>>,
+  required: ReadonlySet<RequiredUserField>,
+): RequiredUserField[] {
+  const order: RequiredUserField[] = ["email", "phone", "username", "firstName", "lastName"];
+  return order.filter((field) => required.has(field) && !(values[field] ?? "").trim());
 }

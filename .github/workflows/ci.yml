@@ -17,6 +17,9 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: Native sqlite binding loads on Node
         run: node -e "require('better-sqlite3')"
+      - run: bun run test:maintenance
+      - run: bun run check:files
+      - run: bun run check:docs
       - run: bun run typecheck
       - run: bun run test
       - name: Committed OpenAPI document is current

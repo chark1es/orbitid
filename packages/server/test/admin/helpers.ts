@@ -41,7 +41,7 @@ export async function testApp(): Promise<TestInstance> {
   };
 }
 
-export interface ErrorBody { errors: { code: string; message: string }[] }
+export interface ErrorBody { errors: { code: string; message: string; meta?: Record<string, unknown> }[] }
 
 export async function json<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
@@ -80,4 +80,13 @@ export function ticketFromUrl(url: string): string {
   const ticket = new URL(url).searchParams.get("__orbit_ticket");
   if (!ticket) throw new Error(`no ticket in url: ${url}`);
   return ticket;
+}
+
+/**
+ * A real, verifiable session JWT the way a browser holds one. Used by tests that exercise the possession
+ * requirement on `POST /v1/sessions/:id/tokens` without going through a full sign-in.
+ */
+export async function sessionJwtFor(ctx: AppContext, sessionId: string, userId: string): Promise<string> {
+  const { signJwt } = await import("../../src/services/tokens");
+  return signJwt(ctx, { sub: userId, sid: sessionId, sts: "active" }, { expiresInSeconds: 60 });
 }

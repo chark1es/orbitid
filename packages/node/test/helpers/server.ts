@@ -80,9 +80,22 @@ export async function createUserWithSession(server: RealServer, options: { email
   const sessionId = sessions[0]?.id;
   if (!sessionId) throw new Error("sign-in produced no session");
 
-  const minted = await backend(server, "POST", `/v1/sessions/${sessionId}/tokens`);
-  const token = (minted.body as { jwt: string }).jwt;
+  const token = await mintSessionToken(server, sessionId, cookie);
   return { userId, sessionId, email, password, cookie, token };
+}
+
+/**
+ * Mints a session JWT the way the browser does: from the Frontend API, authenticated by the client's own
+ * `__client` cookie. The Backend API only mints for a caller that presents the session's own token.
+ */
+export async function mintSessionToken(server: RealServer, sessionId: string, cookie: string): Promise<string> {
+  const minted = await fetchJson(`${server.url}/v1/client/sessions/${sessionId}/tokens`, {
+    method: "POST",
+    headers: { cookie, "content-type": "application/json" },
+    body: "{}",
+  });
+  if (minted.status !== 200) throw new Error(`token mint failed: ${minted.status} ${JSON.stringify(minted.body)}`);
+  return (minted.body as { jwt: string }).jwt;
 }
 
 /** Signs in through the real Frontend API and returns the `__client` cookie. */
@@ -136,6 +149,7 @@ export async function fetchJson(url: string, init: RequestInit = {}): Promise<Ba
 
 /** Creates an organization owned by `userId` and returns its id (creator becomes `org:admin`). */
 export async function createOrganization(server: RealServer, userId: string, name = "Acme"): Promise<string> {
+  await server.context.settings.update({ organizations: { enabled: true } });
   const response = await backend(server, "POST", "/v1/organizations", { name, created_by: userId });
   if (response.status !== 200 && response.status !== 201) throw new Error(`organization create failed: ${response.status} ${JSON.stringify(response.body)}`);
   return (response.body as { id: string }).id;
@@ -153,8 +167,7 @@ export async function tokenWithOrganization(server: RealServer, user: TestUser, 
     body: JSON.stringify({ active_organization_id: organizationId }),
   });
   if (touched.status !== 200) throw new Error(`touch failed: ${touched.status} ${JSON.stringify(touched.body)}`);
-  const minted = await backend(server, "POST", `/v1/sessions/${active.id}/tokens`);
-  return (minted.body as { jwt: string }).jwt;
+  return mintSessionToken(server, active.id, user.cookie);
 }
 
 export { clearMailOutbox };

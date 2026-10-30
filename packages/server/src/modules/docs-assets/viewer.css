@@ -199,6 +199,8 @@ pre code { font-size: inherit; }
 .copy:hover { border-color: var(--ink-muted); }
 .copy:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
 .copy[data-done="true"] { color: var(--go); border-color: var(--go); }
+/* Off-screen target for the clipboard fallback; a class, not an inline style, so the docs CSP holds. */
+.copy-fallback { position: fixed; top: -1000px; left: -1000px; opacity: 0; }
 
 /* ── schema tree ── */
 .schema { font-family: var(--mono); font-size: 0.8125rem; }

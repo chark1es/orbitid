@@ -26,11 +26,16 @@ Next.js 14+ integration for OrbitID.
 | Variable | Used by | Meaning |
 |---|---|---|
 | `ORBITID_SECRET_KEY` | server | `sk_test_…` for `currentUser()` / `orbitIdClient()`. Required |
-| `ORBITID_JWT_KEY` | server/middleware | PEM public key for offline `__session` verification. Optional |
+| `ORBITID_JWT_KEY` | server/middleware | PEM public key (SPKI or X.509 certificate) for offline `__session` verification. Optional |
 | `ORBITID_AUTHORIZED_PARTIES` | server/middleware | comma-separated origins checked against `azp`. Optional |
 | `ORBITID_WEBHOOK_SECRET` | server | default `whsec_…` for `verifyWebhook()`. Only to receive webhooks |
 
 Session tokens must carry the issuer encoded in your publishable key (the server's public URL); a validly signed token from any other issuer is refused. Override it with the `issuer` option of `orbitIdMiddleware` if you front the server with a different public URL.
+
+`jwtKey` accepts an asymmetric PEM key, an imported `jose` key, or — only when explicitly marked — an HMAC
+secret: `hs256:<secret>` as a string, or a `Uint8Array`. A bare string is refused, because a public key pasted
+without its PEM header would otherwise be tried as an HMAC secret and let anyone holding that public key mint
+tokens. Instance session tokens are always RS256, so most deployments only ever need the PEM public key.
 
 Every variable in the repo, including the ones for the OrbitID server itself, is listed by label in [docs/ENVIRONMENT.md](../../docs/ENVIRONMENT.md).
 
@@ -191,7 +196,7 @@ Signatures use `svix-id`, `svix-timestamp` and `svix-signature` with a 5-minute 
   sees a signed-out session while `<HandshakeRefresher/>` refreshes the client token and reloads the
   RSC tree.
 - `auth()` returns the shared `AuthObject` (`userId`, `sessionId`, `orgId`, `orgRole`, `orgSlug`,
-  `orgPermissions`, `actor`, `sessionClaims`, `sessionStatus`, `isAuthenticated`, `getToken`,
+  `orgPermissions`, `roles`, `rolePermissions`, `actor`, `sessionClaims`, `sessionStatus`, `isAuthenticated`, `getToken`,
   `has`) plus `protect()` and `redirectToSignIn()`.
 
 ## Exports

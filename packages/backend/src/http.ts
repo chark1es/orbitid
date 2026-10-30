@@ -14,6 +14,7 @@ export interface BackendRequestOptions {
   query?: Record<string, string | number | boolean | undefined | null | Array<string | number>>;
   body?: unknown;
   formData?: FormData;
+  headers?: Record<string, string>;
 }
 
 function joinUrl(base: string, path: string): string {
@@ -58,6 +59,7 @@ export class BackendHttp {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.secretKey}`,
       Accept: "application/json",
+      ...(options.headers ?? {}),
     };
     const init: RequestInit = { method, headers };
     if (options.formData) {

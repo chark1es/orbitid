@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   Sidebar,
@@ -16,12 +16,13 @@ import {
 } from "@orbitid/ui";
 import { Loader2 } from "lucide-react";
 import { getApiUrl } from "../../lib/api";
+import { useShowOrganizations } from "../../lib/features";
 import { useInstance } from "../../lib/instance";
 import { Breadcrumbs } from "./breadcrumbs";
 import { CommandPalette } from "./command-palette";
 import { DocumentTitle } from "./document-title";
 import { InstanceChip } from "./instance-chip";
-import { NAV_GROUPS } from "./nav";
+import { visibleNavGroups } from "./nav";
 import { ThemeToggle } from "./theme-toggle";
 import { UserMenu } from "./user-menu";
 
@@ -74,6 +75,8 @@ export function AppSidebar() {
   const { pathname } = useLocation();
   const { data: instance } = useInstance();
   const instanceName = instance?.application?.name?.trim() || "OrbitID";
+  const organizations = useShowOrganizations();
+  const groups = useMemo(() => visibleNavGroups({ organizations }), [organizations]);
 
   return (
     <Sidebar collapsible="icon">
@@ -97,7 +100,7 @@ export function AppSidebar() {
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent className="gap-0 px-0 pt-2">
-        {NAV_GROUPS.map((group, groupIndex) => (
+        {groups.map((group, groupIndex) => (
           <SidebarGroup key={group.label ?? `group-${groupIndex}`} className="py-1">
             {group.label ? <SidebarGroupLabel>{group.label}</SidebarGroupLabel> : null}
             <SidebarGroupContent>

@@ -19,7 +19,17 @@ export interface SessionClaims {
   org_slug?: string;
   org_role?: string; // "org:admin"
   org_permissions?: string[];
-  /** impersonation */
+  /**
+   * Instance-wide custom role keys assigned to the user by an operator (never by the user, the client or
+   * metadata), e.g. `app:support`. Organization roles live in `org_role`; these are independent of one.
+   */
+  roles?: string[];
+  /** Permissions granted by the instance roles in `roles` (the union, sorted). */
+  role_permissions?: string[];
+  /**
+   * Impersonation context. Only sessions created before impersonation was removed carry this; it is kept
+   * so historical activity and audit rows still deserialize.
+   */
   act?: { sub: string; sid?: string; [k: string]: unknown };
   /** [firstFactorAgeMinutes, secondFactorAgeMinutes], -1 = not performed */
   fva?: [number, number];
@@ -38,6 +48,10 @@ export interface AuthObject {
   orgRole: string | null;
   orgSlug: string | null;
   orgPermissions: string[] | null;
+  /** Instance-wide role keys (`app:...`) assigned by an operator; empty when there are none. */
+  roles: string[];
+  /** Permissions granted by those instance roles. Independent of `orgPermissions`. */
+  rolePermissions: string[];
   actor: SessionClaims["act"] | null;
   sessionClaims: SessionClaims | null;
   sessionStatus: "active" | "pending" | null;

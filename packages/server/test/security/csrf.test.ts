@@ -92,7 +92,7 @@ describe("CSRF protection for the cookie-authenticated Frontend API", () => {
   });
 
   it("treats another instance origin as untrusted in production mode", async () => {
-    const { app, ctx } = await setup({ nodeEnv: "production", encryptionKey: "p".repeat(40), baseUrl: "https://auth.example.com" });
+    const { app, ctx } = await setup({ nodeEnv: "production", secretKey: "sk_test_production_0123456789abcdef", encryptionKey: "p".repeat(40), baseUrl: "https://auth.example.com" });
     const client = testClient(app);
     await client.request("/v1/client");
     const res = await client.request("/v1/client", {

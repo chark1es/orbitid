@@ -23,6 +23,7 @@ export const {
   roles,
   permissions,
   rolePermissions,
+  userRoles,
   organizationMemberships,
   organizationInvitations,
   organizationDomains,

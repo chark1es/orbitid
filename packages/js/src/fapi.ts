@@ -2,7 +2,7 @@ import { decodePublishableKey, type ClientJSON } from "@orbitid/shared";
 import { errorFromBody, networkError, OrbitAPIResponseError } from "./util/errors";
 import { inBrowser } from "./util/browser";
 import { toQueryString, type QueryParams } from "./util/pagination";
-import { delay } from "./util/async";
+import { delayWithSignal } from "./util/async";
 
 export const CLIENT_HEADER = "x-orbitid-client";
 export const SDK_VERSION = "0.1.0";
@@ -33,6 +33,28 @@ export interface RequestOptions {
 }
 
 class NetworkFailure extends Error {}
+
+function isAbortError(err: unknown): boolean {
+  return (err instanceof DOMException || err instanceof Error) && err.name === "AbortError";
+}
+
+function abortError(signal?: AbortSignal): unknown {
+  if (signal?.reason instanceof Error) return signal.reason;
+  return new DOMException("The operation was aborted", "AbortError");
+}
+
+/** Only absolute `http(s)` URLs may be navigated to from an API-supplied redirect. */
+function isNavigableUrl(url: string): boolean {
+  // Resolving `//evil.test` against the current origin yields a different origin, so the scheme has to be
+  // explicit: a protocol-relative or relative value from an API response is not a navigation target.
+  if (!/^https?:\/\//i.test(url)) return false;
+  try {
+    const parsed = new URL(url);
+    return (parsed.protocol === "http:" || parsed.protocol === "https:") && !parsed.username && !parsed.password;
+  } catch {
+    return false;
+  }
+}
 
 function joinUrl(base: string, path: string): string {
   if (!path) return base;
@@ -91,14 +113,19 @@ export class FapiClient {
   }
 
   async request<T = unknown>(method: HttpMethod, path: string, options: RequestOptions = {}): Promise<T> {
+    // A caller that aborted must never be retried: the retry would outlive the component that asked.
+    if (options.signal?.aborted) throw abortError(options.signal);
     const attempts = method === "GET" && options.retry !== false ? this.retryAttempts : 1;
     for (let attempt = 0; attempt < attempts; attempt++) {
       try {
         return await this.requestOnce<T>(method, path, options);
       } catch (err) {
+        if (options.signal?.aborted || isAbortError(err)) throw isAbortError(err) ? err : abortError(options.signal);
         const retryable = err instanceof NetworkFailure;
         if (!retryable || attempt === attempts - 1) throw retryable ? networkError() : err;
-        await delay(this.retryDelayMs);
+        // Wake immediately on abort instead of holding a timer for the whole back-off.
+        await delayWithSignal(this.retryDelayMs, options.signal);
+        if (options.signal?.aborted) throw abortError(options.signal);
       }
     }
     throw networkError();
@@ -122,7 +149,7 @@ export class FapiClient {
     try {
       res = await this.fetchImpl(url, init);
     } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") throw err;
+      if (isAbortError(err)) throw err;
       throw new NetworkFailure(err instanceof Error ? err.message : "Network request failed");
     }
 
@@ -131,7 +158,9 @@ export class FapiClient {
     let json: unknown = null;
     try {
       json = await res.json();
-    } catch {
+    } catch (err) {
+      // A body that never finishes must not turn into a slow-motion retry loop.
+      if (isAbortError(err) || options.signal?.aborted) throw isAbortError(err) ? err : abortError(options.signal);
       json = null;
     }
 
@@ -144,8 +173,13 @@ export class FapiClient {
     return json as T;
   }
 
-  /** Navigates the browser (OAuth redirects); honours an injected router in SSR/tests. */
+  /**
+   * Navigates the browser (OAuth redirects); honours an injected router in SSR/tests.
+   * Only `http(s)` targets are followed: the URL comes from an API response, and `javascript:`/`data:`
+   * would execute or render attacker content on this origin.
+   */
   redirectTo(url: string): void {
+    if (!isNavigableUrl(url)) return;
     if (this.navigate) {
       this.navigate(url);
       return;

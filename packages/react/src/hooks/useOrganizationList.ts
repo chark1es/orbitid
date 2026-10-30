@@ -1,3 +1,4 @@
+import { organizationsEnabled as readOrganizationsEnabled } from "./internal/organizationFeature";
 import { useCallback, useContext, useMemo } from "react";
 import { AuthContext, UserContext } from "../provider/contexts";
 import type {
@@ -10,7 +11,7 @@ import type {
 } from "../provider/types";
 import { fetchUserInvitations, fetchUserMemberships, fetchUserSuggestions } from "./internal/adapters";
 import { usePagedResource, type PagedResource } from "./internal/usePagedResource";
-import { invalidateRequest } from "./internal/requestCache";
+import { invalidateRequest, resourceIdentity } from "./internal/requestCache";
 import { resolvePageOptions, type UseOrganizationParam } from "./internal/pageOptions";
 import { useOrbitID } from "./useOrbitID";
 
@@ -38,6 +39,7 @@ export interface UseOrganizationListReturn {
 /** Every organization the current user belongs to (plus invitations and suggestions). */
 export function useOrganizationList(params: UseOrganizationListParams = {}): UseOrganizationListReturn {
   const instance = useOrbitID();
+  const organizationsEnabled = readOrganizationsEnabled(instance.environment);
   const user = useContext(UserContext);
   const { isLoaded, userId } = useContext(AuthContext);
 
@@ -59,33 +61,33 @@ export function useOrganizationList(params: UseOrganizationListParams = {}): Use
   );
 
   const userMemberships = usePagedResource<OrganizationMembershipResource>({
-    key: `user:${userId}:organization-memberships`,
+    key: `user:${userId}:${user ? resourceIdentity(user) : "none"}:organization-memberships`,
     fetcher: fetchMembershipsPage,
     pageSize: membershipsOptions.pageSize,
     initialPage: membershipsOptions.initialPage,
     infinite: membershipsOptions.infinite,
     keepPreviousData: membershipsOptions.keepPreviousData,
-    enabled: membershipsOptions.enabled && Boolean(userId),
+    enabled: membershipsOptions.enabled && organizationsEnabled && Boolean(userId),
   });
 
   const userInvitations = usePagedResource<UserOrganizationInvitationResource>({
-    key: `user:${userId}:organization-invitations`,
+    key: `user:${userId}:${user ? resourceIdentity(user) : "none"}:organization-invitations`,
     fetcher: fetchInvitationsPage,
     pageSize: invitationsOptions.pageSize,
     initialPage: invitationsOptions.initialPage,
     infinite: invitationsOptions.infinite,
     keepPreviousData: invitationsOptions.keepPreviousData,
-    enabled: invitationsOptions.enabled && Boolean(userId),
+    enabled: invitationsOptions.enabled && organizationsEnabled && Boolean(userId),
   });
 
   const userSuggestions = usePagedResource<OrganizationSuggestionResource>({
-    key: `user:${userId}:organization-suggestions`,
+    key: `user:${userId}:${user ? resourceIdentity(user) : "none"}:organization-suggestions`,
     fetcher: fetchSuggestionsPage,
     pageSize: suggestionsOptions.pageSize,
     initialPage: suggestionsOptions.initialPage,
     infinite: suggestionsOptions.infinite,
     keepPreviousData: suggestionsOptions.keepPreviousData,
-    enabled: suggestionsOptions.enabled && Boolean(userId),
+    enabled: suggestionsOptions.enabled && organizationsEnabled && Boolean(userId),
   });
 
   const revalidateMemberships = userMemberships.revalidate;
@@ -98,20 +100,22 @@ export function useOrganizationList(params: UseOrganizationListParams = {}): Use
 
   const setActive = useCallback(
     async ({ organization, beforeEmit }: SetActiveOrganizationParams) => {
+      if (organization && !organizationsEnabled) throw new Error("Organizations are turned off.");
       await instance.setActive({ session: instance.session, organization, beforeEmit });
       invalidateUserOrganizationData();
       await Promise.all([revalidateMemberships(), revalidateInvitations()]);
     },
-    [instance, invalidateUserOrganizationData, revalidateMemberships, revalidateInvitations],
+    [instance, organizationsEnabled, invalidateUserOrganizationData, revalidateMemberships, revalidateInvitations],
   );
 
   const createOrganization = useCallback(
     async (params: CreateOrganizationParams) => {
+      if (!organizationsEnabled) throw new Error("Organizations are turned off.");
       const organization = await instance.createOrganization(params);
       invalidateUserOrganizationData();
       return organization;
     },
-    [instance, invalidateUserOrganizationData],
+    [instance, organizationsEnabled, invalidateUserOrganizationData],
   );
 
   return useMemo(

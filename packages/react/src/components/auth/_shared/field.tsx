@@ -10,7 +10,13 @@ export interface FieldProps<TFieldValues extends FieldValues> {
   description?: string;
   required?: boolean;
   className?: string;
-  children: (field: ControllerRenderProps<TFieldValues, FieldPath<TFieldValues>> & { id: string }) => ReactNode;
+  children: (
+    field: ControllerRenderProps<TFieldValues, FieldPath<TFieldValues>> & {
+      id: string;
+      "aria-invalid"?: boolean;
+      "aria-describedby"?: string;
+    },
+  ) => ReactNode;
 }
 
 /** react-hook-form + shadcn Form wrapper with label, description, and validation message. */
@@ -32,29 +38,38 @@ export function Field<TFieldValues extends FieldValues>({
     <Controller
       control={control}
       name={name}
-      render={({ field, fieldState }) => (
-        <div className={cn("grid gap-1.5", el("formField"), className)}>
-          <Label htmlFor={inputId} className={cn("text-sm font-medium", el("formFieldLabel"))}>
-            {label}
-            {required ? (
-              <span aria-hidden="true" className="text-destructive">
-                *
-              </span>
+      render={({ field, fieldState }) => {
+        const hasError = Boolean(fieldState.error?.message);
+        const describedBy = [description ? descriptionId : null, hasError ? errorId : null].filter(Boolean).join(" ");
+        return (
+          <div className={cn("grid gap-1.5", el("formField"), className)}>
+            <Label htmlFor={inputId} className={cn("text-sm font-medium", el("formFieldLabel"))}>
+              {label}
+              {required ? (
+                <span aria-hidden="true" className="text-destructive">
+                  *
+                </span>
+              ) : null}
+            </Label>
+            {children({
+              ...field,
+              id: inputId,
+              "aria-invalid": hasError ? true : undefined,
+              "aria-describedby": describedBy || undefined,
+            })}
+            {description ? (
+              <p id={descriptionId} className={cn("text-xs text-muted-foreground", el("formFieldHintText"))}>
+                {description}
+              </p>
             ) : null}
-          </Label>
-          {children({ ...field, id: inputId })}
-          {description ? (
-            <p id={descriptionId} className={cn("text-xs text-muted-foreground", el("formFieldHintText"))}>
-              {description}
-            </p>
-          ) : null}
-          {fieldState.error?.message ? (
-            <p id={errorId} role="alert" className={cn("text-xs text-destructive", el("formFieldErrorText"))}>
-              {fieldState.error.message}
-            </p>
-          ) : null}
-        </div>
-      )}
+            {hasError ? (
+              <p id={errorId} role="alert" className={cn("text-xs text-destructive", el("formFieldErrorText"))}>
+                {fieldState.error?.message}
+              </p>
+            ) : null}
+          </div>
+        );
+      }}
     />
   );
 }

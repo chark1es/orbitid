@@ -1,87 +1,91 @@
 import { describe, it, expect } from "vitest";
 import { eq } from "drizzle-orm";
-import { ErrorCodes, type ActorTokenJSON, type SignInTokenJSON } from "@orbitid/shared";
+import { ErrorCodes } from "@orbitid/shared";
 import { sha256 } from "../../src/lib/crypto";
 import * as s from "../../src/db/schema";
 import { redeemTicket, validateTicket } from "../../src/services/restrictions";
-import { createUser, json, testApp } from "./helpers";
+import { createUser, testApp } from "./helpers";
 
-function ticketFromUrl(url: string): string {
-  const ticket = new URL(url).searchParams.get("__orbit_ticket");
-  if (!ticket) throw new Error(`no ticket in ${url}`);
-  return ticket;
-}
-
-describe("sign-in tokens & actor tokens", () => {
-  it("issues a single-use sign-in token and consumes it via redeemTicket", async () => {
-    const { api, ctx } = await testApp();
+/**
+ * Impersonation and operator-minted sign-in tokens were removed. These tests prove both halves of that: the
+ * minting endpoints are gone (so no credential can be created) and tickets that already exist in the database
+ * cannot be redeemed for a session.
+ */
+describe("operator session minting is denied", () => {
+  it("refuses to create a sign-in or actor token and reports a typed 403", async () => {
+    const { api } = await testApp();
     const user = await createUser(api);
 
-    const created = await json<SignInTokenJSON>(await api("POST", "/v1/sign_in_tokens", { user_id: user.id }));
-    expect(created.object).toBe("sign_in_token");
-    expect(created.status).toBe("pending");
-    expect(created.user_id).toBe(user.id);
-    expect(created.url).toContain("/sign-in?__orbit_ticket=");
-    const ticket = ticketFromUrl(created.url!);
-
-    const stored = (await ctx.db.select().from(s.signInTokens))[0]!;
-    expect(stored.tokenHash).toBe(sha256(ticket));
-    expect(stored.tokenHash).not.toBe(ticket);
-
-    await expect(redeemTicket(ctx, ticket)).resolves.toEqual({ kind: "sign_in_token", userId: user.id });
-    expect((await ctx.db.select().from(s.signInTokens))[0]!.status).toBe("accepted");
-
-    await expect(redeemTicket(ctx, ticket)).rejects.toMatchObject({ code: ErrorCodes.ticket_invalid });
-    await expect(redeemTicket(ctx, "not-a-ticket")).rejects.toMatchObject({ code: ErrorCodes.ticket_invalid });
+    const requests: [string, unknown][] = [
+      ["/v1/sign_in_tokens", { user_id: user.id }],
+      ["/v1/sign_in_tokens/sit_whatever/revoke", undefined],
+      ["/v1/actor_tokens", { user_id: user.id, actor: { sub: "user_admin" } }],
+      ["/v1/actor_tokens/act_whatever/revoke", undefined],
+    ];
+    for (const [path, body] of requests) {
+      const res = await api("POST", path, body);
+      expect(res.status, path).toBe(403);
+      const payload = (await res.json()) as { errors: { code: string; message: string }[] };
+      expect(payload.errors[0]!.code).toBe(ErrorCodes.not_allowed_access);
+      // The message tells the operator what to do instead of just "no".
+      expect(payload.errors[0]!.message).toMatch(/impersonation/i);
+    }
   });
 
-  it("honours expiry and revocation", async () => {
+  it("does not write a token row even when the request would otherwise be valid", async () => {
     const { api, ctx } = await testApp();
     const user = await createUser(api);
-
-    const expired = await json<SignInTokenJSON>(await api("POST", "/v1/sign_in_tokens", { user_id: user.id, expires_in_seconds: 10 }));
-    const expiredTicket = ticketFromUrl(expired.url!);
-    await ctx.db.update(s.signInTokens).set({ expiresAt: Date.now() - 1 }).where(eq(s.signInTokens.id, expired.id));
-    await expect(validateTicket(ctx, expiredTicket)).rejects.toMatchObject({ code: ErrorCodes.ticket_expired });
-
-    const revoked = await json<SignInTokenJSON>(await api("POST", "/v1/sign_in_tokens", { user_id: user.id }));
-    const revokedTicket = ticketFromUrl(revoked.url!);
-    const revokeRes = await json<SignInTokenJSON>(await api("POST", `/v1/sign_in_tokens/${revoked.id}/revoke`));
-    expect(revokeRes.status).toBe("revoked");
-    expect(revokeRes.token).toBeUndefined();
-    await expect(redeemTicket(ctx, revokedTicket)).rejects.toMatchObject({ code: ErrorCodes.ticket_invalid });
-
-    expect((await api("POST", "/v1/sign_in_tokens/sit_nope/revoke")).status).toBe(404);
-    expect((await api("POST", "/v1/sign_in_tokens", { user_id: user.id, expires_in_seconds: 5 })).status).toBe(422);
+    await api("POST", "/v1/sign_in_tokens", { user_id: user.id });
+    await api("POST", "/v1/actor_tokens", { user_id: user.id, actor: { sub: "x" } });
+    expect(await ctx.db.select().from(s.signInTokens)).toHaveLength(0);
+    expect(await ctx.db.select().from(s.actorTokens)).toHaveLength(0);
   });
 
-  it("issues actor tokens that carry the impersonation actor and session cap", async () => {
-    const { api, ctx } = await testApp();
-    const user = await createUser(api);
-
-    const created = await json<ActorTokenJSON>(
-      await api("POST", "/v1/actor_tokens", { user_id: user.id, actor: { sub: "user_admin" }, expires_in_seconds: 600, session_max_duration_in_seconds: 900 }),
-    );
-    expect(created.object).toBe("actor_token");
-    expect(created.actor).toEqual({ sub: "user_admin" });
-    expect(created.status).toBe("pending");
-    expect(created.token).toBeTruthy();
-
-    await expect(redeemTicket(ctx, created.token!)).resolves.toEqual({
-      kind: "actor_token",
-      userId: user.id,
-      actor: { sub: "user_admin" },
-      sessionMaxDurationSeconds: 900,
+  it("still requires the secret key, so an unauthenticated attempt is a 401", async () => {
+    const { app } = await testApp();
+    const res = await app.request("/v1/sign_in_tokens", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ user_id: "user_1" }),
     });
-    expect((await ctx.db.select().from(s.actorTokens))[0]!.status).toBe("accepted");
+    expect(res.status).toBe(401);
+  });
 
-    const second = await json<ActorTokenJSON>(await api("POST", "/v1/actor_tokens", { user_id: user.id, actor: { sub: "user_admin", extra: "x" } }));
-    const revokedRes = await json<ActorTokenJSON>(await api("POST", `/v1/actor_tokens/${second.id}/revoke`));
-    expect(revokedRes.status).toBe("revoked");
-    await expect(redeemTicket(ctx, second.token!)).rejects.toMatchObject({ code: ErrorCodes.ticket_invalid });
+  it("refuses pre-existing sign-in and actor tickets instead of redeeming them", async () => {
+    const { api, ctx } = await testApp();
+    const user = await createUser(api);
+    const now = Date.now();
+    await ctx.db.insert(s.signInTokens).values({
+      id: "sit_legacy", userId: user.id, tokenHash: sha256("legacy-sign-in-ticket"), status: "pending",
+      expiresAt: now + 60_000, createdAt: now, updatedAt: now,
+    });
+    await ctx.db.insert(s.actorTokens).values({
+      id: "act_legacy", userId: user.id, actor: { sub: "operator_1" }, tokenHash: sha256("legacy-actor-ticket"), status: "pending",
+      expiresAt: now + 60_000, sessionMaxDurationSeconds: 600, createdAt: now, updatedAt: now,
+    });
 
-    expect((await api("POST", "/v1/actor_tokens", { user_id: user.id, actor: {} })).status).toBe(422);
-    expect((await api("POST", "/v1/actor_tokens", { user_id: "user_missing", actor: { sub: "a" } })).status).toBe(404);
-    expect((await api("POST", "/v1/actor_tokens/act_nope/revoke")).status).toBe(404);
+    for (const ticket of ["legacy-sign-in-ticket", "legacy-actor-ticket"]) {
+      await expect(validateTicket(ctx, ticket), ticket).rejects.toMatchObject({ code: ErrorCodes.ticket_invalid });
+      await expect(redeemTicket(ctx, ticket), ticket).rejects.toMatchObject({ code: ErrorCodes.ticket_invalid });
+    }
+    // Validation is a read: the rows keep their status, so a second attempt fails the same way.
+    expect((await ctx.db.select().from(s.signInTokens).where(eq(s.signInTokens.id, "sit_legacy")))[0]!.status).toBe("pending");
+    expect((await ctx.db.select().from(s.actorTokens).where(eq(s.actorTokens.id, "act_legacy")))[0]!.status).toBe("pending");
+  });
+
+  it("does not accept a ticket through the Frontend API sign-in route", async () => {
+    const { app, ctx, fapi } = await testApp();
+    const now = Date.now();
+    const user = await createUser((method, path, body) => Promise.resolve(app.request(path, {
+      method,
+      headers: { authorization: "Bearer sk_test_testsecret", "content-type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })));
+    await ctx.db.insert(s.signInTokens).values({
+      id: "sit_api", userId: user.id, tokenHash: sha256("api-ticket"), status: "pending", expiresAt: now + 60_000, createdAt: now, updatedAt: now,
+    });
+    const res = await fapi("POST", "/v1/client/sign_ins", { ticket: "api-ticket" });
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { errors: { code: string }[] }).errors[0]!.code).toBe(ErrorCodes.ticket_invalid);
   });
 });

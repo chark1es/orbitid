@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { UserProfile } from "../index";
 import type { UserResource } from "../../../provider/types";
-import { enterOtp, renderAuth, setupAuth } from "./fake-auth";
+import { authEnvironment, enterOtp, renderAuth, setupAuth } from "./fake-auth";
 
 async function goToSecurity() {
   fireEvent.click(screen.getAllByRole("button", { name: "Security" })[0]!);
@@ -141,6 +141,25 @@ describe("UserProfile", () => {
     expect(harness.instance.navigations.at(-1)?.to).toBe("/");
   });
 
+  it("clears the typed confirmation when the delete dialog is cancelled", async () => {
+    const harness = setupAuth();
+    const user = harness.instance.user as UserResource;
+    renderAuth(<UserProfile routing="virtual" />, harness);
+    await goToSecurity();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete account" }));
+    let dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(/Type "Delete account"/), { target: { value: "Delete account" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete account" }));
+    dialog = await screen.findByRole("dialog");
+    expect((within(dialog).getByLabelText(/Type "Delete account"/) as HTMLInputElement).value).toBe("");
+    expect((within(dialog).getByRole("button", { name: "Delete my account" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(user.delete).not.toHaveBeenCalled();
+  });
+
   it("renders custom pages and links in the navigation", async () => {
     const harness = setupAuth();
     renderAuth(
@@ -156,5 +175,53 @@ describe("UserProfile", () => {
     fireEvent.click(screen.getByRole("button", { name: "Billing" }));
     expect(await screen.findByText("Billing settings")).toBeTruthy();
     expect(screen.getByText("Help").closest("a")?.getAttribute("href")).toBe("https://example.com/help");
+  });
+
+  it("does not save a blank required name and says why", async () => {
+    const environment = authEnvironment();
+    environment.userSettings.attributes.firstName = {
+      ...environment.userSettings.attributes.firstName!,
+      required: true,
+    };
+    const harness = setupAuth({ environment });
+    const user = harness.instance.user as UserResource;
+    renderAuth(<UserProfile routing="virtual" />, harness);
+
+    const firstName = await screen.findByLabelText(/First name/);
+    fireEvent.change(firstName, { target: { value: "   " } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByText("This field is required.")).toBeTruthy();
+    expect(user.update).not.toHaveBeenCalled();
+
+    fireEvent.change(firstName, { target: { value: "Grace" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(user.update).toHaveBeenCalledWith(expect.objectContaining({ firstName: "Grace" })));
+  });
+
+  it("keeps the only phone number when the instance requires one", async () => {
+    const environment = authEnvironment();
+    environment.userSettings.attributes.phoneNumber = {
+      enabled: true,
+      required: true,
+      usedForFirstFactor: false,
+      usedForSecondFactor: false,
+      verifications: ["phone_code"],
+      verifyAtSignUp: false,
+    };
+    const harness = setupAuth({ environment });
+    const user = harness.instance.user as UserResource;
+    user.phoneNumbers = [
+      {
+        id: "idn_p1",
+        phoneNumber: "+15551234567",
+        verification: { status: "verified", strategy: "phone_code", attempts: 0, expireAt: null },
+        destroy: vi.fn(async () => undefined),
+      } as never,
+    ];
+    renderAuth(<UserProfile routing="virtual" />, harness);
+
+    const remove = await screen.findByRole("button", { name: "Remove phone number" });
+    expect((remove as HTMLButtonElement).disabled).toBe(true);
   });
 });

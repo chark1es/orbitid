@@ -3,6 +3,7 @@ import {
   decodeJwt,
   importPKCS8,
   importSPKI,
+  importX509,
   jwtVerify,
   type JWTVerifyGetKey,
   type KeyLike,
@@ -20,7 +21,7 @@ import { stripTrailingSlash } from "./env";
 export type JwtKey = string | Uint8Array | KeyLike;
 
 export interface VerifySessionTokenOptions {
-  /** PEM (public or private), raw HMAC secret, or an imported jose key. */
+  /** PEM (SPKI/certificate) public key, raw HMAC secret as bytes, or an imported jose key. */
   jwtKey?: JwtKey;
   /** Explicit JWKS endpoint; takes precedence over `apiUrl`. */
   jwksUrl?: string;
@@ -52,23 +53,50 @@ function isPem(value: string): boolean {
   return value.includes("-----BEGIN ");
 }
 
-async function importJwtKey(jwtKey: JwtKey): Promise<KeyLike | Uint8Array> {
+/**
+ * Instance session tokens are RS256 and machine/OIDC tokens share the key but carry an audience. Only the
+ * asymmetric set is ever accepted for a PEM `jwtKey`, so a public key can never be replayed as an HMAC secret
+ * ("algorithm confusion"). HMAC is opt-in, explicitly:
+ *
+ * - `hs256:<secret>` — a shared secret given as a string (the only way to supply it through an env var);
+ * - a `Uint8Array` — the same thing as bytes.
+ *
+ * A bare string is refused: it is almost always a public key pasted without its PEM header, and treating it as
+ * an HMAC secret would let anyone holding that public key mint accepted tokens.
+ */
+const ASYMMETRIC_ALGORITHMS = ["RS256", "ES256", "PS256"] as const;
+const HMAC_PREFIX = "hs256:";
+
+async function importJwtKey(jwtKey: JwtKey): Promise<{ key: KeyLike | Uint8Array; algorithms: string[] }> {
   if (typeof jwtKey === "string") {
-    if (!isPem(jwtKey)) return new TextEncoder().encode(jwtKey);
+    if (jwtKey.startsWith(HMAC_PREFIX)) {
+      const secret = jwtKey.slice(HMAC_PREFIX.length);
+      if (secret.length < 16) {
+        throw new Error("@orbitid/nextjs: an HMAC `jwtKey` secret must be at least 16 characters");
+      }
+      return { key: new TextEncoder().encode(secret), algorithms: ["HS256"] };
+    }
+    if (!isPem(jwtKey)) {
+      throw new Error(
+        "@orbitid/nextjs: `jwtKey` must be a PEM public key. For an HMAC (HS256) secret, prefix it with `hs256:` or pass a Uint8Array.",
+      );
+    }
     const cached = keyCache.get(jwtKey);
-    if (cached) return cached;
+    if (cached) return { key: await cached, algorithms: [...ASYMMETRIC_ALGORITHMS] };
     const imported = (async () => {
       const body = jwtKey.trim();
       if (body.includes("PUBLIC KEY")) return importSPKI(body, "RS256");
+      // An X.509 certificate is not a bare SPKI block: `importSPKI` would reject it, so it needs `importX509`.
+      if (body.includes("CERTIFICATE")) return importX509(body, "RS256");
+      // A private key also carries the public half; verifying with it is fine and never leaves this process.
       if (body.includes("PRIVATE KEY")) return importPKCS8(body, "RS256");
-      if (body.includes("CERTIFICATE")) return importSPKI(body, "RS256");
       throw new Error("@orbitid/nextjs: unsupported PEM key type for `jwtKey`");
     })();
     keyCache.set(jwtKey, imported);
-    return imported;
+    return { key: await imported, algorithms: [...ASYMMETRIC_ALGORITHMS] };
   }
-  if (jwtKey instanceof Uint8Array) return jwtKey;
-  return jwtKey as KeyLike;
+  if (jwtKey instanceof Uint8Array) return { key: jwtKey, algorithms: ["HS256"] };
+  return { key: jwtKey as KeyLike, algorithms: [...ASYMMETRIC_ALGORITHMS] };
 }
 
 function jwksFor(url: string): JWTVerifyGetKey {
@@ -114,10 +142,12 @@ export async function verifySessionToken(
 
   let key: KeyLike | Uint8Array | null = null;
   let getKey: JWTVerifyGetKey | null = null;
-  let algorithms: string[] | undefined;
+  let algorithms: string[];
   if (options.jwtKey) {
     try {
-      key = await importJwtKey(options.jwtKey);
+      const imported = await importJwtKey(options.jwtKey);
+      key = imported.key;
+      algorithms = imported.algorithms;
     } catch (error) {
       return {
         valid: false,
@@ -125,17 +155,11 @@ export async function verifySessionToken(
         message: error instanceof Error ? error.message : String(error),
       };
     }
-    algorithms =
-      typeof options.jwtKey === "string" && !isPem(options.jwtKey)
-        ? ["HS256"]
-        : options.jwtKey instanceof Uint8Array
-          ? ["HS256"]
-          : ["RS256", "ES256", "PS256"];
   } else {
     const jwksUrl = options.jwksUrl ?? (options.apiUrl ? `${stripTrailingSlash(options.apiUrl)}/.well-known/jwks.json` : undefined);
     if (!jwksUrl) return { valid: false, reason: "no-key", message: "Provide `jwtKey`, `jwksUrl` or `apiUrl` to verify session tokens" };
     getKey = jwksFor(jwksUrl);
-    algorithms = ["RS256", "ES256", "PS256"];
+    algorithms = [...ASYMMETRIC_ALGORITHMS];
   }
 
   const verifyOptions = {
@@ -153,19 +177,24 @@ export async function verifySessionToken(
     if (payload.aud !== undefined && options.audience === undefined) {
       return { valid: false, reason: "invalid", message: "Token is not a session token" };
     }
+    // Same shape check as the server and the Node SDK: a token without a subject and a session is not a session,
+    // however valid its signature. Without it a machine token or an ID token could be treated as a session.
+    if (typeof payload.sub !== "string" || typeof payload.sid !== "string" || !payload.sub || !payload.sid) {
+      return { valid: false, reason: "invalid", message: "Token is missing the sub/sid claims", claims };
+    }
     if (!partyMatches(claims.azp, options.authorizedParties)) {
       return { valid: false, reason: "unauthorized-party", claims };
     }
     return { valid: true, claims, token };
   } catch (error) {
     if (isExpiredError(error)) {
-      const claims = decodeSessionClaims(token);
-      return { valid: false, reason: "expired", claims, message: "Session token has expired" };
+      // Decoded, unverified claims are only useful for diagnostics: callers get `valid: false` and no
+      // authorization from them (see `resolveRequestAuthState`).
+      return { valid: false, reason: "expired", message: "Session token has expired" };
     }
     return {
       valid: false,
       reason: "invalid",
-      claims: decodeSessionClaims(token),
       message: error instanceof Error ? error.message : String(error),
     };
   }

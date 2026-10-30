@@ -20,7 +20,7 @@ Set these where OrbitID runs: the container environment, `docker compose`'s `.en
 | `ORBITID_DATABASE_URL` | recommended | SQLite file in the data dir | `postgres://…`, `pglite://<dir>` or `sqlite:<file>`. `DATABASE_URL` also works. |
 | `ORBITID_BASE_URL` | yes in production | `http://localhost:<port>` | The URL browsers and your apps use to reach the server. It is the token issuer. |
 | `PORT` / `ORBITID_PORT` | no | `4000` | Port to listen on. |
-| `ORBITID_SECRET_KEY` | no | derived from the encryption key | Backend API key. Set it only to pin a specific value. |
+| `ORBITID_SECRET_KEY` | no | derived from the encryption key | Backend API key. Omit it to derive a strong key; an explicit production key must contain at least 32 random characters. |
 | `ORBITID_DATABASE_PATH` | no | none | Legacy alias: a SQLite file path, used when `ORBITID_DATABASE_URL` is not set. |
 | `ORBITID_DATA_DIR` | no | `./data` | Uploads and, for SQLite, the database file. |
 | `ORBITID_DASHBOARD_DIR` | no | built dashboard next to the server | Folder holding the built dashboard. |
@@ -31,7 +31,6 @@ Set these where OrbitID runs: the container environment, `docker compose`'s `.en
 | `ORBITID_DASHBOARD_CONNECT_SRC` | no | none | Extra origins the dashboard may call, when its API lives elsewhere. See [SECURITY.md](SECURITY.md). |
 | `ORBITID_RESEND_API_KEY` | no | none | Send email through Resend. See [EMAIL.md](EMAIL.md). |
 | `ORBITID_SMTP_URL` | no | none | Send email through SMTP, `smtps://user:password@host:465`. |
-| `ORBITID_ALLOW_CONSOLE_EMAIL` | no | `false` | Production only. Lets the console transport print email, codes and links included, to the server log. For a trial run, never for real users. See [EMAIL.md](EMAIL.md). |
 | `ORBITID_EMAIL_FROM` | no | `OrbitID <no-reply@localhost>` | From address for all email. |
 | `NODE_ENV` | no | `development` | Set to `production` in deployments (the Docker image does). Turns on production checks. |
 | `POSTGRES_PASSWORD` | docker compose only | `orbitid` | Password of the bundled Postgres container. |
@@ -44,10 +43,10 @@ Set these on the server side of your own app: the Next.js server, an Express or 
 
 | Variable | Required | Read by | Meaning |
 | --- | --- | --- | --- |
-| `ORBITID_SECRET_KEY` | **yes** | `@orbitid/nextjs`, `@orbitid/node`, `@orbitid/backend` | Backend API key (`sk_…`). Print it with `orbitid keys` or copy it from the dashboard. |
+| `ORBITID_SECRET_KEY` | **yes** | `@orbitid/nextjs`, `@orbitid/node`, `@orbitid/backend` | Backend API key (`sk_…`). Retrieve it explicitly with `orbitid keys` (from source: `bun run --filter @orbitid/server start keys`) or the local data-directory key file. The dashboard and startup logs do not reveal it. |
 | `ORBITID_API_URL` | **yes**, unless a publishable key is given | `@orbitid/node`, `@orbitid/backend` | URL of your OrbitID server (`https://auth.example.com`). There is no hosted default, so the SDK refuses to start without it (or `ORBITID_PUBLISHABLE_KEY`, which carries the URL). |
 | `ORBITID_WEBHOOK_SECRET` | only to receive webhooks | all backend SDKs | Signing secret (`whsec_…`) of the webhook endpoint you registered in the dashboard. |
-| `ORBITID_JWT_KEY` | no | `@orbitid/nextjs` | PEM public key to verify session tokens without fetching the key set. |
+| `ORBITID_JWT_KEY` | no | `@orbitid/nextjs` | PEM public key (SPKI, X.509 certificate or a private key, whose public half is used) to verify session tokens without fetching the key set. A bare string without a PEM header is refused rather than treated as an HMAC secret; for HMAC, opt in explicitly with the `hs256:` prefix (`hs256:<secret>`, ≥16 characters). |
 | `ORBITID_JWKS_URL` | no | `@orbitid/node` | Key set URL when it is not `<api url>/.well-known/jwks.json`. |
 | `ORBITID_AUTHORIZED_PARTIES` | no | `@orbitid/nextjs` | Comma-separated origins accepted in the token's `azp` claim. |
 | `ORBITID_ISSUER` | no | `@orbitid/node` | The server's public URL, which tokens carry as `iss`. Defaults to the URL in the publishable key, else `ORBITID_API_URL`. Set it when this process reaches the server on an internal address (`http://orbitid:4000`) but tokens are issued for the public one. |

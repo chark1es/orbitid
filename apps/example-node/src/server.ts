@@ -17,17 +17,44 @@ function json(res: ServerResponse, status: number, body: unknown, headers: Recor
   res.end(payload);
 }
 
-function apiError(res: ServerResponse, status: number, code: string, message: string): void {
-  json(res, status, { errors: [{ code, message }] }, status === 401 ? { "www-authenticate": 'Bearer realm="orbitid"' } : {});
+function apiError(
+  res: ServerResponse,
+  status: number,
+  code: string,
+  message: string,
+  headers: Record<string, string> = {},
+): void {
+  json(
+    res,
+    status,
+    { errors: [{ code, message }] },
+    { ...(status === 401 ? { "www-authenticate": 'Bearer realm="orbitid"' } : {}), ...headers },
+  );
+}
+
+/** Thrown when a request body exceeds `MAX_BODY_BYTES`; mapped to `413`, not a generic `500`. */
+class BodyTooLargeError extends Error {
+  constructor() {
+    super("body_too_large");
+    this.name = "BodyTooLargeError";
+  }
 }
 
 async function readBody(req: IncomingMessage): Promise<Buffer> {
+  const declared = Number(req.headers["content-length"] ?? Number.NaN);
+  // Refuse before reading a single byte when the sender already said it is too big.
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) throw new BodyTooLargeError();
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     const buffer = Buffer.from(chunk);
     size += buffer.length;
-    if (size > MAX_BODY_BYTES) throw new Error("body_too_large");
+    if (size > MAX_BODY_BYTES) {
+      // Stop reading rather than draining a hostile upload, but leave the socket intact: destroying it here
+      // also destroys the response, so the caller would see a connection reset instead of the 413 below.
+      req.pause();
+      throw new BodyTooLargeError();
+    }
     chunks.push(buffer);
   }
   return Buffer.concat(chunks);
@@ -116,6 +143,12 @@ const server = createServer((req, res) => {
   };
 
   void run().catch((error: unknown) => {
+    if (error instanceof BodyTooLargeError) {
+      // `connection: close` because the rest of the request body was never read; the socket cannot be reused.
+      if (!res.headersSent) apiError(res, 413, "request_body_too_large", "Request body is too large", { connection: "close" });
+      else res.end();
+      return;
+    }
     // Verification that could not run at all (key set unreachable, bad configuration) is a 503, not a 500:
     // the caller is not signed out, the server just cannot tell right now.
     if (isOrbitIdError(error) && ["jwks-fetch-failed", "network-error", "request-timeout", "configuration"].includes(error.reason ?? "")) {

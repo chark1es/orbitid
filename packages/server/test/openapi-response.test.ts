@@ -129,7 +129,9 @@ describe("documented responses match real payloads", () => {
   });
 
   it("creating and listing users with the Backend API", async () => {
-    const { api } = await adminApp();
+    const { api, ctx } = await adminApp();
+    // Organizations are off by default; the Backend API is gated by the same switch, so turn them on to list them.
+    await ctx.settings.update({ organizations: { enabled: true } });
     const created = await createUser(api, { email_address: ["documented-backend@example.com"], password: "Sup3r-secret!", public_metadata: { tier: "pro" } });
     expectMatches(created, "createUser");
 

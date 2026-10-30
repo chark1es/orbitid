@@ -34,6 +34,7 @@ export interface VerifyTokenOptions {
   jwksUrl?: string;
   /** PEM-encoded public key (SPKI). Enables networkless verification. */
   jwtKey?: string;
+  /** @deprecated Not used by local verification. Use jwtKey/JWKS; this option does not enable HMAC. */
   secretKey?: string;
   apiUrl?: string;
   authorizedParties?: string[];

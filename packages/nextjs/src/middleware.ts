@@ -119,6 +119,13 @@ function createMiddlewareAuthObject(
     orgRole: authenticatedClaims?.org_role ?? null,
     orgSlug: authenticatedClaims?.org_slug ?? null,
     orgPermissions: authenticatedClaims?.org_permissions ?? null,
+    // Instance-wide roles live outside the organization claims; a pending session holds neither.
+    roles: Array.isArray(authenticatedClaims?.roles)
+      ? authenticatedClaims.roles.filter((role): role is string => typeof role === "string")
+      : [],
+    rolePermissions: Array.isArray(authenticatedClaims?.role_permissions)
+      ? authenticatedClaims.role_permissions.filter((permission): permission is string => typeof permission === "string")
+      : [],
     actor: claims?.act ?? null,
     sessionClaims: claims,
     sessionStatus,
@@ -161,12 +168,47 @@ function serializeCsp(csp: ContentSecurityPolicyOptions): string {
       parts.push(`${directive} ${values.join(" ")}`.trim());
     }
   }
-  if (csp.reportUri) parts.push(`report-uri ${csp.reportUri}`);
+  // A nonce is generated per request; it has to replace or add the `'nonce-…'` token of `script-src`.
+  // Substituting in place only worked when the directive already listed a placeholder, so a policy configured
+  // without one silently shipped no nonce and the page's inline bootstrap was blocked.
   if (csp.nonce) {
-    for (let i = 0; i < parts.length; i += 1) {
-      parts[i] = parts[i]!.replace(/'nonce-[^']*'/g, `'nonce-${csp.nonce}'`);
+    // A nonce is base64-ish by definition; anything else (quotes, spaces, `;`) would let a configured value
+    // inject or corrupt the header, so an unusable one is dropped rather than serialized verbatim.
+    const safeNonce = /^[A-Za-z0-9+/_-]+=*$/.test(csp.nonce) ? csp.nonce : null;
+    if (safeNonce) {
+      const nonceToken = `'nonce-${safeNonce}'`;
+      const target = "script-src";
+      let scriptSrcSeen = false;
+      let scriptSrcNonced = false;
+      for (let i = 0; i < parts.length; i += 1) {
+        const part = parts[i]!;
+        // Every directive that already carries a placeholder gets the fresh nonce, so a policy written for
+        // the old nonce never ships a stale one. Only `script-src` is where a missing one is added: it is the
+        // one directive the policy server owns for the page's own bootstrap. Synthesising `script-src-elem`,
+        // `style-src` or `style-src-elem` would silently narrow or broaden what the operator allow-listed.
+        const [name] = part.trim().split(/\s+/, 1);
+        const isTarget = name === target;
+        if (isTarget) scriptSrcSeen = true;
+        if (!/'nonce-[^']*'/.test(part)) continue;
+        if (isTarget) scriptSrcNonced = true;
+        parts[i] = part.replace(/\s*'nonce-[^']*'/g, ` ${nonceToken}`).replace(/\s+/g, " ").trim();
+      }
+      if (scriptSrcSeen && !scriptSrcNonced) {
+        // A configured `script-src` without a placeholder still needs this request's nonce appended.
+        for (let i = 0; i < parts.length; i += 1) {
+          if (parts[i]!.trim().split(/\s+/, 1)[0] === target) {
+            parts[i] = `${parts[i]} ${nonceToken}`.trim();
+            scriptSrcNonced = true;
+            break;
+          }
+        }
+      }
+      if (!scriptSrcSeen && parts.some((part) => part.trim().split(/\s+/, 1)[0] === "default-src")) {
+        parts.push(`script-src 'self' ${nonceToken}`);
+      }
     }
   }
+  if (csp.reportUri) parts.push(`report-uri ${csp.reportUri}`);
   return parts.join("; ");
 }
 
@@ -225,7 +267,11 @@ export function orbitIdMiddleware(
     const state = await resolveRequestAuthState(incoming, req.url, env);
 
     if (options.debug) {
-      console.debug(`[orbitid] ${req.method} ${req.nextUrl?.pathname ?? req.url} → ${state.status}`, state.reason ?? "");
+      // Never log the token or the claims: only method, path and the coarse status/reason.
+      console.debug(
+        `[orbitid] ${req.method} ${req.nextUrl?.pathname ?? new URL(req.url).pathname} → ${state.status}`,
+        state.reason ?? "",
+      );
     }
 
     // Expired/missing `__session` with a live `__client_uat` on a top-level navigation: one handshake

@@ -11,6 +11,8 @@ import { ConfirmDialog } from "../shared/confirm-dialog";
 import { Panel, Section } from "../shared/section";
 import { UserAvatar } from "../shared/user-avatar";
 import { userLabel } from "../../lib/format";
+import { useInstance } from "../../lib/instance";
+import { REQUIRED_FIELD_LABELS, missingRequiredFields, requiredUserFields } from "../../lib/users";
 
 export function UserProfileTab({ user, onUpdated }: { user: UserJSON; onUpdated: () => void }) {
   const [firstName, setFirstName] = useState(user.first_name ?? "");
@@ -40,6 +42,12 @@ export function UserProfileTab({ user, onUpdated }: { user: UserJSON; onUpdated:
       setConfirmRemoveImage(false);
     },
   });
+
+  const instance = useInstance();
+  const required = requiredUserFields(instance.data);
+  // Email and phone are managed on the Identifiers tab; only the fields this form edits can be missing here.
+  const editable = new Set([...required].filter((field) => field === "firstName" || field === "lastName" || field === "username"));
+  const missing = missingRequiredFields({ firstName, lastName, username }, editable);
 
   const dirty =
     firstName !== (user.first_name ?? "") ||
@@ -75,6 +83,7 @@ export function UserProfileTab({ user, onUpdated }: { user: UserJSON; onUpdated:
             className="space-y-5"
             onSubmit={(event) => {
               event.preventDefault();
+              if (!instance.data || missing.length > 0) return;
               const body: Record<string, unknown> = {
                 first_name: firstName.trim() || null,
                 last_name: lastName.trim() || null,
@@ -86,16 +95,34 @@ export function UserProfileTab({ user, onUpdated }: { user: UserJSON; onUpdated:
           >
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="profile-first-name">First name</Label>
-                <Input id="profile-first-name" value={firstName} onChange={(event) => setFirstName(event.target.value)} />
+                <Label htmlFor="profile-first-name">First name{required.has("firstName") ? <span className="text-muted-foreground"> (required)</span> : null}</Label>
+                <Input
+                  id="profile-first-name"
+                  value={firstName}
+                  onChange={(event) => setFirstName(event.target.value)}
+                  aria-required={required.has("firstName") || undefined}
+                  aria-invalid={missing.includes("firstName") || undefined}
+                />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="profile-last-name">Last name</Label>
-                <Input id="profile-last-name" value={lastName} onChange={(event) => setLastName(event.target.value)} />
+                <Label htmlFor="profile-last-name">Last name{required.has("lastName") ? <span className="text-muted-foreground"> (required)</span> : null}</Label>
+                <Input
+                  id="profile-last-name"
+                  value={lastName}
+                  onChange={(event) => setLastName(event.target.value)}
+                  aria-required={required.has("lastName") || undefined}
+                  aria-invalid={missing.includes("lastName") || undefined}
+                />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="profile-username">Username</Label>
-                <Input id="profile-username" value={username} onChange={(event) => setUsername(event.target.value)} />
+                <Label htmlFor="profile-username">Username{required.has("username") ? <span className="text-muted-foreground"> (required)</span> : null}</Label>
+                <Input
+                  id="profile-username"
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  aria-required={required.has("username") || undefined}
+                  aria-invalid={missing.includes("username") || undefined}
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="profile-external-id">External ID</Label>
@@ -109,8 +136,15 @@ export function UserProfileTab({ user, onUpdated }: { user: UserJSON; onUpdated:
                 <CopyButton value={user.id} label="Copy user ID" />
               </div>
             </div>
-            <div className="flex justify-end border-t border-border pt-4">
-              <Button type="submit" disabled={!dirty || save.isPending}>
+            <div className="flex items-center justify-end gap-3 border-t border-border pt-4">
+              {missing.length > 0 ? (
+                <p role="alert" className="mr-auto text-[0.8125rem] leading-relaxed text-signal">
+                  {missing.map((field) => REQUIRED_FIELD_LABELS[field]).join(", ")} {missing.length === 1 ? "is" : "are"} required by this
+                  instance's settings.
+                </p>
+              ) : null}
+              {instance.error ? <p role="alert" className="mr-auto text-sm text-signal">Required field settings could not be loaded. <Button type="button" variant="outline" size="sm" onClick={() => void instance.refetch()}>Retry</Button></p> : null}
+              <Button type="submit" disabled={!instance.data || !dirty || save.isPending || missing.length > 0}>
                 {save.isPending ? <Loader2 className="animate-spin" aria-hidden /> : <Save aria-hidden />}
                 Save profile
               </Button>

@@ -307,7 +307,7 @@ export function createOrbitId(options: CreateOrbitIdOptions = {}): OrbitIdNode {
       const body = typeof rawBody === "string" ? rawBody : new TextDecoder().decode(rawBody);
       // `verifyWebhook` returns the event; verification failures are mapped to the SDK's error type.
       try {
-        return await verifyWebhookSignature<T>({ body, headers: headers as Record<string, string | undefined> }, { signingSecret, toleranceInSeconds: 300 });
+        return await verifyWebhookSignature<T>({ body, headers }, { signingSecret, toleranceInSeconds: 300 });
       } catch (error) {
         throw new OrbitIdError({
           status: 400,

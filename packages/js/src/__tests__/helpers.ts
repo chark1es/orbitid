@@ -137,6 +137,8 @@ export function userJSON(overrides: Partial<UserJSON> = {}): UserJSON {
     delete_self_enabled: true,
     create_organization_enabled: true,
     create_organizations_limit: null,
+    roles: [],
+    role_permissions: [],
     last_sign_in_at: now,
     last_active_at: now,
     legal_accepted_at: null,

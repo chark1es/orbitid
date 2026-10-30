@@ -1,3 +1,4 @@
+import { trimCache } from "./trimCache";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface AsyncValue<T> {
@@ -51,6 +52,7 @@ export function useAsyncValue<T>(options: UseAsyncValueOptions<T>): AsyncValue<T
       const result = await current({ force });
       if (requestIdRef.current !== requestId) return;
       cache.set(key, { data: result, at: Date.now() });
+      trimCache(cache, CACHE_TTL_MS);
       setState({ data: result, isFetching: false, error: null });
     } catch (error) {
       if (requestIdRef.current !== requestId) return;
@@ -71,6 +73,7 @@ export function useAsyncValue<T>(options: UseAsyncValueOptions<T>): AsyncValue<T
     // Seed from the new key's cache so switching organizations/accounts never shows stale data.
     setState({ data: readCache<T>(key), isFetching: true, error: null });
     void load();
+    return () => { requestIdRef.current += 1; };
   }, [enabled, key, load]);
 
   return {

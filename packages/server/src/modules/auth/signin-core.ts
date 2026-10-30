@@ -44,8 +44,6 @@ export interface SignInState {
   first?: FactorState;
   second?: FactorState;
   resetPassword?: { verified: boolean; strategy: string };
-  actor?: Record<string, unknown>;
-  sessionMaxDurationSeconds?: number;
   requestedReset?: boolean;
   transferProfile?: StashedProfile;
   enterpriseConnectionId?: string;
@@ -172,7 +170,6 @@ export async function buildSignInJSON(ctx: AppContext, row: SignInRow): Promise<
 }
 
 export interface CompleteSignInOptions {
-  actor?: Record<string, unknown>;
   maxLifetimeSeconds?: number;
   ip?: string;
   userAgent?: string;
@@ -190,13 +187,12 @@ export async function completeSignIn(ctx: AppContext, row: SignInRow, opts: Comp
   const sessionId = await createSession(ctx, {
     clientId: row.clientId,
     userId: row.userId,
-    actor: state.actor ?? opts.actor,
     ip: opts.ip,
     userAgent: opts.userAgent,
-    maxLifetimeSeconds: opts.maxLifetimeSeconds ?? state.sessionMaxDurationSeconds,
+    maxLifetimeSeconds: opts.maxLifetimeSeconds,
     firstFactor: true,
     secondFactor: opts.secondFactor ?? false,
-    method: state.actor ? "ticket" : authMethodOf(state.first?.strategy),
+    method: authMethodOf(state.first?.strategy),
     rotateClientToken: opts.rotateClientToken,
   });
   const nextState: SignInState = { ...state, second: opts.secondFactor ? { ...(state.second ?? { strategy: "totp" }), status: "verified" } : state.second };
@@ -301,18 +297,13 @@ export async function clearTransferProfile(ctx: AppContext, row: SignInRow) {
   await saveSignInState(ctx, row, { ...state, transferProfile: undefined, first: undefined });
 }
 
-export type RedeemTicketResult =
-  | { kind: "sign_in_token" | "actor_token"; userId: string; actor?: Record<string, unknown>; sessionMaxDurationSeconds?: number }
-  | { kind: "invitation"; invitationId: string; email: string; publicMetadata: Record<string, unknown> };
-
-/** Validates a `ticket` (sign-in token / actor token) and returns the user + impersonation actor. */
-export async function resolveTicket(ctx: AppContext, ticket: string): Promise<{ userId: string; actor?: Record<string, unknown>; sessionMaxDurationSeconds?: number }> {
-  const result = await redeemTicket(ctx, ticket);
-  if (!result) throw new OrbitError(422, ErrorCodes.ticket_invalid, "That ticket is not valid");
-  if (result.kind === "invitation") {
-    throw new OrbitError(422, ErrorCodes.ticket_invalid, "This ticket can only be used to sign up");
-  }
-  return { userId: result.userId, actor: result.actor, sessionMaxDurationSeconds: result.sessionMaxDurationSeconds };
+/**
+ * There is no ticket that signs a user in. Sign-in tokens and impersonation tokens were removed, and the only
+ * remaining ticket is an app invitation, which belongs to the sign-up route. A presented ticket is refused as
+ * invalid rather than being redeemed for a session.
+ */
+export function resolveTicket(_ctx: AppContext, _ticket: string): never {
+  throw new OrbitError(422, ErrorCodes.ticket_invalid, "This ticket is invalid. Sign in with your own credentials.");
 }
 
 /** Throws when the user is banned/locked (with the documented error codes). */

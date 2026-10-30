@@ -12,7 +12,7 @@ export default async function SeedPage() {
       <div className="space-y-8">
         <PageHeader
           title="Seed data"
-          description="Create users, organizations and sign-in links through the Backend API."
+          description="Create users and organizations through the Backend API."
         />
         <SetupRequired
           title="Seed data needs the secret key"
@@ -29,7 +29,7 @@ export default async function SeedPage() {
     <div className="space-y-8">
       <PageHeader
         title="Seed data"
-        description="Create users, organizations and sign-in links through the Backend API, then remove exactly what this tool made."
+        description="Create users and organizations through the Backend API, then remove exactly what this tool made."
       />
       <SeedManager
         users={result.users}

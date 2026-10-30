@@ -4,13 +4,16 @@ import Page from "./settings-email-sms";
 import { instanceBody, mockApi, renderPage } from "./_config/__tests__/harness";
 
 describe("email & SMS settings", () => {
-  it("shows the effective provider and warns when mail only reaches the server log", async () => {
+  it("shows missing delivery configuration without email fields or test actions", async () => {
     mockApi({ instance: instanceBody((settings) => { settings.email.provider = "console"; }) });
     renderPage(<Page />);
 
-    expect(await screen.findByText("Email is printed to the server log, not delivered")).toBeTruthy();
-    expect(screen.getAllByText(/Print to server log/).length).toBeGreaterThan(0);
+    expect(await screen.findByText("Email delivery is not configured")).toBeTruthy();
+    expect(screen.getAllByText(/Not configured/).length).toBeGreaterThan(0);
     expect(screen.queryByLabelText("Resend API key")).toBeNull();
+    expect(screen.queryByLabelText(/From address/)).toBeNull();
+    expect(screen.queryByLabelText("Test recipient")).toBeNull();
+    expect(screen.queryByRole("button", { name: /send test email/i })).toBeNull();
   });
 
   it("derives the effective provider from automatic mode", async () => {
@@ -23,7 +26,7 @@ describe("email & SMS settings", () => {
     renderPage(<Page />);
 
     expect(await screen.findAllByText("Resend")).not.toHaveLength(0);
-    expect(screen.queryByText("Email is printed to the server log, not delivered")).toBeNull();
+    expect(screen.queryByText("Email delivery is not configured")).toBeNull();
   });
 
   it("marks a stored secret as Set, keeps it on save, and replaces it only when typed", async () => {

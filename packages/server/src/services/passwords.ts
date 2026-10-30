@@ -1,10 +1,11 @@
 // Password policy + argon2id hashing + optional HIBP check.
 import { createRequire } from "node:module";
-import { createHash, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHash, scrypt, timingSafeEqual } from "node:crypto";
 import { hash, verify } from "@node-rs/argon2";
 import { ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../context";
 import type { InstanceSettings } from "@orbitid/shared";
+import { parseScryptDigest, passwordDigestKind } from "../lib/password-digest";
 import { safeFetch } from "../lib/safe-fetch";
 
 /** Argon2id parameters. Test runs use a cheaper cost so the suite stays fast (verification still works for both). */
@@ -29,24 +30,26 @@ export function optionalBcrypt(): { compare?: (plain: string, hash: string) => P
 }
 
 /** `scrypt$<N>$<r>$<p>$<saltBase64>$<keyBase64>` */
-function verifyScrypt(hash: string, password: string): boolean {
-  const [scheme, n, r, p, salt, digest] = hash.split("$");
-  if (scheme !== "scrypt" || !n || !r || !p || !salt || !digest) return false;
-  const expected = Buffer.from(digest, "base64");
-  const actual = scryptSync(password, Buffer.from(salt, "base64"), expected.length, { N: Number(n), r: Number(r), p: Number(p), maxmem: 512 * 1024 * 1024 });
-  return actual.length === expected.length && timingSafeEqual(actual, expected);
+async function verifyScrypt(digest: string, password: string): Promise<boolean> {
+  const parsed = parseScryptDigest(digest);
+  if (!parsed) return false;
+  const { N, r, p, salt, expected } = parsed;
+  const actual = await new Promise<Buffer>((resolve, reject) => {
+    scrypt(password, salt, expected.length, { N, r, p, maxmem: 129 * 1024 * 1024 }, (error, key) => error ? reject(error) : resolve(key));
+  });
+  return timingSafeEqual(actual, expected);
 }
 
 /** Checks a stored digest of any supported format: argon2id (native), bcrypt and scrypt (imported users). */
 export async function verifyPassword(passwordHash: string | null | undefined, password: string): Promise<boolean> {
-  if (!passwordHash) return false;
+  if (!passwordHash || !passwordDigestKind(passwordHash)) return false;
   try {
     if (passwordHash.startsWith("$argon2")) return await verify(passwordHash, password);
     if (/^\$2[abxy]\$/.test(passwordHash)) {
       const bcrypt = optionalBcrypt();
       return bcrypt?.compare ? await bcrypt.compare(password, passwordHash) : false;
     }
-    if (passwordHash.startsWith("scrypt$")) return verifyScrypt(passwordHash, password);
+    if (passwordHash.startsWith("scrypt$")) return await verifyScrypt(passwordHash, password);
     return false;
   } catch {
     return false;

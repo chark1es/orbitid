@@ -7,7 +7,7 @@ import { parseBody } from "../../lib/http";
 import { sha256 } from "../../lib/crypto";
 import * as s from "../../db/schema";
 import { serializeSession } from "../../serializers";
-import { signSessionToken } from "../../services/tokens";
+import { signSessionToken, verifySessionToken } from "../../services/tokens";
 import { emitEvent } from "../../services/webhooks";
 import { audit } from "../../services/audit";
 import type { AppContext } from "../../context";
@@ -82,21 +82,49 @@ export default function routes(ctx: AppContext) {
     return c.json(await serializeSession(ctx, updated, { withUser: true }));
   });
 
+  /**
+   * Marks a session as having passed a factor. Removed: the operator cannot assert that somebody else's session
+   * passed a first or second factor, because that is exactly what an MFA bypass looks like to the app (the JWT's
+   * `fva` and `has({ reverification })` would report a factor the user never presented). A browser refreshes its
+   * own factor state through `POST /v1/client/sessions/:id/verify/...` after presenting the factor.
+   */
   app.post("/sessions/:id/verify", async (c) => {
-    const row = await sessionOrThrow(ctx, c.req.param("id") ?? "");
-    const user = first(await ctx.db.select().from(s.users).where(eq(s.users.id, row.userId)));
-    const now = Date.now();
-    const mfaEnabled = !!user && (user.totpVerified || !!user.backupCodes?.length);
-    await ctx.db
-                  .update(s.sessions)
-                  .set({ firstFactorVerifiedAt: now, secondFactorVerifiedAt: mfaEnabled ? now : row.secondFactorVerifiedAt, updatedAt: now })
-                  .where(eq(s.sessions.id, row.id));
-    await audit(ctx, { actor: "secret_key", action: "session.verified", targetType: "session", targetId: row.id });
-    return c.json(await serializeSession(ctx, await sessionOrThrow(ctx, row.id), { withUser: true }));
+    await sessionOrThrow(ctx, c.req.param("id") ?? "");
+    throw new OrbitError(
+      403,
+      ErrorCodes.not_allowed_access,
+      "The Backend API cannot mark a session as verified: an operator must not assert a factor the user never presented. " +
+        "The browser completes reverification through POST /v1/client/sessions/:id/verify/prepare_* and /attempt_*.",
+    );
   });
 
+  /**
+   * Mints a session JWT, but only for a caller that already holds that session's own token.
+   *
+   * A secret key alone must not be enough: the returned JWT is a full application session for the user, so
+   * minting it from an id would be sign-in-as-user with one request (the same capability the removed actor
+   * tokens had). Server-side SDKs call this to refresh a short-lived token or to render a JWT template for a
+   * request whose user token they already verified; that token is what proves possession here. The `sid` must
+   * match the session being minted for, so a token for one user cannot be recycled for another.
+   */
   const mint = async (c: Context) => {
     const row = await sessionOrThrow(ctx, c.req.param("id") ?? "");
+    const presented = (c.req.header("x-orbitid-session-token") ?? "").trim();
+    if (!presented) {
+      throw new OrbitError(
+        403,
+        ErrorCodes.not_allowed_access,
+        "Minting a session token requires that session's own token in the X-OrbitID-Session-Token header. " +
+          "An operator credential alone must not become a user's session. The browser refreshes its token from " +
+          "POST /v1/client/sessions/:id/tokens, authenticated by its own client cookie.",
+      );
+    }
+    const claims = await verifySessionToken(ctx, presented).catch(() => {
+      throw new OrbitError(403, ErrorCodes.not_allowed_access, "The presented session token is not valid for this session.");
+    });
+    if (claims.sid !== row.id) {
+      throw new OrbitError(403, ErrorCodes.not_allowed_access, "The presented session token does not belong to this session.");
+    }
     if (row.status !== "active") throw new OrbitError(400, ErrorCodes.authentication_invalid, "Session is not active.");
     const template = c.req.param("template");
     if (template && !first(await ctx.db.select().from(s.jwtTemplates).where(eq(s.jwtTemplates.name, template)))) {

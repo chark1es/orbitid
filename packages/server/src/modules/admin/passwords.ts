@@ -1,6 +1,7 @@
 // Password hashing for the Backend API (argon2id at rest, verification of imported digests).
 import { hash as argonHash } from "@node-rs/argon2";
 import { ErrorCodes, OrbitError, type InstanceSettings } from "@orbitid/shared";
+import { passwordDigestKind } from "../../lib/password-digest";
 import { optionalBcrypt, verifyPassword } from "../../services/passwords";
 
 export { verifyPassword };
@@ -22,6 +23,14 @@ export function assertPasswordHasher(hasher: string): PasswordHasher {
     throw new OrbitError(422, ErrorCodes.form_param_value_invalid, "password_hasher bcrypt is not available on this instance (install bcryptjs).", { param_name: "password_hasher" });
   }
   return hasher as PasswordHasher;
+}
+
+/** Reject malformed, mismatched or excessive-cost digests before persisting imported credentials. */
+export function assertPasswordDigest(digest: string, hasher: string): void {
+  assertPasswordHasher(hasher);
+  if (passwordDigestKind(digest) !== hasher) {
+    throw new OrbitError(422, ErrorCodes.form_param_value_invalid, "password_digest is malformed, does not match password_hasher, or exceeds the supported cost limits.", { param_name: "password_digest" });
+  }
 }
 
 /** Instance password policy from `settings.password`. */

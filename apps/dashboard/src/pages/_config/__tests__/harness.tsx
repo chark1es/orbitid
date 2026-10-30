@@ -19,6 +19,8 @@ const json = (value: unknown, status = 200) =>
 export function instanceBody(mutate?: (settings: InstanceSettings) => void): Record<string, unknown> {
   const settings = defaultInstanceSettings();
   settings.application.homeUrl = "http://localhost:3000";
+  settings.email.provider = "resend";
+  settings.email.resendApiKey = "••••";
   settings.email.from = "OrbitID <no-reply@example.com>";
   mutate?.(settings);
   return settings as unknown as Record<string, unknown>;

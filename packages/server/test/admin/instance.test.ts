@@ -4,10 +4,10 @@ import { ID_PREFIX, type AuditLogJSON, type PaginatedList } from "@orbitid/share
 import { sha256 } from "../../src/lib/crypto";
 import * as s from "../../src/db/schema";
 import { newId } from "../../src/lib/ids";
-import { createSessionFixture, createUser, json, testApp } from "./helpers";
+import { createSessionFixture, createUser, json, testApp, type ErrorBody } from "./helpers";
 
-type SendEmail = (ctx: unknown, input: { to: string; template: string; vars: Record<string, unknown> }) => Promise<void>;
-const { sendEmail } = vi.hoisted(() => ({ sendEmail: vi.fn<SendEmail>(async () => undefined) }));
+type SendEmail = (ctx: unknown, input: { to: string; template: string; vars: Record<string, unknown> }) => Promise<{ delivered: boolean; error?: { code: string; message: string } }>;
+const { sendEmail } = vi.hoisted(() => ({ sendEmail: vi.fn<SendEmail>(async () => ({ delivered: true })) }));
 vi.mock("../../src/services/mail", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/services/mail")>()),
   sendEmail,
@@ -108,7 +108,23 @@ describe("instance settings", () => {
     expect(ctx.settings.get().application.homeUrl).toBe("https://auth.example.com");
   });
 
-  it("sends a test email", async () => {
+  it("refuses an organization role setting that names a missing role", async () => {
+    const { api } = await testApp();
+    // `org:member` / `org:admin` are seeded, so the default round-trip is accepted.
+    expect((await api("PATCH", "/v1/instance", { organizations: { creatorRole: "org:admin", defaultRole: "org:member" } })).status).toBe(200);
+
+    for (const field of ["creatorRole", "defaultRole"] as const) {
+      const missing = await api("PATCH", "/v1/instance", { organizations: { [field]: "org:nope" } });
+      expect(missing.status, field).toBe(422);
+      expect((await json<ErrorBody>(missing)).errors[0]!.meta?.param_name).toBe(`organizations.${field}`);
+      // An instance role is refused by the pure policy before the database lookup even matters.
+      const wrongScope = await api("PATCH", "/v1/instance", { organizations: { [field]: "app:support" } });
+      expect(wrongScope.status, field).toBe(422);
+      expect((await json<ErrorBody>(wrongScope)).errors[0]!.meta?.param_name).toBe(`organizations.${field}`);
+    }
+  });
+
+  it("sends a test email and reports a typed failure instead of a false success", async () => {
     const { api, ctx } = await testApp();
     await ctx.settings.update({ application: { supportEmail: "help@example.com" } });
     expect(await json(await api("POST", "/v1/instance/test_email", {}))).toEqual({ status: "ok", to: "help@example.com" });
@@ -116,6 +132,27 @@ describe("instance settings", () => {
 
     await api("POST", "/v1/instance/test_email", { to: "ops@example.com" });
     expect(sendEmail.mock.calls[1]![1].to).toBe("ops@example.com");
+
+    // When the send reports a failure, the legacy route says so rather than answering "ok".
+    sendEmail.mockResolvedValueOnce({ delivered: false, error: { code: "email_not_configured", message: "Email is not configured." } });
+    const failed = await api("POST", "/v1/instance/test_email", { to: "ops@example.com" });
+    expect(failed.status).toBe(503);
+    expect((await json<ErrorBody>(failed)).errors[0]!.code).toBe("email_not_configured");
+
+    // A malformed recipient is a 422 (the documented contract), not a misleading "transport failed" 503.
+    sendEmail.mockResolvedValueOnce({ delivered: false, error: { code: "form_param_format_invalid", message: "to must be a valid email address" } });
+    const invalid = await api("POST", "/v1/instance/test_email", { to: "ops@example.com" });
+    expect(invalid.status).toBe(422);
+    expect((await json<ErrorBody>(invalid)).errors[0]!.code).toBe("form_param_format_invalid");
+  });
+
+  it("uses the bare From address when no recipient is given", async () => {
+    const { api, ctx } = await testApp();
+    expect(ctx.settings.get().email.from).toContain("OrbitID");
+    const res = await api("POST", "/v1/instance/test_email", {});
+    expect(res.status).toBe(200);
+    // The header is `OrbitID <no-reply@localhost>`; passing that display-name form to the send path was a 422.
+    expect(sendEmail.mock.calls[0]![1].to).toBe("no-reply@localhost");
   });
 
   it("rotates the instance signing key", async () => {

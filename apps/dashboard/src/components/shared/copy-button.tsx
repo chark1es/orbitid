@@ -1,8 +1,7 @@
-import { useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { Button, cn } from "@orbitid/ui";
 import { toast } from "sonner";
-import { useCopyToClipboard } from "../../lib/hooks";
+import { useCopyToClipboard, useFlash } from "../../lib/hooks";
 
 export function CopyButton({
   value,
@@ -20,7 +19,7 @@ export function CopyButton({
   disabled?: boolean;
 }) {
   const copy = useCopyToClipboard();
-  const [copied, setCopied] = useState(false);
+  const [copied, flashCopied] = useFlash(1500);
 
   return (
     <Button
@@ -37,9 +36,8 @@ export function CopyButton({
           toast.error("Could not copy to clipboard");
           return;
         }
-        setCopied(true);
+        flashCopied();
         toast.success("Copied to clipboard");
-        setTimeout(() => setCopied(false), 1500);
       }}
     >
       {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
