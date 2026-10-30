@@ -58,7 +58,7 @@ bun install
 export ORBITID_DATABASE_URL=postgres://user:password@localhost:5432/orbitid   # omit to use a local SQLite file
 export ORBITID_ENCRYPTION_KEY="$(openssl rand -base64 32)"   # required with Postgres; keep the same value across restarts
 bun run dev:server          # http://localhost:4000, prints your publishable and secret keys
-bun run dev:dashboard       # http://localhost:5173, sign in with the secret key
+bun run dev:dashboard       # http://localhost:5173, proxies the API; sign in with the secret key
 ```
 
 Check it with the playground, a separate test site that reads the instance and builds its own pages (sign-in, account, organizations, API keys, a session inspector, an API lab, webhooks, and seed data):
@@ -181,14 +181,11 @@ bun run test        # every workspace (vitest)
 
 ## Known gaps
 
-- The Docker image and compose file are written and reviewed but have not been run: there was no Docker in the environment this was built in. Build and start them once before relying on them.
 - Social sign-in is tested end to end against a second OrbitID instance acting as the identity provider (custom OIDC, enterprise OIDC) and a signing SAML IdP, not against the live Google, GitHub or Apple services. Apple's client secret is generated from your `.p8` key, but Apple's own endpoints were never called.
 - Passkeys are tested with a software authenticator against the real API, not with a hardware security key or a platform authenticator in a real browser.
 - Tokens delivered by the handshake appear in the API host's access log for one request. See [docs/HANDSHAKE.md](docs/HANDSHAKE.md).
 - Cross-site POST callbacks (SAML ACS, Apple `form_post`) need an https base URL: the browser-binding cookie is `SameSite=None; Secure` only over https. This is a browser rule, not something the server can relax.
-- The dashboard signs in with the instance secret key, which it keeps in `sessionStorage`; there are no operator accounts yet. A strict CSP and no raw-HTML rendering are what protect it ([docs/SECURITY.md](docs/SECURITY.md)).
-- `zod` 3 carries one advisory (memory use on huge constrained arrays). Request bodies are capped at 1 MB first, which bounds it; moving to zod 4 would change validation across every endpoint. Everything else `bun audit` reports is fixed.
-- The council review (two DeepSeek V4.1 Flash reviewers and one GPT 6.1 Sol reviewer) ran three rounds. Every verified finding was fixed, but none of the three reviewers had signed off after round 3, and the last round's fixes were not reviewed again. Treat a first production deployment as needing its own security review.
+- The dashboard uses a revocable httpOnly operator session, but has no named operator accounts or per-operator roles yet. Every operator uses the instance secret key to start a session ([docs/SECURITY.md](docs/SECURITY.md)).
 - Switching databases copies data with `export`/`import`; uploaded images are not part of the export and must be copied separately ([docs/DATA_MOVE.md](docs/DATA_MOVE.md)).
 
 ## License

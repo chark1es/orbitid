@@ -26,8 +26,6 @@ export interface ConnectTarget {
   publishableKey: string;
   /** Frontend/Backend API origin the dashboard is pointed at. */
   apiUrl: string;
-  /** The key used to sign in to this dashboard (sessionStorage). */
-  secretKey: string;
   /** Sign-in / sign-up paths on the operator's site, derived from the application home URL. */
   homeUrl: string;
   signInUrl: string;
@@ -42,17 +40,21 @@ export function signInUrlFor(homeUrl: string | undefined, path = "/sign-in"): st
   return home ? `${home}${path}` : `https://your-app.example.com${path}`;
 }
 
+/**
+ * The dashboard never holds the secret key after sign-in, so the snippets carry a placeholder and say where
+ * the key comes from. Copying a block can then never move a live credential into a chat or a ticket.
+ */
+export const SECRET_KEY_PLACEHOLDER = "sk_test_…";
+
 export function connectTarget(input: {
   publishableKey: string;
   apiUrl: string;
-  secretKey: string;
   homeUrl: string | undefined;
 }): ConnectTarget {
   const home = trimSlash(input.homeUrl ?? "");
   return {
     publishableKey: input.publishableKey.trim(),
     apiUrl: trimSlash(input.apiUrl),
-    secretKey: input.secretKey.trim(),
     homeUrl: home,
     signInUrl: signInUrlFor(home || undefined, "/sign-in"),
     signUpUrl: signInUrlFor(home || undefined, "/sign-up"),
@@ -66,8 +68,6 @@ export function connectTarget(input: {
 export interface EnvVariable {
   name: string;
   value: string;
-  /** Masked in the display until the operator reveals it. Copy always uses the real value. */
-  secret?: boolean;
   /** Rendered above the variable as a `#` line. */
   comment?: string;
   /** Rendered as a commented-out line: the variable exists but this project does not need it. */
@@ -92,24 +92,13 @@ export interface ConnectPlan {
   sample: { title: string; code: string };
 }
 
-const mask = (value: string): string => {
-  if (!value) return "";
-  if (value.length <= 8) return "•".repeat(Math.max(8, value.length));
-  return `${value.slice(0, 6)}${"•".repeat(12)}${value.slice(-2)}`;
-};
-
-/** Display value for one variable: secrets show a fixed shape unless the operator revealed them. */
-export function variableValue(variable: EnvVariable, reveal: boolean): string {
-  if (!variable.value) return "";
-  return variable.secret && !reveal ? mask(variable.value) : variable.value;
-}
 
 /** `NAME=value` lines, with `#` comments, suitable for a `.env` file. */
-export function renderEnvBlock(block: ConnectBlock, reveal: boolean): string {
+export function renderEnvBlock(block: ConnectBlock): string {
   return block.variables
     .flatMap((variable) => {
       const lines = variable.comment ? [`# ${variable.comment}`] : [];
-      const assignment = `${variable.name}=${variableValue(variable, reveal)}`;
+      const assignment = `${variable.name}=${variable.value}`;
       lines.push(variable.optional ? `# ${assignment}` : assignment);
       return lines;
     })
@@ -117,17 +106,20 @@ export function renderEnvBlock(block: ConnectBlock, reveal: boolean): string {
 }
 
 /** A block plus its neighbours, so "copy all" can paste a whole file. */
-export function renderEnvBlocks(blocks: readonly ConnectBlock[], reveal: boolean): string {
-  return blocks.map((block) => renderEnvBlock(block, reveal)).join("\n\n");
+export function renderEnvBlocks(blocks: readonly ConnectBlock[]): string {
+  return blocks.map((block) => renderEnvBlock(block)).join("\n\n");
 }
 
 /**
  * One labelled block with its heading and destination above it, so a copy pasted into a ticket or a
  * chat keeps the "where this goes" instruction attached.
  */
-export function renderBlockWithHeader(block: ConnectBlock, reveal: boolean): string {
-  return [`# ${block.heading}`, `# ${block.where}`, "", renderEnvBlock(block, reveal)].join("\n");
+export function renderBlockWithHeader(block: ConnectBlock): string {
+  return [`# ${block.heading}`, `# ${block.where}`, "", renderEnvBlock(block)].join("\n");
 }
+
+const SECRET_KEY_NOTE =
+  "The instance secret key. Copy it from the server log or <data dir>/keys.json. The dashboard does not keep it after sign-in.";
 
 const WEBHOOK_NOTE =
   "The webhook secret is per endpoint: open Webhooks, choose the endpoint, and copy its signing secret (whsec_…). Rotating it invalidates the old one immediately.";
@@ -158,7 +150,7 @@ function nextjsBlocks(target: ConnectTarget): ConnectBlock[] {
       where: "Paste into the environment of the server that runs next build and your route handlers. Never prefix these with NEXT_PUBLIC_.",
       filename: ".env (server only)",
       variables: [
-        { name: "ORBITID_SECRET_KEY", value: target.secretKey, secret: true },
+        { name: "ORBITID_SECRET_KEY", value: SECRET_KEY_PLACEHOLDER, comment: SECRET_KEY_NOTE },
         { name: "ORBITID_API_URL", value: target.apiUrl },
         { name: "ORBITID_WEBHOOK_SECRET", value: "", comment: WEBHOOK_NOTE },
         { name: "ORBITID_JWT_KEY", value: "", optional: true, comment: JWT_NOTE },
@@ -189,7 +181,7 @@ function reactBlocks(target: ConnectTarget): ConnectBlock[] {
       where: "Paste into your API server's environment. Import @orbitid/backend there, never in the React bundle.",
       filename: ".env (server only)",
       variables: [
-        { name: "ORBITID_SECRET_KEY", value: target.secretKey, secret: true },
+        { name: "ORBITID_SECRET_KEY", value: SECRET_KEY_PLACEHOLDER, comment: SECRET_KEY_NOTE },
         { name: "ORBITID_API_URL", value: target.apiUrl },
         { name: "ORBITID_WEBHOOK_SECRET", value: "", comment: WEBHOOK_NOTE },
       ],
@@ -219,7 +211,7 @@ function expressBlocks(target: ConnectTarget): ConnectBlock[] {
       where: "Paste into the environment that runs your Express server; createOrbitId() reads it at startup.",
       filename: ".env (server only)",
       variables: [
-        { name: "ORBITID_SECRET_KEY", value: target.secretKey, secret: true },
+        { name: "ORBITID_SECRET_KEY", value: SECRET_KEY_PLACEHOLDER, comment: SECRET_KEY_NOTE },
         { name: "ORBITID_API_URL", value: target.apiUrl },
         { name: "ORBITID_WEBHOOK_SECRET", value: "", comment: WEBHOOK_NOTE },
       ],
@@ -247,7 +239,7 @@ function nodeBlocks(target: ConnectTarget): ConnectBlock[] {
       where: "Export these in the shell or the job that runs the script, for example ORBITID_SECRET_KEY=… bun run list-users.",
       filename: "shell environment",
       variables: [
-        { name: "ORBITID_SECRET_KEY", value: target.secretKey, secret: true },
+        { name: "ORBITID_SECRET_KEY", value: SECRET_KEY_PLACEHOLDER, comment: SECRET_KEY_NOTE },
         { name: "ORBITID_API_URL", value: target.apiUrl },
         { name: "ORBITID_WEBHOOK_SECRET", value: "", optional: true, comment: WEBHOOK_NOTE },
       ],
@@ -417,7 +409,8 @@ export interface SetupCheckInput {
   environment: { firstFactors: string[]; signUpMode: string; applicationName: string } | null;
   environmentError: string | null;
   publishableKey: string;
-  secretKey: string;
+  /** True when the dashboard has a live operator session, i.e. the Backend API calls behind the page work. */
+  sessionActive: boolean;
   settings: InstanceSettings | null;
 }
 
@@ -471,12 +464,12 @@ export function setupChecks(input: SetupCheckInput): SetupCheck[] {
   });
 
   checks.push({
-    id: "secret-key",
-    label: "Secret key in this session",
-    state: input.secretKey ? "ok" : "warn",
-    detail: input.secretKey
-      ? "Present. Sign in again if you rotate it; the Backend API and these snippets use the same value."
-      : "This dashboard session has no secret key, so the backend snippet cannot be filled in.",
+    id: "operator-session",
+    label: "Dashboard session",
+    state: input.sessionActive ? "ok" : "warn",
+    detail: input.sessionActive
+      ? "Signed in with an httpOnly session cookie. The browser never holds the secret key; snippets use a placeholder."
+      : "No live dashboard session, so the Backend API calls behind this page cannot run. Sign in again.",
   });
 
   if (input.environmentError) {

@@ -13,10 +13,10 @@ piece of content smuggled in through an upload or an outbound URL.
 | Adversary | What they can reach | What they must not be able to do |
 |---|---|---|
 | Anonymous network caller | every public route | read or change tenant data; exhaust memory/CPU/disk with a cheap request; redirect the server into its own network |
-| Another website in a visitor's browser | the visitor's cookies for this instance | make the browser perform a state-changing Frontend API call (CSRF); frame the dashboard; read responses |
+| Another website in a visitor's browser | the visitor's cookies for this instance, including the dashboard's operator cookie if the browser happens to be signed in to a dashboard | make the browser perform a state-changing Frontend API or Backend API call (CSRF); frame the dashboard; read responses; use the operator session from another origin |
 | Signed-in user (low privilege) | their own client, session and resources | read or change another user's or organisation's resources (IDOR); escalate roles; write privileged user fields (mass assignment) |
 | Instance operator (holds the secret key) | the Backend API and settings | see stored third-party credentials in plaintext; point the server at internal services (SSRF); leak secrets into logs |
-| Attacker who already read the database | stored rows | use OAuth/TOTP/signing/refresh secrets without the encryption key |
+| Attacker who already read the database | stored rows | use OAuth/TOTP/signing/refresh secrets without the encryption key; mint a dashboard session from a stored token hash |
 
 Out of scope, and therefore the operator's responsibility: the host OS, the database engine, the TLS terminator,
 DNS, and anyone who legitimately holds the secret key or the encryption key.
@@ -63,10 +63,18 @@ cookie** must therefore prove where it came from (`packages/server/src/lib/secur
 - Requests without the `__client` cookie (bearer tokens, unauthenticated callers, server-side SDKs) are not
   affected, because a bearer token is not an ambient credential.
 
+The Backend API checks the dashboard's operator cookie on reads and writes. Its `Origin` (or `Referer` when
+`Origin` is absent) must be this instance's own origin. `Sec-Fetch-Site` must be `same-origin`, `none` or absent,
+and a literal `Origin: null` is refused. Another application origin in `allowedOrigins` does not earn operator
+access (`requireSecretKey` in `packages/server/src/middleware.ts`). The operator-session endpoints apply the
+same rule. Frontend API requests and federation callbacks ignore this cookie and keep their own authentication
+rules, so being signed into the dashboard does not prevent an operator from using their application.
+
 Cookies are audited in one place each: `__client` is `HttpOnly`, `SameSite=Lax`, `Path=/`, one year, and
-`Secure` whenever the base URL is https. The OAuth/SAML browser-binding cookie `__orbit_oauth` is `HttpOnly`,
-`Path=/v1`, 10 minutes, and `SameSite=None; Secure` over https because SAML ACS and Apple `form_post` callbacks
-are cross-site POSTs.
+`Secure` whenever the base URL is https. The dashboard's `__orbit_operator` is `HttpOnly`, `SameSite=Strict`,
+`Path=/v1`, 8 hours, and `Secure` over https. The OAuth/SAML browser-binding cookie `__orbit_oauth` is
+`HttpOnly`, `Path=/v1`, 10 minutes, and `SameSite=None; Secure` over https because SAML ACS and Apple
+`form_post` callbacks are cross-site POSTs.
 
 ### 3. Request limits
 
@@ -144,7 +152,13 @@ and `Content-Security-Policy: sandbox`. The existing path-traversal guard on the
 
 - The Backend API secret key is compared with `safeEqual` (constant time); failed attempts are rate limited per
   IP (10 failures / 5 minutes → 429), and a key offered in the query string is refused outright because query
-  strings end up in proxy logs and browser history.
+  strings end up in proxy logs and browser history. The dashboard's key exchange
+  (`POST /v1/operator_sessions`) shares that per-address failure budget and uses the same constant-time
+  comparison, so presenting the key in two places does not double the guessing budget.
+- The Backend API accepts two credentials: the bearer secret key (unchanged, for servers and SDKs) and the
+  dashboard's httpOnly operator cookie. The cookie is only honoured on this instance's own origin, only over a
+  session row whose token hash matches, and only while the row is unexpired, unrevoked and bound to the current
+  key. A browser request that carries it with `Sec-Fetch-Site: cross-site` is refused.
 - OIDC: `redirect_uri` must match a registered value **verbatim**, PKCE is required for public clients and
   anything marked `pkce_required`, and only `S256` is accepted.
 - JWT verification pins algorithms: session tokens and machine tokens accept `RS256` only, so `none` and
@@ -177,11 +191,9 @@ from the dedicated secret endpoint). They never appear in list or detail respons
 
 ### 9. Dependencies
 
-`bun audit` works offline with the committed lockfile; its current findings and our assessment are in the report
-for this change. Two are relevant to the server and are addressed by available upgrades rather than by code:
-`drizzle-orm` (identifier escaping) and `nodemailer` (message-level raw option). Everything the audit reports
-under `vite`, `vitest`, `esbuild` and `@vitest/mocker` is development tooling that is not part of a production
-image.
+`bun audit` checks dependency advisories against the committed lockfile and currently reports no known
+vulnerabilities. `drizzle-orm` and `nodemailer` include fixes for the identifier-escaping and message-level
+raw-option issues. Keep the lockfile committed and run `bun audit` as part of maintenance.
 
 ## The self-hoster's responsibilities
 
@@ -245,22 +257,45 @@ A proxy that sends only `X-Real-IP` leaves the server seeing the proxy's address
 
 ## Dashboard sign-in
 
-The dashboard has no accounts of its own yet: an operator pastes the instance secret key, which the page keeps in
-`sessionStorage` (this tab only; it is gone when the tab closes) and sends as a bearer token. That means any script
-that runs in the dashboard's origin can read the key. The defenses are around that surface rather than around the
-key: the dashboard's CSP allows scripts only from its own origin plus one nonce-tagged bootstrap script, with no
-inline handlers and no `eval`; the app renders every server string through React text nodes (there is no
-`dangerouslySetInnerHTML` anywhere in it); and the page is served with `frame-ancestors 'none'` and `no-store`. Keep
-the dashboard on its own origin, behind your TLS and, if you can, behind a VPN or an allowlist. Operator accounts with
-an httpOnly session are the next step for this surface.
+The dashboard has no accounts of its own: the operator pastes the instance secret key once, and the page trades it
+for an httpOnly session in the same request. The secret key is never written to `sessionStorage`, `localStorage` or
+`document.cookie`, and no response returns the key, so a script that runs in the dashboard's origin can act as the
+operator while the session is live but cannot exfiltrate the secret key.
+
+- `POST /v1/operator_sessions` compares the key with `safeEqual` and rate limits failures per address (10 / 5
+  minutes → 429), sharing the budget with the bearer gate. The key is accepted only from this instance's own
+  origin, so a malicious site cannot use the endpoint as an oracle against another instance.
+- The response is an opaque 256-bit token in `__orbit_operator`: `HttpOnly`, `SameSite=Strict`, `Path=/v1`,
+  `Secure` over https, 8 hours. The server stores only its sha256 hash, so a database reader cannot mint a session.
+- Each row is bound to an HMAC fingerprint of the secret key. Rotating the key ends every session, and sign-out
+  revokes the row immediately (`DELETE /v1/operator_sessions/current`), so a copied cookie stops working. A
+  database transfer deliberately leaves these rows behind (`docs/DATA_MOVE.md`), so an export can never restore a
+  live operator login on another instance.
+- The cookie is accepted by the Backend API only from this origin, on reads as well as writes. `Sec-Fetch-Site` must
+  be `same-origin`, `none` or absent; an explicit `Origin` is authoritative, so `null`, a malformed value or another
+  host is refused and `Referer` is never consulted in its place; `Referer` is used only when no `Origin` was sent.
+  Another application origin in `allowedOrigins` does not qualify, and `SameSite=Strict` means a cross-site request
+  never carries the cookie anyway. The Frontend API's separate CSRF guard checks its own client cookie.
+- The dashboard's CSP allows scripts only from its own origin plus one nonce-tagged bootstrap script, with no
+  inline handlers and no `eval`; the app renders every server string through React text nodes (there is no
+  `dangerouslySetInnerHTML` anywhere in it); and the page is served with `frame-ancestors 'none'` and `no-store`.
+- External dashboards are not supported by a weaker fallback. A dashboard that is not served by the instance it
+  manages cannot receive the same-origin cookie, so the page refuses to send the key to another origin rather than
+  falling back to a bearer token in browser storage. Serve the built dashboard from the server (the container image
+  does this) or place it behind the same origin with a reverse proxy; keep it behind your TLS and, if you can, a VPN
+  or an allowlist.
+
+Operator accounts (a named user per operator, roles, and per-operator audit) are the next step for this surface;
+the session table and the audit events are shaped so that change does not touch the API contract.
 
 ## Dependency status
 
-`bun audit` is clean except for one advisory in `zod` 3.x (memory use when validating very large arrays that carry
-a length constraint). Fixing it means moving the whole codebase to zod 4, which changes validation behavior across
-every endpoint, so it is tracked separately. It is not reachable in practice: request bodies are capped at 1 MB
-before any validation runs, so the memory a request can cost is bounded by that cap. Development-only tooling
-(vitest, vite, esbuild, postcss) is kept on patched versions through `overrides` in the root `package.json`.
+`bun audit` reports no advisory for a production dependency. The validation layer runs on zod 4 across the
+server, the shared contract and the OpenAPI converter, so the zod 3 memory advisory (very large arrays carrying a
+length constraint) no longer applies. Regression tests confirm that overlong constrained arrays are refused
+before validating their elements. A separate 1 MB request-body cap remains in place. Development tooling
+(vitest, vite, esbuild, postcss) is
+kept on patched versions through `overrides` in the root `package.json`.
 
 ## Reporting a vulnerability
 

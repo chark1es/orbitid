@@ -137,7 +137,7 @@ export function computeRequirements(ctx: AppContext, fields: SignUpFields, verif
     if (!present) continue;
     if (kind !== "email_address" && kind !== "phone_number") continue;
     if (!attr.verifyAtSignUp) continue;
-    const verified = kind === "email_address" ? emailIsVerified(fields, verifications) : verifications.phone_number?.status === "verified";
+    const verified = kind === "email_address" ? emailIsVerified(fields, verifications) : phoneIsVerified(fields, verifications);
     if (!verified) unverified.push(kind);
   }
   return { required_fields: required, optional_fields: optional, missing_fields: missing, unverified_fields: unverified };
@@ -150,6 +150,12 @@ export function computeRequirements(ctx: AppContext, fields: SignUpFields, verif
 export function emailIsVerified(fields: SignUpFields, verifications: SignUpVerifications): boolean {
   const snapshot = verifications.email_address;
   return snapshot?.status === "verified" && !!fields.emailAddress && snapshot.identifier === fields.emailAddress;
+}
+
+/** A code sent to one phone number cannot prove a replacement number on the same sign-up. */
+export function phoneIsVerified(fields: SignUpFields, verifications: SignUpVerifications): boolean {
+  const snapshot = verifications.phone_number;
+  return snapshot?.status === "verified" && !!fields.phoneNumber && snapshot.identifier === fields.phoneNumber;
 }
 
 export async function buildSignUpJSON(ctx: AppContext, row: SignUpRow): Promise<SignUpJSON> {
@@ -260,7 +266,7 @@ export async function completeSignUp(ctx: AppContext, row: SignUpRow, opts: Comp
   const fields = asSignUpFields(row);
   const verifications = asSignUpVerifications(row);
   const emailVerified = emailIsVerified(fields, verifications);
-  const phoneVerified = verifications.phone_number?.status === "verified";
+  const phoneVerified = phoneIsVerified(fields, verifications);
 
   const user = await createUser(ctx, {
       email: fields.emailAddress ?? null,

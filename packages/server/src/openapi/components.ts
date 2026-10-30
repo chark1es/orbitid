@@ -83,6 +83,12 @@ export const trustedDevice: Schema = obj({
   ...timestamps,
 });
 
+export const operatorSession: Schema = obj({
+  object: lit("operator_session"),
+  id: str({ description: "Session id (`osess_…`). The session token itself is only ever in the httpOnly cookie." }),
+  expires_at: int({ description: "Epoch milliseconds. After this the cookie is refused and must be exchanged again." }),
+}, { description: "A dashboard operator session. The secret key is never part of this object or any response." });
+
 export const user: Schema = obj({
   object: lit("user"),
   id: str(),
@@ -670,6 +676,7 @@ export const allSchemas: Record<string, Schema> = {
   ExternalAccount: externalAccount,
   Passkey: passkey,
   TrustedDevice: trustedDevice,
+  OperatorSession: operatorSession,
   User: user,
   Session: session,
   SignIn: signIn,

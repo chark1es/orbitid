@@ -97,17 +97,29 @@ export async function parseBody<S extends ZodTypeAny>(c: Context, schema: S): Pr
   return validate(schema, raw === null ? {} : stripPrototypeKeys(raw));
 }
 export function validate<S extends ZodTypeAny>(schema: S, value: unknown): z.infer<S> {
-  const r = schema.safeParse(value);
+  // `reportInput` keeps the offending value on each issue, so a missing field can be told apart from a wrong one
+  // without parsing zod's message text.
+  const r = schema.safeParse(value, { reportInput: true });
   if (!r.success) throw zodToOrbit(r.error);
   return r.data;
 }
+
+/**
+ * zod 4 dropped `received` from `invalid_type` issues. The issue carries the offending input when the parse asked for
+ * it; otherwise (an error raised elsewhere, such as re-validating stored settings) the message names it.
+ */
+function isMissingIssue(issue: z.core.$ZodIssue): boolean {
+  if (issue.code !== "invalid_type") return false;
+  return "input" in issue ? (issue as { input?: unknown }).input === undefined : /received undefined$/.test(issue.message);
+}
+
 export function zodToOrbit(err: ZodError): OrbitError {
   const first = err.issues[0]!;
   const param = first.path.join(".") || undefined;
-  const missing = first.code === "invalid_type" && (first as any).received === "undefined";
+  const missing = isMissingIssue(first);
   const e = new OrbitError(422, missing ? ErrorCodes.form_param_missing : ErrorCodes.form_param_format_invalid,
     missing ? `${param} is missing` : `${param ?? "body"}: ${first.message}`, { param_name: param });
-  (e as any).items = err.issues.map((i) => new OrbitError(422, i.code === "invalid_type" && (i as any).received === "undefined" ? ErrorCodes.form_param_missing : ErrorCodes.form_param_format_invalid, i.message, { param_name: i.path.join(".") }).toItem());
+  (e as any).items = err.issues.map((i) => new OrbitError(422, isMissingIssue(i) ? ErrorCodes.form_param_missing : ErrorCodes.form_param_format_invalid, i.message, { param_name: i.path.join(".") }).toItem());
   return e;
 }
 

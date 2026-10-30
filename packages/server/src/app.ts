@@ -26,6 +26,7 @@ import m2m from "./modules/m2m";
 import oidc from "./modules/oidc";
 import enterprise from "./modules/enterprise";
 import docs from "./modules/docs";
+import operatorSessions from "./modules/operator-sessions";
 
 /** A race between a check and an insert surfaces as a unique-constraint error from either database. */
 function isUniqueViolation(err: unknown): boolean {
@@ -94,7 +95,10 @@ export function createApp(ctx: AppContext) {
   app.route("/v1/verify", verifyLink(ctx));
   if (ssoApp.saml) app.route("/v1/saml", ssoApp.saml);
 
-  // Backend API (secret key authenticated)
+  // Dashboard operator sessions (the exchange route; the cookie it sets is accepted by the Backend API below)
+  app.route("/v1", operatorSessions(ctx));
+
+  // Backend API (secret key or same-origin operator-session cookie)
   const backend = new Hono();
   backend.use("*", requireSecretKey(ctx));
   backend.route("/", admin(ctx));

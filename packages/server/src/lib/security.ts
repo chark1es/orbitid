@@ -95,6 +95,9 @@ export function requestOriginAllowed(ctx: AppContext, origin: string): boolean {
  * `__client` cookie and change state must come from an origin this instance trusts. Browsers always send
  * `Origin` on such requests (or at least `Referer`); a request with neither cannot be a browser-driven
  * cross-site attack, so non-browser clients keep working. Bearer-token requests are unaffected.
+ *
+ * The Backend API and operator-session endpoints check their own operator-cookie origin. Its presence
+ * must not change the rules for Frontend API requests or federation callbacks that do not authenticate with it.
  */
 export const csrfProtection = (ctx: AppContext): MiddlewareHandler => async (c, next) => {
   const method = c.req.method.toUpperCase();

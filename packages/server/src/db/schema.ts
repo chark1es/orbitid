@@ -45,6 +45,7 @@ export const {
   oauthConsents,
   enterpriseConnections,
   trustedDevices,
+  operatorSessions,
   deviceCodes,
   auditLogs,
 } = tables;

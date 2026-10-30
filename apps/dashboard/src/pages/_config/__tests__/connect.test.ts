@@ -10,13 +10,12 @@ import {
   serverSummary,
   setupChecks,
   signInUrlFor,
-  variableValue,
+  SECRET_KEY_PLACEHOLDER,
 } from "../connect";
 
 const target = connectTarget({
   publishableKey: "pk_test_abc123",
   apiUrl: "http://localhost:4000/",
-  secretKey: "sk_test_dashboard_session",
   homeUrl: "https://app.example.com/",
 });
 
@@ -48,7 +47,6 @@ describe("environment blocks", () => {
       "NEXT_PUBLIC_ORBITID_SIGN_IN_URL",
       "NEXT_PUBLIC_ORBITID_SIGN_UP_URL",
     ]);
-    expect(browser.variables.some((variable) => variable.secret)).toBe(false);
     expect(browser.where).toMatch(/\.env\.local/);
 
     const backend = plan.blocks.find((block) => block.id === "backend")!;
@@ -59,7 +57,6 @@ describe("environment blocks", () => {
       "ORBITID_WEBHOOK_SECRET",
       "ORBITID_JWT_KEY",
     ]);
-    expect(backend.variables[0]!.secret).toBe(true);
     expect(backend.variables.some((variable) => variable.optional)).toBe(true);
     expect(backend.note).toMatch(/never in a bundle/);
   });
@@ -84,23 +81,22 @@ describe("environment blocks", () => {
     }
   });
 
-  it("masks secrets in the display and copies the real value", () => {
+  it("keeps the secret key a placeholder, because the dashboard does not hold it", () => {
     const plan = buildConnectPlan("nextjs", target);
     const backend = plan.blocks.find((block) => block.id === "backend")!;
     const secret = backend.variables.find((variable) => variable.name === "ORBITID_SECRET_KEY")!;
 
-    expect(variableValue(secret, false)).not.toContain("dashboard_session");
-    expect(variableValue(secret, false)).toContain("•");
-    expect(variableValue(secret, true)).toBe("sk_test_dashboard_session");
-
-    expect(renderEnvBlock(backend, false)).not.toContain("sk_test_dashboard_session");
-    expect(renderEnvBlock(backend, true)).toContain("ORBITID_SECRET_KEY=sk_test_dashboard_session");
+    expect(secret.value).toBe(SECRET_KEY_PLACEHOLDER);
+    expect(secret.comment).toMatch(/server log/);
+    // No real key can be copied out of the page: the only value is the placeholder.
+    expect(renderEnvBlock(backend)).toContain(`ORBITID_SECRET_KEY=${SECRET_KEY_PLACEHOLDER}`);
+    expect(renderEnvBlock(backend)).not.toMatch(/sk_(live|test)_[A-Za-z0-9]{8,}/);
   });
 
   it("comments out optional values and keeps the webhook hint", () => {
     const plan = buildConnectPlan("nextjs", target);
     const backend = plan.blocks.find((block) => block.id === "backend")!;
-    const text = renderEnvBlock(backend, true);
+    const text = renderEnvBlock(backend);
     expect(text).toContain("# ORBITID_JWT_KEY=");
     expect(text).toContain("# The webhook secret is per endpoint");
     expect(text).toContain("ORBITID_WEBHOOK_SECRET=");
@@ -108,21 +104,19 @@ describe("environment blocks", () => {
 
   it("joins every block for copy all", () => {
     const plan = buildConnectPlan("nextjs", target);
-    const all = renderEnvBlocks(plan.blocks, true);
+    const all = renderEnvBlocks(plan.blocks);
     expect(all).toContain("NEXT_PUBLIC_ORBITID_PUBLISHABLE_KEY=pk_test_abc123");
-    expect(all).toContain("ORBITID_SECRET_KEY=sk_test_dashboard_session");
+    expect(all).toContain(`ORBITID_SECRET_KEY=${SECRET_KEY_PLACEHOLDER}`);
     expect(all.split("\n\n")).toHaveLength(2);
   });
 
   it("carries the heading and destination when one block is copied", () => {
     const plan = buildConnectPlan("nextjs", target);
     const backend = plan.blocks.find((block) => block.id === "backend")!;
-    const text = renderBlockWithHeader(backend, false);
+    const text = renderBlockWithHeader(backend);
     expect(text.split("\n")[0]).toBe("# Website · backend (secret)");
     expect(text.split("\n")[1]).toMatch(/^# /);
-    // A single block copy is masked on screen; the copy button always uses the revealed form.
-    expect(text).not.toContain("ORBITID_SECRET_KEY=sk_test_dashboard_session");
-    expect(renderBlockWithHeader(backend, true)).toContain("ORBITID_SECRET_KEY=sk_test_dashboard_session");
+    expect(text).toContain(`ORBITID_SECRET_KEY=${SECRET_KEY_PLACEHOLDER}`);
   });
 });
 
@@ -158,7 +152,7 @@ describe("setup checks", () => {
     environment: { firstFactors: ["password", "email_code"], signUpMode: "public", applicationName: "Acme" },
     environmentError: null,
     publishableKey: "pk_test_abc123",
-    secretKey: "sk_test_x",
+    sessionActive: true,
     settings: defaultInstanceSettings(),
   };
 
@@ -167,7 +161,7 @@ describe("setup checks", () => {
     const byId = Object.fromEntries(checks.map((check) => [check.id, check]));
     expect(byId.health?.state).toBe("ok");
     expect(byId["publishable-key"]?.state).toBe("ok");
-    expect(byId["secret-key"]?.state).toBe("ok");
+    expect(byId["operator-session"]?.state).toBe("ok");
     expect(byId.environment?.state).toBe("ok");
     expect(byId.environment?.detail).toContain("password, email code");
   });
@@ -180,13 +174,13 @@ describe("setup checks", () => {
       environment: null,
       environmentError: "The server did not answer.",
       publishableKey: "",
-      secretKey: "",
+      sessionActive: false,
     });
     const byId = Object.fromEntries(checks.map((check) => [check.id, check]));
     expect(byId.health?.state).toBe("fail");
     expect(byId.health?.detail).toContain("Health check failed (503)");
     expect(byId["publishable-key"]?.state).toBe("fail");
-    expect(byId["secret-key"]?.state).toBe("warn");
+    expect(byId["operator-session"]?.state).toBe("warn");
     expect(byId.environment?.state).toBe("fail");
   });
 

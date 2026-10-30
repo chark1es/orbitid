@@ -1,5 +1,5 @@
 /** Builders for OpenAPI operations, so every route carries the same metadata and error envelope. */
-import type { ZodTypeAny } from "zod";
+import { ZodType, type ZodTypeAny } from "zod";
 import { fromZod } from "./from-zod";
 import type { Schema } from "./schema";
 
@@ -18,6 +18,7 @@ export const Tags = {
   sso: "Enterprise SSO",
   instance: "Instance",
   health: "Health",
+  dashboard: "Dashboard",
 } as const;
 
 export const tagList = [
@@ -35,6 +36,7 @@ export const tagList = [
   { name: Tags.sso, description: "SAML 2.0 and enterprise OIDC connections, and the browser flows that use them." },
   { name: Tags.instance, description: "Instance settings, signing keys, audit logs and statistics." },
   { name: Tags.health, description: "Unauthenticated liveness and key discovery." },
+  { name: Tags.dashboard, description: "Operator sign-in for the dashboard: trade the instance secret key for a revocable httpOnly session." },
 ];
 
 /** Which error envelope an operation returns. OAuth protocol endpoints use RFC 6749's `{ error, error_description }`. */
@@ -148,7 +150,8 @@ const errorResponse = (status: number, shape: ErrorShape) => {
   return { $ref: `#/components/responses/${oauth ? `OAuth${name}` : name}` };
 };
 
-const isZod = (value: unknown): value is ZodTypeAny => typeof value === "object" && value !== null && "_def" in (value as Record<string, unknown>);
+// `z.ZodType` is the public base class, so this survives a zod upgrade without depending on `_def`.
+const isZod = (value: unknown): value is ZodTypeAny => value instanceof ZodType;
 
 /** Request bodies are written as zod where a schema already exists and as JSON Schema where it does not. */
 const toSchema = (value: Schema | ZodTypeAny): Schema => (isZod(value) ? fromZod(value) : value);

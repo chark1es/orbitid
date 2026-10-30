@@ -385,6 +385,23 @@ export function defineSchema(kit: Kit) {
     ...created(),
   }, (t) => [index("trusted_devices_user_idx").on(t.userId)]);
 
+  /**
+   * Dashboard operator sessions. The secret key is exchanged once for an opaque token that lives in an
+   * httpOnly cookie; only its sha256 is stored, so the database cannot mint a session and a compromised
+   * cookie can be revoked immediately. `keyFingerprint` binds the session to the secret key it was
+   * approved with, so rotating the key signs every operator out.
+   */
+  const operatorSessions = table("operator_sessions", {
+    id: text("id").primaryKey(),
+    tokenHash: text("token_hash").notNull().unique(),
+    keyFingerprint: text("key_fingerprint").notNull(),
+    userAgent: text("user_agent"),
+    ipAddress: text("ip_address"),
+    expiresAt: int("expires_at").notNull(),
+    revokedAt: int("revoked_at"),
+    ...created(),
+  }, (t) => [index("operator_sessions_expires_idx").on(t.expiresAt)]);
+
   /** OAuth 2.0 device authorization grant (RFC 8628): a CLI or TV polls with `deviceCodeHash` while the user approves `userCode` in a browser. */
   const deviceCodes = table("device_codes", {
     id: text("id").primaryKey(),
@@ -572,10 +589,11 @@ export function defineSchema(kit: Kit) {
     oauthConsents,
     enterpriseConnections,
     trustedDevices,
+    operatorSessions,
     deviceCodes,
     auditLogs,
   };
 }
 
 export type Schema = ReturnType<typeof defineSchema>;
-export const TABLE_NAMES = ["instance", "signingKeys", "users", "emailAddresses", "phoneNumbers", "externalAccounts", "passkeys", "clients", "sessions", "signIns", "signUps", "verifications", "oauthStates", "rateLimits", "organizations", "roles", "permissions", "rolePermissions", "organizationMemberships", "organizationInvitations", "organizationDomains", "organizationMembershipRequests", "invitations", "waitlistEntries", "allowlistIdentifiers", "blocklistIdentifiers", "jwtTemplates", "actorTokens", "signInTokens", "webhookEndpoints", "webhookEvents", "webhookDeliveries", "apiKeys", "machines", "m2mTokens", "oauthApplications", "oauthGrants", "oauthConsents", "enterpriseConnections", "trustedDevices", "deviceCodes", "auditLogs"] as const;
+export const TABLE_NAMES = ["instance", "signingKeys", "users", "emailAddresses", "phoneNumbers", "externalAccounts", "passkeys", "clients", "sessions", "signIns", "signUps", "verifications", "oauthStates", "rateLimits", "organizations", "roles", "permissions", "rolePermissions", "organizationMemberships", "organizationInvitations", "organizationDomains", "organizationMembershipRequests", "invitations", "waitlistEntries", "allowlistIdentifiers", "blocklistIdentifiers", "jwtTemplates", "actorTokens", "signInTokens", "webhookEndpoints", "webhookEvents", "webhookDeliveries", "apiKeys", "machines", "m2mTokens", "oauthApplications", "oauthGrants", "oauthConsents", "enterpriseConnections", "trustedDevices", "operatorSessions", "deviceCodes", "auditLogs"] as const;

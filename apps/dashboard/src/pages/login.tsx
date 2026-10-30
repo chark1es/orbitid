@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { Button, Input, Label } from "@orbitid/ui";
 import { Check, Eye, EyeOff, Loader2, Sun, TriangleAlert, X } from "lucide-react";
-import { api, API_URL, ApiError, getApiUrl, setApiUrl, setSecretKey } from "../lib/api";
+import { API_URL, ApiError, DEFAULT_API_URL, getApiUrl, isSameOrigin } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { errorMessage } from "../lib/errors";
 import { databaseLabel, fetchInstanceHealth, type InstanceHealth } from "../lib/instance-health";
@@ -30,7 +30,7 @@ function OrbitMark() {
 }
 
 export default function LoginPage() {
-  const { authenticated, signIn } = useAuth();
+  const { authenticated, checking, signIn } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [apiUrl, setApiUrlInput] = useState(getApiUrl());
@@ -40,6 +40,7 @@ export default function LoginPage() {
   const [pending, setPending] = useState(false);
   const [health, setHealth] = useState<HealthState>({ state: "checking" });
   const [checkCount, setCheckCount] = useState(0);
+  const sameOrigin = isSameOrigin(apiUrl.trim() || DEFAULT_API_URL);
 
   useEffect(() => {
     document.title = "Sign in · OrbitID";
@@ -78,16 +79,19 @@ export default function LoginPage() {
       setError("Enter the secret key. It is printed when the server starts.");
       return;
     }
+    if (!isSameOrigin(apiUrl.trim())) {
+      setError(
+        "The dashboard must be served by the instance it manages. Open the dashboard at the URL the server prints.",
+      );
+      return;
+    }
     setPending(true);
-    // Validate before committing the key so a typo does not poison every later request.
-    setApiUrl(apiUrl);
-    setSecretKey(secretKey);
     try {
-      await api("GET", "/instance");
-      signIn(apiUrl, secretKey);
+      await signIn(apiUrl, secretKey);
+      // The key was only ever in this form field. Clear it as soon as the exchange succeeds.
+      setSecretKeyInput("");
       navigate(redirectTarget(location.state), { replace: true });
     } catch (cause) {
-      setSecretKey(null);
       if (cause instanceof ApiError && cause.status === 401) {
         setError(
           `The server rejected that secret key. Copy the key that starts with sk_ from the server log or from ./data/keys.json, then sign in again.`,
@@ -98,6 +102,14 @@ export default function LoginPage() {
     } finally {
       setPending(false);
     }
+  }
+
+  if (checking) {
+    return (
+      <div role="status" className="flex min-h-svh items-center justify-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="size-4 animate-spin" aria-hidden /> Checking your session…
+      </div>
+    );
   }
 
   return (
@@ -118,7 +130,8 @@ export default function LoginPage() {
             Sign in with your secret key
           </h1>
           <p className="mt-2 max-w-[60ch] text-sm text-muted-foreground">
-            The dashboard manages this instance through the Backend API. The key stays in this tab's session storage.
+            The dashboard exchanges the key for a session cookie and keeps it in this browser only until you sign out or
+            it expires. The key itself is never stored.
           </p>
 
           <form onSubmit={onSubmit} className="mt-8 space-y-5" noValidate>
@@ -137,6 +150,13 @@ export default function LoginPage() {
               <p className="text-xs text-muted-foreground">
                 Origin that serves the OrbitID API, without a trailing slash.
               </p>
+              {!sameOrigin ? (
+                <p className="flex items-start gap-1.5 text-xs text-signal">
+                  <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                  This build can only sign in to the instance that serves it. Open the dashboard at{" "}
+                  <code className="font-data">{apiUrl}</code> instead.
+                </p>
+              ) : null}
             </div>
 
             <div className="space-y-1.5">
@@ -166,7 +186,8 @@ export default function LoginPage() {
                 </button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Server-side key. The publishable key is for browsers and cannot sign in here.
+                Server-side key. It is used once to start the session and is not kept in this page. The publishable key
+                is for browsers and cannot sign in here.
               </p>
             </div>
 
@@ -182,7 +203,7 @@ export default function LoginPage() {
 
             <Button type="submit" className="w-full" disabled={pending}>
               {pending ? <Loader2 className="animate-spin" aria-hidden /> : null}
-              {pending ? "Checking the key" : "Sign in"}
+              {pending ? "Starting the session" : "Sign in"}
             </Button>
           </form>
 
@@ -223,7 +244,8 @@ export default function LoginPage() {
 
           <p className="mt-6 flex items-start gap-2 border-t border-border pt-6 text-sm text-muted-foreground">
             <Sun className="mt-0.5 size-4 shrink-0" aria-hidden />
-            Keys are per instance. Point the dashboard at a different URL to manage a different instance.
+            Keys are per instance. The dashboard that manages an instance is served by that instance, so the session
+            cookie stays same-origin.
           </p>
         </aside>
       </main>

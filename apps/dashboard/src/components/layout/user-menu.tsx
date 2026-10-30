@@ -11,15 +11,13 @@ import {
 import { ChevronsUpDown, LogOut, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "../../lib/auth";
-import { getApiUrl, getSecretKey } from "../../lib/api";
+import { ApiError, getApiUrl } from "../../lib/api";
 import { UserAvatar } from "../shared/user-avatar";
 
 export function UserMenu() {
   const { signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const secretKey = getSecretKey();
-  const keyKind = secretKey.startsWith("sk_live_") ? "Live secret key" : "Test secret key";
 
   return (
     <DropdownMenu>
@@ -39,7 +37,7 @@ export function UserMenu() {
           <ShieldCheck className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
           <span className="flex min-w-0 flex-col">
             <span className="text-sm font-medium">Instance admin</span>
-            <span className="text-xs text-muted-foreground">{keyKind}</span>
+            <span className="text-xs text-muted-foreground">Operator session</span>
           </span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
@@ -49,9 +47,21 @@ export function UserMenu() {
         <DropdownMenuSeparator />
         <DropdownMenuItem
           onClick={() => {
-            signOut();
-            toast.success("Signed out");
-            navigate("/login", { replace: true, state: { from: location.pathname } });
+            void signOut().then(
+              () => {
+                toast.success("Signed out");
+                navigate("/login", { replace: true, state: { from: location.pathname } });
+              },
+              (cause: unknown) => {
+                // Revocation failed, so the cookie is still live. Say so instead of pretending to sign out.
+                toast.error("Could not sign out", {
+                  description:
+                    cause instanceof ApiError
+                      ? cause.message
+                      : "The server did not answer. Your session is still active; try again.",
+                });
+              },
+            );
           }}
         >
           <LogOut aria-hidden /> Sign out

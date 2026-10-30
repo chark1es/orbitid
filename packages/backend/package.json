@@ -17,7 +17,7 @@
   "dependencies": {
     "@orbitid/shared": "*",
     "jose": "^5.9.0",
-    "zod": "^3.23.8"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^20",

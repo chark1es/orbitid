@@ -206,6 +206,10 @@ describe("database transfer", () => {
     const position = new Map(names.map((name, index) => [name, index]));
     expect(SKIPPED_TABLES.has("rateLimits")).toBe(true);
     expect(names).not.toContain("rate_limits");
+    // Dashboard logins are environment-local: copying them would restore an operator's browser session on
+    // the target instance, so an import signs every dashboard out instead.
+    expect(SKIPPED_TABLES.has("operatorSessions")).toBe(true);
+    expect(names).not.toContain("operator_sessions");
     for (const emitted of ["users", "organizations", "organization_memberships", "organization_invitations", "webhook_endpoints", "webhook_events", "webhook_deliveries", "audit_logs", "api_keys", "oauth_applications"]) {
       expect(names).toContain(emitted);
     }
@@ -251,8 +255,9 @@ describe("database transfer", () => {
     expect(header.tables).toContain("users");
     expect(header.tables).toContain("webhook_deliveries");
     expect(header.tables).toContain("audit_logs");
-    // Ephemeral counters describe the old process and are not copied.
+    // Ephemeral counters describe the old process and are not copied; neither are dashboard logins.
     expect(header.tables).not.toContain("rate_limits");
+    expect(header.tables).not.toContain("operator_sessions");
     expect(typeof header.key_check).toBe("string");
     const userLine = lines.slice(1).map((line) => JSON.parse(line) as { t: string; r: Record<string, unknown> }).find((line) => line.t === "users");
     expect(userLine).toBeTruthy();

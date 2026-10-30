@@ -1,4 +1,4 @@
-import { ApiError, getApiUrl, getSecretKey } from "./api";
+import { ApiError, apiInit, getApiUrl } from "./api";
 
 async function parseError(res: Response): Promise<ApiError> {
   const body: unknown = await res.json().catch(() => null);
@@ -19,11 +19,8 @@ async function parseError(res: Response): Promise<ApiError> {
 export async function uploadFile<T>(path: string, method: "POST" | "PUT", file: File, field = "file"): Promise<T> {
   const form = new FormData();
   form.append(field, file);
-  const res = await fetch(`${getApiUrl()}/v1${path}`, {
-    method,
-    headers: { Authorization: `Bearer ${getSecretKey()}` },
-    body: form,
-  });
+  const init = apiInit(method);
+  const res = await fetch(`${getApiUrl()}/v1${path}`, { ...init, body: form });
   if (!res.ok) throw await parseError(res);
   if (res.status === 204) return undefined as T;
   const body: unknown = await res.json();

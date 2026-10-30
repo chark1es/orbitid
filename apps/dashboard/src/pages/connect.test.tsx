@@ -1,22 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import Page from "./connect";
-import { clipboardStub, instanceBody, mockApi, renderPage } from "./_config/__tests__/harness";
+import { clipboardStub, instanceBody, mockApi, renderAuthedPage } from "./_config/__tests__/harness";
 
 describe("connect your app", () => {
   it("shows the instance keys, URL and database from the running server", async () => {
     mockApi({ instance: instanceBody((settings) => { settings.application.homeUrl = "https://app.example.com"; }) });
-    renderPage(<Page />);
+    renderAuthedPage(<Page />);
 
     expect(await screen.findByText("pk_test_demo")).toBeTruthy();
     expect(screen.getAllByText("http://localhost:4000").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Postgres").length).toBeGreaterThan(0);
-    expect(screen.getByText(/^sk_test_••••/)).toBeTruthy();
+    expect(screen.getByText("Signed in. The secret key is not kept in this page.")).toBeTruthy();
   });
 
   it("defaults to the Next.js blocks with public and secret headings", async () => {
     mockApi();
-    renderPage(<Page />);
+    renderAuthedPage(<Page />);
 
     expect(await screen.findByRole("heading", { name: "Website · browser (public)" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Website · backend (secret)" })).toBeTruthy();
@@ -26,23 +26,21 @@ describe("connect your app", () => {
     expect(screen.getByText(/never in a bundle/)).toBeTruthy();
   });
 
-  it("masks the secret by default and reveals it on demand", async () => {
+  it("keeps the secret key a placeholder and never prints a real one", async () => {
     mockApi();
-    renderPage(<Page />);
+    renderAuthedPage(<Page />);
 
     await screen.findByRole("heading", { name: "Website · backend (secret)" });
-    expect(screen.queryByText(/ORBITID_SECRET_KEY=sk_test_dashboard_session/)).toBeNull();
-
-    fireEvent.click(screen.getAllByRole("button", { name: /Reveal secret/ })[0]!);
-    expect(screen.getByText(/ORBITID_SECRET_KEY=sk_test_dashboard_session/)).toBeTruthy();
-    fireEvent.click(screen.getAllByRole("button", { name: /Hide secret/ })[0]!);
-    expect(screen.queryByText(/ORBITID_SECRET_KEY=sk_test_dashboard_session/)).toBeNull();
+    expect(screen.getAllByText(/ORBITID_SECRET_KEY=sk_test_…/).length).toBeGreaterThan(0);
+    // No reveal control, and no live key anywhere in the rendered page.
+    expect(screen.queryByRole("button", { name: /Reveal secret/ })).toBeNull();
+    expect(document.body.textContent).not.toMatch(/sk_(live|test)_[A-Za-z0-9]{8,}/);
   });
 
-  it("copies a block with the real value even while it is masked", async () => {
+  it("copies a block with the heading, and never a key", async () => {
     const written = clipboardStub();
     mockApi();
-    renderPage(<Page />);
+    renderAuthedPage(<Page />);
 
     await screen.findByRole("heading", { name: "Website · backend (secret)" });
     const panel = screen.getByRole("tabpanel");
@@ -52,24 +50,25 @@ describe("connect your app", () => {
 
     await waitFor(() => expect(written.length).toBeGreaterThan(0));
     expect(written.at(-1)).toContain("# Website · backend (secret)");
-    expect(written.at(-1)).toContain("ORBITID_SECRET_KEY=sk_test_dashboard_session");
+    expect(written.at(-1)).toContain("ORBITID_SECRET_KEY=sk_test_…");
     expect(written.at(-1)).toContain("ORBITID_API_URL=http://localhost:4000");
+    expect(written.at(-1)).not.toMatch(/sk_(live|test)_[A-Za-z0-9]{8,}/);
   });
 
   it("copies all blocks for the current framework", async () => {
     const written = clipboardStub();
     mockApi();
-    renderPage(<Page />);
+    renderAuthedPage(<Page />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Copy all/ }));
     await waitFor(() => expect(written.length).toBeGreaterThan(0));
     expect(written.at(-1)).toContain("NEXT_PUBLIC_ORBITID_PUBLISHABLE_KEY=pk_test_demo");
-    expect(written.at(-1)).toContain("ORBITID_SECRET_KEY=sk_test_dashboard_session");
+    expect(written.at(-1)).toContain("ORBITID_SECRET_KEY=sk_test_…");
   });
 
   it("switches variable names with the framework tabs", async () => {
     mockApi();
-    renderPage(<Page />);
+    renderAuthedPage(<Page />);
 
     fireEvent.mouseDown(await screen.findByRole("tab", { name: "React + backend" }));
     expect(await screen.findByText(/VITE_ORBITID_PUBLISHABLE_KEY=pk_test_demo/)).toBeTruthy();
@@ -82,7 +81,7 @@ describe("connect your app", () => {
 
   it("summarises the server without naming the encryption key", async () => {
     mockApi();
-    renderPage(<Page />);
+    renderAuthedPage(<Page />);
 
     expect(await screen.findByRole("heading", { name: "Server (this instance)" })).toBeTruthy();
     expect(screen.getByText(/docs\/ENVIRONMENT\.md/)).toBeTruthy();
@@ -95,7 +94,7 @@ describe("connect your app", () => {
 
   it("checks the setup against health and the environment endpoint", async () => {
     const calls = mockApi();
-    renderPage(<Page />);
+    renderAuthedPage(<Page />);
 
     expect(await screen.findByText(/Server reachable/)).toBeTruthy();
     expect(await screen.findByText(/accepts email code, password/)).toBeTruthy();
@@ -112,20 +111,19 @@ describe("connect your app", () => {
           : undefined,
       instance: instanceBody(),
     });
-    renderPage(<Page />);
+    renderAuthedPage(<Page />);
 
     expect(await screen.findByText(/Server reachable/)).toBeTruthy();
     expect(await screen.findByText(/GET http:\/\/localhost:4000\/health failed/)).toBeTruthy();
     expect(screen.getByText(/Sign-in methods published/)).toBeTruthy();
   });
 
-  it("offers placeholders when the session has no secret key", async () => {
-    mockApi();
-    renderPage(<Page />, { secretKey: null });
+  it("says the operator session is not live when the cookie is missing", async () => {
+    mockApi({ sessionActive: false });
+    renderAuthedPage(<Page />);
 
-    expect(await screen.findByText("No secret key in this session")).toBeTruthy();
-    expect(screen.getByText(/ORBITID_SECRET_KEY=sk_test_…/)).toBeTruthy();
-    expect(screen.getAllByText("Not in this session").length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: /Copy placeholders/ })).toBeTruthy();
+    expect(await screen.findByText(/No live dashboard session/)).toBeTruthy();
+    expect(screen.getByText("No live session")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/sk_(live|test)_[A-Za-z0-9]{8,}/);
   });
 });

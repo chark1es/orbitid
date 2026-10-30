@@ -28,3 +28,24 @@ jobs:
         env:
           NEXT_PUBLIC_ORBITID_PUBLISHABLE_KEY: pk_test_aHR0cDovL2xvY2FsaG9zdDo0MDAw
           ORBITID_SECRET_KEY: sk_test_ci
+
+  # Proves the documented deployment works: the image builds, runs unprivileged on SQLite, and the compose
+  # file brings up Postgres. scripts/smoke-container.sh is the same check an operator can run locally.
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Docker versions
+        run: docker version && docker compose version
+      - name: Container smoke test
+        run: bash scripts/smoke-container.sh
+      - name: Logs on failure
+        if: failure()
+        run: |
+          docker ps -a
+          docker compose ls -a || true
+          for id in $(docker ps -aq); do echo "=== $id ==="; docker logs --tail 200 "$id" || true; done
