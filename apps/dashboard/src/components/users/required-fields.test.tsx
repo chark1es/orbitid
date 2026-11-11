@@ -43,6 +43,8 @@ describe("create user dialog: required attributes", () => {
     const calls = mockApi({ instance: instanceBody() });
     renderPage(<CreateUserDialog open onOpenChange={() => undefined} />);
 
+    // The create form is a sheet-width form (576px) with a two-column grid; the old 672px was an extra size.
+    expect((await screen.findByRole("dialog")).className).toContain("sm:max-w-xl");
     // Email is required by default settings; wait for the instance settings to mark it.
     expect(await screen.findByText("(required)")).toBeTruthy();
     fireEvent.change(screen.getByLabelText(/Username/), { target: { value: "ada" } });

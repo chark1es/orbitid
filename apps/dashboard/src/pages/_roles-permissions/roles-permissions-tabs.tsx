@@ -39,13 +39,13 @@ export function RolesPermissionsTabs({ ctl }: { ctl: RolesPermissionsController 
 
       <TabsContent value="roles" className="mt-4 space-y-3">
         <div className="flex items-baseline justify-between gap-3">
-          <h2 className="text-sm font-semibold">Roles</h2>
+          <h2 className="text-sm font-heading">Roles</h2>
           <p className="text-xs text-muted-foreground">{scope === "org" ? "Roles attach to organization memberships." : "Roles attach directly to users, with or without an organization."}</p>
         </div>
         {rolesQuery.isLoading ? (
           <TableSkeleton />
         ) : roles.length === 0 ? (
-          <EmptyState title="No roles" description="The server seeds system roles at boot. Add a custom role to grant your own permissions." />
+          <EmptyState compact title="No roles" description="The server seeds system roles at boot. Add a custom role to grant your own permissions." />
         ) : (
           <RuledTable>
             <TableHeader>
@@ -103,13 +103,13 @@ export function RolesPermissionsTabs({ ctl }: { ctl: RolesPermissionsController 
 
       <TabsContent value="permissions" className="mt-4 space-y-3">
         <div className="flex items-baseline justify-between gap-3">
-          <h2 className="text-sm font-semibold">Permissions</h2>
+          <h2 className="text-sm font-heading">Permissions</h2>
           <p className="text-xs text-muted-foreground">The Frontend API checks these keys and exposes them on session tokens.</p>
         </div>
         {permissionsQuery.isLoading ? (
           <TableSkeleton />
         ) : permissions.length === 0 ? (
-          <EmptyState title="No permissions" description="The server seeds system permissions at boot." />
+          <EmptyState compact title="No permissions" description="The server seeds system permissions at boot." />
         ) : (
           <RuledTable>
             <TableHeader>

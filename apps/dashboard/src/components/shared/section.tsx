@@ -19,7 +19,7 @@ export function Section({
     <section className={cn("border-t border-border pt-5", className)}>
       <div className="flex flex-wrap items-start justify-between gap-3 pb-3">
         <div className="min-w-0 space-y-1">
-          <h2 className="text-[0.9375rem] font-semibold tracking-[-0.01em] text-foreground">{title}</h2>
+          <h2 className="text-[0.9375rem] font-heading tracking-[-0.01em] text-foreground">{title}</h2>
           {description ? (
             <p className="max-w-[70ch] text-sm leading-6 text-muted-foreground">{description}</p>
           ) : null}

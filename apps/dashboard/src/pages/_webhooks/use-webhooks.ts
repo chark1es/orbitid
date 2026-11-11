@@ -1,13 +1,15 @@
 import { useState } from "react";
 import { type PaginatedList, type WebhookDeliveryJSON, type WebhookEndpointJSON } from "@orbitid/shared";
 import { toast } from "sonner";
-import { api, useApi } from "../../lib/api";
+import { api, apiAllPages, useApi } from "../../lib/api";
 import { oneTimeSecret, unwrapList } from "../_config/data";
 import { errorMessage, groupWebhookEvents, isHttpUrl } from "../_config/settings";
 import { type EndpointForm, EMPTY_FORM } from "./model";
 
 export function useWebhooks() {
-  const query = useApi<PaginatedList<WebhookEndpointJSON>>(["webhooks"], "/webhooks/endpoints?limit=100");
+  const query = useApi<PaginatedList<WebhookEndpointJSON>>(["webhooks"], "/webhooks/endpoints", {
+    queryFn: ({ signal }) => apiAllPages<WebhookEndpointJSON>("/webhooks/endpoints", { signal }),
+  });
   const endpoints = unwrapList<WebhookEndpointJSON>(query.data);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [form, setForm] = useState<EndpointForm>(EMPTY_FORM);
@@ -49,7 +51,8 @@ export function useWebhooks() {
   };
 
   const formErrors: string[] = [];
-  if (!isHttpUrl(form.url)) formErrors.push("Endpoint URL must be an http(s) URL.");
+  if (!form.url.trim()) formErrors.push("Endpoint URL is required.");
+  else if (!isHttpUrl(form.url)) formErrors.push("Endpoint URL must be an http(s) URL.");
   if (!form.allEvents && form.eventTypes.length === 0) formErrors.push("Select at least one event or choose all events.");
 
   const toggleEvent = (event: string) => {

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { resetVirtualRouter } from "../../../lib/routing";
 import { OrganizationList } from "../OrganizationList";
 import { createFakeInstance, renderWithOrbit } from "./harness";
@@ -99,6 +99,21 @@ describe("<OrganizationList />", () => {
 
     await waitFor(() => expect(fake.backend.calls.setActive).toEqual([null]));
     expect(fake.backend.calls.navigate).toEqual(["/home"]);
+  });
+
+  test("keeps a long organization name inside the phone-width column", async () => {
+    const fake = createFakeInstance();
+    const longName = `Long Organization ${"Name ".repeat(40)}`.trim();
+    addOrg(fake, "org_long", longName);
+    renderWithOrbit(<OrganizationList />, fake);
+
+    const row = await screen.findByTestId("org-list-membership-org_long");
+    // The implicit grid track used to size to the longest name (718px inside a 343px parent). The
+    // explicit minmax(0,1fr) track plus min-w-0/truncate keeps every row inside the viewport.
+    expect(row.parentElement?.className).toContain("grid-cols-[minmax(0,1fr)]");
+    expect(row.className).toContain("min-w-0");
+    expect(row.className).toContain("max-w-full");
+    expect(within(row).getByText(longName).className).toContain("truncate");
   });
 
   test("joins a suggested organization", async () => {

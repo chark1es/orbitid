@@ -115,6 +115,8 @@ describe("<OrganizationSwitcher />", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Open organization switcher" }));
     fireEvent.click(await screen.findByRole("button", { name: "Create organization" }));
     const dialog = await screen.findByRole("dialog");
+    // 448, the small-form token: the create form is a three-field dialog, not a 512px sheet.
+    expect(dialog.className).toContain("sm:max-w-md");
     fireEvent.change(within(dialog).getByLabelText("Organization name"), {
       target: { value: "New Co" },
     });
@@ -154,5 +156,42 @@ describe("<OrganizationSwitcher />", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Open organization switcher" }));
     expect(screen.queryByRole("button", { name: /Personal account/ })).toBeNull();
+  });
+
+  test("lets the trigger shrink in a narrow header instead of forcing the bar wider", async () => {
+    const fake = createFakeInstance();
+    renderWithOrbit(<OrganizationSwitcher />, fake);
+
+    const trigger = await screen.findByRole("button", { name: "Open organization switcher" });
+    const root = trigger.closest(".orbitid-org")!;
+    expect(root.className).toContain("w-auto");
+    expect(root.className).toContain("min-w-0");
+    expect(root.className).toContain("max-w-full");
+    expect(trigger.className).toContain("min-w-0");
+    expect(trigger.className).toContain("max-w-full");
+    expect(trigger.className.split(/\s+/)).not.toContain("w-full");
+    const label = within(trigger).getByText("Acme");
+    expect(label.className).toContain("min-w-0");
+    expect(label.className).toContain("truncate");
+    // At 375px the text column leaves; the avatar and chevron keep the control identifiable.
+    const column = label.parentElement!;
+    expect(column.className).toContain("hidden");
+    expect(column.className).toContain("sm:flex");
+  });
+
+  test("truncates a long active name and a long row instead of widening the bar", async () => {
+    const fake = createFakeInstance();
+    const longName = `Starfleet ${"Operations ".repeat(20)}`.trim();
+    fake.backend.orgs[0]!.name = longName;
+    renderWithOrbit(<OrganizationSwitcher />, fake);
+
+    const trigger = await screen.findByRole("button", { name: "Open organization switcher" });
+    expect(trigger.className).toContain("min-w-0");
+    expect(trigger.className).toContain("sm:max-w-[16rem]");
+
+    fireEvent.click(trigger);
+    const row = await screen.findByRole("button", { name: new RegExp("Starfleet") });
+    expect(row.className).toContain("min-w-0");
+    expect(within(row).getByText(longName).className).toContain("truncate");
   });
 });

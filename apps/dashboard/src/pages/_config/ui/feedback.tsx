@@ -102,14 +102,17 @@ export function EmptyState({
   description,
   action,
   icon,
+  compact = false,
 }: {
   title: string;
   description?: string;
   action?: React.ReactNode;
   icon?: React.ReactNode;
+  /** Use inside a table or card so the empty list does not take a whole page of vertical space. */
+  compact?: boolean;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-2 border-y border-border px-6 py-14 text-center">
+    <div className={cn("flex flex-col items-center justify-center gap-2 border-y border-border px-6 text-center", compact ? "py-8" : "py-14")}>
       <div className="text-muted-foreground" aria-hidden>
         {icon ?? <Inbox className="size-5" />}
       </div>

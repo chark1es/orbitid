@@ -9,7 +9,7 @@ import { hit } from "../../lib/rate-limit";
 import { SCOPE_DESCRIPTIONS, assertScopesAllowed, authenticateClient, burnDeviceCode, createDeviceAuthorization, decideDeviceCode, deviceApplication, findDeviceByUserCode, formatUserCode, normalizeUserCode, parseScopes } from "../../services/oidc";
 import { resolveCaller } from "../machine/auth";
 import { DEVICE_PAGE_CSP, devicePageHtml, deviceResultHtml } from "../oidc-device-page";
-import { DEVICE_CODE_ATTEMPTS, DEVICE_CODE_WINDOW_MS, DEVICE_LOOKUP_PER_IP, urlWith, handle, deviceAuthorizationSchema, deviceVerificationUrl, serveAsset, signInLink } from "./shared";
+import { DEVICE_CODE_ATTEMPTS, DEVICE_CODE_WINDOW_MS, DEVICE_LOOKUP_PER_IP, urlWith, handle, deviceAuthorizationSchema, deviceVerificationUrl, serveAsset, signInLink, requestIssuer } from "./shared";
 
 export function registerDeviceRoutes(app: Hono, ctx: AppContext) {
   const deviceEnabled = () => ctx.settings.get().oidcProvider.deviceAuthorizationEnabled;
@@ -26,7 +26,7 @@ export function registerDeviceRoutes(app: Hono, ctx: AppContext) {
         });
     const scopes = assertScopesAllowed(appRow, parseScopes(body.scope || "openid"));
     const created = await createDeviceAuthorization(ctx, { application: appRow, scopes });
-    const verificationUri = deviceVerificationUrl(ctx);
+    const verificationUri = deviceVerificationUrl(ctx, requestIssuer(ctx, c));
     return c.json({
       device_code: created.deviceCode,
       user_code: formatUserCode(created.row.userCode),
@@ -69,7 +69,7 @@ export function registerDeviceRoutes(app: Hono, ctx: AppContext) {
     const code = rawCode ? normalizeUserCode(rawCode) : null;
     const signedIn = !!caller?.userId;
     // Back to this page (on the instance origin) after signing in, so the code survives the round trip.
-    const pageUrl = urlWith(deviceVerificationUrl(ctx), { user_code: code ? formatUserCode(code) : null });
+    const pageUrl = urlWith(deviceVerificationUrl(ctx, requestIssuer(ctx, c)), { user_code: code ? formatUserCode(code) : null });
     const signInHref = signInLink(ctx, pageUrl);
     if (!code) return { signedIn, signInHref, code: null as string | null, appName: null as string | null, scopes: [] as string[], state: "enter_code" as const };
     const row = await findDeviceByUserCode(ctx, code);
@@ -109,7 +109,7 @@ export function registerDeviceRoutes(app: Hono, ctx: AppContext) {
     // Same-origin only: a cross-site form post must not be able to approve a code its author created.
     const origin = c.req.header("origin");
     const fetchSite = c.req.header("sec-fetch-site");
-    if (fetchSite === "cross-site" || (origin && origin !== new URL(ctx.env.baseUrl).origin)) {
+    if (fetchSite === "cross-site" || (origin && origin !== new URL(requestIssuer(ctx, c)).origin)) {
       return c.html(deviceResultHtml("cross_site", undefined, productName()), 403, {
         "content-security-policy": DEVICE_PAGE_CSP, "cache-control": "no-store", "referrer-policy": "no-referrer",
       });

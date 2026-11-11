@@ -1,10 +1,11 @@
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "../../lib/utils"
+import { CONTROL_RECIPE } from "../../lib/control"
 import { Slot } from "radix-ui"
 
 const buttonVariants = cva(
-  "inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-colors select-none disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  `${CONTROL_RECIPE} shrink-0 gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-colors select-none disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4`,
   {
     variants: {
       variant: {
@@ -20,14 +21,14 @@ const buttonVariants = cva(
         link: "text-primary underline decoration-border underline-offset-4 hover:decoration-current",
       },
       size: {
-        default: "h-[34px] px-[14px] has-[>svg]:px-3",
+        default: "h-[34px] px-3.5 has-[>svg]:px-3",
         xs: "h-6 gap-1 px-2 text-xs has-[>svg]:px-1.5 [&_svg:not([class*='size-'])]:size-3",
         sm: "h-7 gap-1.5 px-2.5 text-[0.8125rem] has-[>svg]:px-2",
         lg: "h-[38px] px-4 has-[>svg]:px-3.5",
-        icon: "size-[34px]",
-        "icon-xs": "size-6 [&_svg:not([class*='size-'])]:size-3",
-        "icon-sm": "size-7",
-        "icon-lg": "size-[38px]",
+        icon: "size-[34px] p-0",
+        "icon-xs": "size-6 p-0 [&_svg:not([class*='size-'])]:size-3",
+        "icon-sm": "size-7 p-0",
+        "icon-lg": "size-[38px] p-0",
       },
     },
     defaultVariants: {

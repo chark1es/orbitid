@@ -84,12 +84,17 @@ export function mockApi(options: MockApiOptions = {}): ApiCall[] {
   return calls;
 }
 
-export function renderPage(ui: ReactElement) {
+/** Leaves every request pending, so a test can assert the loading state before data arrives. */
+export function pendingApi(): void {
+  vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise<Response>(() => {}));
+}
+
+export function renderPage(ui: ReactElement, initialEntries: string[] = ["/"]) {
   sessionStorage.setItem("orbitid.apiUrl", "http://localhost:4000");
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter>{ui}</MemoryRouter>
+      <MemoryRouter initialEntries={initialEntries}>{ui}</MemoryRouter>
     </QueryClientProvider>,
   );
 }

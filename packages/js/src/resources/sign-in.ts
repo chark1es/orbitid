@@ -3,6 +3,13 @@ import { startAuthentication, type PublicKeyCredentialRequestOptionsJSON } from 
 import type { FapiClient } from "../fapi";
 import { fetchData } from "./base";
 import { Verification } from "./verification";
+import {
+  clearPendingSignInStrategy,
+  commitPendingSignInStrategy,
+  isSignInStrategy,
+  recordLastUsedStrategy,
+  rememberSignInStrategy,
+} from "../util/last-used-strategy";
 
 export interface SignInFactor {
   strategy: string;
@@ -203,6 +210,22 @@ export class SignIn {
     return fetchData<SignInJSON>(this.fapi, "POST", path, { body });
   }
 
+  /** Remembers a completed method, or holds it until a second factor / redirect completes. */
+  private track(json: SignInJSON, strategy?: string): void {
+    if (json.status === "complete" && json.created_session_id) {
+      if (strategy && isSignInStrategy(strategy)) {
+        recordLastUsedStrategy(strategy);
+        clearPendingSignInStrategy();
+      } else {
+        commitPendingSignInStrategy();
+      }
+      return;
+    }
+    if (strategy && isSignInStrategy(strategy) && (json.status === "needs_second_factor" || json.status === "needs_new_password")) {
+      rememberSignInStrategy(strategy);
+    }
+  }
+
   async create(params: SignInCreateParams = {}): Promise<this> {
     const json = await this.post("/v1/client/sign_ins", {
       identifier: params.identifier,
@@ -213,13 +236,17 @@ export class SignIn {
       ticket: params.ticket,
       transfer: params.transfer,
     });
-    return this.update(json);
+    this.update(json);
+    this.track(json, params.strategy);
+    return this;
   }
 
   /** Re-fetches the sign-in attempt (used by polling flows). */
   async reload(): Promise<this> {
     const json = await fetchData<SignInJSON>(this.fapi, "GET", this.basePath);
-    return this.update(json);
+    this.update(json);
+    if (json.status === "complete") commitPendingSignInStrategy();
+    return this;
   }
 
   async prepareFirstFactor(params: PrepareFirstFactorParams): Promise<this> {
@@ -230,7 +257,11 @@ export class SignIn {
       redirect_url: params.redirectUrl,
       action_complete_redirect_url: params.actionCompleteRedirectUrl,
     });
-    return this.update(json);
+    this.update(json);
+    // A magic link completes while the page is polling, not in this response, so hold the method.
+    rememberSignInStrategy(params.strategy);
+    if (json.status === "complete") commitPendingSignInStrategy();
+    return this;
   }
 
   async attemptFirstFactor(params: AttemptFirstFactorParams): Promise<this> {
@@ -243,7 +274,9 @@ export class SignIn {
       public_key_credential: params.publicKeyCredential,
       redirect_url: params.redirectUrl,
     });
-    return this.update(json);
+    this.update(json);
+    this.track(json, params.strategy);
+    return this;
   }
 
   async prepareSecondFactor(params: PrepareSecondFactorParams): Promise<this> {
@@ -262,7 +295,9 @@ export class SignIn {
       signature: params.signature,
       trust_device: params.trustDevice,
     });
-    return this.update(json);
+    this.update(json);
+    if (json.status === "complete") commitPendingSignInStrategy();
+    return this;
   }
 
   /** Completes a `needs_new_password` attempt (forced password reset). */
@@ -272,11 +307,15 @@ export class SignIn {
       sign_out_of_other_sessions: params.signOutOfOtherSessions,
       redirect_url: params.redirectUrl,
     });
-    return this.update(json);
+    this.update(json);
+    if (json.status === "complete") commitPendingSignInStrategy();
+    return this;
   }
 
   /** Starts OAuth / enterprise SSO and navigates to the provider. */
   async authenticateWithRedirect(params: AuthenticateWithRedirectParams): Promise<this> {
+    // The provider navigates away before the attempt can complete; the return leg commits this.
+    rememberSignInStrategy(params.strategy);
     await this.create({
       strategy: params.strategy,
       identifier: params.identifier ?? params.emailAddress ?? params.phoneNumber,

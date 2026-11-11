@@ -11,10 +11,15 @@ import { Organization } from "./resources/organization";
 import { Session } from "./resources/session";
 import { ApiKey, type CreateApiKeyParams } from "./resources/api-key";
 import { unwrap } from "./resources/base";
+import { isOrbitAPIResponseError } from "./util/errors";
 import { inBrowser } from "./util/browser";
+import { readLastUsedStrategy } from "./util/last-used-strategy";
 import { clearAuthCookies, setClientUatCookie, setSessionCookie, type CookieOptions } from "./util/cookies";
 import type { PaginatedResponse, PaginationParams } from "./util/pagination";
 import { OrbitIDNavigation } from "./orbit/navigation-base";
+import { TokenRefresh } from "./orbit/refresh";
+import { AuthCookies } from "./orbit/auth-cookies";
+import { isCurrentSession } from "./orbit/session-state";
 import { handleRedirectCallback as runRedirectCallback } from "./orbit/redirect-callback";
 import type {
   HandleRedirectCallbackParams,
@@ -46,6 +51,8 @@ export type {
 export class OrbitID extends OrbitIDNavigation {
   static readonly version = SDK_VERSION;
   readonly version = SDK_VERSION;
+  /** The key this instance was built with: the Frontend API URL is encoded in it. */
+  readonly publishableKey: string;
   readonly fapi: FapiClient;
   private readonly tokenCache: TokenCache;
   protected readonly options: OrbitIDOptions;
@@ -54,10 +61,14 @@ export class OrbitID extends OrbitIDNavigation {
   private readonly organizationCache = new Map<string, Organization>();
   private readonly organizationFetches = new Map<string, Promise<Organization>>();
   private crossTab: CrossTabSync | null = null;
-  private refreshTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly tokenRefresh: TokenRefresh;
+  private readonly authCookies: AuthCookies;
   private loadPromise: Promise<void> | null = null;
   private refreshPromise: Promise<Client | null> | null = null;
-
+  /** True while a rejected session is being confirmed, so the client response's cookie sync cannot re-enter. */
+  private reconciling = false;
+  /** Set while the confirmation client fetch runs: its response must not trigger another cookie sync. */
+  private skipCookieSync = false;
   private _client: Client | null = null;
   private _session: Session | null = null;
   private _user: User | null = null;
@@ -66,14 +77,12 @@ export class OrbitID extends OrbitIDNavigation {
   private _loaded = false;
   private loading = false;
   private disposed = false;
-
   constructor(publishableKey: string, options: OrbitIDOptions = {}) {
     super();
+    this.publishableKey = publishableKey;
     this.options = options;
     this.cookieOptions = { domain: options.cookie?.domain, secure: options.cookie?.secure };
-    this.tokenCache = new TokenCache({
-      onToken: (info) => this.handleToken(info),
-    });
+    // Build the transport first so the token cache can reject tokens from another issuer.
     this.fapi = new FapiClient({
       publishableKey,
       domain: options.domain,
@@ -83,6 +92,48 @@ export class OrbitID extends OrbitIDNavigation {
       retry: options.retry,
       onClient: (client) => this.handleClient(client),
       navigate: (url, navigateOptions) => this.navigate(url, navigateOptions),
+    });
+    this.tokenCache = new TokenCache({
+      issuer: this.fapi.baseUrl,
+      onToken: (info) => this.authCookies.handleToken(info),
+    });
+    this.tokenRefresh = new TokenRefresh({
+      isReady: () => this._loaded && !this.disposed,
+      isDisposed: () => this.disposed,
+      intervalMs: () => this.options.tokenRefreshIntervalMs,
+      tokenExpiry: (sessionId) => this.tokenCache.get(sessionId)?.expiresAt ?? null,
+      tokenLifetimeMs: (sessionId) => this.tokenCache.lifetimeMs(sessionId),
+      cacheIsFresh: (sessionId) => {
+        // Another tab may have written a fresh `__session` cookie while this tab was asleep or waiting
+        // for the lock. Adopting it is what keeps N tabs at one mint per cycle without BroadcastChannel.
+        this.authCookies.adoptSharedToken(sessionId);
+        return this.tokenCache.isFresh(sessionId);
+      },
+      session: () => this._session,
+      isCurrentLiveSession: (session) => isCurrentSession(this._session, session, true),
+      acquireLock: () => !this.crossTab || this.crossTab.tryAcquireRefreshLock(),
+      releaseLock: () => this.crossTab?.releaseRefreshLock(),
+      fetchToken: (session) => session.getToken({ skipCache: true }),
+      acceptToken: (session, token) => {
+        if (!isCurrentSession(this._session, session, true)) return;
+        setSessionCookie(token, this.cookieOptions);
+        this.authCookies.writeClientUat();
+      },
+      reconcileRejected: (session) => this.reconcileRejectedSession(session),
+    });
+    this.authCookies = new AuthCookies({
+      isDisposed: () => this.disposed,
+      isInBrowser: () => inBrowser,
+      session: () => this._session,
+      isCurrentLiveSession: (session) => isCurrentSession(this._session, session, true),
+      tokenCache: () => this.tokenCache,
+      cookieOptions: () => this.cookieOptions,
+      crossTab: () => this.crossTab,
+      setCrossTab: (sync) => { this.crossTab = sync; },
+      refreshClient: () => this.refreshClient(),
+      reconcileRejected: (session) => this.reconcileRejectedSession(session),
+      scheduleRefresh: () => this.tokenRefresh.schedule(),
+      emit: () => this.emit(),
     });
   }
 
@@ -106,6 +157,10 @@ export class OrbitID extends OrbitIDNavigation {
   }
   get isSignedIn(): boolean {
     return !!this._session && this._session.status === "active";
+  }
+  /** The sign-in method completed most recently, or `null`. Never contains an identifier or other PII. */
+  get lastUsedStrategy(): string | null {
+    return readLastUsedStrategy();
   }
   get afterSignOutUrl(): string | undefined {
     return this.options.afterSignOutUrl;
@@ -158,8 +213,15 @@ export class OrbitID extends OrbitIDNavigation {
   }
 
   private applyClient(raw: ClientJSON): void {
+    const previousId = this._session?.id ?? null;
     this._client = Client.fromJSON(this.fapi, raw, this.tokenCache);
-    this._session = this._client.session;
+    // `lastActiveSessionId` is server-side per client, so a sign-in in another tab would otherwise move this
+    // tab to the newly activated account on its next refresh. Keep the session this tab is already using while
+    // it is still usable; an explicit `setActive` (or a fresh sign-in, when there is no previous session) still
+    // follows the client's pointer.
+    const previous = previousId ? this._client.sessions.find((session) => session.id === previousId) : undefined;
+    const keep = previous && (previous.status === "active" || previous.status === "pending") ? previous : null;
+    this._session = keep ?? this._client.session;
     this._user = this._session?.user ?? null;
     const organizationId = this._session?.lastActiveOrganizationId ?? null;
     // Signing out (or switching to a session with no organization) must not leave the previous
@@ -174,7 +236,9 @@ export class OrbitID extends OrbitIDNavigation {
     this.applyClient(raw);
     if (this.loading || !this._loaded) return;
     if (this._session?.lastActiveOrganizationId && !this._organization) void this.ensureOrganization();
-    void this.syncAuthCookies();
+    // A response fetched to confirm a rejected session must not start another token mint: that mint is
+    // what was just rejected, and syncing here would loop client→sync→confirm→client forever.
+    if (!this.skipCookieSync) void this.authCookies.sync();
     this.emit();
   }
 
@@ -195,12 +259,12 @@ export class OrbitID extends OrbitIDNavigation {
       this.applyClient(unwrap<ClientJSON>(clientRaw).data);
       // The organization fetch and the first token mint only depend on the client, not on each other: run them
       // together so a signed-in visit does not pay for two sequential round trips before first paint.
-      await Promise.all([this.ensureOrganization(), this.syncAuthCookies()]);
+      await Promise.all([this.ensureOrganization(), this.authCookies.sync()]);
       if (this.disposed) return;
       this.loading = false;
       this._loaded = true;
       this.startTokenRefresh();
-      this.startCrossTabSync();
+      this.authCookies.startCrossTab();
       this.emit();
     })().catch((error: unknown) => {
       this.loading = false;
@@ -248,99 +312,53 @@ export class OrbitID extends OrbitIDNavigation {
   // Tokens & cookies
   // ---------------------------------------------------------------------------
 
-  private handleToken(info: { sessionId: string; template: string | null; token: string; expiresAt: number }): void {
-    // A token fetch can resolve after `dispose()`; it must not write cookies or broadcast from a dead instance.
-    if (this.disposed) return;
-    if (this._session?.id !== info.sessionId) return;
-    if (!info.template) setSessionCookie(info.token, this.cookieOptions);
-    this.writeClientUat();
-    // Template tokens are least-privilege credentials for another service; a tab that wants one can mint
-    // its own. Only the default session token — the one every tab of this app already holds — is shared.
-    if (!info.template) {
-      this.crossTab?.broadcast({ type: "token", sessionId: info.sessionId, template: null, token: info.token });
-    }
-  }
-
-  private writeClientUat(): void {
-    const seconds = this._session?.lastActiveAt ? Math.floor(this._session.lastActiveAt / 1000) : Math.floor(Date.now() / 1000);
-    setClientUatCookie(this._session ? seconds : 0, this.cookieOptions);
-  }
-
-  private async syncAuthCookies(): Promise<void> {
-    if (this.disposed) return;
-    if (!this._session || this._session.status !== "active") {
-      clearAuthCookies(this.cookieOptions);
-      return;
-    }
-    // `__client_uat` first: middleware uses it to decide whether a handshake can refresh a missing
-    // `__session`, so a token request that fails must not leave the browser looking signed out.
-    this.writeClientUat();
-    const session = this._session;
-    try {
-      const token = await session.getToken();
-      // The user may have signed out, switched session, or torn the instance down while the request was in flight.
-      if (!this.disposed && this.isCurrentActiveSession(session)) setSessionCookie(token, this.cookieOptions);
-    } catch {
-      /* leave the existing `__session` untouched: the next refresh retries */
-    }
-  }
-
-  /** True while `session` is still the active session of this instance. */
-  private isCurrentActiveSession(session: Session): boolean {
-    return this._session === session && session.status === "active";
+  /** Refreshes the session JWT now; the loop's tolerance rules live in `orbit/refresh.ts`. */
+  private refreshSessionToken(): Promise<void> {
+    return this.tokenRefresh.refreshNow();
   }
 
   private startTokenRefresh(): void {
-    if (this.refreshTimer || typeof setInterval === "undefined") return;
-    const interval = this.options.tokenRefreshIntervalMs ?? 50_000;
-    this.refreshTimer = setInterval(() => {
-      void this.refreshSessionToken();
-    }, interval);
-  }
-
-  private async refreshSessionToken(): Promise<void> {
-    const session = this._session;
-    if (!session || session.status !== "active") return;
-    try {
-      const token = await session.getToken({ skipCache: true });
-      // A response that lands after sign-out or a session switch must not bring the old session back.
-      if (!this.isCurrentActiveSession(session)) return;
-      setSessionCookie(token, this.cookieOptions);
-      this.writeClientUat();
-    } catch {
-      /* offline: the next tick retries */
-    }
+    this.tokenRefresh.start();
   }
 
   stopTokenRefresh(): void {
-    if (this.refreshTimer) {
-      clearInterval(this.refreshTimer);
-      this.refreshTimer = null;
-    }
+    this.tokenRefresh.stop();
   }
 
-  private startCrossTabSync(): void {
-    if (this.crossTab || this.disposed || !inBrowser) return;
-    this.crossTab = new CrossTabSync((message) => {
-      if (this.disposed) return;
-      this.handleSyncMessage(message);
-    });
-  }
-
-  private handleSyncMessage(message: SyncMessage): void {
-    switch (message.type) {
-      case "token":
-        if (!this.tokenCache.setFromSync(message.sessionId, message.template, message.token)) return;
-        if (!message.template && this._session?.id === message.sessionId) setSessionCookie(message.token, this.cookieOptions);
-        return;
-      case "signout":
-        this.tokenCache.clear();
-        clearAuthCookies(this.cookieOptions);
-        void this.refreshClient().catch(() => undefined);
-        return;
-      case "refresh-client":
-        void this.refreshClient().catch(() => undefined);
-        return;
+  /**
+   * Confirms a rejected token against the authoritative client state. Only a client response that no longer
+   * carries an active session clears cookies and local state. Returns true when the session is gone (nothing
+   * left to retry), false when the state is still signed in or the confirmation failed transiently.
+   */
+  private async reconcileRejectedSession(session: Session): Promise<boolean> {
+    // A client response applies the session and then syncs cookies, whose own 401 path lands here again.
+    // Without both guards the two paths would confirm each other forever.
+    if (this.reconciling) return false;
+    this.reconciling = true;
+    this.skipCookieSync = true;
+    try {
+      try {
+        await this.refreshClient();
+      } catch {
+        // The confirmation itself failed (offline, 5xx): keep everything and retry on the normal schedule.
+        return false;
+      }
+      if (this.disposed) return true;
+      // A pending-MFA session is still live: a rejected mint is not a sign-out, exactly like an active one.
+      if (this._session?.status === "active" || this._session?.status === "pending") return false;
+      // The server confirmed the session is gone: cancel any in-flight token request for it before clearing.
+      this.tokenCache.removeSession(session.id);
+      this._session = null;
+      this._user = null;
+      this._organization = null;
+      clearAuthCookies(this.cookieOptions);
+      this.crossTab?.broadcast({ type: "signout" });
+      this.stopTokenRefresh();
+      this.emit();
+      return true;
+    } finally {
+      this.reconciling = false;
+      this.skipCookieSync = false;
     }
   }
 
@@ -355,6 +373,7 @@ export class OrbitID extends OrbitIDNavigation {
       this._user = null;
       this._organization = null;
       clearAuthCookies(this.cookieOptions);
+      this.stopTokenRefresh();
       this.emit();
       if (redirectUrl) this.navigate(redirectUrl, { replace: true });
       return { session: null };
@@ -378,7 +397,11 @@ export class OrbitID extends OrbitIDNavigation {
     this._user = this._session.user ?? this._user;
     await this.ensureOrganization();
     if (!this._organization && organization && typeof organization === "object") this._organization = organization;
-    await this.syncAuthCookies();
+    await this.authCookies.sync();
+    // A newly activated session has its own token deadline; restart the schedule and clear the failure backoff.
+    // `start()` also re-binds the resume listeners after a previous sign-out stopped the loop.
+    this.tokenRefresh.reset();
+    this.tokenRefresh.start();
 
     await beforeEmit?.(this.state);
     this.emit();
@@ -399,6 +422,7 @@ export class OrbitID extends OrbitIDNavigation {
       this._user = null;
       this._organization = null;
       clearAuthCookies(this.cookieOptions);
+      this.stopTokenRefresh();
       this.crossTab?.broadcast({ type: "signout" });
       try {
         await this.refreshClient();

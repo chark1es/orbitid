@@ -222,13 +222,13 @@ function UserButtonInner(props: UserButtonProps) {
                   >
                     <Avatar className="size-5">
                       {publicUser?.image_url ? <AvatarImage src={publicUser.image_url} alt="" /> : null}
-                      <AvatarFallback className="text-[10px]">
+                      <AvatarFallback className="text-[0.6875rem]">
                         {(publicUser?.first_name?.charAt(0) ?? publicUser?.identifier?.charAt(0) ?? "?").toUpperCase()}
                       </AvatarFallback>
                     </Avatar>
                     <span className="truncate">{label}</span>
                     {session.id === activeSessionId ? (
-                      <span className="ms-auto text-[10px] text-muted-foreground">{t("userProfile.devices.current")}</span>
+                      <span className="ms-auto text-[0.6875rem] text-muted-foreground">{t("userProfile.devices.current")}</span>
                     ) : null}
                   </DropdownMenuItem>
                 );

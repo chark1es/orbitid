@@ -18,6 +18,19 @@ export interface OAuthProviderConfig {
   clientSecret: string;
   scopes: string[];
   discoveryUrl?: string;
+  /** Custom providers: `oidc` (default) or `oauth2` (no ID token; profile comes from userinfo). */
+  protocol?: "oidc" | "oauth2";
+  /** Custom providers without a discovery document. */
+  authorizationUrl?: string;
+  tokenUrl?: string;
+  userinfoUrl?: string;
+  jwksUrl?: string;
+  issuer?: string;
+  clientAuthMethod?: "client_secret_basic" | "client_secret_post";
+  pkce?: boolean;
+  trustEmailVerified?: boolean;
+  logoUrl?: string;
+  claimMapping?: Partial<Record<"sub" | "email" | "emailVerified" | "name" | "firstName" | "lastName" | "username" | "picture", string>>;
   /** Apple only: the `.p8` key material the server uses to mint the client secret. */
   appleTeamId?: string;
   appleKeyId?: string;
@@ -66,7 +79,7 @@ const PROVIDER_NAMES: Record<string, string> = {
   facebook: "Facebook", twitter: "Twitter", x: "X", linkedin_oidc: "LinkedIn", slack: "Slack", twitch: "Twitch",
   spotify: "Spotify", bitbucket: "Bitbucket", dropbox: "Dropbox", notion: "Notion", hubspot: "HubSpot",
   tiktok: "TikTok", coinbase: "Coinbase", line: "LINE", linear: "Linear", huggingface: "Hugging Face",
-  box: "Box", atlassian: "Atlassian", xero: "Xero",
+  box: "Box", atlassian: "Atlassian", xero: "Xero", zoom: "Zoom",
 };
 
 const LOGO_SLUGS: Record<string, string> = { twitter: "x", x: "x", linkedin_oidc: "linkedin", microsoft: "microsoft" };
@@ -103,8 +116,10 @@ const DEFAULT_SCOPES: Record<string, string[]> = {
   box: [],
   atlassian: ["read:me", "read:account", "offline_access"],
   xero: ["openid", "profile", "email", "offline_access"],
+  zoom: ["user:read"],
 };
 
+/** Provider defaults; a custom provider's own settings always win over these. */
 export const providerRedirectUri = (ctx: AppContext, key: string) => `${ctx.env.baseUrl}/v1/oauth_callback/${key}`;
 
 /** Reads the provider's configuration from instance settings (empty client id/secret ⇒ disabled). */
@@ -117,8 +132,19 @@ export function providerConfig(ctx: AppContext, key: string): OAuthProviderConfi
     name: providerDisplayName(key, cfg.name),
     clientId: cfg.clientId,
     clientSecret: cfg.clientSecret,
-    scopes: cfg.scopes.length ? cfg.scopes : DEFAULT_SCOPES[key] ?? (key.startsWith("custom_") ? ["openid", "profile", "email"] : []),
+    scopes: cfg.scopes.length ? cfg.scopes : DEFAULT_SCOPES[key] ?? (key.startsWith("custom_") ? (cfg.protocol === "oauth2" ? [] : ["openid", "profile", "email"]) : []),
     discoveryUrl: cfg.discoveryUrl,
+    protocol: cfg.protocol,
+    authorizationUrl: cfg.authorizationUrl,
+    tokenUrl: cfg.tokenUrl,
+    userinfoUrl: cfg.userinfoUrl,
+    jwksUrl: cfg.jwksUrl,
+    issuer: cfg.issuer,
+    clientAuthMethod: cfg.clientAuthMethod,
+    pkce: cfg.pkce,
+    trustEmailVerified: cfg.trustEmailVerified,
+    logoUrl: cfg.logoUrl,
+    claimMapping: cfg.claimMapping,
     appleTeamId: cfg.appleTeamId,
     appleKeyId: cfg.appleKeyId,
     applePrivateKey: cfg.applePrivateKey,
@@ -244,7 +270,7 @@ export function listEnabledSocialProviders(ctx: AppContext): SocialProviderListi
       key,
       strategy: `oauth_${key}`,
       name: providerDisplayName(key, cfg.name),
-      logo_url: providerLogoUrl(key),
+      logo_url: cfg.logoUrl?.trim() || providerLogoUrl(key),
       authenticatable: cfg.authenticatableAtSignIn,
     }));
 }

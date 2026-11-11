@@ -73,3 +73,14 @@ describe("sign out menu", () => {
     expect(screen.queryByText("Signed out")).toBeNull();
   });
 });
+
+describe("account trigger", () => {
+  it("shows the operator word, not invented initials", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(json(SESSION));
+    renderMenu();
+    const trigger = await screen.findByRole("button", { name: "Instance menu" });
+    expect(trigger.textContent).toContain("Admin");
+    expect(trigger.textContent).not.toContain("IA");
+    expect(trigger.querySelector('[data-slot="avatar"]')).toBeNull();
+  });
+});

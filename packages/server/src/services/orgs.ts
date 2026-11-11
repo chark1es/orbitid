@@ -169,7 +169,8 @@ export async function assertOrganizationCapacity(ctx: AppContext, org: OrgRow, o
   const pending = opts.includePendingInvitations
     ? (await ctx.db.select({ id: s.organizationInvitations.id }).from(s.organizationInvitations).where(and(eq(s.organizationInvitations.organizationId, org.id), eq(s.organizationInvitations.status, "pending")))).length
     : 0;
-  if (members + pending >= org.maxAllowedMemberships) {
+  // 0 means no limit (the default): a plan-shaped cap is never imposed by the product.
+  if (org.maxAllowedMemberships > 0 && members + pending >= org.maxAllowedMemberships) {
     throw new OrbitError(403, ErrorCodes.organization_membership_quota_exceeded, "This organization has reached its maximum number of memberships", {
       max_allowed_memberships: org.maxAllowedMemberships,
     });

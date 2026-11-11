@@ -29,7 +29,8 @@ describe("environment", () => {
     expect(env.display_config.captcha_site_key).toBe("site-key");
     expect(env.user_settings.social.google!.strategy).toBe("oauth_google");
     expect(env.auth_config.first_factors).toEqual(expect.arrayContaining(["email_code", "password", "oauth_google"]));
-    expect(env.auth_config.single_session_mode).toBe(true);
+    // Multi-session is the default; a single-session mode is an explicit operator choice.
+    expect(env.auth_config.single_session_mode).toBe(false);
   });
 });
 

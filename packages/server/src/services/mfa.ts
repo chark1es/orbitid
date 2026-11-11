@@ -86,29 +86,44 @@ export async function consumeBackupCode(ctx: AppContext, user: UserRow, code: st
   return !!spent;
 }
 
-export async function verifiedSecondFactorPhones(ctx: AppContext, user: UserRow) {
+export async function verifiedSecondFactorPhones(ctx: AppContext, user: UserRow, opts: { excludePhoneId?: string } = {}) {
   return (await ctx.db.select().from(s.phoneNumbers).where(eq(s.phoneNumbers.userId, user.id)))
-    .filter((p) => p.verified && p.reservedForSecondFactor);
+    .filter((p) => p.verified && p.reservedForSecondFactor && p.id !== opts.excludePhoneId);
 }
 
-/** True when a verified email address may be used as a second factor (`attributes.emailAddress.usedForSecondFactor`). */
-export async function emailSecondFactor(ctx: AppContext, user: UserRow) {
+/** Verified email addresses that may be used as a second factor (`attributes.emailAddress.usedForSecondFactor`). */
+export async function emailSecondFactors(ctx: AppContext, user: UserRow, opts: { excludeEmailId?: string } = {}) {
   const st = ctx.settings.get();
-  if (!st.attributes.emailAddress.enabled || !st.attributes.emailAddress.usedForSecondFactor) return undefined;
+  if (!st.attributes.emailAddress.enabled || !st.attributes.emailAddress.usedForSecondFactor) return [];
   return (await ctx.db.select().from(s.emailAddresses).where(eq(s.emailAddresses.userId, user.id)))
-    .find((e) => e.verified);
+    .filter((e) => e.verified && e.id !== opts.excludeEmailId);
+}
+
+/** The first verified email address usable as a second factor. */
+export async function emailSecondFactor(ctx: AppContext, user: UserRow, opts: { excludeEmailId?: string } = {}) {
+  return (await emailSecondFactors(ctx, user, opts))[0];
+}
+
+/** The channel a first-factor strategy belongs to. A second factor must use a different channel/identifier. */
+export function firstFactorChannel(strategy: string | undefined): "email" | "phone" | undefined {
+  if (strategy === "email_code" || strategy === "email_link" || strategy === "reset_password_email_code") return "email";
+  if (strategy === "phone_code" || strategy === "reset_password_phone_code") return "phone";
+  return undefined;
 }
 
 export interface SecondFactorOptions {
   /** Strategy already used as the first factor: a second factor must be a *different* factor. */
   firstFactorStrategy?: string;
+  /** The exact email used as the first factor, when it was an email strategy. */
+  firstFactorEmailId?: string;
+  /** The exact phone used as the first factor, when it was a phone strategy. */
+  firstFactorPhoneId?: string;
 }
-
-const isEmailFactor = (strategy: string | undefined) => strategy === "email_code" || strategy === "email_link";
 
 /**
  * Second factors the user can actually perform, in priority order.
- * Email is never offered when the first factor was the email itself.
+ * The channel and identifier used as the first factor are never offered again, so a recovery code for the same
+ * mailbox/phone cannot satisfy both steps.
  */
 export async function supportedSecondFactors(
   ctx: AppContext,
@@ -116,13 +131,21 @@ export async function supportedSecondFactors(
   opts: SecondFactorOptions = {},
 ): Promise<SignInFactor[]> {
   const factors: SignInFactor[] = [];
+  const channel = firstFactorChannel(opts.firstFactorStrategy);
+  // If the exact identifier used as the first factor is unknown, fail closed for that whole channel instead of
+  // guessing. Otherwise a recovery code sent to a secondary mailbox could be "verified" again by the same mailbox.
+  const excludeAllPhones = channel === "phone" && !opts.firstFactorPhoneId;
+  const excludeAllEmails = channel === "email" && !opts.firstFactorEmailId;
+  const excludePhoneId = channel === "phone" ? opts.firstFactorPhoneId : undefined;
+  const excludeEmailId = channel === "email" ? opts.firstFactorEmailId : undefined;
   if (user.totpVerified) factors.push({ strategy: "totp" });
-  for (const phone of await verifiedSecondFactorPhones(ctx, user)) {
+  const phones = excludeAllPhones ? [] : await verifiedSecondFactorPhones(ctx, user, { excludePhoneId });
+  for (const phone of phones) {
     factors.push({ strategy: "phone_code", phone_number_id: phone.id, default: phone.defaultSecondFactor });
   }
-  if (!isEmailFactor(opts.firstFactorStrategy)) {
-    const email = await emailSecondFactor(ctx, user);
-    if (email) factors.push({ strategy: "email_code", email_address_id: email.id, safe_identifier: maskEmail(email.email), primary: email.id === user.primaryEmailAddressId });
+  const emails = excludeAllEmails ? [] : await emailSecondFactors(ctx, user, { excludeEmailId });
+  for (const email of emails) {
+    factors.push({ strategy: "email_code", email_address_id: email.id, safe_identifier: maskEmail(email.email), primary: email.id === user.primaryEmailAddressId });
   }
   if ((user.backupCodes?.length ?? 0) > 0) factors.push({ strategy: "backup_code" });
   return factors;

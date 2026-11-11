@@ -66,10 +66,12 @@ export function createJwtTemplatesApi(http: BackendHttp) {
     getJwtTemplate(templateId: string) {
       return http.get<JwtTemplate>(`/v1/jwt_templates/${templateId}`);
     },
-    createJwtTemplate(params: { name: string; claims: Record<string, unknown>; lifetime?: number; allowedClockSkew?: number; signingAlgorithm?: string }) {
+    /** `customSigningKey` makes the template sign with a key of its own (`signingAlgorithm`), not the instance key. */
+    createJwtTemplate(params: { name: string; claims: Record<string, unknown>; lifetime?: number; allowedClockSkew?: number; customSigningKey?: boolean; signingAlgorithm?: string }) {
       return http.post<JwtTemplate>("/v1/jwt_templates", { body: params });
     },
-    updateJwtTemplate(templateId: string, params: { name?: string; claims?: Record<string, unknown>; lifetime?: number; allowedClockSkew?: number }) {
+    /** Updating `signingAlgorithm` under a custom key regenerates that key; turning `customSigningKey` off returns to the instance key. */
+    updateJwtTemplate(templateId: string, params: { name?: string; claims?: Record<string, unknown>; lifetime?: number; allowedClockSkew?: number; customSigningKey?: boolean; signingAlgorithm?: string }) {
       return http.patch<JwtTemplate>(`/v1/jwt_templates/${templateId}`, { body: params });
     },
     deleteJwtTemplate(templateId: string) {

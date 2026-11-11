@@ -64,8 +64,8 @@ async function apiCall(browser: Browser, path: string, body?: unknown): Promise<
   return response;
 }
 
-/** Signs a user up over HTTP and returns the browser holding the `__client` cookie. */
-async function signedUpBrowser(): Promise<Browser> {
+/** Signs a user up over HTTP and returns the browser holding the `__client` cookie, plus its session. */
+async function signedUpBrowser(): Promise<{ browser: Browser; userId: string; sessionId: string }> {
   const email = `handshake${Math.random().toString(36).slice(2, 10)}@example.com`;
   const browser: Browser = { cookie: "" };
   const created = (await (await apiCall(browser, "/v1/client/sign_ups", {
@@ -79,9 +79,9 @@ async function signedUpBrowser(): Promise<Browser> {
   const verified = (await (await apiCall(browser, `/v1/client/sign_ups/${created.response.id}/attempt_verification`, {
     strategy: "email_code",
     code,
-  })).json()) as { response: { status: string; created_session_id: string } };
+  })).json()) as { response: { status: string; created_session_id: string; created_user_id: string } };
   if (verified.response.status !== "complete") throw new Error(`sign-up did not complete: ${JSON.stringify(verified)}`);
-  return browser;
+  return { browser, userId: verified.response.created_user_id, sessionId: verified.response.created_session_id };
 }
 
 function uat(): number {
@@ -90,13 +90,16 @@ function uat(): number {
 
 describe("handshake end to end (real server + middleware)", () => {
   it("restores __session for a hard navigation carrying a dead token", async () => {
-    const browser = await signedUpBrowser();
+    const { browser, userId, sessionId } = await signedUpBrowser();
     const middleware = orbitIdMiddleware({ apiUrl: baseUrl });
 
-    // 1. Hard navigation: live `__client_uat`, dead `__session`, `__client` cookie for the API host.
+    // 1. Hard navigation: live `__client_uat`, expired `__session` (a real session JWT from this instance), and
+    // the `__client` cookie for the API host.
+    const { signJwt } = await import("../../src/services/tokens");
+    const dead = await signJwt(ctx, { sub: userId, sid: sessionId, sts: "active" }, { expiresInSeconds: -120, issuer: baseUrl });
     const first = await middleware(new NextRequest(`${appUrl}${APP_PATH}`, {
       headers: {
-        cookie: `__session=dead.token.value; __client_uat=${uat()}; ${browser.cookie}`,
+        cookie: `__session=${dead}; __client_uat=${uat()}; ${browser.cookie}`,
         "sec-fetch-mode": "navigate",
         accept: "text/html",
       },

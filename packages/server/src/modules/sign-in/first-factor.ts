@@ -2,27 +2,66 @@
 import type { Hono } from "hono";
 import type { AppContext } from "../../context";
 import { type AuthenticationResponseJSON } from "@simplewebauthn/server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { ErrorCodes, OrbitError } from "@orbitid/shared";
 import * as s from "../../db/schema";
 import { clientIp, parseBody } from "../../lib/http";
 import { hit } from "../../lib/rate-limit";
 import { assertPasswordValid, hashPassword } from "../../services/passwords";
+import { assertAdditionalIdentificationsAllowed } from "../../services/enterprise-access";
 import { endSessionsForUser } from "../../services/sessions";
+import { revokeGrantsForUser } from "../../services/oidc/revocation";
 import { revokeAllTrustedDevices } from "../../services/trusted-devices";
 import { verifyCaptcha } from "../../services/captcha";
 import { beginPasskeyAuthentication, finishPasskeyAuthentication, relyingParty } from "../../services/passkeys";
 import { sendEmail, sendSms } from "../../services/mail";
-import { getUserById, primaryEmail, resetFailedAttempts } from "../../services/users";
+import { getUserById, listEmails, listPhones, primaryEmail, resetFailedAttempts, type UserRow } from "../../services/users";
 import { isProviderEnabled, providerKeyFromStrategy } from "../../services/oauth-providers";
 import { getOrCreateClient } from "../auth/client-auth";
 import { asSignInState, assertSignInAllowed, enterpriseConnectionForEmail, saveSignInState, verifiedEmailOf, verifiedPhoneOf, type FactorState, type SignInState } from "../auth/signin-core";
 import { createOAuthAuthorization } from "../auth/oauth-flow";
-import { getVerification, issueVerification, magicLinkUrl } from "../auth/verifications";
+import { getVerification, getVerificationById, issueVerification, magicLinkUrl, type VerificationRow } from "../auth/verifications";
 import { validateRedirectUrl } from "../auth/redirects";
 import { first } from "../../lib/db";
 import { prepareFirstSchema, attemptFirstSchema, resetPasswordSchema, captchaToken } from "./shared";
 import type { SignInHelpers } from "./helpers";
+
+interface RecoveryFactor {
+  strategy: "reset_password_email_code" | "reset_password_phone_code";
+  emailId?: string;
+  phoneId?: string;
+}
+
+/**
+ * First factors that need no prepare step because the attempt itself carries and checks the credential.
+ * They must not be matched against the strategy that was prepared: the UI can move from an email code
+ * straight to the password screen, and the password attempt is validated by `attemptPassword` (plus the
+ * sign-in state gate). Every strategy whose prepare step issues a code, link, or ceremony challenge
+ * (email_code, phone_code, email_link, reset_password_*, passkey) keeps the prepared-strategy binding so
+ * one channel's artifact cannot be relabelled as another. Redirect flows and tickets are refused in the
+ * attempt route before any verification, so their binding is moot.
+ */
+const PREPARATION_FREE_FIRST_FACTORS = new Set(["password"]);
+
+/**
+ * Maps a verified `reset_password` record to the recovery factor it authorized. The record is authoritative
+ * for the channel and identifier; the request body never decides which mailbox or handset was recovered.
+ */
+async function recoveryFactorFromVerification(
+  ctx: AppContext,
+  user: UserRow,
+  verification: VerificationRow,
+): Promise<RecoveryFactor | undefined> {
+  if (verification.strategy === "email_code") {
+    const email = (await listEmails(ctx, user.id)).find((e) => e.email === verification.identifier && e.verified);
+    return email ? { strategy: "reset_password_email_code", emailId: email.id } : undefined;
+  }
+  if (verification.strategy === "phone_code") {
+    const phone = (await listPhones(ctx, user.id)).find((p) => p.phone === verification.identifier && p.verified);
+    return phone ? { strategy: "reset_password_phone_code", phoneId: phone.id } : undefined;
+  }
+  return undefined;
+}
 
 export function registerFirstFactorRoutes(app: Hono, ctx: AppContext, helpers: SignInHelpers) {
   const { respond, reload, load, userForRow, checkSignInCode, notifySession, afterFirst, assertFirstFactorEnabled, attemptPassword, startEnterprise } = helpers;
@@ -32,11 +71,16 @@ export function registerFirstFactorRoutes(app: Hono, ctx: AppContext, helpers: S
     const client = await getOrCreateClient(ctx, c);
     const row = await load(client.id, c.req.param("id"));
     const body = await parseBody(c, prepareFirstSchema);
-    if (row.status === "complete") throw new OrbitError(400, ErrorCodes.client_state_invalid, "This sign-in is already complete");
-    await hit(ctx, `sign_in:prepare:${clientIp(c)}`, 30, 60_000);
-    await verifyCaptcha(ctx, captchaToken(c, body), clientIp(c));
     const state = asSignInState(row);
     const strategy = body.strategy ?? state.first?.strategy ?? "password";
+    // A first factor may only be prepared while the sign-in is still waiting for one: the normal first
+    // step, or the identifier-first passkey (conditional UI) step. This keeps a sign-in that already
+    // advanced to MFA, or already reset its password, from being walked back into another reset.
+    if (row.status !== "needs_first_factor" && !(row.status === "needs_identifier" && strategy === "passkey")) {
+      throw new OrbitError(400, ErrorCodes.client_state_invalid, "This sign-in is not waiting for a first factor");
+    }
+    await hit(ctx, `sign_in:prepare:${clientIp(c)}`, 30, 60_000);
+    await verifyCaptcha(ctx, captchaToken(c, body), clientIp(c));
     const user = row.userId ? await getUserById(ctx, row.userId) : undefined;
     if (!user && strategy !== "passkey") throw new OrbitError(400, ErrorCodes.client_state_invalid, "Sign-in has no user");
     if (user) assertSignInAllowed(user);
@@ -137,11 +181,25 @@ export function registerFirstFactorRoutes(app: Hono, ctx: AppContext, helpers: S
     const client = await getOrCreateClient(ctx, c);
     const row = await load(client.id, c.req.param("id"));
     const body = await parseBody(c, attemptFirstSchema);
-    if (row.status === "complete") throw new OrbitError(400, ErrorCodes.client_state_invalid, "This sign-in is already complete");
-    await hit(ctx, `sign_in:attempt:${clientIp(c)}`, 60, 60_000);
     const state = asSignInState(row);
     const strategy = body.strategy ?? state.first?.strategy;
+    // Attempts are only accepted from the state that is waiting for a first factor (the normal first step,
+    // or the identifier-first passkey step). Without this gate a sign-in parked at `needs_second_factor` or
+    // `needs_new_password` could be pushed back to re-verify a first-factor code that was already spent.
+    if (row.status !== "needs_first_factor" && !(row.status === "needs_identifier" && strategy === "passkey")) {
+      throw new OrbitError(400, ErrorCodes.client_state_invalid, "This sign-in is not waiting for a first factor");
+    }
+    await hit(ctx, `sign_in:attempt:${clientIp(c)}`, 60, 60_000);
     if (!strategy) throw new OrbitError(400, ErrorCodes.client_state_invalid, "No first-factor strategy in progress", { param_name: "strategy" });
+    // The strategy a caller names must be the one that was actually prepared, except for strategies such
+    // as password that carry their own credential and need no preparation. Without this binding a valid code
+    // for one channel could be submitted under another strategy and persisted as the factor that was verified.
+    const preparedStrategy = state.first?.strategy;
+    if (body.strategy && preparedStrategy && body.strategy !== preparedStrategy
+      && !PREPARATION_FREE_FIRST_FACTORS.has(body.strategy)) {
+      throw new OrbitError(400, ErrorCodes.client_state_invalid,
+        "The attempted strategy does not match the first factor that was prepared", { param_name: "strategy" });
+    }
     const existingUser = row.userId ? await getUserById(ctx, row.userId) : undefined;
     if (strategy !== "passkey") {
       if (!existingUser) throw new OrbitError(400, ErrorCodes.client_state_invalid, "Sign-in has no user");
@@ -186,10 +244,25 @@ export function registerFirstFactorRoutes(app: Hono, ctx: AppContext, helpers: S
     }
 
     if (strategy === "reset_password_email_code" || strategy === "reset_password_phone_code") {
-      const verification = await getVerification(ctx, "reset_password", row.id);
+      // Only the verification row created at prepare time may authorize this reset, and only for the channel
+      // the caller prepared. The verified record — not the request body — decides which identifier was recovered.
+      const prepared = state.first;
+      const expectedVerificationStrategy = strategy === "reset_password_email_code" ? "email_code" : "phone_code";
+      const verification = prepared?.verificationId ? await getVerificationById(ctx, prepared.verificationId) : undefined;
+      if (!prepared || prepared.strategy !== strategy || !verification
+        || verification.purpose !== "reset_password" || verification.ownerId !== row.id
+        || verification.strategy !== expectedVerificationStrategy || verification.consumedAt) {
+        throw new OrbitError(400, ErrorCodes.client_state_invalid, "No matching password recovery is in progress", { param_name: "strategy" });
+      }
       await checkSignInCode(user, verification, body.code);
+      const recovery = await recoveryFactorFromVerification(ctx, user, verification);
+      if (!recovery) {
+        throw new OrbitError(400, ErrorCodes.strategy_for_user_invalid, "This account no longer has the recovery identifier", { param_name: "strategy" });
+      }
       const saved = await saveSignInState(ctx, row, {
-              ...state, first: { ...(state.first ?? { strategy }), status: "verified" }, resetPassword: { verified: true, strategy },
+              ...state,
+              first: { strategy: recovery.strategy, status: "verified", verificationId: verification.id, emailId: recovery.emailId, phoneId: recovery.phoneId },
+              resetPassword: { verified: true, strategy: recovery.strategy },
             });
       await ctx.db.update(s.signIns).set({ status: "needs_new_password", state: saved.state as Record<string, unknown>, updatedAt: Date.now() }).where(eq(s.signIns.id, row.id));
       return respond(c, client.id, await reload(row.id));
@@ -219,25 +292,80 @@ export function registerFirstFactorRoutes(app: Hono, ctx: AppContext, helpers: S
     }
     const user = await userForRow(row);
     if (user.banned) throw new OrbitError(403, ErrorCodes.user_banned, "This user has been banned");
+    // Re-derive the recovered channel and identifier from the verified record, never from stored request input.
+    const verification = state.first?.verificationId ? await getVerificationById(ctx, state.first.verificationId) : undefined;
+    const recovery = verification && verification.purpose === "reset_password" && verification.verifiedAt && !verification.consumedAt
+      ? await recoveryFactorFromVerification(ctx, user, verification)
+      : undefined;
+    if (!verification || !recovery || verification.ownerId !== row.id || state.first?.strategy !== recovery.strategy) {
+      throw new OrbitError(400, ErrorCodes.client_state_invalid, "Password reset has not been verified");
+    }
+    // Recovery must not create a local credential the enterprise connection forbids.
+    await assertAdditionalIdentificationsAllowed(ctx, user.id);
     await assertPasswordValid(ctx, body.password);
     const passwordHash = await hashPassword(body.password);
     const now = Date.now();
+    // The recovery authorization itself is single-use: consume the verified record atomically. A replayed
+    // code — or a parallel duplicate — finds it already spent and never reaches the password write.
+    const consumed = await ctx.db.update(s.verifications).set({ consumedAt: now })
+      .where(and(eq(s.verifications.id, verification.id), isNull(s.verifications.consumedAt), isNotNull(s.verifications.verifiedAt)))
+      .returning({ id: s.verifications.id });
+    if (!consumed.length) throw new OrbitError(400, ErrorCodes.client_state_invalid, "Password reset has not been verified");
     // One request wins the authorization; a parallel duplicate finds the attempt already claimed.
     const claimed = await ctx.db.update(s.signIns).set({ status: "resetting_password", updatedAt: now })
       .where(and(eq(s.signIns.id, row.id), eq(s.signIns.status, "needs_new_password"))).returning({ id: s.signIns.id });
     if (!claimed.length) throw new OrbitError(400, ErrorCodes.client_state_invalid, "Password reset has not been verified");
     await ctx.db.update(s.users).set({ passwordHash, passwordUpdatedAt: now, failedAttempts: 0, locked: false, lockoutExpiresAt: null, updatedAt: now }).where(eq(s.users.id, user.id));
+    // Recovery is the step an attacker who stole a session is least able to survive. Revoke every other session,
+    // every OIDC grant (including device-flow grants with no browser session) and every trusted device *before*
+    // any notification mail: a failed email send must never leave the attacker's session alive. The recovering
+    // browser keeps signing in with the new password and receives its new session below.
+    const signOut = body.sign_out_of_other_sessions ?? ctx.settings.get().password.signOutOfOtherSessionsOnReset;
+    if (signOut) {
+      await endSessionsForUser(ctx, user.id, "revoked");
+      await revokeGrantsForUser(ctx, user.id);
+    }
+    // A reset password invalidates every remembered browser.
+    await revokeAllTrustedDevices(ctx, user.id);
     const email = await primaryEmail(ctx, user);
     if (email) {
       await sendEmail(ctx, { to: email.email, template: "password_changed", vars: { user_name: user.firstName ?? undefined } });
     }
-    const signOut = body.sign_out_of_other_sessions ?? ctx.settings.get().password.signOutOfOtherSessionsOnChange;
-    if (signOut) await endSessionsForUser(ctx, user.id, "revoked");
-    // A reset password invalidates every remembered browser.
-    await revokeAllTrustedDevices(ctx, user.id);
-    const { resetPassword, ...rest } = state;
-    const saved = await saveSignInState(ctx, row, { ...rest, first: { strategy: resetPassword.strategy, status: "verified" } });
+    const rest: SignInState = { ...state };
+    delete rest.resetPassword;
+    // Keep the verified identifier the reset was authorized with: dropping it made MFA fall back to the first
+    // stored address, so the recovery mailbox could also satisfy the second factor.
+    const saved = await saveSignInState(ctx, row, {
+      ...rest,
+      first: {
+        strategy: recovery.strategy,
+        status: "verified",
+        verificationId: verification.id,
+        emailId: recovery.emailId,
+        phoneId: recovery.phoneId,
+      },
+    });
     const result = await afterFirst(c, client.id, saved, user);
+    if (result.status === "needs_sign_in") {
+      // The reset itself succeeded, but recovery already used the channel of the account's only enrolled
+      // second factor, so no eligible factor is left. Do not mint a session that never passed MFA; hand the
+      // browser back to the password step so the normal password flow can ask for the second factor.
+      await saveSignInState(ctx, row, {
+        ...rest,
+        requestedReset: false,
+        second: undefined,
+        first: {
+          strategy: "password",
+          status: "unverified",
+          error: {
+            code: ErrorCodes.needs_second_factor,
+            message: "MFA is required. Sign in with your new password to complete a second factor.",
+          },
+        },
+      });
+      await ctx.db.update(s.signIns).set({ status: "needs_first_factor", updatedAt: Date.now() }).where(eq(s.signIns.id, row.id));
+      return respond(c, client.id, await reload(row.id));
+    }
     if (result.sessionId) await notifySession(user, result.sessionId);
     return respond(c, client.id, await reload(row.id));
   });

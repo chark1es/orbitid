@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { EnterpriseConnectionJSON, PaginatedList } from "@orbitid/shared";
 import { toast } from "sonner";
-import { api, getApiUrl, useApi } from "../../lib/api";
+import { api, apiAllPages, getApiUrl, useApi } from "../../lib/api";
 import { unwrapList } from "../_config/data";
 import {
   errorMessage,
@@ -14,7 +14,9 @@ import { type SsoForm, EMPTY_FORM, samlSpDetails } from "./model";
 
 export function useEnterpriseSso() {
   const apiBase = getApiUrl();
-  const query = useApi<PaginatedList<EnterpriseConnectionJSON>>(["enterprise_connections"], "/enterprise_connections?limit=100");
+  const query = useApi<PaginatedList<EnterpriseConnectionJSON>>(["enterprise_connections"], "/enterprise_connections", {
+    queryFn: ({ signal }) => apiAllPages<EnterpriseConnectionJSON>("/enterprise_connections", { signal }),
+  });
   const connections = unwrapList<EnterpriseConnectionJSON>(query.data);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [step, setStep] = useState(0);
@@ -39,10 +41,15 @@ export function useEnterpriseSso() {
   if (domains.length === 0) step0Errors.push("Add at least one email domain.");
   if (domains.some((domain) => !isValidDomain(domain))) step0Errors.push("Every domain must be a valid email domain.");
   const step1Errors: string[] = [];
+  const hasMetadata = Boolean(form.idpMetadataUrl.trim() || form.idpMetadataXml.trim());
   if (form.protocol === "saml") {
-    if (!form.idpEntityId.trim()) step1Errors.push("IdP entity ID is required.");
-    if (!isHttpUrl(form.idpSsoUrl)) step1Errors.push("IdP SSO URL must be an http(s) URL.");
-    if (!form.idpCertificate.trim()) step1Errors.push("IdP signing certificate is required.");
+    if (form.idpMetadataUrl.trim() && !isHttpUrl(form.idpMetadataUrl)) step1Errors.push("Metadata URL must be an http(s) URL.");
+    if (!hasMetadata) {
+      if (!form.idpEntityId.trim()) step1Errors.push("IdP entity ID is required.");
+      if (!isHttpUrl(form.idpSsoUrl)) step1Errors.push("IdP SSO URL must be an http(s) URL.");
+      if (!form.idpCertificate.trim()) step1Errors.push("IdP signing certificate is required.");
+    }
+    if (form.idpSsoUrl.trim() && !isHttpUrl(form.idpSsoUrl)) step1Errors.push("IdP SSO URL must be an http(s) URL.");
     if (mapping.error) step1Errors.push(`Attribute mapping: ${mapping.error}`);
   } else {
     if (!isHttpUrl(form.discoveryUrl)) step1Errors.push("Discovery URL must be an http(s) URL.");
@@ -66,9 +73,11 @@ export function useEnterpriseSso() {
         disable_additional_identifications: form.disableAdditionalIdentifications,
       };
       if (form.protocol === "saml") {
-        body.idp_entity_id = form.idpEntityId.trim();
-        body.idp_sso_url = form.idpSsoUrl.trim();
-        body.idp_certificate = form.idpCertificate.trim();
+        if (form.idpMetadataUrl.trim()) body.idp_metadata_url = form.idpMetadataUrl.trim();
+        if (form.idpMetadataXml.trim()) body.idp_metadata_xml = form.idpMetadataXml.trim();
+        if (form.idpEntityId.trim()) body.idp_entity_id = form.idpEntityId.trim();
+        if (form.idpSsoUrl.trim()) body.idp_sso_url = form.idpSsoUrl.trim();
+        if (form.idpCertificate.trim()) body.idp_certificate = form.idpCertificate.trim();
         body.attribute_mapping = mapping.value ?? {};
       } else {
         body.discovery_url = form.discoveryUrl.trim();

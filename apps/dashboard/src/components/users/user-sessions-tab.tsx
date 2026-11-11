@@ -12,7 +12,8 @@ import { toast } from "sonner";
 import type { SessionJSON, UserJSON } from "@orbitid/shared";
 import { api, useApi } from "../../lib/api";
 import { errorMessage } from "../../lib/errors";
-import { formatDateTime } from "../../lib/format";
+import { revokeAllUserSessions } from "../../lib/user-admin";
+import { formatSessionExpiry } from "../../lib/format";
 import { buildListPath } from "../../lib/query";
 import { DataTable, type DataTableColumn } from "../shared/data-table";
 import { TablePagination } from "../shared/table-pagination";
@@ -57,8 +58,11 @@ export function UserSessionsTab({ user, onUpdated }: { user: UserJSON; onUpdated
   async function revokeAll() {
     setPendingId("all");
     try {
-      await Promise.all(rows.filter((session) => session.status === "active").map((session) => api("POST", `/sessions/${session.id}/revoke`)));
-      toast.success("Active sessions on this page revoked");
+      // Every active session, not only the rows on this page: the dialog promises all devices and the
+      // helper walks the live `status=active` list until it is empty.
+      const result = await revokeAllUserSessions(user.id);
+      if (result.failed > 0) toast.error(`Revoked ${result.revoked} of ${result.total} sessions`);
+      else toast.success(result.revoked === 0 ? "No active sessions to revoke" : "All active sessions revoked");
       setConfirmRevokeAll(false);
       await sessions.refetch();
       onUpdated();
@@ -98,7 +102,7 @@ export function UserSessionsTab({ user, onUpdated }: { user: UserJSON; onUpdated
       headerClassName: "hidden md:table-cell",
       className: "hidden md:table-cell",
       cell: (session) => (
-        <span className="font-data text-xs text-muted-foreground">{formatDateTime(session.expire_at)}</span>
+        <span className="font-data text-xs text-muted-foreground">{formatSessionExpiry(session.expire_at)}</span>
       ),
     },
     {
@@ -151,7 +155,7 @@ export function UserSessionsTab({ user, onUpdated }: { user: UserJSON; onUpdated
               setPage(1);
             }}
           >
-            <SelectTrigger className="h-8 w-[140px]" aria-label="Filter by status">
+            <SelectTrigger className="w-[140px]" aria-label="Filter by status">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -163,7 +167,6 @@ export function UserSessionsTab({ user, onUpdated }: { user: UserJSON; onUpdated
             </SelectContent>
           </Select>
           <Button
-            size="sm"
             variant="outline"
             onClick={() => setConfirmRevokeAll(true)}
             disabled={!rows.some((session) => session.status === "active")}
@@ -182,7 +185,7 @@ export function UserSessionsTab({ user, onUpdated }: { user: UserJSON; onUpdated
           error={sessions.error}
           onRetry={() => void sessions.refetch()}
           loadingRows={5}
-          empty={<EmptyState title="No sessions" description="Sessions are created when the user signs in." />}
+          empty={<EmptyState variant="compact" title="No sessions" description="Sessions are created when the user signs in." />}
         />
         <TablePagination
           page={page}
@@ -199,8 +202,8 @@ export function UserSessionsTab({ user, onUpdated }: { user: UserJSON; onUpdated
       <ConfirmDialog
         open={confirmRevokeAll}
         onOpenChange={setConfirmRevokeAll}
-        title="Revoke active sessions on this page?"
-        description="The user is signed out on the devices listed above."
+        title="Revoke every active session?"
+        description="The user is signed out on every device, not only the sessions on this page."
         confirmLabel="Revoke"
         destructive
         pending={pendingId === "all"}

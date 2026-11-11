@@ -1,4 +1,4 @@
-import { ApiError, apiInit, getApiUrl } from "./api";
+import { ApiError, apiInit, getApiUrl, notifyUnauthorized } from "./api";
 
 async function parseError(res: Response): Promise<ApiError> {
   const body: unknown = await res.json().catch(() => null);
@@ -12,6 +12,9 @@ async function parseError(res: Response): Promise<ApiError> {
       else if ("message" in first && typeof first.message === "string") message = first.message;
     }
   }
+  // Multipart uploads go through the same session as `api()`, so an expired operator cookie must reach the
+  // shell's unauthorized handler even when the error body is not JSON.
+  if (res.status === 401) notifyUnauthorized();
   return new ApiError(res.status, code, message);
 }
 

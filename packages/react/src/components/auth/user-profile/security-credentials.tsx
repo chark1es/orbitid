@@ -25,7 +25,8 @@ export function PasswordSection({ user, refresh, onError, onNotice }: SectionPro
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [signOutOther, setSignOutOther] = useState(true);
+  // Opt-in, never the default: changing a password must not silently sign the user out of their other devices.
+  const [signOutOther, setSignOutOther] = useState(false);
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [removePassword, setRemovePassword] = useState("");
@@ -232,7 +233,7 @@ export function PasskeysSection({ user, refresh, onError, onNotice }: SectionPro
                 type="button"
                 variant="link"
                 size="sm"
-                className="h-auto p-0"
+                className="h-auto min-h-6 px-0 py-1"
                 onClick={() => {
                   setRenameTarget(passkey.id);
                   setRenameValue(passkey.name);

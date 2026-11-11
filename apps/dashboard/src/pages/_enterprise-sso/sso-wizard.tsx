@@ -1,3 +1,4 @@
+import { useRef, useState } from "react";
 import {
   Button,
   Input,
@@ -37,6 +38,21 @@ export function SsoWizard({ ctl }: { ctl: EnterpriseSsoController }) {
     allErrors,
     createConnection,
   } = ctl;
+  const errorRef = useRef<HTMLDivElement>(null);
+  const [attemptedSteps, setAttemptedSteps] = useState<number[]>([]);
+  const stepErrors = step === 0 ? step0Errors : step1Errors;
+  /** A fresh step is not an error state: only a Next attempt on it reveals its validation list. */
+  const showStepErrors = attemptedSteps.includes(step);
+  const next = () => {
+    setAttemptedSteps((current) => (current.includes(step) ? current : [...current, step]));
+    if (stepErrors.length > 0) {
+      // The footer is sticky, so a message at the end of a long step can sit underneath it. Bring the
+      // first problem into view instead of leaving Next looking like it did nothing.
+      errorRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      return;
+    }
+    setStep((current) => current + 1);
+  };
 
   return (
     <DetailSheet
@@ -56,10 +72,7 @@ export function SsoWizard({ ctl }: { ctl: EnterpriseSsoController }) {
             </Button>
           ) : null}
           {step < 2 ? (
-            <Button
-              onClick={() => setStep((current) => current + 1)}
-              disabled={step === 0 ? step0Errors.length > 0 : step1Errors.length > 0}
-            >
+            <Button onClick={next} disabled={saving}>
               Next
             </Button>
           ) : (
@@ -100,13 +113,52 @@ export function SsoWizard({ ctl }: { ctl: EnterpriseSsoController }) {
               inputType="text"
             />
           </Field>
-          <ValidationSummary errors={step0Errors} title="Fix these to continue" />
+          <div ref={errorRef}>
+            <ValidationSummary errors={showStepErrors ? step0Errors : []} title="Fix these to continue" />
+          </div>
         </div>
       ) : step === 1 ? (
         <div className="space-y-4">
           {form.protocol === "saml" ? (
             <>
-              <Field label="IdP entity ID" htmlFor="sso-idp-entity" required>
+              <Field
+                label="Metadata URL"
+                htmlFor="sso-idp-metadata-url"
+                description="Optional: fetch entity ID, SSO URL and signing certificate from the IdP's metadata. Explicit fields below override it."
+              >
+                <Input
+                  id="sso-idp-metadata-url"
+                  value={form.idpMetadataUrl}
+                  onChange={(event) => setForm((current) => ({ ...current, idpMetadataUrl: event.target.value }))}
+                  placeholder="https://idp.example.com/metadata"
+                  className="font-data text-xs"
+                />
+              </Field>
+              <Field label="Or upload metadata XML" htmlFor="sso-idp-metadata-file" description="A file from the IdP, or paste the XML in the box below.">
+                <Input
+                  id="sso-idp-metadata-file"
+                  type="file"
+                  accept=".xml,application/xml,text/xml"
+                  className="h-[34px] py-0 text-xs file:h-[34px] file:rounded-sm file:border-0 file:bg-muted file:px-2.5 file:text-xs file:font-medium file:text-foreground"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (!file) return;
+                    void file.text().then((xml) => setForm((current) => ({ ...current, idpMetadataXml: xml })));
+                  }}
+                />
+              </Field>
+              {form.idpMetadataXml.trim() ? (
+                <Field label="Metadata XML" htmlFor="sso-idp-metadata-xml">
+                  <Textarea
+                    id="sso-idp-metadata-xml"
+                    rows={4}
+                    value={form.idpMetadataXml}
+                    onChange={(event) => setForm((current) => ({ ...current, idpMetadataXml: event.target.value }))}
+                    className="font-data text-xs"
+                  />
+                </Field>
+              ) : null}
+              <Field label="IdP entity ID" htmlFor="sso-idp-entity" required={!form.idpMetadataUrl.trim() && !form.idpMetadataXml.trim()}>
                 <Input
                   id="sso-idp-entity"
                   value={form.idpEntityId}
@@ -115,7 +167,7 @@ export function SsoWizard({ ctl }: { ctl: EnterpriseSsoController }) {
                   className="font-data text-xs"
                 />
               </Field>
-              <Field label="IdP SSO URL" htmlFor="sso-idp-sso" required>
+              <Field label="IdP SSO URL" htmlFor="sso-idp-sso" required={!form.idpMetadataUrl.trim() && !form.idpMetadataXml.trim()}>
                 <Input
                   id="sso-idp-sso"
                   value={form.idpSsoUrl}
@@ -124,7 +176,7 @@ export function SsoWizard({ ctl }: { ctl: EnterpriseSsoController }) {
                   className="font-data text-xs"
                 />
               </Field>
-              <Field label="IdP signing certificate" htmlFor="sso-idp-cert" required description="PEM or Base64 X.509 certificate.">
+              <Field label="IdP signing certificate" htmlFor="sso-idp-cert" required={!form.idpMetadataUrl.trim() && !form.idpMetadataXml.trim()} description="PEM or Base64 X.509 certificate.">
                 <Textarea
                   id="sso-idp-cert"
                   rows={5}
@@ -176,7 +228,9 @@ export function SsoWizard({ ctl }: { ctl: EnterpriseSsoController }) {
               </div>
             </>
           )}
-          <ValidationSummary errors={step1Errors} title="Fix these to continue" />
+          <div ref={errorRef}>
+            <ValidationSummary errors={showStepErrors ? step1Errors : []} title="Fix these to continue" />
+          </div>
         </div>
       ) : (
         <div className="space-y-4">

@@ -13,6 +13,8 @@ export function sessionsTables(kit: Kit, users: IdentityTables["users"]) {
     /** sha256 of the opaque `__client` cookie value */
     tokenHash: text("token_hash").notNull().unique(),
     lastActiveSessionId: text("last_active_session_id"),
+    /** When the current opaque `__client` token was issued (epoch ms), so a durable cookie can be re-issued. */
+    tokenIssuedAt: int("token_issued_at"),
     ip: text("ip"),
     userAgent: text("user_agent"),
     ...created(),

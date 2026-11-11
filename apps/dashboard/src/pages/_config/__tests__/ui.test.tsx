@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { ConfirmDialog, DetailSheet, JsonEditor, Notice, SaveBar, SecretInput, SecretReveal, StatusBadge } from "../ui";
+import { DetailSheet, JsonEditor, Notice, SaveBar, SecretInput, SecretReveal, StatusBadge } from "../ui";
+import { ConfirmDialog } from "../../../components/shared/confirm-dialog";
 
 describe("SaveBar", () => {
   it("is hidden when there is nothing to save", () => {
@@ -53,13 +54,13 @@ describe("SaveBar", () => {
 describe("StatusBadge", () => {
   it("always carries the status word next to the dot", () => {
     const { rerender, container } = render(<StatusBadge status="active" />);
-    expect(screen.getByText("active")).toBeTruthy();
+    expect(screen.getByText("Active")).toBeTruthy();
     expect(container.querySelector(".bg-go")).toBeTruthy();
     rerender(<StatusBadge status="failed" />);
-    expect(screen.getByText("failed")).toBeTruthy();
+    expect(screen.getByText("Failed")).toBeTruthy();
     expect(container.querySelector(".bg-signal")).toBeTruthy();
     rerender(<StatusBadge status="revoked" />);
-    expect(screen.getByText("revoked")).toBeTruthy();
+    expect(screen.getByText("Revoked")).toBeTruthy();
     expect(container.querySelector(".bg-signal")).toBeTruthy();
   });
 });

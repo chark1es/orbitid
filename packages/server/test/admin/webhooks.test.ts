@@ -130,6 +130,59 @@ describe("webhook delivery", () => {
     expect(received).toHaveLength(3);
   });
 
+  it("stops queued deliveries while an endpoint is disabled without consuming attempts", async () => {
+    const { api, ctx } = await testApp();
+    respondWith = [500];
+    const endpoint = await json<WebhookEndpointJSON>(await api("POST", "/v1/webhooks/endpoints", { url: hookUrl() }));
+    await createUser(api);
+    await deliverDue(ctx);
+    let [delivery] = await deliveries(api, endpoint.id);
+    expect(delivery).toMatchObject({ status: "pending", attempt: 1, response_code: 500 });
+    expect(received).toHaveLength(1);
+
+    await api("PATCH", `/v1/webhooks/endpoints/${endpoint.id}`, { disabled: true });
+    await json<WebhookDeliveryJSON>(await api("POST", `/v1/webhooks/deliveries/${delivery!.id}/retry`));
+    await forceDue(ctx, delivery!.id);
+    expect(await deliverDue(ctx)).toBe(0);
+    [delivery] = await deliveries(api, endpoint.id);
+    expect(received).toHaveLength(1);
+    expect(delivery).toMatchObject({ status: "pending", attempt: 0, response_code: null });
+
+    // Re-enabling resumes the queued delivery rather than losing it.
+    await api("PATCH", `/v1/webhooks/endpoints/${endpoint.id}`, { disabled: false });
+    await deliverDue(ctx);
+    [delivery] = await deliveries(api, endpoint.id);
+    expect(received).toHaveLength(2);
+    expect(delivery).toMatchObject({ status: "success", attempt: 1, response_code: 200 });
+  });
+
+  it("does not let disabled endpoints starve an enabled delivery out of the batch limit", async () => {
+    const { api, ctx } = await testApp();
+    const enabled = await json<WebhookEndpointJSON>(await api("POST", "/v1/webhooks/endpoints", { url: hookUrl() }));
+    const now = Date.now();
+    await ctx.db.insert(s.webhookEvents).values({
+      id: "wev_starvation", type: "user.created", payload: { object: "event", type: "user.created", data: { id: "user_x" } }, createdAt: now,
+    });
+    for (let i = 0; i < 20; i++) {
+      await ctx.db.insert(s.webhookEndpoints).values({
+        id: `we_disabled_${i}`, url: `${hookUrl()}?disabled-${i}`, description: "", eventTypes: [], secret: "whsec_disabled",
+        disabled: true, createdAt: now, updatedAt: now,
+      });
+      await ctx.db.insert(s.webhookDeliveries).values({
+        id: `whd_disabled_${i}`, endpointId: `we_disabled_${i}`, eventId: "wev_starvation", status: "pending", attempt: 0,
+        nextAttemptAt: now, createdAt: now,
+      });
+    }
+    await ctx.db.insert(s.webhookDeliveries).values({
+      id: "whd_enabled", endpointId: enabled.id, eventId: "wev_starvation", status: "pending", attempt: 0, nextAttemptAt: now, createdAt: now,
+    });
+
+    expect(await deliverDue(ctx)).toBe(1);
+    expect(received).toHaveLength(1);
+    const [delivery] = await deliveries(api, enabled.id);
+    expect(delivery).toMatchObject({ status: "success", attempt: 1 });
+  });
+
   it("gives up after the retry schedule is exhausted", async () => {
     const { api, ctx } = await testApp();
     respondWith = Array.from({ length: 7 }, () => 500);

@@ -42,7 +42,7 @@ export function FooterSwitch({
         variant="link"
         size="sm"
         onClick={onClick}
-        className={cn("h-auto p-0 font-medium", el("footerActionLink"))}
+        className={cn("h-auto min-h-6 px-0 py-1 text-sm font-medium", el("footerActionLink"))}
       >
         {actionLabel}
       </Button>
@@ -52,7 +52,7 @@ export function FooterSwitch({
 
 export function LinkButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
-    <Button type="button" variant="link" size="sm" onClick={onClick} className="h-auto p-0 text-sm font-medium">
+    <Button type="button" variant="link" size="sm" onClick={onClick} className="h-auto min-h-6 px-0 py-1 text-sm font-medium">
       {label}
     </Button>
   );

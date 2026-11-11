@@ -8,6 +8,7 @@ import { newId } from "../../lib/ids";
 import {
   assertValidCertificate, assertValidDomains, DEFAULT_ATTRIBUTE_MAPPING, encryptClientSecret, normalizeDomains,
 } from "../../services/saml";
+import { resolveSamlMetadata, type IdpMetadata } from "../../services/saml-metadata";
 import { assertPublicUrl } from "../../lib/safe-fetch";
 import { first } from "../../lib/db";
 
@@ -28,6 +29,9 @@ export const connectionBodySchema = z.object({
   idp_entity_id: z.string().min(1).optional(),
   idp_sso_url: z.string().url().optional(),
   idp_certificate: z.string().min(1).optional(),
+  /** SAML metadata import: a URL fetched through the SSRF guard, or the XML itself. */
+  idp_metadata_url: z.string().url().optional(),
+  idp_metadata_xml: z.string().min(1).optional(),
   attribute_mapping: attributeMappingSchema.optional(),
   client_id: z.string().min(1).optional(),
   client_secret: z.string().min(1).optional(),
@@ -46,6 +50,9 @@ export const connectionPatchSchema = z.object({
   idp_entity_id: z.string().min(1).optional(),
   idp_sso_url: z.string().url().optional(),
   idp_certificate: z.string().min(1).optional(),
+  /** SAML metadata import: a URL fetched through the SSRF guard, or the XML itself. */
+  idp_metadata_url: z.string().url().optional(),
+  idp_metadata_xml: z.string().min(1).optional(),
   attribute_mapping: attributeMappingSchema.optional(),
   client_id: z.string().min(1).optional(),
   client_secret: z.string().min(1).optional(),
@@ -59,11 +66,11 @@ function requireField(value: string | undefined, param: string, protocol: string
   return value;
 }
 
-function samlConfigFromBody(body: ConnectionBody) {
+function samlConfigFromBody(body: ConnectionBody, metadata: IdpMetadata = {}) {
   return {
-    idpEntityId: requireField(body.idp_entity_id, "idp_entity_id", "SAML"),
-    idpSsoUrl: requireField(body.idp_sso_url, "idp_sso_url", "SAML"),
-    idpCertificate: assertValidCertificate(requireField(body.idp_certificate, "idp_certificate", "SAML")),
+    idpEntityId: requireField(body.idp_entity_id ?? metadata.entityId, "idp_entity_id", "SAML"),
+    idpSsoUrl: requireField(body.idp_sso_url ?? metadata.ssoUrl, "idp_sso_url", "SAML"),
+    idpCertificate: assertValidCertificate(requireField(body.idp_certificate ?? metadata.certificate, "idp_certificate", "SAML")),
     attributeMapping: { ...DEFAULT_ATTRIBUTE_MAPPING, ...(body.attribute_mapping ?? {}) },
   };
 }
@@ -97,7 +104,7 @@ export async function createConnection(ctx: AppContext, body: ConnectionBody): P
   if (body.discovery_url) await assertPublicUrl(ctx, body.discovery_url, "discovery_url");
   const now = Date.now();
   const config = body.protocol === "saml"
-    ? samlConfigFromBody(body)
+    ? samlConfigFromBody(body, await resolveSamlMetadata(ctx, { idpMetadataUrl: body.idp_metadata_url, idpMetadataXml: body.idp_metadata_xml }))
     : {
         clientId: requireField(body.client_id, "client_id", "OIDC"),
         clientSecretEnc: encryptClientSecret(ctx, requireField(body.client_secret, "client_secret", "OIDC")),
@@ -143,6 +150,14 @@ export async function updateConnection(ctx: AppContext, row: ConnectionRow, patc
 
   const config = { ...(row.config ?? {}) } as Record<string, unknown>;
   if (row.protocol === "saml") {
+    // Metadata import fills whatever the patch does not name; explicit fields below always win.
+    const metadata = await resolveSamlMetadata(ctx, { idpMetadataUrl: patch.idp_metadata_url, idpMetadataXml: patch.idp_metadata_xml });
+    if (metadata.entityId && patch.idp_entity_id === undefined) config.idpEntityId = metadata.entityId;
+    if (metadata.ssoUrl && patch.idp_sso_url === undefined) {
+      await assertPublicUrl(ctx, metadata.ssoUrl, "idp_sso_url");
+      config.idpSsoUrl = metadata.ssoUrl;
+    }
+    if (metadata.certificate && patch.idp_certificate === undefined) config.idpCertificate = assertValidCertificate(metadata.certificate);
     if (patch.idp_entity_id !== undefined) config.idpEntityId = patch.idp_entity_id;
     if (patch.idp_sso_url !== undefined) {
       await assertPublicUrl(ctx, patch.idp_sso_url, "idp_sso_url");

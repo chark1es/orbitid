@@ -9886,6 +9886,165 @@
         }
       }
     },
+    "/v1/organizations/{id}/domains/{did}/prepare_affiliation_verification": {
+      "post": {
+        "tags": [
+          "Organizations"
+        ],
+        "summary": "Send a domain affiliation code",
+        "operationId": "prepareDomainAffiliationBackend",
+        "description": "Sends a code to an address on the domain. The domain starts unverified until the code is attempted.",
+        "security": [
+          {
+            "SecretKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Organization id (`org_…`).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "did",
+            "in": "path",
+            "required": true,
+            "description": "Organization domain id (`orgdom_…`).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "affiliation_email_address": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "affiliation_email_address"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationDomain"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/v1/organizations/{id}/domains/{did}/attempt_affiliation_verification": {
+      "post": {
+        "tags": [
+          "Organizations"
+        ],
+        "summary": "Verify a domain affiliation",
+        "operationId": "attemptDomainAffiliationBackend",
+        "security": [
+          {
+            "SecretKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Organization id (`org_…`).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "did",
+            "in": "path",
+            "required": true,
+            "description": "Organization domain id (`orgdom_…`).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationDomain"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
     "/v1/organizations/{id}/membership_requests": {
       "get": {
         "tags": [
@@ -15367,6 +15526,236 @@
         }
       }
     },
+    "/v1/instance/social/test": {
+      "post": {
+        "tags": [
+          "Instance"
+        ],
+        "summary": "Check a custom identity provider's endpoints",
+        "operationId": "testSocialProvider",
+        "description": "Resolves a discovery document (or validates manual endpoints), probes each endpoint and reports what the provider advertises: issuer, scopes, PKCE support and token-endpoint authentication methods. Nothing is saved. Errors are returned in the body so a dashboard can show all of them at once. Rate limited.",
+        "security": [
+          {
+            "SecretKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "protocol": {
+                    "type": "string",
+                    "enum": [
+                      "oidc",
+                      "oauth2"
+                    ]
+                  },
+                  "discoveryUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "issuer": {
+                    "type": "string"
+                  },
+                  "authorizationUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "tokenUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "userinfoUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "jwksUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "protocol": {
+                      "type": "string",
+                      "enum": [
+                        "oidc",
+                        "oauth2"
+                      ]
+                    },
+                    "issuer": {
+                      "type": "string"
+                    },
+                    "endpoints": {
+                      "type": "object",
+                      "properties": {
+                        "authorization": {
+                          "type": "string"
+                        },
+                        "token": {
+                          "type": "string"
+                        },
+                        "userinfo": {
+                          "type": "string"
+                        },
+                        "jwks": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "authorization",
+                        "token"
+                      ]
+                    },
+                    "scopes_supported": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "pkce_supported": {
+                      "type": "boolean"
+                    },
+                    "client_auth_methods": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "checks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "reachable": {
+                            "type": "boolean"
+                          },
+                          "status": {
+                            "type": "integer"
+                          },
+                          "error": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "url",
+                          "reachable"
+                        ]
+                      }
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "errors": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "protocol",
+                    "endpoints",
+                    "checks",
+                    "warnings",
+                    "errors"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/v1/instance/social/{provider}": {
+      "delete": {
+        "tags": [
+          "Instance"
+        ],
+        "summary": "Delete a custom social provider",
+        "operationId": "deleteSocialProvider",
+        "description": "Removes a `custom_<key>` provider from instance settings. Built-in providers can only be turned off.",
+        "security": [
+          {
+            "SecretKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "description": "Custom provider key, for example `custom_acme`.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Instance"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          }
+        }
+      }
+    },
     "/v1/instance/signing_keys/rotate": {
       "post": {
         "tags": [
@@ -18323,7 +18712,33 @@
         ],
         "summary": "Read the OIDC discovery document",
         "operationId": "getOpenIdConfiguration",
-        "description": "Issuer, endpoints and capabilities. Public; standard OIDC clients discover everything from here.",
+        "description": "Issuer, endpoints and capabilities. Public; standard OIDC clients discover everything from here. The same document is served at `/.well-known/oauth-authorization-server` and at path-based variants for issuers with a path prefix.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenIdConfiguration"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          }
+        }
+      }
+    },
+    "/.well-known/oauth-authorization-server": {
+      "get": {
+        "tags": [
+          "OAuth/OIDC"
+        ],
+        "summary": "Read RFC 8414 authorization-server metadata",
+        "operationId": "getAuthorizationServerMetadata",
+        "description": "Same values as the OIDC discovery document, for OAuth 2.0 clients that do not use OIDC discovery.",
         "security": [],
         "responses": {
           "200": {
@@ -18434,7 +18849,7 @@
         ],
         "summary": "Authorization endpoint",
         "operationId": "authorize",
-        "description": "Standard authorization code flow. PKCE (`S256`) is required for public clients. Without a session the browser is sent to the app's sign-in page and brought back; with consent enabled the consent screen data comes from `/oauth/consent_info`. Ends in a redirect carrying `code` and `state`, or `error` and `error_description`.",
+        "description": "Standard authorization code flow. PKCE (`S256`) is required for public clients and optional for confidential clients unless the application sets `pkce_required`. Without a session the browser is sent to the app's sign-in page and brought back; with consent enabled the consent screen data comes from `/oauth/consent_info`. Ends in a redirect or, with `response_mode=form_post`, a self-submitting form carrying `code` and `state` (or `error`).",
         "security": [],
         "parameters": [
           {
@@ -18461,7 +18876,7 @@
             "name": "redirect_uri",
             "in": "query",
             "required": false,
-            "description": "Must match a registered redirect URI exactly.",
+            "description": "Must match a registered redirect URI exactly (loopback ports may vary).",
             "schema": {
               "type": "string"
             }
@@ -18479,9 +18894,22 @@
             "name": "state",
             "in": "query",
             "required": false,
-            "description": "Returned unchanged in the redirect.",
+            "description": "Returned unchanged in the response.",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "response_mode",
+            "in": "query",
+            "required": false,
+            "description": "Defaults to `query`.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "query",
+                "form_post"
+              ]
             }
           },
           {
@@ -18496,11 +18924,11 @@
             "name": "code_challenge_method",
             "in": "query",
             "required": false,
+            "description": "`plain` is refused.",
             "schema": {
               "type": "string",
               "enum": [
-                "S256",
-                "plain"
+                "S256"
               ]
             }
           },
@@ -18508,7 +18936,7 @@
             "name": "nonce",
             "in": "query",
             "required": false,
-            "description": "Included in the id_token.",
+            "description": "Included in the id_token and checked by the client.",
             "schema": {
               "type": "string"
             }
@@ -18517,19 +18945,33 @@
             "name": "prompt",
             "in": "query",
             "required": false,
+            "description": "Space separated: `none`, `login`, `consent`, `select_account`.",
             "schema": {
-              "type": "string",
-              "enum": [
-                "none",
-                "consent",
-                "login"
-              ]
+              "type": "string"
+            }
+          },
+          {
+            "name": "max_age",
+            "in": "query",
+            "required": false,
+            "description": "Require a sign-in newer than this many seconds.",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "login_hint",
+            "in": "query",
+            "required": false,
+            "description": "Username, email, phone or user id to prefer.",
+            "schema": {
+              "type": "string"
             }
           }
         ],
         "responses": {
           "302": {
-            "description": "Redirect to the client's `redirect_uri` (302).",
+            "description": "Redirect to the client's `redirect_uri` (302), or an auto-post HTML form for `response_mode=form_post`.",
             "headers": {
               "Location": {
                 "schema": {
@@ -18782,7 +19224,7 @@
         ],
         "summary": "Token endpoint",
         "operationId": "token",
-        "description": "Exchanges an authorization code or a refresh token for an access token, and (with the `openid` scope) an id_token. Confidential clients authenticate with HTTP Basic (`client_id:client_secret`) or with `client_id` and `client_secret` in the body. Errors use the OAuth error shape, not the OrbitID error envelope.",
+        "description": "Exchanges an authorization code or a refresh token for an access token, and (with the `openid` scope) an id_token. Confidential clients authenticate with HTTP Basic (`client_id:client_secret`, encoded or raw) or with `client_id` and `client_secret` in the body. Refresh tokens rotate; a just-rotated token can be retried inside the grace window without revoking the grant. Errors use the OAuth error shape, not the OrbitID error envelope.",
         "security": [],
         "requestBody": {
           "required": true,
@@ -19239,6 +19681,127 @@
         }
       }
     },
+    "/oauth/end_session": {
+      "get": {
+        "tags": [
+          "OAuth/OIDC"
+        ],
+        "summary": "RP-initiated logout",
+        "operationId": "oidcEndSession",
+        "description": "Validates `id_token_hint` (signature and issuer, not expiry) and the registered `post_logout_redirect_uri`, ends the browser session carried by the hint's `sid`, revokes the grants minted from it, and redirects. `state` is returned unchanged.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "id_token_hint",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "client_id",
+            "in": "query",
+            "required": false,
+            "description": "Used instead of `id_token_hint` to identify the application.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "post_logout_redirect_uri",
+            "in": "query",
+            "required": false,
+            "description": "Must be registered on the application.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to the registered post-logout URI, or the app's home URL (302).",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string",
+                  "description": "Where the browser goes next."
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/OAuthBadRequest"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "OAuth/OIDC"
+        ],
+        "summary": "RP-initiated logout (form post)",
+        "operationId": "oidcEndSessionPost",
+        "description": "Same as the GET form, for clients that submit the request as a form.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id_token_hint": {
+                    "type": "string"
+                  },
+                  "client_id": {
+                    "type": "string"
+                  },
+                  "post_logout_redirect_uri": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "logout_hint": {
+                    "type": "string"
+                  },
+                  "ui_locales": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "302": {
+            "description": "Redirect to the registered post-logout URI, or the app's home URL (302).",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string",
+                  "description": "Where the browser goes next."
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/OAuthBadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          }
+        }
+      }
+    },
     "/oauth/m2m/token": {
       "post": {
         "tags": [
@@ -19400,7 +19963,7 @@
         ],
         "summary": "Create an OAuth application",
         "operationId": "createOAuthApplication",
-        "description": "`client_secret` is returned once, in this response. Public clients get no secret and must use PKCE.",
+        "description": "`client_secret` is returned once, in this response. Public clients get no secret and must use PKCE. Confidential clients may leave `pkce_required` off for clients that send no challenge.",
         "security": [
           {
             "SecretKey": []
@@ -19423,19 +19986,51 @@
                       "format": "uri"
                     }
                   },
+                  "post_logout_redirect_uris": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "description": "Allowed return URIs for RP-initiated logout."
+                  },
                   "scopes": {
                     "type": "string",
-                    "description": "Space separated scopes. Defaults to `openid profile email`."
+                    "description": "Space separated scopes. Defaults to `openid profile email phone groups organizations offline_access`."
                   },
                   "public": {
                     "type": "boolean",
                     "description": "Public clients have no secret and must use PKCE."
                   },
                   "consent_screen_enabled": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Off skips consent for a first-party/trusted application."
                   },
                   "pkce_required": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Off by default for confidential clients, so clients that send no challenge work."
+                  },
+                  "access_token_lifetime_seconds": {
+                    "type": "integer",
+                    "description": "60–86400 seconds. Default 3600."
+                  },
+                  "refresh_token_lifetime_seconds": {
+                    "type": "integer",
+                    "description": "60–31536000 seconds. Default 2592000."
+                  },
+                  "id_token_lifetime_seconds": {
+                    "type": "integer",
+                    "description": "60–86400 seconds. Default 3600."
+                  },
+                  "groups_claim": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "organizations",
+                      "roles",
+                      "all"
+                    ],
+                    "description": "What the groups claim contains."
                   }
                 },
                 "required": [
@@ -19552,6 +20147,13 @@
                       "format": "uri"
                     }
                   },
+                  "post_logout_redirect_uris": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  },
                   "scopes": {
                     "type": "string"
                   },
@@ -19560,6 +20162,24 @@
                   },
                   "pkce_required": {
                     "type": "boolean"
+                  },
+                  "access_token_lifetime_seconds": {
+                    "type": "integer"
+                  },
+                  "refresh_token_lifetime_seconds": {
+                    "type": "integer"
+                  },
+                  "id_token_lifetime_seconds": {
+                    "type": "integer"
+                  },
+                  "groups_claim": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "organizations",
+                      "roles",
+                      "all"
+                    ]
                   }
                 }
               }
@@ -19860,6 +20480,14 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "idp_metadata_url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "idp_metadata_xml": {
+                    "type": "string",
+                    "minLength": 1
+                  },
                   "attribute_mapping": {
                     "type": "object",
                     "additionalProperties": {
@@ -20026,6 +20654,14 @@
                     "format": "uri"
                   },
                   "idp_certificate": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "idp_metadata_url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "idp_metadata_xml": {
                     "type": "string",
                     "minLength": 1
                   },
@@ -22824,6 +23460,14 @@
               "format": "uri"
             }
           },
+          "post_logout_redirect_uris": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "description": "Allowed `post_logout_redirect_uri` values for RP-initiated logout."
+          },
           "scopes": {
             "type": "string",
             "description": "Space separated scopes granted to the application."
@@ -22833,6 +23477,25 @@
           },
           "pkce_required": {
             "type": "boolean"
+          },
+          "access_token_lifetime_seconds": {
+            "type": "integer"
+          },
+          "refresh_token_lifetime_seconds": {
+            "type": "integer"
+          },
+          "id_token_lifetime_seconds": {
+            "type": "integer"
+          },
+          "groups_claim": {
+            "type": "string",
+            "enum": [
+              "none",
+              "organizations",
+              "roles",
+              "all"
+            ],
+            "description": "What the `groups` claim contains."
           },
           "created_at": {
             "type": "integer",
@@ -22850,9 +23513,14 @@
           "client_id",
           "public",
           "redirect_uris",
+          "post_logout_redirect_uris",
           "scopes",
           "consent_screen_enabled",
           "pkce_required",
+          "access_token_lifetime_seconds",
+          "refresh_token_lifetime_seconds",
+          "id_token_lifetime_seconds",
+          "groups_claim",
           "created_at",
           "updated_at"
         ]
@@ -23943,6 +24611,10 @@
                 "type": "boolean"
               },
               "signOutOfOtherSessionsOnChange": {
+                "default": false,
+                "type": "boolean"
+              },
+              "signOutOfOtherSessionsOnReset": {
                 "default": true,
                 "type": "boolean"
               }
@@ -24038,6 +24710,81 @@
                 "name": {
                   "type": "string"
                 },
+                "protocol": {
+                  "type": "string",
+                  "enum": [
+                    "oidc",
+                    "oauth2"
+                  ]
+                },
+                "authorizationUrl": {
+                  "type": "string"
+                },
+                "tokenUrl": {
+                  "type": "string"
+                },
+                "userinfoUrl": {
+                  "type": "string"
+                },
+                "jwksUrl": {
+                  "type": "string"
+                },
+                "issuer": {
+                  "type": "string"
+                },
+                "clientAuthMethod": {
+                  "type": "string",
+                  "enum": [
+                    "client_secret_basic",
+                    "client_secret_post"
+                  ]
+                },
+                "pkce": {
+                  "type": "boolean"
+                },
+                "trustEmailVerified": {
+                  "type": "boolean"
+                },
+                "logoUrl": {
+                  "type": "string"
+                },
+                "claimMapping": {
+                  "type": "object",
+                  "properties": {
+                    "sub": {
+                      "default": "",
+                      "type": "string"
+                    },
+                    "email": {
+                      "default": "",
+                      "type": "string"
+                    },
+                    "emailVerified": {
+                      "default": "",
+                      "type": "string"
+                    },
+                    "name": {
+                      "default": "",
+                      "type": "string"
+                    },
+                    "firstName": {
+                      "default": "",
+                      "type": "string"
+                    },
+                    "lastName": {
+                      "default": "",
+                      "type": "string"
+                    },
+                    "username": {
+                      "default": "",
+                      "type": "string"
+                    },
+                    "picture": {
+                      "default": "",
+                      "type": "string"
+                    }
+                  }
+                },
                 "authenticatableAtSignIn": {
                   "default": true,
                   "type": "boolean"
@@ -24077,7 +24824,7 @@
             "type": "object",
             "properties": {
               "lifetimeSeconds": {
-                "default": 604800,
+                "default": 0,
                 "type": "number"
               },
               "inactivityTimeoutSeconds": {
@@ -24089,7 +24836,7 @@
                 "type": "number"
               },
               "multiSession": {
-                "default": false,
+                "default": true,
                 "type": "boolean"
               },
               "trustedDevicesEnabled": {
@@ -24118,7 +24865,7 @@
                 "type": "boolean"
               },
               "retentionSeconds": {
-                "default": 2592000,
+                "default": 0,
                 "type": "integer",
                 "minimum": 0
               }
@@ -24149,6 +24896,12 @@
                 "default": 5,
                 "type": "integer",
                 "minimum": 1
+              },
+              "refreshTokenReuseGraceSeconds": {
+                "default": 30,
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 600
               }
             }
           },
@@ -24165,7 +24918,7 @@
                 "type": "boolean"
               },
               "maxAllowedMemberships": {
-                "default": 5,
+                "default": 0,
                 "type": "number"
               },
               "slugEnabled": {
@@ -24642,7 +25395,16 @@
           "jwks_uri": {
             "type": "string"
           },
-          "registration_endpoint": {
+          "revocation_endpoint": {
+            "type": "string"
+          },
+          "introspection_endpoint": {
+            "type": "string"
+          },
+          "end_session_endpoint": {
+            "type": "string"
+          },
+          "device_authorization_endpoint": {
             "type": "string"
           },
           "scopes_supported": {
@@ -24687,13 +25449,49 @@
               "type": "string"
             }
           },
+          "revocation_endpoint_auth_methods_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "introspection_endpoint_auth_methods_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "code_challenge_methods_supported": {
             "type": "array",
             "items": {
               "type": "string"
             }
           },
+          "prompt_values_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "claims_supported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "request_parameter_supported": {
+            "type": "boolean"
+          },
+          "request_uri_parameter_supported": {
+            "type": "boolean"
+          },
+          "claims_parameter_supported": {
+            "type": "boolean"
+          },
+          "access_token_format": {
+            "type": "string"
+          },
+          "access_token_signing_alg_values_supported": {
             "type": "array",
             "items": {
               "type": "string"
@@ -24794,6 +25592,9 @@
           },
           "iss": {
             "type": "string"
+          },
+          "jti": {
+            "type": "string"
           }
         },
         "required": [
@@ -24829,7 +25630,7 @@
           "sub"
         ],
         "additionalProperties": true,
-        "description": "Claims for the user behind the access token: `sub`, and whichever of `email`, `email_verified`, `name`, `given_name`, `family_name`, `picture` the scopes allow."
+        "description": "Claims for the user behind the access token: `sub`, and whichever of `email`, `email_verified`, `name`, `given_name`, `family_name`, `preferred_username`, `picture`, `locale`, `updated_at`, `phone_number`, `phone_number_verified`, `groups`, `org_*` and `organizations` the scopes allow."
       },
       "ApiError": {
         "type": "object",

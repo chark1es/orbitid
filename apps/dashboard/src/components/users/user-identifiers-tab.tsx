@@ -1,10 +1,9 @@
-import { Badge } from "@orbitid/ui";
 import { Globe } from "lucide-react";
 import type { UserJSON } from "@orbitid/shared";
 import { formatDate } from "../../lib/format";
 import { EmptyState } from "../shared/empty-state";
 import { Section } from "../shared/section";
-import { StatusBadge } from "../shared/status-badge";
+import { LabelChip, StatusBadge } from "../shared/status-badge";
 import { CopyButton } from "../shared/copy-button";
 
 interface IdentifierRow { id: string; value: string; verified: boolean; primary: boolean; createdAt: number }
@@ -15,7 +14,7 @@ function IdentifierGroup({ title, rows }: { title: string; rows: IdentifierRow[]
     {rows.length === 0 ? <EmptyState className="py-8" title={`No ${title.toLowerCase()}`} description="The user can add and verify an identifier in their account settings." /> : <ul>
       {rows.map((row) => <li key={row.id} className="flex flex-wrap items-center gap-2 border-b border-border py-2.5 last:border-b-0">
         <span className="min-w-0 flex-1 truncate font-data text-sm">{row.value}</span>
-        {row.primary ? <Badge variant="secondary">Primary</Badge> : null}
+        {row.primary ? <LabelChip>Primary</LabelChip> : null}
         <StatusBadge status={row.verified ? "verified" : "unverified"} />
         <span className="hidden font-data text-xs text-muted-foreground sm:inline">{formatDate(row.createdAt)}</span>
         <CopyButton value={row.value} label="Copy identifier" />
@@ -53,9 +52,9 @@ export function UserIdentifiersTab({ user }: { user: UserJSON; onUpdated: () => 
                 key={account.id}
                 className="flex flex-wrap items-center gap-2 border-b border-border py-2.5 last:border-b-0"
               >
-                <Badge variant="outline" className="capitalize">
+                <LabelChip className="capitalize">
                   {account.provider.replace(/_/g, " ")}
-                </Badge>
+                </LabelChip>
                 <span className="min-w-0 flex-1 truncate text-sm">
                   {account.email_address || account.username || account.provider_user_id}
                 </span>

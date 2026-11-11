@@ -105,6 +105,27 @@ describe("api keys — backend API", () => {
     expect(gone.status).toBe(404);
   });
 
+  it("refuses keys for banned or locked users, and revokes them when a user is banned", async () => {
+    const created = await h.app.request("/v1/api_keys", { method: "POST", headers: authHeaders(), body: json({ name: "ci", subject: user.userId }) });
+    const key = await created.json();
+    const verify = () => h.app.request("/v1/api_keys/verify", { method: "POST", headers: authHeaders(), body: json({ secret: key.secret }) });
+
+    await h.ctx.db.update(s.users).set({ banned: true }).where(eq(s.users.id, user.userId));
+    expect((await verify()).status).toBe(401);
+
+    await h.ctx.db.update(s.users).set({ banned: false, locked: true, lockoutExpiresAt: null }).where(eq(s.users.id, user.userId));
+    expect((await verify()).status).toBe(401);
+
+    await h.ctx.db.update(s.users).set({ locked: false }).where(eq(s.users.id, user.userId));
+    expect((await verify()).status).toBe(200);
+
+    // Banning revokes the credential instead of leaving a flag the key could outlive.
+    const banned = await h.app.request(`/v1/users/${user.userId}/ban`, { method: "POST", headers: authHeaders() });
+    expect(banned.status).toBe(200);
+    expect(first(await h.ctx.db.select().from(s.apiKeys).where(eq(s.apiKeys.id, key.id)))!.revoked).toBe(true);
+    expect((await verify()).status).toBe(401);
+  });
+
   it("validates the subject and requires the secret key", async () => {
     const bad = await h.app.request("/v1/api_keys", { method: "POST", headers: authHeaders(), body: json({ name: "x", subject: "wat_123" }) });
     expect(bad.status).toBe(422);

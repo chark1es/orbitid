@@ -163,6 +163,21 @@ export const operations: DocumentedOperation[] = [
     ...ok(ref("OrganizationDomain")),
     errors: [404, 422],
   }),
+  op("post", "/v1/organizations/{id}/domains/{did}/prepare_affiliation_verification", "Organizations", "prepareDomainAffiliationBackend", "Send a domain affiliation code", {
+    security: "backend",
+    description: "Sends a code to an address on the domain. The domain starts unverified until the code is attempted.",
+    parameters: [orgId, did],
+    body: { schema: body.affiliationStart },
+    ...ok(ref("OrganizationDomain")),
+    errors: [404, 422, 429],
+  }),
+  op("post", "/v1/organizations/{id}/domains/{did}/attempt_affiliation_verification", "Organizations", "attemptDomainAffiliationBackend", "Verify a domain affiliation", {
+    security: "backend",
+    parameters: [orgId, did],
+    body: { schema: body.affiliationAttempt },
+    ...ok(ref("OrganizationDomain")),
+    errors: [404, 422, 429],
+  }),
   op("delete", "/v1/organizations/{id}/domains/{did}", "Organizations", "deleteOrganizationDomainBackend", "Delete a domain", {
     security: "backend",
     parameters: [orgId, did],

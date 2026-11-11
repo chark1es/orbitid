@@ -1,20 +1,17 @@
 import { useState } from "react";
+import { Page as PageLayout } from "../components/shared/page";
 import type { AuditLogJSON, PaginatedList } from "@orbitid/shared";
 import {
   Button,
   Input,
+  SearchInput,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
 } from "@orbitid/ui";
-import { ChevronLeft, ChevronRight, Eye, RefreshCw, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, Eye, RefreshCw } from "lucide-react";
 import { useApi } from "../lib/api";
 import { unwrapList, unwrapTotal } from "./_config/data";
 import { formatDate, fromDateInput, fromDateInputStart } from "./_config/settings";
@@ -25,9 +22,9 @@ import {
   ErrorAlert,
   MetaChip,
   PageHeader,
-  RuledTable,
   TableSkeleton,
 } from "./_config/ui";
+import { DataTable, type DataTableColumn } from "../components/shared/data-table";
 
 const PAGE_SIZE = 50;
 
@@ -65,8 +62,73 @@ export default function Page() {
     setOffset(0);
   };
 
+  // Below lg the target and IP columns go first: they are the detail the metadata sheet repeats, and
+  // removing them keeps the table inside a 768px viewport. DataTable stacks every field below sm.
+  const columns: DataTableColumn<AuditLogJSON>[] = [
+    {
+      id: "time",
+      header: "Time",
+      headerClassName: "w-[146px]",
+      className: "w-[146px]",
+      cell: (log) => <span className="font-data text-xs text-muted-foreground">{formatDate(log.created_at)}</span>,
+    },
+    {
+      id: "action",
+      header: "Action",
+      cell: (log) => (
+        <code className="block break-all font-data text-xs font-medium" title={log.action}>
+          {log.action}
+        </code>
+      ),
+    },
+    {
+      id: "actor",
+      header: "Actor",
+      headerClassName: "hidden w-[160px] xl:table-cell",
+      className: "hidden w-[160px] xl:table-cell",
+      cell: (log) => <span className="block truncate font-data text-xs">{log.actor ?? "system"}</span>,
+    },
+    {
+      id: "target",
+      header: "Target",
+      headerClassName: "hidden w-[200px] xl:table-cell",
+      className: "hidden w-[200px] xl:table-cell",
+      cell: (log) => (
+        <span className="block truncate text-xs" title={log.target_id ?? undefined}>
+          {log.target_type ? (
+            <>
+              <span className="text-muted-foreground">{log.target_type} </span>
+              <span className="font-data">{log.target_id ?? ""}</span>
+            </>
+          ) : (
+            <span className="text-muted-foreground">None</span>
+          )}
+        </span>
+      ),
+    },
+    {
+      id: "ip",
+      header: "IP",
+      headerClassName: "hidden w-[100px] xl:table-cell",
+      className: "hidden w-[100px] xl:table-cell",
+      cell: (log) => <span className="font-data text-xs text-muted-foreground">{log.ip ?? "None"}</span>,
+    },
+    {
+      id: "actions",
+      header: <span className="sr-only">Detail</span>,
+      headerClassName: "w-12 text-right",
+      className: "w-12 text-right",
+      cell: (log) => (
+        <Button variant="ghost" size="icon-sm" onClick={() => setMetadata(log)} title="Metadata">
+          <Eye className="size-4" aria-hidden />
+          <span className="sr-only">Metadata for {log.action}</span>
+        </Button>
+      ),
+    },
+  ];
+
   return (
-    <div className="space-y-6">
+    <PageLayout>
       <PageHeader
         title="Audit logs"
         description="Administrative and security-relevant actions across the instance. Records are immutable and ordered by time."
@@ -81,19 +143,16 @@ export default function Page() {
 
       <div className="space-y-3 border-y border-border py-3">
         <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" aria-hidden />
-            <Input
-              value={action}
-              onChange={(event) => {
-                setAction(event.target.value);
-                setOffset(0);
-              }}
-              placeholder="Action, for example user.created"
-              className="pl-8 font-data text-xs"
-              aria-label="Filter by action"
-            />
-          </div>
+          <SearchInput
+            value={action}
+            onChange={(event) => {
+              setAction(event.target.value);
+              setOffset(0);
+            }}
+            placeholder="Action, for example user.created"
+            inputClassName="font-data"
+            aria-label="Filter by action"
+          />
           <Input
             value={actor}
             onChange={(event) => {
@@ -101,7 +160,7 @@ export default function Page() {
               setOffset(0);
             }}
             placeholder="Actor user ID"
-            className="font-data text-xs"
+            className="font-data"
             aria-label="Filter by actor"
           />
           <Input
@@ -111,7 +170,7 @@ export default function Page() {
               setOffset(0);
             }}
             placeholder="Target ID"
-            className="font-data text-xs"
+            className="font-data"
             aria-label="Filter by target ID"
           />
           <Select
@@ -143,7 +202,7 @@ export default function Page() {
               setDateFrom(event.target.value);
               setOffset(0);
             }}
-            className="font-data text-xs"
+            className="font-data"
             aria-label="From date"
           />
           <Input
@@ -154,7 +213,7 @@ export default function Page() {
               setDateTo(event.target.value);
               setOffset(0);
             }}
-            className="font-data text-xs"
+            className="font-data"
             aria-label="To date"
           />
         </div>
@@ -187,50 +246,7 @@ export default function Page() {
         />
       ) : (
         <div className="space-y-3">
-          <RuledTable>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-[146px]">Time</TableHead>
-                <TableHead>Action</TableHead>
-                <TableHead className="w-[180px]">Actor</TableHead>
-                <TableHead className="w-[230px]">Target</TableHead>
-                <TableHead className="w-[110px]">IP</TableHead>
-                <TableHead className="w-12 text-right">Detail</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {logs.map((log) => (
-                <TableRow key={log.id}>
-                  <TableCell className="font-data text-xs text-muted-foreground">{formatDate(log.created_at)}</TableCell>
-                  <TableCell>
-                    <code className="font-data text-xs font-medium">{log.action}</code>
-                  </TableCell>
-                  <TableCell>
-                    <span className="block truncate font-data text-xs">{log.actor ?? "system"}</span>
-                  </TableCell>
-                  <TableCell>
-                    <span className="block truncate text-xs">
-                      {log.target_type ? (
-                        <>
-                          <span className="text-muted-foreground">{log.target_type} </span>
-                          <span className="font-data">{log.target_id ?? ""}</span>
-                        </>
-                      ) : (
-                        <span className="text-muted-foreground">None</span>
-                      )}
-                    </span>
-                  </TableCell>
-                  <TableCell className="font-data text-xs text-muted-foreground">{log.ip ?? "None"}</TableCell>
-                  <TableCell className="text-right">
-                    <Button variant="ghost" size="icon-sm" onClick={() => setMetadata(log)} title="Metadata">
-                      <Eye className="size-4" aria-hidden />
-                      <span className="sr-only">Metadata for {log.action}</span>
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </RuledTable>
+          <DataTable columns={columns} rows={logs} rowKey={(log) => log.id} />
           <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
             <span className="font-data">
               {offset + 1} to {offset + logs.length} of {total.toLocaleString()}
@@ -290,6 +306,6 @@ export default function Page() {
           ) : null}
         </div>
       </DetailSheet>
-    </div>
+    </PageLayout>
   );
 }

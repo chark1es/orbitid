@@ -44,16 +44,8 @@ export default function OrganizationsPage() {
               <OrganizationProfile afterLeaveOrganizationUrl="/organizations" />
             </section>
 
-            <section aria-labelledby="org-create-title" className="space-y-3">
-              <div>
-                <h2 id="org-create-title" className="text-lg">
-                  Create an organization
-                </h2>
-                <p className="text-muted-foreground">Name, slug and logo, then optional invitations.</p>
-              </div>
-              <div className="max-w-2xl">
-                <CreateOrganization skipInvitationScreen afterCreateOrganizationUrl="/organizations" />
-              </div>
+            <section aria-label="Create an organization" className="max-w-2xl">
+              <CreateOrganization skipInvitationScreen afterCreateOrganizationUrl="/organizations" />
             </section>
           </div>
         </OrganizationsGate>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Page as PageLayout } from "../components/shared/page";
 import {
   cn,
   Input,
@@ -93,7 +94,7 @@ export default function Page() {
   const brandText = brandVanishes ? "var(--primary-foreground)" : previewInk;
 
   return (
-    <div className="space-y-6">
+    <PageLayout>
       <PageHeader
         title="Appearance"
         description="Brand the hosted sign-in experience and choose which origins may call the Frontend API."
@@ -264,6 +265,6 @@ export default function Page() {
         onSave={editor.save}
         onDiscard={editor.reset}
       />
-    </div>
+    </PageLayout>
   );
 }

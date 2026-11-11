@@ -37,7 +37,11 @@ export interface OrbitIDOptions {
   routerReplace?: RouterFn;
   cookie?: Pick<CookieOptions, "domain" | "secure">;
   retry?: { attempts?: number; delayMs?: number };
-  /** Session-token refresh cadence (default 50 s, i.e. 10 s before the 60 s JWT expiry). */
+  /**
+   * Fixed session-token refresh cadence, in ms. Leave unset (recommended): the SDK schedules the next refresh
+   * from the token's own `exp` and re-arms after suspend/offline, which is what keeps a JWT fresh in a
+   * throttled background tab. Set this only to force a cadence.
+   */
   tokenRefreshIntervalMs?: number;
 }
 

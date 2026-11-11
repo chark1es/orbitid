@@ -73,16 +73,23 @@ describe("settings prerequisites", () => {
   it("validates password and session lifetimes", () => {
     expect(() => assertSettingsUsable(parse({ password: { minLength: 80 } }))).toThrow(/72/);
     expect(() => assertSettingsUsable(parse({ password: { minLength: 0 } }))).toThrow();
-    expect(() => assertSettingsUsable(parse({ session: { lifetimeSeconds: 0 } }))).toThrow(/greater than 0/);
+    // 0 means "no maximum lifetime" and is the default; a negative value is refused.
+    expect(() => assertSettingsUsable(parse({ session: { lifetimeSeconds: 0 } }))).not.toThrow();
+    expect(() => assertSettingsUsable(parse({ session: { lifetimeSeconds: -1 } }))).toThrow(/0 \(no maximum lifetime\)/);
     expect(() => assertSettingsUsable(parse({ session: { tokenLifetimeSeconds: 0 } }))).toThrow(/greater than 0/);
-    expect(() => assertSettingsUsable(parse({ session: { tokenLifetimeSeconds: 10_000_000 } }))).toThrow(/cannot exceed/);
+    expect(() => assertSettingsUsable(parse({ session: { lifetimeSeconds: 3_600, tokenLifetimeSeconds: 10_000_000 } }))).toThrow(/cannot exceed/);
+    // With no maximum, a long-lived token is fine; an inactivity timeout may exceed any finite lifetime.
+    expect(() => assertSettingsUsable(parse({ session: { lifetimeSeconds: 0, tokenLifetimeSeconds: 10_000_000 } }))).not.toThrow();
+    expect(() => assertSettingsUsable(parse({ session: { inactivityTimeoutSeconds: 0 } }))).not.toThrow();
     expect(() => assertSettingsUsable(parse({ password: { maxLength: 8, minLength: 9 } }))).toThrow();
   });
 
   it("refuses an organization role setting that is not an organization key", () => {
     expect(() => assertSettingsUsable(parse({ organizations: { creatorRole: "app:admin" } }))).toThrow(/organization role key/);
     expect(() => assertSettingsUsable(parse({ organizations: { defaultRole: "member" } }))).toThrow(/organization role key/);
-    expect(() => assertSettingsUsable(parse({ organizations: { maxAllowedMemberships: 0 } }))).toThrow(/at least 1/);
+    expect(() => assertSettingsUsable(parse({ organizations: { maxAllowedMemberships: -1 } }))).toThrow(/0 \(no limit\)/);
+    // 0 means unlimited, the default: no plan-shaped member cap.
+    expect(() => assertSettingsUsable(parse({ organizations: { maxAllowedMemberships: 0 } }))).not.toThrow();
   });
 
   it("refuses an enabled provider without credentials or a discovery URL", () => {
@@ -95,6 +102,33 @@ describe("settings prerequisites", () => {
     expect(() => assertSettingsUsable(parse({
       social: { apple: { enabled: true, clientId: "id", appleTeamId: "t", appleKeyId: "k", applePrivateKey: "p" } },
     }))).not.toThrow();
+  });
+
+  it("accepts custom providers with manual endpoints or a public PKCE client", () => {
+    const base = { enabled: true, clientId: "id", clientSecret: "s" } as const;
+    expect(() => assertSettingsUsable(parse({ social: { custom_oauth: {
+      ...base, protocol: "oauth2",
+      authorizationUrl: "https://idp.example/authorize", tokenUrl: "https://idp.example/token", userinfoUrl: "https://idp.example/userinfo",
+    } } }))).not.toThrow();
+    // OIDC manual endpoints need a way to read the profile: userinfo or JWKS.
+    expect(() => assertSettingsUsable(parse({ social: { custom_manual: {
+      ...base, protocol: "oidc", authorizationUrl: "https://idp.example/authorize", tokenUrl: "https://idp.example/token",
+    } } }))).toThrow(/userinfoUrl or a jwksUrl/);
+    // A public client uses PKCE with no secret.
+    expect(() => assertSettingsUsable(parse({ social: { custom_public: {
+      enabled: true, clientId: "id", pkce: true,
+      authorizationUrl: "https://idp.example/authorize", tokenUrl: "https://idp.example/token", userinfoUrl: "https://idp.example/userinfo",
+    } } }))).not.toThrow();
+  });
+
+  it("validates every custom endpoint URL", () => {
+    const settings = (patch: Record<string, unknown>) => parse({ social: { custom_bad: {
+      enabled: true, clientId: "id", clientSecret: "s",
+      authorizationUrl: "https://idp.example/authorize", tokenUrl: "https://idp.example/token", userinfoUrl: "https://idp.example/userinfo",
+      ...patch,
+    } } });
+    expect(() => assertSettingsUsable(settings({ tokenUrl: "http://public.example/token" }))).toThrow(/https/);
+    expect(() => assertSettingsUsable(settings({ logoUrl: "not a url" }))).toThrow(/absolute URL/);
   });
 
   it("refuses a captcha provider with no secret and an sms provider with missing fields", () => {

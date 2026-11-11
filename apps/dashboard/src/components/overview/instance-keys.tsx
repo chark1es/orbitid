@@ -1,11 +1,11 @@
 import type { ReactNode } from "react";
 import type { InstanceSettings } from "@orbitid/shared";
-import { Badge } from "@orbitid/ui";
 import { KeyRound, TriangleAlert } from "lucide-react";
 import { getApiUrl } from "../../lib/api";
 import { homeUrlOf, type HealthJSON } from "../../lib/instance";
 import { SECRET_KEY_PLACEHOLDER } from "../../pages/_config/connect";
 import { CopyButton } from "../shared/copy-button";
+import { StatusBadge } from "../shared/status-badge";
 import { Panel, Section } from "../shared/section";
 import { Snippet } from "./snippet";
 
@@ -85,9 +85,11 @@ export function InstanceKeys({
       title="Keys"
       description="The publishable key goes in the browser. The secret key stays on your server: this dashboard signs in with it once and then holds only an httpOnly session."
       actions={
-        <Badge variant="outline" className="font-normal">
-          {loading ? "Checking instance" : health ? "Instance reachable" : "Instance status unknown"}
-        </Badge>
+        <StatusBadge
+          status={health ? "reachable" : "unknown"}
+          tone={health ? "positive" : "neutral"}
+          label={loading ? "Checking instance" : health ? "Instance reachable" : "Instance status unknown"}
+        />
       }
     >
       <Panel>

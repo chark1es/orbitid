@@ -161,17 +161,22 @@ describe("atomic single-use and counted operations", () => {
     expect(grants).toHaveLength(1);
   });
 
-  it("treats a losing parallel refresh as reuse and kills the family", async () => {
+  it("never lets a losing parallel refresh kill the grant", async () => {
     const { ctx } = await setup();
     const user = await insertUser(ctx);
     const userRow = first(await ctx.db.select().from(s.users).where(eq(s.users.id, user.userId)))!;
     const { row: application } = await createApplication(ctx, { name: "Concurrency refresh", redirectUris: ["http://localhost:3000/cb"] });
     const issued = await issueTokenSet(ctx, { application, user: userRow, scopes: ["offline_access"], family: "family_concurrency" });
     const results = await settle(Array.from({ length: PARALLEL }, () => exchangeRefreshToken(ctx, application, issued.refresh_token!)));
-    expect(fulfilled(results)).toHaveLength(1);
-    expect(oauthErrors(results)).toEqual(Array.from({ length: PARALLEL - 1 }, () => "invalid_grant"));
+    // The grace window lets a concurrent loser retry; whatever the timing, at least one caller wins and the family
+    // keeps exactly one live refresh token instead of being revoked as theft.
+    expect(fulfilled(results).length).toBeGreaterThanOrEqual(1);
+    expect(fulfilled(results).length + oauthErrors(results).length).toBe(PARALLEL);
     const presented = await findGrantByToken(ctx, issued.refresh_token!);
     expect(presented?.revoked).toBe(true);
+    const active = await ctx.db.select().from(s.oauthGrants)
+      .where(and(eq(s.oauthGrants.kind, "refresh"), eq(s.oauthGrants.familyId, "family_concurrency"), eq(s.oauthGrants.revoked, false)));
+    expect(active).toHaveLength(1);
   });
 
   it("locks an account after parallel failed passwords", async () => {

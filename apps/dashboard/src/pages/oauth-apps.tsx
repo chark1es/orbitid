@@ -1,7 +1,9 @@
 import { Button } from "@orbitid/ui";
+import { Page as PageLayout } from "../components/shared/page";
 import { Plus } from "lucide-react";
 import { errorMessage } from "./_config/settings";
-import { ConfirmDialog, ErrorAlert, MetaChip, PageHeader, SaveBar } from "./_config/ui";
+import { ErrorAlert, MetaChip, PageHeader, SaveBar } from "./_config/ui";
+import { ConfirmDialog } from "../components/shared/confirm-dialog";
 import { useOAuthApps } from "./_oauth-apps/use-oauth-apps";
 import { ProviderOptions } from "./_oauth-apps/provider-options";
 import { ApplicationsTable } from "./_oauth-apps/applications-table";
@@ -27,7 +29,7 @@ export default function Page() {
   } = ctl;
 
   return (
-    <div className="space-y-6">
+    <PageLayout>
       <PageHeader
         title="OAuth applications"
         description="OrbitID as an OAuth 2.0 and OpenID Connect identity provider. Applications use the authorize, token, userinfo, and JWKS endpoints."
@@ -67,7 +69,7 @@ export default function Page() {
         }
         confirmLabel="Delete application"
         destructive
-        loading={deleting}
+        pending={deleting}
         onConfirm={() => void deleteApplication()}
       />
 
@@ -83,6 +85,6 @@ export default function Page() {
           saveLabel="Save provider options"
         />
       ) : null}
-    </div>
+    </PageLayout>
   );
 }

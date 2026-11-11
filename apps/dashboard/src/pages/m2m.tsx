@@ -1,6 +1,8 @@
 import { Button } from "@orbitid/ui";
+import { Page as PageLayout } from "../components/shared/page";
 import { Plus } from "lucide-react";
-import { ConfirmDialog, MetaChip, PageHeader } from "./_config/ui";
+import { MetaChip, PageHeader } from "./_config/ui";
+import { ConfirmDialog } from "../components/shared/confirm-dialog";
 import { useM2M } from "./_m2m/use-m2m";
 import { MachinesSection, TokensSection } from "./_m2m/m2m-sections";
 import { MachineSheet, MachineSecretSheet, MintTokenSheet } from "./_m2m/m2m-sheets";
@@ -25,7 +27,7 @@ export default function Page() {
   } = ctl;
 
   return (
-    <div className="space-y-6">
+    <PageLayout>
       <PageHeader
         title="Machine-to-machine"
         description="Machines authenticate as themselves, optionally scoped to other machines, and mint short-lived tokens."
@@ -71,7 +73,7 @@ export default function Page() {
         }
         confirmLabel="Rotate secret"
         destructive
-        loading={rotatingBusy}
+        pending={rotatingBusy}
         onConfirm={() => void rotateSecret()}
       />
 
@@ -82,9 +84,9 @@ export default function Page() {
         description="Verification endpoints reject the token immediately."
         confirmLabel="Revoke token"
         destructive
-        loading={revokeBusy}
+        pending={revokeBusy}
         onConfirm={() => void revokeToken()}
       />
-    </div>
+    </PageLayout>
   );
 }

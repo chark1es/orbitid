@@ -1,32 +1,30 @@
 import { useState } from "react";
+import { Page as PageLayout } from "../components/shared/page";
 import type { ApiKeyJSON, OrganizationJSON, PaginatedList, UserJSON } from "@orbitid/shared";
 import {
   Button,
   Input,
+  SearchInput,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
   Tabs,
   TabsList,
   TabsTrigger,
   Textarea,
 } from "@orbitid/ui";
-import { Plus, Search, Trash2 } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { api, useApi } from "../lib/api";
+import { api, apiAllPages, useApi } from "../lib/api";
 import { useShowOrganizations } from "../lib/features";
 import { useDebounced } from "../lib/hooks";
+import { useTableState } from "../lib/use-table-state";
+import { TablePagination } from "../components/shared/table-pagination";
 import { oneTimeSecret, unwrapList } from "./_config/data";
-import { errorMessage, formatDate, fromDateInput, textToList, toDateInput } from "./_config/settings";
+import { errorMessage, fromDateInput, textToList, toDateInput } from "./_config/settings";
 import {
-  ConfirmDialog,
   CopyButton,
   DetailSheet,
   EmptyState,
@@ -34,12 +32,12 @@ import {
   Field,
   MetaChip,
   PageHeader,
-  RuledTable,
   SecretReveal,
-  StatusBadge,
   TableSkeleton,
   ValidationSummary,
 } from "./_config/ui";
+import { ConfirmDialog } from "../components/shared/confirm-dialog";
+import { ApiKeysTable } from "./_api-keys/keys-table";
 
 type SubjectType = "user" | "org";
 type FilterType = "all" | SubjectType;
@@ -51,12 +49,17 @@ interface SubjectChoice {
 }
 
 export default function Page() {
-  const keysQuery = useApi<PaginatedList<ApiKeyJSON>>(["api_keys"], "/api_keys?limit=100");
+  const table = useTableState({ limit: 20, orderBy: "-created_at" });
+  const keysPath = `/api_keys?order_by=${encodeURIComponent(table.orderBy)}`;
+  const keysQuery = useApi<PaginatedList<ApiKeyJSON>>(["api_keys", table.orderBy], keysPath, {
+    queryFn: ({ signal }) => apiAllPages<ApiKeyJSON>(keysPath, { signal }),
+  });
   const keys = unwrapList<ApiKeyJSON>(keysQuery.data);
   const [filterType, setFilterType] = useState<FilterType>("all");
   const [filterText, setFilterText] = useState("");
 
   const [createOpen, setCreateOpen] = useState(false);
+  const [createAttempted, setCreateAttempted] = useState(false);
   const [subjectType, setSubjectType] = useState<SubjectType>("user");
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounced(search.trim(), 250);
@@ -97,8 +100,12 @@ export default function Page() {
     const needle = filterText.trim().toLowerCase();
     return key.name.toLowerCase().includes(needle) || key.subject.toLowerCase().includes(needle) || key.prefix.toLowerCase().includes(needle);
   });
+  const totalPages = Math.max(1, Math.ceil(filteredKeys.length / table.limit));
+  const currentPage = Math.min(table.page, totalPages);
+  const pageKeys = filteredKeys.slice((currentPage - 1) * table.limit, currentPage * table.limit);
 
   const resetCreate = () => {
+    setCreateAttempted(false);
     setChoice(null);
     setSearch("");
     setName("");
@@ -191,7 +198,7 @@ export default function Page() {
         }));
 
   return (
-    <div className="space-y-6">
+    <PageLayout>
       <PageHeader
         title="API keys"
         description="Scoped, revocable credentials for Backend API access. The secret is shown once and stored as a hash."
@@ -216,22 +223,20 @@ export default function Page() {
             {showOrganizations || filterType === "org" ? <SelectItem value="org">Organizations</SelectItem> : null}
           </SelectContent>
         </Select>
-        <div className="relative flex-1">
-          <Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" aria-hidden />
-          <Input
-            value={filterText}
-            onChange={(event) => setFilterText(event.target.value)}
-            placeholder="Filter by name, subject, or prefix"
-            className="pl-8"
-            aria-label="Filter API keys"
-          />
-        </div>
+        <SearchInput
+          value={filterText}
+          onChange={(event) => setFilterText(event.target.value)}
+          placeholder="Filter by name, subject, or prefix"
+          aria-label="Filter API keys"
+          className="flex-1"
+        />
       </div>
 
       {keysQuery.isLoading ? (
         <TableSkeleton />
       ) : filteredKeys.length === 0 ? (
         <EmptyState
+          compact
           title={keys.length === 0 ? "No API keys" : "No matching API keys"}
           description={
             keys.length === 0
@@ -247,66 +252,23 @@ export default function Page() {
           }
         />
       ) : (
-        <RuledTable>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Subject</TableHead>
-              <TableHead>Scopes</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Expires</TableHead>
-              <TableHead>Last used</TableHead>
-              <TableHead className="w-16 text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredKeys.map((key) => {
-              const expired = Boolean(key.expiration && key.expiration < Date.now());
-              return (
-                <TableRow key={key.id}>
-                  <TableCell>
-                    <div className="space-y-0.5">
-                      <p className="text-sm font-medium">{key.name}</p>
-                      <code className="font-data text-xs text-muted-foreground">{key.prefix}…</code>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="space-y-0.5">
-                      <p className="text-xs text-muted-foreground">{key.subject.startsWith("org_") ? "Organization" : "User"}</p>
-                      <code className="block max-w-[16rem] truncate font-data text-xs">{key.subject}</code>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <span className="block max-w-[18rem] truncate font-data text-xs text-muted-foreground">{key.scopes.join(", ")}</span>
-                  </TableCell>
-                  <TableCell>
-                    <StatusBadge status={key.revoked ? "revoked" : expired ? "expired" : "active"} />
-                  </TableCell>
-                  <TableCell className="font-data text-xs text-muted-foreground">{formatDate(key.expiration)}</TableCell>
-                  <TableCell className="font-data text-xs text-muted-foreground">{formatDate(key.last_used_at)}</TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      className="text-destructive"
-                      disabled={key.revoked}
-                      onClick={() => setRevoking(key)}
-                      title="Revoke"
-                    >
-                      <Trash2 className="size-4" aria-hidden />
-                      <span className="sr-only">Revoke {key.name}</span>
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </RuledTable>
+        <ApiKeysTable keys={pageKeys} onRevoke={setRevoking} />
       )}
+
+      {keys.length > 0 ? (
+        <TablePagination
+          page={currentPage}
+          limit={table.limit}
+          total={filteredKeys.length}
+          onPageChange={table.setPage}
+          onLimitChange={table.setLimit}
+          disabled={keysQuery.isFetching}
+        />
+      ) : null}
 
       <section className="grid gap-4 border-t border-border pt-5 lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-10">
         <div className="space-y-1">
-          <h2 className="text-sm font-semibold">Verify a key</h2>
+          <h2 className="text-sm font-heading">Verify a key</h2>
           <p className="text-[0.8125rem] leading-relaxed text-muted-foreground">Check that a secret is valid and see the scopes the server returns.</p>
         </div>
         <div className="space-y-2">
@@ -345,7 +307,13 @@ export default function Page() {
             <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={creating}>
               Cancel
             </Button>
-            <Button onClick={() => void createKey()} disabled={creating || createErrors.length > 0}>
+            <Button
+              onClick={() => {
+                setCreateAttempted(true);
+                if (createErrors.length === 0) void createKey();
+              }}
+              disabled={creating}
+            >
               {creating ? "Creating…" : "Create key"}
             </Button>
           </>
@@ -440,7 +408,7 @@ export default function Page() {
               className="font-data text-xs"
             />
           </Field>
-          <ValidationSummary errors={createErrors} title="Fix these before creating the key" />
+          <ValidationSummary errors={createAttempted ? createErrors : []} title="Fix these before creating the key" />
         </div>
       </DetailSheet>
 
@@ -480,7 +448,7 @@ export default function Page() {
         }
         confirmLabel="Revoke key"
         destructive
-        loading={revokeBusy}
+        pending={revokeBusy}
         onConfirm={() => void revokeKey()}
       >
         <Field label="Reason (optional)" htmlFor="revoke-reason">
@@ -492,6 +460,6 @@ export default function Page() {
           />
         </Field>
       </ConfirmDialog>
-    </div>
+    </PageLayout>
   );
 }

@@ -12,9 +12,14 @@ export const oauthApplication: Schema = obj({
   client_secret: opt(str({ description: "Returned on create and on secret rotation only." })),
   public: bool(),
   redirect_uris: arr(str({ format: "uri" })),
+  post_logout_redirect_uris: arr(str({ format: "uri" }), { description: "Allowed `post_logout_redirect_uri` values for RP-initiated logout." }),
   scopes: str({ description: "Space separated scopes granted to the application." }),
   consent_screen_enabled: bool(),
   pkce_required: bool(),
+  access_token_lifetime_seconds: int(),
+  refresh_token_lifetime_seconds: int(),
+  id_token_lifetime_seconds: int(),
+  groups_claim: enm(["none", "organizations", "roles", "all"], "What the `groups` claim contains."),
   ...timestamps,
 });
 
@@ -76,7 +81,10 @@ export const openIdConfiguration: Schema = obj({
   token_endpoint: str(),
   userinfo_endpoint: str(),
   jwks_uri: str(),
-  registration_endpoint: opt(str()),
+  revocation_endpoint: opt(str()),
+  introspection_endpoint: opt(str()),
+  end_session_endpoint: opt(str()),
+  device_authorization_endpoint: opt(str()),
   scopes_supported: arr(str()),
   response_types_supported: arr(str()),
   response_modes_supported: opt(arr(str())),
@@ -84,8 +92,16 @@ export const openIdConfiguration: Schema = obj({
   subject_types_supported: arr(str()),
   id_token_signing_alg_values_supported: arr(str()),
   token_endpoint_auth_methods_supported: arr(str()),
+  revocation_endpoint_auth_methods_supported: opt(arr(str())),
+  introspection_endpoint_auth_methods_supported: opt(arr(str())),
   code_challenge_methods_supported: arr(str()),
+  prompt_values_supported: opt(arr(str())),
   claims_supported: opt(arr(str())),
+  request_parameter_supported: opt(bool()),
+  request_uri_parameter_supported: opt(bool()),
+  claims_parameter_supported: opt(bool()),
+  access_token_format: opt(str()),
+  access_token_signing_alg_values_supported: opt(arr(str())),
 });
 
 export const oauthError: Schema = obj({
@@ -113,8 +129,9 @@ export const oauthIntrospection: Schema = obj({
   sub: opt(str()),
   aud: opt(str()),
   iss: opt(str()),
+  jti: opt(str()),
 });
 
 export const oauthApplicationList: Schema = obj({ data: arr(ref("OAuthApplication")), total_count: int() });
 
-export const userInfo: Schema = obj({ sub: str() }, { description: "Claims for the user behind the access token: `sub`, and whichever of `email`, `email_verified`, `name`, `given_name`, `family_name`, `picture` the scopes allow.", additional: true });
+export const userInfo: Schema = obj({ sub: str() }, { description: "Claims for the user behind the access token: `sub`, and whichever of `email`, `email_verified`, `name`, `given_name`, `family_name`, `preferred_username`, `picture`, `locale`, `updated_at`, `phone_number`, `phone_number_verified`, `groups`, `org_*` and `organizations` the scopes allow.", additional: true });

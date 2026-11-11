@@ -10,6 +10,7 @@ import { parseBody } from "../../lib/http";
 import { emitEvent } from "../../services/webhooks";
 
 import { addMembership, assertCanCreateOrganization, creatorRoleKey } from "../../services/orgs";
+import { revokeOrganizationAuthorityGrants } from "../../services/oidc/revocation";
 import { PERMISSIONS } from "../../services/rbac";
 import { resolveCaller } from "../orgs/auth";
 import { deletedObject, orgAccess, requireOrganizationsEnabled, resolveSlug } from "../orgs/shared";
@@ -76,8 +77,11 @@ export function registerOrganizationRoutes(app: Hono, ctx: AppContext) {
     const { org } = await orgAccess(ctx, c, PERMISSIONS.PROFILE_DELETE);
     if (!org.adminDeleteEnabled) throw new OrbitError(403, ErrorCodes.not_allowed_access, "Deleting this organization is disabled for admins");
     const payload = await serializeOrganization(ctx, org, { backend: true });
+    const members = await ctx.db.select({ userId: s.organizationMemberships.userId })
+      .from(s.organizationMemberships).where(eq(s.organizationMemberships.organizationId, org.id));
     deleteLogoFile(ctx, org.imageUrl);
     await ctx.db.delete(s.organizations).where(eq(s.organizations.id, org.id));
+    for (const member of members) await revokeOrganizationAuthorityGrants(ctx, member.userId);
     await emitEvent(ctx, "organization.deleted", payload);
     return c.json({ response: deletedObject("organization", org.id) });
   });

@@ -1,4 +1,5 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
+import { Page as PageLayout } from "../components/shared/page";
 import { Link, useNavigate } from "react-router-dom";
 import { keepPreviousData, useQueryClient } from "@tanstack/react-query";
 import {
@@ -11,8 +12,10 @@ import {
   DialogTitle,
   Input,
   Label,
+  SearchInput,
 } from "@orbitid/ui";
-import { Building2, Plus, Search, Trash2 } from "lucide-react";
+import { OVERLAY_WIDTH } from "../components/shared/overlay-sizes";
+import { Building2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { OrganizationJSON } from "@orbitid/shared";
 import { api, useApi } from "../lib/api";
@@ -20,7 +23,7 @@ import { errorMessage } from "../lib/errors";
 import { formatNumber } from "../lib/format";
 import { buildListPath } from "../lib/query";
 import { useTableState } from "../lib/use-table-state";
-import { useDebounced } from "../lib/hooks";
+import { useUrlSyncedInput } from "../lib/hooks";
 import { PageHeader } from "../components/shared/page-header";
 import { DataTable, type DataTableColumn } from "../components/shared/data-table";
 import { TablePagination } from "../components/shared/table-pagination";
@@ -72,9 +75,9 @@ function CreateOrganizationDialog({ open, onOpenChange }: { open: boolean; onOpe
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="rounded-[6px] sm:max-w-md">
+      <DialogContent className={`rounded-[6px] ${OVERLAY_WIDTH.form}`}>
         <DialogHeader>
-          <DialogTitle className="text-base font-[650] tracking-[-0.01em]">Create organization</DialogTitle>
+          <DialogTitle className="text-base font-heading tracking-[-0.01em]">Create organization</DialogTitle>
           <DialogDescription className="text-sm leading-6 text-muted-foreground">
             Organizations group members, roles, invitations and domains.
           </DialogDescription>
@@ -128,16 +131,10 @@ function CreateOrganizationDialog({ open, onOpenChange }: { open: boolean; onOpe
 export default function OrganizationsPage() {
   const navigate = useNavigate();
   const table = useTableState({ limit: 20, orderBy: "-created_at" });
-  const [search, setSearch] = useState(table.query);
-  const debounced = useDebounced(search, 300);
+  const [search, setSearch] = useUrlSyncedInput(table.query, table.setQuery, 300);
   const [createOpen, setCreateOpen] = useState(false);
   const [deleting, setDeleting] = useState<OrganizationJSON | null>(null);
   const queryClient = useQueryClient();
-
-  useEffect(() => {
-    if (debounced !== table.query) table.setQuery(debounced);
-  }, [debounced]);
-  useEffect(() => setSearch(table.query), [table.query]);
 
   const path = buildListPath("/organizations", {
     limit: table.limit,
@@ -160,11 +157,14 @@ export default function OrganizationsPage() {
           <div className="min-w-0">
             <Link
               to={`/organizations/${org.id}`}
+              title={org.name}
               className="block max-w-[34ch] truncate text-sm font-medium underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               {org.name}
             </Link>
-            <span className="block truncate font-data text-[0.6875rem] text-muted-foreground">{org.slug}</span>
+            <span title={org.slug} className="block max-w-[34ch] truncate font-data text-[0.6875rem] text-muted-foreground">
+              {org.slug}
+            </span>
           </div>
         </div>
       ),
@@ -179,8 +179,6 @@ export default function OrganizationsPage() {
     {
       id: "invitations",
       header: "Pending invitations",
-      headerClassName: "hidden sm:table-cell",
-      className: "hidden sm:table-cell",
       cell: (org) => (
         <span className="font-data text-xs tabular-nums text-muted-foreground">
           {formatNumber(org.pending_invitations_count ?? 0)}
@@ -191,6 +189,8 @@ export default function OrganizationsPage() {
       id: "created",
       header: "Created",
       sortKey: "created_at",
+      headerClassName: "hidden lg:table-cell",
+      className: "hidden lg:table-cell",
       cell: (org) => <TimeAgo value={org.created_at} className="font-data text-xs text-muted-foreground" />,
     },
     {
@@ -215,7 +215,7 @@ export default function OrganizationsPage() {
   ];
 
   return (
-    <>
+    <PageLayout>
       <PageHeader
         title="Organizations"
         description="Every organization on this instance, with member and invitation counts."
@@ -227,20 +227,13 @@ export default function OrganizationsPage() {
       />
 
       <div className="flex flex-wrap items-end gap-x-2 gap-y-3">
-        <div className="relative min-w-56 flex-1 max-w-md">
-          <Search
-            className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
-            strokeWidth={1.5}
-            aria-hidden
-          />
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search by name or slug"
-            aria-label="Search organizations"
-            className="h-[34px] pl-8"
-          />
-        </div>
+        <SearchInput
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search by name or slug"
+          aria-label="Search organizations"
+          className="min-w-56 max-w-md flex-1"
+        />
       </div>
 
       <DataTable
@@ -313,6 +306,6 @@ export default function OrganizationsPage() {
           }
         }}
       />
-    </>
+    </PageLayout>
   );
 }

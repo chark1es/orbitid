@@ -140,8 +140,8 @@ export function EnterpriseAccountsSection() {
               ? Reflect.get(account, "enterprise_connection_name") ?? Reflect.get(account, "name")
               : null;
           return (
-            <li key={index} className="flex items-center justify-between gap-2 px-3 py-2.5 text-sm">
-              <span>{typeof name === "string" ? name : t("userProfile.enterpriseAccounts.title")}</span>
+            <li key={index} className="flex min-w-0 items-center justify-between gap-2 px-3 py-2.5 text-sm">
+              <span className="min-w-0 truncate">{typeof name === "string" ? name : t("userProfile.enterpriseAccounts.title")}</span>
               <Badge variant="outline">{t("userProfile.connectedAccounts.connected")}</Badge>
             </li>
           );

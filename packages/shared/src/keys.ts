@@ -13,6 +13,21 @@ export const isPublishableKey = (k: string) => /^pk_(test|live)_/.test(k);
 export const isSecretKey = (k: string) => /^sk_(test|live)_/.test(k);
 
 /** Cookie names. */
+/**
+ * Browsers cap a cookie's lifetime at 400 days. The browser-owned cookies (`__client`, `__session`,
+ * `__client_uat`) use the cap and are rewritten on every use, so a browser that comes back after months is
+ * still signed in instead of arriving with a cookie the browser already dropped.
+ */
+export const COOKIE_MAX_AGE_SECONDS = 400 * 24 * 60 * 60;
+
+/**
+ * `sessions.expire_at` for a session whose operator set no maximum lifetime (`session.lifetimeSeconds: 0`,
+ * the default). A real date is still stored so sorting, stats and the dashboard keep working; no code path
+ * ever compares it as "expired" while the policy says unlimited. Kept below `Number.MAX_SAFE_INTEGER` for
+ * SQLite integers and Postgres `bigint` read as a JS number.
+ */
+export const SESSION_NEVER_EXPIRES_AT = 8_640_000_000_000_000;
+
 export const COOKIES = {
   session: "__session", client: "__client", clientUat: "__client_uat", handshake: "__orbit_handshake", devBrowser: "__orbit_db_jwt",
   /** Remembers a browser that may skip the second factor (`settings.session.trustedDevicesEnabled`). */

@@ -1,27 +1,27 @@
 import * as React from "react";
+import { PageHeader as SharedPageHeader } from "../../../components/shared/page-header";
 
 export function PageHeader({
   title,
   description,
+  descriptionClassName,
   badge,
   actions,
 }: {
   title: string;
   description?: React.ReactNode;
+  descriptionClassName?: string;
   badge?: React.ReactNode;
   actions?: React.ReactNode;
 }) {
   return (
-    <header className="flex flex-col gap-4 pb-1 sm:flex-row sm:items-start sm:justify-between">
-      <div className="min-w-0 space-y-1.5">
-        <div className="flex flex-wrap items-center gap-2.5">
-          <h1 className="text-[1.375rem] font-semibold leading-tight tracking-[-0.015em]">{title}</h1>
-          {badge}
-        </div>
-        {description ? <p className="max-w-[70ch] text-[0.8125rem] leading-relaxed text-muted-foreground">{description}</p> : null}
-      </div>
-      {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
-    </header>
+    <SharedPageHeader
+      title={title}
+      description={description}
+      descriptionClassName={descriptionClassName}
+      badge={badge}
+      actions={actions}
+    />
   );
 }
 
@@ -52,7 +52,7 @@ export function SettingsSection({
   return (
     <section aria-labelledby={headingId} className="grid gap-x-10 gap-y-4 border-t border-border pt-6 lg:grid-cols-[220px_minmax(0,1fr)]">
       <div className="space-y-1.5">
-        <h2 id={headingId} className="text-sm font-semibold">
+        <h2 id={headingId} className="text-[0.9375rem] font-heading tracking-[-0.01em]">
           {title}
         </h2>
         {description ? <p className="text-[0.8125rem] leading-relaxed text-muted-foreground">{description}</p> : null}

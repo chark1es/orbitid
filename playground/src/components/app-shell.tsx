@@ -24,7 +24,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@orbitid/ui";
-import { useAuth } from "@orbitid/react";
+import { UserButton, useAuth } from "@orbitid/react";
 import type { InstanceStatus } from "@/lib/env";
 import { useTheme } from "./theme-provider";
 import { StatusChip } from "./status-chip";
@@ -112,14 +112,9 @@ function SessionIndicator() {
     );
   }
   return (
-    <Link
-      href="/account"
-      className="hidden items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground sm:inline-flex"
-      title={`Signed in as ${userId}`}
-    >
-      <UserRound className="size-4" aria-hidden="true" />
-      <span className="font-data hidden text-xs lg:inline">{userId}</span>
-    </Link>
+    <span className="inline-flex items-center gap-2" title={`Signed in as ${userId}`}>
+      <UserButton />
+    </span>
   );
 }
 
@@ -261,7 +256,7 @@ export function AppShell({
             <div className="hidden min-w-0 sm:block">
               <InstanceChip status={status} />
             </div>
-            <span className="inline-flex shrink-0 items-center gap-1.5 rounded-sm border px-2 py-1 text-[0.6875rem] font-medium text-caution">
+            <span className="hidden shrink-0 items-center gap-1.5 rounded-sm border px-2 py-1 text-[0.6875rem] font-medium text-caution sm:inline-flex">
               <span aria-hidden="true" className="size-1.5 rounded-full bg-current" />
               <span className="md:hidden">Not for production</span>
               <span className="hidden md:inline">Test site, not for production</span>

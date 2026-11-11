@@ -10,6 +10,8 @@ import {
   PopoverContent,
   PopoverTrigger,
   Separator,
+  OVERLAY_WIDTH,
+  cn,
 } from "@orbitid/ui";
 import {
   CheckIcon,
@@ -67,7 +69,7 @@ export interface OrganizationSwitcherProps extends CommonOrgProps {
  */
 export function OrganizationSwitcher(props: OrganizationSwitcherProps) {
   return (
-    <OrgRoot appearance={props.appearance} className={props.className} whenDisabled="hidden">
+    <OrgRoot appearance={props.appearance} className={cn("w-auto min-w-0 max-w-full", props.className)} whenDisabled="hidden">
       <OrganizationSwitcherView {...props} />
     </OrgRoot>
   );
@@ -179,7 +181,7 @@ function OrganizationSwitcherView({
         <PopoverTrigger asChild>
           <Button
             variant="ghost"
-            className="h-auto w-full justify-start gap-2 px-2 py-1.5 sm:w-auto"
+            className="h-auto min-w-0 max-w-full justify-start gap-2 px-2 py-1.5 sm:max-w-[16rem]"
             aria-label={t("organizationSwitcher.triggerLabel")}
             aria-expanded={open}
           >
@@ -192,13 +194,15 @@ function OrganizationSwitcherView({
             ) : (
               <OrgAvatar name={self.name || "?"} />
             )}
-            <span className="flex min-w-0 flex-col items-start">
-              <span className="max-w-[10rem] truncate font-medium">{activeName}</span>
+            {/* Below sm the trigger is the avatar and the chevron: the name is the widest thing in a
+                375px header and it is repeated at the top of the popover. */}
+            <span className="hidden min-w-0 flex-col items-start sm:flex">
+              <span className="min-w-0 max-w-[10rem] truncate font-medium">{activeName}</span>
               {activeRole ? (
-                <span className="text-xs text-muted-foreground">{activeRole}</span>
+                <span className="truncate text-xs text-muted-foreground">{activeRole}</span>
               ) : null}
             </span>
-            <ChevronsUpDownIcon className="ml-auto size-4 text-muted-foreground" aria-hidden="true" />
+            <ChevronsUpDownIcon className="ml-auto size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           </Button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-80 p-2">
@@ -227,7 +231,7 @@ function OrganizationSwitcherView({
                     <Button
                       key={item.id}
                       variant="ghost"
-                      className="h-auto w-full justify-start gap-2 px-2 py-1.5"
+                      className="h-auto w-full min-w-0 justify-start gap-2 px-2 py-1.5"
                       disabled={selectAction.isPending}
                       aria-current={isActive ? "true" : undefined}
                       onClick={() => void handleSelect(item.organization)}
@@ -268,7 +272,7 @@ function OrganizationSwitcherView({
                     return (
                       <div
                         key={invitation.id}
-                        className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5"
+                        className="flex min-w-0 items-center justify-between gap-2 rounded-md px-2 py-1.5"
                       >
                         {organizationName ? (
                           <OrgAvatar name={organizationName} imageUrl={organizationImage} size="xs" />
@@ -318,9 +322,9 @@ function OrganizationSwitcherView({
                   {list.suggestions.data.map((suggestion) => (
                     <div
                       key={suggestion.id}
-                      className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5"
+                      className="flex min-w-0 items-center justify-between gap-2 rounded-md px-2 py-1.5"
                     >
-                      <span className="flex min-w-0 items-center gap-2">
+                      <span className="flex min-w-0 flex-1 items-center gap-2">
                         <OrgAvatar
                           name={suggestion.publicOrganizationData.name}
                           imageUrl={suggestion.publicOrganizationData.imageUrl}
@@ -396,7 +400,7 @@ function OrganizationSwitcherView({
       </Popover>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className={OVERLAY_WIDTH.form}>
           <DialogTitle className="sr-only">{t("createOrganization.title")}</DialogTitle>
           <CreateOrganization
             skipInvitationScreen={skipInvitationScreen}

@@ -15,6 +15,7 @@ import type { UserJSON } from "@orbitid/shared";
 import { useApi } from "../../lib/api";
 import { useDebounced } from "../../lib/hooks";
 import { primaryEmail, userLabel } from "../../lib/format";
+import { OVERLAY_WIDTH } from "../shared/overlay-sizes";
 import { UserAvatar } from "../shared/user-avatar";
 import { useShowOrganizations } from "../../lib/features";
 import { visibleNavGroups } from "./nav";
@@ -59,17 +60,23 @@ export function CommandPalette() {
       <Button
         variant="outline"
         size="sm"
-        className="h-7 w-7 justify-center gap-2 px-0 text-muted-foreground sm:w-52 sm:justify-start sm:px-2"
+        className="h-7 w-7 justify-center gap-2 px-0 text-muted-foreground lg:w-52 lg:justify-start lg:px-2"
         onClick={() => setOpen(true)}
         aria-label="Search pages and users"
       >
-        <Search className="size-3.5 shrink-0" aria-hidden />
-        <span className="hidden flex-1 text-left text-[0.8125rem] font-normal sm:inline">Search</span>
-        <kbd className="hidden h-4.5 items-center rounded-xs border border-border bg-muted px-1 font-data text-[0.6875rem] text-muted-foreground sm:inline-flex">
+        <Search className="size-4 shrink-0" aria-hidden />
+        <span className="hidden flex-1 text-left text-[0.8125rem] font-normal lg:inline">Search</span>
+        <kbd className="hidden h-4.5 items-center rounded-sm border border-border bg-muted px-1 font-data text-[0.6875rem] text-muted-foreground lg:inline-flex">
           ⌘K
         </kbd>
       </Button>
-      <CommandDialog open={open} onOpenChange={setOpen} title="Command palette" description="Search pages and users">
+      <CommandDialog
+        open={open}
+        onOpenChange={setOpen}
+        title="Command palette"
+        description="Search pages and users"
+        className={OVERLAY_WIDTH.sheet}
+      >
         <CommandInput placeholder="Search pages or users…" value={search} onValueChange={setSearch} />
         <CommandList>
           <CommandEmpty>{isFetching ? "Searching…" : "No results. Try a name, an email, or a page."}</CommandEmpty>

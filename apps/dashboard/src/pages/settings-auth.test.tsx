@@ -35,6 +35,16 @@ describe("authentication settings", () => {
     expect(await screen.findByText("Enable at least one second factor before requiring MFA.")).toBeTruthy();
   });
 
+  it("keeps a one-line switch row at the 40px table-row rhythm", async () => {
+    mockApi();
+    renderPage(<AuthPage />);
+
+    const label = await screen.findByText("Allow password sign-in");
+    const row = label.closest("div.flex");
+    expect(row?.className).toContain("py-2.5");
+    expect(row?.className).not.toContain("py-3");
+  });
+
   it("explains and saves the anonymous account retention", async () => {
     const calls = mockApi();
     renderPage(<AuthPage />);
@@ -49,7 +59,7 @@ describe("authentication settings", () => {
         anonymous: { enabled: true, retentionSeconds: 86_400 },
       });
     });
-    expect(screen.getByText(/Guests count against your user totals/)).toBeTruthy();
+    expect(screen.getByText(/Guests are ordinary user rows/)).toBeTruthy();
   });
 });
 

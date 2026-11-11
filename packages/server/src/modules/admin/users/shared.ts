@@ -6,6 +6,7 @@ import * as s from "../../../db/schema";
 import { type AppContext } from "../../../context";
 import { bool, metadataSchema, normalizeEmail, queryValues } from "../shared";
 import { containsText } from "../../../lib/db";
+import { endSessionsForUser } from "../../../services/sessions";
 
 export const AUDIT_ACTOR = "secret_key";
 export const MAX_PROFILE_IMAGE_BYTES = 512 * 1024;
@@ -135,12 +136,9 @@ export async function userWhere(ctx: AppContext, c: Context): Promise<SQL | unde
   return conds.length ? and(...conds) : undefined;
 }
 
-/** Revokes every non-ended session of a user (ban / password change). */
+/** Revokes every open session of a user (ban / password change) and the OIDC grants each authorized. */
 export async function revokeSessions(ctx: AppContext, userId: string, exceptSessionId?: string): Promise<void> {
-  await ctx.db
-            .update(s.sessions)
-            .set({ status: "revoked", updatedAt: Date.now() })
-            .where(and(eq(s.sessions.userId, userId), eq(s.sessions.status, "active"), exceptSessionId ? sql`${s.sessions.id} != ${exceptSessionId}` : undefined));
+  await endSessionsForUser(ctx, userId, "revoked", exceptSessionId);
 }
 
 export const USER_ORDER_COLUMNS = {

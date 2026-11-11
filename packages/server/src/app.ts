@@ -6,6 +6,7 @@ import type { AppContext } from "./context";
 import { requireSecretKey } from "./middleware";
 import { dashboardHandler } from "./modules/dashboard";
 import { csrfProtection, securityHeaders, uploadSizeLimit } from "./lib/security";
+import { oidcCors } from "./modules/oidc/shared";
 
 import jwks from "./modules/jwks";
 import environment from "./modules/environment";
@@ -41,6 +42,8 @@ export function createApp(ctx: AppContext) {
   // ───────────── security (headers, CSRF, body caps) ─────────────
   // Mounted first so `await next()` wraps every response, including error responses from onError.
   app.use("*", securityHeaders(ctx));
+  // OIDC endpoints answer their own CORS (wildcard, bearer-only) before the cookie-credentialed Frontend API policy.
+  app.use("*", oidcCors);
   app.use("*", uploadSizeLimit());
   app.use("*", csrfProtection(ctx));
 

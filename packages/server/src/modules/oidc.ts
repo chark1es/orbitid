@@ -6,6 +6,7 @@ import { registerTokenRoutes } from "./oidc/token";
 import { registerDeviceRoutes } from "./oidc/device";
 import { registerMachineRoutes } from "./oidc/machine";
 import { registerApplicationRoutes } from "./oidc/applications";
+import { registerLogoutRoutes } from "./oidc/logout";
 
 export default function routes(ctx: AppContext) {
   const app = new Hono();
@@ -13,6 +14,7 @@ export default function routes(ctx: AppContext) {
   registerDiscoveryRoutes(app, ctx);
   registerTokenRoutes(app, ctx);
   registerDeviceRoutes(app, ctx);
+  registerLogoutRoutes(app, ctx);
   registerMachineRoutes(app, ctx);
   registerApplicationRoutes(app, ctx);
 

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { cn } from "@orbitid/ui";
 
 /**
@@ -66,13 +67,27 @@ export function StatusBadge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 whitespace-nowrap rounded-[3px] border px-1.5 py-px text-xs font-medium text-foreground",
+        "inline-flex h-5 items-center gap-1.5 whitespace-nowrap rounded-[3px] border px-1.5 text-xs font-medium leading-none text-foreground control-optical",
         palette.chip,
         className,
       )}
     >
       <span className={cn("size-1.5 shrink-0 rounded-full", palette.dot)} aria-hidden />
       {text.charAt(0).toUpperCase() + text.slice(1)}
+    </span>
+  );
+}
+
+/** A label that is not a status (a provider name, a count): the chip shape without a status dot. */
+export function LabelChip({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex h-5 items-center whitespace-nowrap rounded-[3px] border border-border px-1.5 text-xs font-medium leading-none text-muted-foreground control-optical",
+        className,
+      )}
+    >
+      {children}
     </span>
   );
 }

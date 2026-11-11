@@ -13,7 +13,7 @@ import { serializeSession } from "../serializers";
 import { signSessionToken } from "../services/tokens";
 import { consumeBackupCode, userHasMfa, verifyTotp, verifiedSecondFactorPhones } from "../services/mfa";
 import { verifyPassword } from "../services/passwords";
-import { endSession, evaluateSessionStatus, markSessionReverified, requireSession, touchSession } from "../services/sessions";
+import { endSession, evaluateSessionStatus, markSessionReverified, requireSession, slideSessionActivity, touchSession } from "../services/sessions";
 import { recordFailedAttempt, resetFailedAttempts } from "../services/users";
 import { getUserById } from "../services/users";
 import { sendEmail, sendSms } from "../services/mail";
@@ -112,7 +112,11 @@ export default function routes(ctx: AppContext) {
   const mintToken = async (c: Context, template?: string) => {
     const client = await requireClientRow(ctx, c);
     const row = await requireSession(ctx, client.id, sessionParam(c));
-    await hit(ctx, `session_token:${client.id}`, 300, 60_000);
+    // A refresh is ordinary activity for an inactivity policy, and a legitimately signed-in browser refreshes
+    // for every open tab: keep the budget high enough that a refresh can never look like abuse (600/min ≈ 10/s).
+    await hit(ctx, `session_token:${client.id}`, 600, 60_000);
+    // Sliding inactivity: minting a token extends an operator's idle timeout (no-op when it is disabled).
+    await slideSessionActivity(ctx, row);
     const jwt = await signSessionToken(ctx, row.id, { template, azp: clientAzp(c) });
     return c.json({ jwt });
   };

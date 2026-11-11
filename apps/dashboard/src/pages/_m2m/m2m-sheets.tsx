@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Button, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@orbitid/ui";
 import {
   CheckboxRow,
@@ -22,6 +23,10 @@ export function MachineSheet({ ctl }: { ctl: M2MController }) {
     saveMachine,
     toggleScopedMachine,
   } = ctl;
+  const [attempted, setAttempted] = useState(false);
+  useEffect(() => {
+    if (!machineOpen) setAttempted(false);
+  }, [machineOpen]);
 
   return (
     <DetailSheet
@@ -34,7 +39,13 @@ export function MachineSheet({ ctl }: { ctl: M2MController }) {
           <Button variant="outline" onClick={() => setMachineOpen(false)} disabled={machineSaving}>
             Cancel
           </Button>
-          <Button onClick={() => void saveMachine()} disabled={machineSaving || machineErrors.length > 0}>
+          <Button
+            onClick={() => {
+              setAttempted(true);
+              if (machineErrors.length === 0) void saveMachine();
+            }}
+            disabled={machineSaving}
+          >
             {machineSaving ? "Saving…" : machineForm.id ? "Save changes" : "Create machine"}
           </Button>
         </>
@@ -76,7 +87,7 @@ export function MachineSheet({ ctl }: { ctl: M2MController }) {
             )}
           </div>
         </Field>
-        <ValidationSummary errors={machineErrors} title="Fix this before saving" />
+        <ValidationSummary errors={attempted ? machineErrors : []} title="Fix this before saving" />
       </div>
     </DetailSheet>
   );

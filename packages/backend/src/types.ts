@@ -24,6 +24,7 @@ import type {
   RoleJSON,
   SessionJSON,
   SignInTokenJSON,
+  TrustedDeviceJSON,
   UserJSON,
   UserRolesJSON,
   WaitlistEntryJSON,
@@ -52,6 +53,7 @@ export type AllowlistIdentifier = Camelize<AllowlistIdentifierJSON>;
 export type BlocklistIdentifier = Camelize<BlocklistIdentifierJSON>;
 export type JwtTemplate = Camelize<JwtTemplateJSON>;
 export type SignInToken = Camelize<SignInTokenJSON>;
+export type TrustedDevice = Camelize<TrustedDeviceJSON>;
 export type UserRoles = Camelize<UserRolesJSON>;
 export type WebhookEndpoint = Camelize<WebhookEndpointJSON>;
 export type WebhookDelivery = Camelize<WebhookDeliveryJSON>;
@@ -100,3 +102,14 @@ export interface TestingToken {
 export interface Stats {
   [key: string]: unknown;
 }
+
+/** A session-signing key returned by `POST /v1/instance/signing_keys/rotate`. */
+export interface SigningKey {
+  object: "signing_key";
+  kid: string;
+  algorithm: string;
+  active: boolean;
+}
+
+/** Hashers the server can verify for an imported `password_digest` (`PASSWORD_HASHERS` on the server). */
+export type PasswordHasher = "bcrypt" | "argon2" | "scrypt";

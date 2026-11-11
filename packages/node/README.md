@@ -39,7 +39,7 @@ never returned.
 | `publishableKey` | `ORBITID_PUBLISHABLE_KEY` | No | A stand-in for `apiUrl`: the server URL is read from it. |
 | `audience` | `ORBITID_AUDIENCE` | No | Expected `aud`. Leave unset for session tokens, which carry none. |
 | `webhookSecret` | `ORBITID_WEBHOOK_SECRET` | No | `whsec_…`. Without it `webhooks.verify()` throws a configuration error. |
-| `clockToleranceSeconds` | — | No | Clock skew allowed for `exp`/`nbf`. Default `5`. |
+| `clockToleranceSeconds` | — | No | Clock skew allowed for `exp`/`nbf`. Default `60`. |
 | `authorizedParties` | — | No | Accepted `azp` values (your app origins). |
 | `timeoutMs` | — | No | Per-attempt timeout. Default `10_000`. |
 | `retries` | — | No | Extra attempts for **GET** only. Default `2`. |

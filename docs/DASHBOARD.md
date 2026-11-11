@@ -50,14 +50,14 @@ serves both). Set `ORBITID_DEV_API_URL` to a non-default port only together with
 | `/` | Overview | Instance stats, the sign-up chart and the live activity board. Shows the publishable key and database; secret keys stay out of the dashboard. |
 | `/users` | Users | Server-side search, filters, sorting and pagination; bulk actions. |
 | `/users/:id` | User detail | Profile, identifiers (read-only: passwords, MFA and identifiers are the user's to change), metadata, sessions, organizations, instance roles, ban/lock, delete. |
-| `/organizations`, `/organizations/:id` | Organizations | Members, invitations, domains, membership requests and roles. |
+| `/organizations`, `/organizations/:id` | Organizations | Members, invitations, domains (including enrollment mode and affiliation-code verification), membership requests and roles. |
 | `/sessions` | Sessions | Every session on the instance, with a revoke action. |
 | `/invitations`, `/waitlist` | Invitations, Waitlist | Instance-level invitations and the waitlist. |
 | `/restrictions` | Restrictions | Allowlist and blocklist entries, sign-up restrictions. |
 | `/roles` | Roles & permissions | Instance (`app:`) and organization (`org:`) roles/permissions, kept in separate scopes. |
 | `/settings/authentication` | Authentication | Identifiers, password policy, second factors (including email code as a second factor), sign-up mode, guest accounts, captcha and abuse protection. |
-| `/settings/social` | Social connections | OAuth providers and custom OIDC connections. Apple takes a team ID, key ID and `.p8` private key instead of a client secret. |
-| `/settings/sessions` | Sessions settings | Session lifetime, token refresh, trusted devices, custom JWT claims. |
+| `/settings/social` | Social connections | 26 built-in OAuth presets and custom OIDC / OAuth 2.0 providers: discovery or manual endpoints, claim mapping, PKCE, client-auth method, logo, Test connection, delete. Apple takes a team ID, key ID and `.p8` private key instead of a client secret. |
+| `/settings/sessions` | Sessions settings | Opt-in session lifetime and inactivity limits (unlimited by default), token refresh cadence, multi-session mode, trusted devices, custom JWT claims. |
 | `/settings/organizations` | Organizations settings | Whether users may create organizations, membership limits, domains, roles. |
 | `/settings/email-sms` | Email & SMS | Branding, the mail transport (automatic, Resend, SMTP, or not configured), the from address, code lifetimes, a real test send, and SMS delivery. |
 | `/settings/appearance` | Appearance | Logo, colours, theme, hosted page copy. |
@@ -78,6 +78,16 @@ Organization management links, user tabs and creation controls stay hidden until
 enabled. Direct organization pages show a loading or locked state while unavailable. The configuration page
 remains reachable, and instance roles stay available regardless of the organization switch.
 
+A domain starts unverified. **Verify** sends a one-time code to an address on that domain through the Backend
+API, and the code proves ownership. **Enrollment** is editable per domain: manual invitation, automatic
+invitation or automatic suggestion. Changing to automatic invitation can enroll matching members, and a
+verified domain is required before automatic enrollment takes effect.
+
+Admin lists that the dashboard shows in full — API keys, machines and tokens, webhook endpoints, OAuth
+applications, enterprise connections, JWT templates and the allow/block lists — read every server page instead
+of silently stopping at the first 100 rows. API keys also paginate in the browser, so the count and filters
+cover the whole set.
+
 On **User detail**, the **Roles** tab assigns `app:` roles directly to the user; the **Organizations** tab assigns
 `org:` roles to memberships. Saving instance-role assignments revokes the user's sessions. Existing offline
 JWTs can still verify until expiry; see [RBAC.md](RBAC.md).
@@ -86,11 +96,37 @@ Identifiers, password status and MFA status are read-only to operators. Credenti
 the user-facing authentication/account flow. Operators may still ban, lock, delete, revoke sessions and revoke
 trusted devices. The **Trusted devices** tab lists device labels, IPs, activity and expiry with a confirmed revoke
 action. Session/activity rows identify second factors skipped by a trusted device. Guest users carry a **Guest**
-status and a notice explaining that organization and API-key creation require an upgraded account.
+status and a notice explaining that a guest cannot create organizations or API keys until it becomes a registered
+account by adding a verified identifier or a password.
 
 Forms wait for required-field settings before allowing user saves. Server validation enforces the same rules;
 removing a required email/phone or saving missing provider credentials is refused even through a direct API call.
 The Appearance preview follows the selected theme and allows a temporary Light/Dark flip without saving a draft.
+
+## Theming and SSR
+
+`@orbitid/ui` exports `ThemeProvider`, `useTheme`, `initTheme` and `themeBootstrapScript`. The choice lives in
+`localStorage` under `orbitid-theme` (`light`, `dark` or `system`); `system` follows `prefers-color-scheme` live.
+
+- **Client-only apps (the dashboard).** Call `initTheme()` once before `createRoot` (the dashboard does this in
+  `main.tsx`) so the class is on `<html>` before the first paint, then render `ThemeProvider`. There is no flash.
+- **Server-rendered apps (Next.js, React SSR).** The server cannot read `localStorage` or the visitor's colour
+  scheme, so `ThemeProvider` renders a deterministic snapshot on the server and for the hydration render (the
+  `defaultTheme`, with `system` resolved to light) and switches to the stored/system preference immediately after
+  hydration. That is what prevents the `system:light` → stored-dark hydration mismatch. To avoid a flash of the
+  wrong theme before hydration, put the exported bootstrap in `<head>`:
+
+  ```tsx
+  import { themeBootstrapScript } from "@orbitid/ui";
+
+  <head>
+    <script dangerouslySetInnerHTML={{ __html: themeBootstrapScript() }} />
+  </head>
+  ```
+
+  Pass the same `storageKey`/`defaultTheme` to the provider and the bootstrap if you customise them. Do not read
+  `localStorage` during render in your own components either: use `useTheme()` after hydration.
+
 
 ## Connect your app
 

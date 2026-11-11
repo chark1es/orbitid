@@ -17,7 +17,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
-import { asc, count, getTableColumns, sql } from "drizzle-orm";
+import { asc, count, getTableColumns } from "drizzle-orm";
 import { getTableConfig as getPostgresTableConfig } from "drizzle-orm/pg-core";
 import { getTableConfig as getSqliteTableConfig } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
@@ -31,6 +31,7 @@ import { dialect, isPostgresUrl, type Dialect } from "../../db/dialect";
 import { TABLE_NAMES } from "../../db/define-schema";
 import * as schema from "../../db/schema";
 import { decrypt, encrypt } from "../../lib/crypto";
+import { inWriteTransaction } from "../../lib/db";
 
 const headerSchema = z.object({
   orbitid_export: z.literal(EXPORT_FORMAT),
@@ -124,26 +125,13 @@ function allTables(): TableEntry[] {
 /**
  * Everything the import does, the clearing of the target included, happens in one transaction: a malformed line, a
  * constraint failure or a count mismatch rolls the whole thing back and leaves the target exactly as it was.
- * SQLite's driver is synchronous (its transaction callback cannot await), so there the single connection is driven with
- * explicit BEGIN / COMMIT / ROLLBACK.
+ * {@link inWriteTransaction} owns the SQLite connection (serialized, dedicated writer) as well as Postgres.
  */
 export async function importDatabase(ctx: AppContext, options: ImportOptions): Promise<ImportResult> {
   if (options.truncate && !options.yes) {
     throw new Error("--truncate deletes everything in the target database. Pass --yes to confirm.");
   }
-  if (ctx.database.driver !== "sqlite") {
-    return ctx.db.transaction(async (tx) => importInto({ ...ctx, db: tx as unknown as AppContext["db"] }, options));
-  }
-  const raw = ctx.db as unknown as { run(query: unknown): unknown };
-  await raw.run(sql`BEGIN IMMEDIATE`);
-  try {
-    const result = await importInto(ctx, options);
-    await raw.run(sql`COMMIT`);
-    return result;
-  } catch (error) {
-    await raw.run(sql`ROLLBACK`);
-    throw error;
-  }
+  return inWriteTransaction(ctx, (tx) => importInto({ ...ctx, db: tx }, options));
 }
 
 async function importInto(ctx: AppContext, options: ImportOptions): Promise<ImportResult> {
@@ -168,7 +156,13 @@ async function importInto(ctx: AppContext, options: ImportOptions): Promise<Impo
   const flush = async (entries: { entry: TableEntry; rows: Record<string, unknown>[] }[]) => {
     for (const { entry, rows } of entries) {
       if (!rows.length) continue;
-      await ctx.db.insert(entry.table as never).values(rows as never);
+      // Older exports may predate `pkce_required`. The SQLite table's physical default is still `true` from its
+      // original creation (it cannot be altered without rebuilding a table that grants cascade from), so an
+      // absent column must be filled explicitly with the product default rather than left to the engine.
+      const values = entry.key === "oauthApplications"
+        ? rows.map((row) => (row.pkce_required === undefined ? { ...row, pkce_required: false } : row))
+        : rows;
+      await ctx.db.insert(entry.table as never).values(values as never);
     }
     entries.length = 0;
   };

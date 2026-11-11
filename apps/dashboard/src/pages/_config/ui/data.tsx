@@ -1,10 +1,121 @@
 import * as React from "react";
-import { Button, Input, Table, Textarea, cn } from "@orbitid/ui";
+import {
+  Button,
+  Input,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  Textarea,
+  cn,
+  useMediaQuery,
+} from "@orbitid/ui";
 import { Plus, X } from "lucide-react";
 import { CopyButton } from "./clipboard";
 
-/** Table frame with the shared row height, rule, and column header treatment. */
+type TablePart = React.ComponentType<{ children?: React.ReactNode; className?: string }>;
+
+type NodeElement = React.ReactElement<{ children?: React.ReactNode }>;
+
+function childElements(node: React.ReactNode): NodeElement[] {
+  return React.Children.toArray(node).filter(React.isValidElement) as NodeElement[];
+}
+
+function findPart(node: React.ReactNode, part: TablePart): NodeElement | null {
+  for (const child of childElements(node)) {
+    if (child.type === part) return child;
+    const nested = findPart(child.props.children, part);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+function plainText(node: React.ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(plainText).join("");
+  if (React.isValidElement<{ children?: React.ReactNode }>(node)) return plainText(node.props.children);
+  return "";
+}
+
+/**
+ * The stacked layout is not a table: a `<TableCell>` element cannot render inside a `<div>`/`<dd>`
+ * (React rejects `<td>` there). Unwrap the cell into a plain `<div>` that carries its class names
+ * and children, so page-level sizing such as `max-w-[26rem]` still applies to the stacked row.
+ */
+function stackedCell(cell: React.ReactElement<{ children?: React.ReactNode; className?: string }>): React.ReactNode {
+  if (cell.type !== TableCell) return cell;
+  return <div className={cn("min-w-0", cell.props.className)}>{cell.props.children}</div>;
+}
+
+interface StackedCell {
+  cell: React.ReactElement<{ children?: React.ReactNode; colSpan?: number }>;
+  label: string;
+}
+
+function stackedRows(children: React.ReactNode): { primary: StackedCell; action: StackedCell | null; fields: StackedCell[]; full: React.ReactNode | null }[] {
+  const header = findPart(children, TableHeader);
+  const body = findPart(children, TableBody);
+  if (!body) return [];
+  const headerRow = header ? childElements(header.props.children)[0] : null;
+  const labels = headerRow ? childElements(headerRow.props.children).map((head) => plainText(head.props.children).trim()) : [];
+  const actionIndex = labels.findIndex((label) => label.toLowerCase() === "actions");
+
+  return childElements(body.props.children).map((row) => {
+    const cells = childElements(row.props.children) as StackedCell["cell"][];
+    const labelled = cells.map((cell, index) => ({ cell, label: labels[index] ?? "" }));
+    if (cells.length === 1 && (cells[0].props.colSpan ?? 1) > 1) {
+      return { primary: labelled[0], action: null, fields: [], full: cells[0].props.children };
+    }
+    const action = actionIndex >= 0 ? labelled[actionIndex] ?? null : null;
+    const fields = labelled.filter((_entry, index) => index !== 0 && index !== actionIndex);
+    return { primary: labelled[0], action, fields, full: null };
+  });
+}
+
+/**
+ * Table frame with the shared row height, rule, and column header treatment. Below 640px the table becomes
+ * labelled stacked rows, like DataTable, so an actions column never sits off-screen.
+ */
 export function RuledTable({ children, className }: { children: React.ReactNode; className?: string }) {
+  const stacked = useMediaQuery("(max-width: 639px)");
+
+  if (stacked) {
+    return (
+      <div className={cn("w-full border-y border-border", className)} data-slot="ruled-table-stack">
+        <ul className="divide-y divide-border">
+          {stackedRows(children).map((row, index) => (
+            <li key={index} className="min-w-0 px-3 py-3">
+              {row.full !== null ? (
+                row.full
+              ) : (
+                <>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1 break-words">{stackedCell(row.primary.cell)}</div>
+                    {row.action ? <div className="shrink-0">{stackedCell(row.action.cell)}</div> : null}
+                  </div>
+                  {row.fields.length > 0 ? (
+                    <dl className="mt-2.5 grid grid-cols-[minmax(0,1fr)] gap-1 border-t border-border pt-2">
+                      {row.fields.map((field, fieldIndex) => (
+                        <div key={fieldIndex} className="flex min-w-0 items-baseline justify-between gap-4">
+                          <dt className="text-[0.6875rem] font-medium tracking-[0.04em] text-muted-foreground uppercase">
+                            {field.label}
+                          </dt>
+                          <dd className="min-w-0 overflow-hidden text-right break-words [&_.font-data]:break-all [&_span]:align-baseline">{stackedCell(field.cell)}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  ) : null}
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
   return (
     <div className={cn("w-full border-y border-border", className)}>
       <Table
@@ -119,21 +230,4 @@ export function EndpointRow({ label, description, url }: { label: string; descri
   );
 }
 
-export function StatusBadge({ status }: { status: string }) {
-  const normalized = status.toLowerCase();
-  const positive = ["active", "success", "enabled", "verified", "accepted", "complete", "delivered"].includes(normalized);
-  const caution = ["pending", "expired", "disabled", "inactive", "paused"].includes(normalized);
-  const negative = ["failed", "revoked", "rejected", "banned", "locked"].includes(normalized);
-  return (
-    <span className="inline-flex w-fit items-center gap-1.5 rounded-sm border border-border px-1.5 py-0.5 text-xs font-medium capitalize">
-      <span
-        className={cn(
-          "size-1.5 shrink-0 rounded-full",
-          positive ? "bg-go" : negative ? "bg-signal" : caution ? "bg-caution" : "bg-muted-foreground",
-        )}
-        aria-hidden
-      />
-      {normalized.replace(/_/g, " ")}
-    </span>
-  );
-}
+export { StatusBadge } from "../../../components/shared/status-badge";

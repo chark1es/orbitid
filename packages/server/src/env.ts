@@ -4,6 +4,10 @@ export interface Env {
   port: number;
   /** Public URL of this server (Frontend API / issuer), e.g. http://localhost:4000 */
   baseUrl: string;
+  /** True when `baseUrl` came from ORBITID_BASE_URL or an explicit override (it is then the canonical issuer). */
+  baseUrlExplicit: boolean;
+  /** Number of trusted reverse proxies (`ORBITID_TRUST_PROXY`). Forwarded host/proto are used only when > 0. */
+  trustProxy: number;
   /** `postgres://…` (recommended), `pglite://…`, `sqlite:<file>` or ":memory:" (throwaway database for tests). */
   databaseUrl: string;
   /** 32+ char secret for AES-GCM at-rest encryption of private keys / OAuth tokens */
@@ -38,7 +42,10 @@ export function loadEnv(overrides: Partial<Env> = {}): Env {
     throw new Error("ORBITID_ENCRYPTION_KEY must be at least 32 characters long, for example `openssl rand -base64 32`.");
   }
   const databaseUrl = overrides.databaseUrl ?? e.ORBITID_DATABASE_URL ?? e.DATABASE_URL;
+  const baseUrlExplicit = overrides.baseUrl !== undefined || e.ORBITID_BASE_URL !== undefined;
   const baseUrl = (overrides.baseUrl ?? e.ORBITID_BASE_URL ?? `http://localhost:${port}`).replace(/\/$/, "");
+  const trustProxy = overrides.trustProxy ?? (e.ORBITID_TRUST_PROXY === "true" ? 1 : Number(e.ORBITID_TRUST_PROXY ?? 0));
+  if (!Number.isInteger(trustProxy) || trustProxy < 0) throw new Error("ORBITID_TRUST_PROXY must be a non-negative integer (or true).");
   const local = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(baseUrl);
   if (!encryptionKey && (!local || /^postgres(ql)?:/.test(databaseUrl ?? ""))) {
     throw new Error("ORBITID_ENCRYPTION_KEY is required with Postgres or a public ORBITID_BASE_URL. Without it the built-in development key would protect stored secrets. Use `openssl rand -base64 32`.");
@@ -50,6 +57,8 @@ export function loadEnv(overrides: Partial<Env> = {}): Env {
   return {
     port,
     baseUrl,
+    baseUrlExplicit,
+    trustProxy,
     databaseUrl: databaseUrl ?? (e.ORBITID_DATABASE_PATH ? `sqlite:${e.ORBITID_DATABASE_PATH}` : `sqlite:${resolve(dataDir, "orbitid.db")}`),
     encryptionKey: encryptionKey ?? "dev-only-insecure-encryption-key-change-me!!",
     encryptionKeyProvided: !!encryptionKey,

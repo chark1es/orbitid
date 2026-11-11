@@ -79,7 +79,7 @@ export function TrustedDevicesSection({ user, refresh, onError, onNotice }: Sect
                     {expiresAt ? ` · ${t("userProfile.trustedDevices.expires", { date: formatDate(expiresAt) })}` : ""}
                   </p>
                 </div>
-                <Button type="button" variant="link" size="sm" className="h-auto p-0" disabled={busy} onClick={() => void revoke(device.id)}>
+                <Button type="button" variant="link" size="sm" className="h-auto min-h-6 px-0 py-1" disabled={busy} onClick={() => void revoke(device.id)}>
                   {t("userProfile.trustedDevices.revoke")}
                 </Button>
               </li>
@@ -175,7 +175,7 @@ export function DevicesSection({ user, refresh, onError, onNotice }: SectionProp
                     {t("userProfile.devices.lastActive", { date: formatDate(session.last_active_at) })}
                   </p>
                 </div>
-                <Button type="button" variant="link" size="sm" className="h-auto p-0" disabled={busy} onClick={() => void revoke(session.id)}>
+                <Button type="button" variant="link" size="sm" className="h-auto min-h-6 px-0 py-1" disabled={busy} onClick={() => void revoke(session.id)}>
                   {t("userProfile.devices.revoke")}
                 </Button>
               </li>

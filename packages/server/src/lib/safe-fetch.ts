@@ -203,9 +203,10 @@ export async function assertPublicUrl(ctx: AppContext | null, raw: string, param
  * point at an internal host. `jose`'s own remote set bypasses this module, hence the manual fetch + cache.
  */
 const jwksCache = new Map<string, { set: ReturnType<typeof createLocalJWKSet>; expiresAt: number }>();
-export async function remoteJwks(ctx: AppContext | null, uri: string, opts: { ttlMs?: number } = {}) {
+export async function remoteJwks(ctx: AppContext | null, uri: string, opts: { ttlMs?: number; forceRefresh?: boolean } = {}) {
   const cached = jwksCache.get(uri);
-  if (cached && cached.expiresAt > Date.now()) return cached.set;
+  if (cached && cached.expiresAt > Date.now() && !opts.forceRefresh) return cached.set;
+  if (opts.forceRefresh) jwksCache.delete(uri);
   const res = await safeFetch(ctx, uri, { timeoutMs: 5_000, maxBytes: 256 * 1024 });
   if (!res.ok) throw new SafeFetchError(`Could not load the key set from ${new URL(uri).host} (${res.status})`);
   let jwks: JSONWebKeySet;

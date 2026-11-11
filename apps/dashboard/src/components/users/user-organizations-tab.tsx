@@ -8,7 +8,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  Input,
+  SearchInput,
   Label,
   Select,
   SelectContent,
@@ -16,7 +16,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@orbitid/ui";
-import { Building2, Plus, Search, Trash2, UserPlus } from "lucide-react";
+import { OVERLAY_WIDTH } from "../shared/overlay-sizes";
+import { Building2, Plus, Trash2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import type { OrganizationJSON, OrganizationMembershipJSON, UserJSON } from "@orbitid/shared";
 import { api, useApi } from "../../lib/api";
@@ -75,7 +76,7 @@ function AddToOrganizationDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className={OVERLAY_WIDTH.form}>
         <DialogHeader>
           <DialogTitle>Add to organization</DialogTitle>
           <DialogDescription>Search for an organization, then choose the member's role.</DialogDescription>
@@ -83,19 +84,15 @@ function AddToOrganizationDialog({
         <div className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="org-search">Organization</Label>
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-              <Input
-                id="org-search"
-                value={search}
-                onChange={(event) => {
-                  setSearch(event.target.value);
-                  setOrganization(null);
-                }}
-                placeholder="Search by name or slug…"
-                className="pl-8"
-              />
-            </div>
+            <SearchInput
+              id="org-search"
+              value={search}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setOrganization(null);
+              }}
+              placeholder="Search by name or slug…"
+            />
             {(orgs.data?.data?.length ?? 0) > 0 ? (
               <ul className="max-h-48 overflow-y-auto rounded-[4px] border border-border">
                 {orgs.data?.data?.map((option) => (
@@ -206,8 +203,6 @@ export function UserOrganizationsTab({ user, onUpdated }: { user: UserJSON; onUp
     {
       id: "joined",
       header: "Joined",
-      headerClassName: "hidden sm:table-cell",
-      className: "hidden sm:table-cell",
       cell: (membership) => (
         <span className="font-data text-xs text-muted-foreground">{formatDate(membership.created_at)}</span>
       ),

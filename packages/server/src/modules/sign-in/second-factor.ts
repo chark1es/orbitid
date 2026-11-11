@@ -7,7 +7,7 @@ import * as s from "../../db/schema";
 import { clientIp, parseBody } from "../../lib/http";
 import { hit } from "../../lib/rate-limit";
 import { issueTrustedDevice, setTrustedDeviceCookie } from "../../services/trusted-devices";
-import { consumeBackupCode, emailSecondFactor, supportedSecondFactors, verifiedSecondFactorPhones, verifyTotp } from "../../services/mfa";
+import { consumeBackupCode, firstFactorChannel, supportedSecondFactors, verifiedSecondFactorPhones, verifyTotp } from "../../services/mfa";
 import { sendEmail, sendSms } from "../../services/mail";
 import { listEmails, recordFailedAttempt, resetFailedAttempts } from "../../services/users";
 import { getOrCreateClient } from "../auth/client-auth";
@@ -30,7 +30,12 @@ export function registerSecondFactorRoutes(app: Hono, ctx: AppContext, helpers: 
     assertSignInAllowed(user);
     const state = asSignInState(row);
     if (state.first?.status !== "verified") throw new OrbitError(400, ErrorCodes.client_state_invalid, "The first factor has not been verified");
-    const available = await supportedSecondFactors(ctx, user, { firstFactorStrategy: state.first?.strategy });
+    const firstFactor = {
+      firstFactorStrategy: state.first?.strategy,
+      firstFactorEmailId: state.first?.emailId,
+      firstFactorPhoneId: state.first?.phoneId,
+    };
+    const available = await supportedSecondFactors(ctx, user, firstFactor);
     if (!available.length) throw new OrbitError(400, ErrorCodes.needs_second_factor, "This account has no second factor");
     const strategy = body.strategy ?? state.second?.strategy ?? available[0]!.strategy;
     if (!available.some((f) => f.strategy === strategy)) {
@@ -44,9 +49,14 @@ export function registerSecondFactorRoutes(app: Hono, ctx: AppContext, helpers: 
       await saveSignInState(ctx, row, { ...state, second: { strategy, status: "unverified" } });
     } else if (strategy === "email_code") {
       const emails = await listEmails(ctx, user.id);
-      const chosen = body.email_address_id ? emails.find((e) => e.id === body.email_address_id) : undefined;
-      if (body.email_address_id && !chosen) throw new OrbitError(404, ErrorCodes.resource_not_found, "Email address not found");
-      const email = chosen ?? await emailSecondFactor(ctx, user);
+      const offered = available.filter((f) => f.strategy === "email_code");
+      const hit = body.email_address_id
+        ? offered.find((f) => f.email_address_id === body.email_address_id)
+        : offered[0];
+      if (body.email_address_id && !hit) {
+        throw new OrbitError(400, ErrorCodes.strategy_for_user_invalid, "That email address is not available as a second factor", { param_name: "email_address_id" });
+      }
+      const email = emails.find((e) => e.id === hit?.email_address_id);
       if (!email || !email.verified) throw new OrbitError(400, ErrorCodes.strategy_for_user_invalid, "This account has no verified email address", { param_name: "strategy" });
       const settings = ctx.settings.get();
       const issued = await issueVerification(ctx, {
@@ -60,7 +70,8 @@ export function registerSecondFactorRoutes(app: Hono, ctx: AppContext, helpers: 
       });
       await saveSignInState(ctx, row, { ...state, second: { strategy, verificationId: issued.row.id, emailId: email.id, status: "unverified" } });
     } else {
-      const phones = await verifiedSecondFactorPhones(ctx, user);
+      const offeredIds = available.filter((f) => f.strategy === "phone_code").map((f) => f.phone_number_id);
+      const phones = (await verifiedSecondFactorPhones(ctx, user)).filter((p) => offeredIds.includes(p.id));
       const phone = body.phone_number_id ? phones.find((p) => p.id === body.phone_number_id) : phones.find((p) => p.defaultSecondFactor) ?? phones[0];
       if (!phone) throw new OrbitError(400, ErrorCodes.strategy_for_user_invalid, "No verified phone number for second factor");
       const settings = ctx.settings.get();
@@ -88,7 +99,12 @@ export function registerSecondFactorRoutes(app: Hono, ctx: AppContext, helpers: 
     }
     const strategy = body.strategy ?? state.second?.strategy;
     if (!strategy) throw new OrbitError(400, ErrorCodes.client_state_invalid, "No second factor in progress", { param_name: "strategy" });
-    const available = await supportedSecondFactors(ctx, user, { firstFactorStrategy: state.first?.strategy });
+    const firstFactor = {
+      firstFactorStrategy: state.first?.strategy,
+      firstFactorEmailId: state.first?.emailId,
+      firstFactorPhoneId: state.first?.phoneId,
+    };
+    const available = await supportedSecondFactors(ctx, user, firstFactor);
     if (!available.some((f) => f.strategy === strategy)) {
       throw new OrbitError(400, ErrorCodes.strategy_for_user_invalid, `Second factor "${strategy}" is not available`, { param_name: "strategy" });
     }
@@ -96,12 +112,21 @@ export function registerSecondFactorRoutes(app: Hono, ctx: AppContext, helpers: 
     if (strategy === "totp") ok = verifyTotp(ctx, user, body.code ?? "");
     else if (strategy === "backup_code") ok = await consumeBackupCode(ctx, user, body.code ?? "");
     else if (strategy === "phone_code") {
+      const phoneId = state.second?.phoneId;
+      const samePhone = firstFactorChannel(state.first?.strategy) === "phone" && phoneId === state.first?.phoneId;
+      const phone = phoneId ? (await verifiedSecondFactorPhones(ctx, user)).find((p) => p.id === phoneId) : undefined;
+      if (!phone || samePhone) {
+        throw new OrbitError(422, ErrorCodes.form_code_incorrect, "There is no pending verification to check", { param_name: "code" });
+      }
       await checkSignInCode(user, await getVerification(ctx, "sign_in_second_factor", row.id), body.code);
       ok = true;
     } else if (strategy === "email_code") {
-      const email = await emailSecondFactor(ctx, user);
+      // Verify against the address chosen for THIS sign-in, not whichever address happens to be first.
+      const emailId = state.second?.emailId;
+      const email = emailId ? (await listEmails(ctx, user.id)).find((e) => e.id === emailId && e.verified) : undefined;
       const verification = await getVerification(ctx, "sign_in_second_factor", row.id);
-      if (!email || !verification || verification.strategy !== "email_code" || verification.identifier !== email.email) {
+      const sameEmail = firstFactorChannel(state.first?.strategy) === "email" && emailId === state.first?.emailId;
+      if (!email || sameEmail || !verification || verification.strategy !== "email_code" || verification.identifier !== email.email) {
         throw new OrbitError(422, ErrorCodes.form_code_incorrect, "There is no pending verification to check", { param_name: "code" });
       }
       await checkSignInCode(user, verification, body.code);

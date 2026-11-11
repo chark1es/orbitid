@@ -8,6 +8,7 @@ import { decrypt } from "../../lib/crypto";
 import { parseBody } from "../../lib/http";
 import { serializeExternalAccount } from "../../serializers";
 import { assertNotLastIdentification } from "../../services/users";
+import { assertAdditionalIdentificationsAllowed } from "../../services/enterprise-access";
 import { getOAuthAdapter, isProviderEnabled, providerKeyFromStrategy } from "../../services/oauth-providers";
 import { requireReverification } from "../auth/reverification";
 import { createOAuthAuthorization } from "../auth/oauth-flow";
@@ -28,6 +29,7 @@ export function registerExternalAccountRoutes(app: Hono, ctx: AppContext, helper
 
   app.post("/external_accounts", requireReverification(ctx, "first_factor", 10), async (c) => {
     const { client, user } = await auth(c);
+    await assertAdditionalIdentificationsAllowed(ctx, user.id);
     const body = await parseBody(c, externalAccountCreateSchema);
     if (!body.strategy.startsWith("oauth_")) throw new OrbitError(422, ErrorCodes.oauth_provider_not_enabled, "strategy must be an oauth_* strategy", { param_name: "strategy" });
     const provider = providerKeyFromStrategy(body.strategy);

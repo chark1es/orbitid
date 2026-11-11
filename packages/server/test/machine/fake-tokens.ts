@@ -41,3 +41,6 @@ export async function generateSigningKey(): Promise<never> {
 export async function getActiveSigningKey(): Promise<never> {
   throw new Error("getActiveSigningKey is not used by the machine test suite");
 }
+
+/** The real function decrypts stored keys; the fake has none, so there is nothing to check. */
+export async function assertSigningKeysReadable(): Promise<void> {}

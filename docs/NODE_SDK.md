@@ -28,7 +28,8 @@ createOrbitId({
   jwksUrl,          // optional; defaults to `${apiUrl}/.well-known/jwks.json`
   publishableKey,   // optional; only used to derive apiUrl
   audience,         // optional; for tokens with an `aud`
-  clockToleranceSeconds, // optional; default 5
+  clockToleranceSeconds, // optional; early-clock (nbf/iat) tolerance, default 60
+  expClockToleranceSeconds, // optional; expiry tolerance, default 10 (a 60 s JWT is usable ~70 s max)
   authorizedParties,     // optional; accepted `azp` values
   webhookSecret,    // optional; `whsec_…`
   fetch,            // optional; transport override (tests, proxies)
@@ -84,6 +85,20 @@ Failure reasons, all on `OrbitIdError.reason`: `token-missing`, `token-expired`,
 `token-not-active-yet`, `invalid-signature`, `invalid-algorithm`, `invalid-issuer`,
 `invalid-audience`, `invalid-authorized-party`, `invalid-claims`, `not-session-token`,
 `session-pending`, `no-matching-key`, `jwks-fetch-failed`.
+
+### `@orbitid/backend#verifyToken` time tolerances
+
+The lower-level verifier used by this SDK splits time tolerances the same way:
+
+| Option | Default | Applies to |
+|---|---|---|
+| `expiredToleranceMs` | `0` (exact) | `exp` only. This is the real revocation bound for a session JWT; keep it small. |
+| `notBeforeToleranceMs` | `clockSkewInMs`, then `0` | `nbf` and `iat` only (verifier clock behind the issuer). |
+| `clockSkewInMs` | `0` | **Deprecated.** Early-only (`nbf`/`iat`); it no longer extends `exp`. Use the two options above. |
+
+A token whose `iat` (or `nbf`) is more than the early tolerance in the future is refused as
+`token-not-active-yet`, exactly like the server and `@orbitid/node`. An expired token is
+`token-expired`; an application should fetch a fresh token rather than treat the user as banned.
 
 ### Token sources
 
@@ -254,6 +269,28 @@ await orbit.apiKeys.verify(key); // POST /v1/api_keys/verify
 
 Both are live server checks, so revocation and expiry take effect immediately. They need the secret
 key and therefore never belong in a browser.
+
+## Backend API client
+
+`orbit.client` is the typed client from `@orbitid/backend`, so every Backend API route is reachable
+through the Node SDK with the same method names and camelCase parameters. Recent additions:
+
+| Call | HTTP route |
+|---|---|
+| `client.users.createUser({ passwordDigest, passwordHasher })` | `POST /v1/users` (`password_hasher`: `bcrypt`, `argon2` or `scrypt`) |
+| `client.organizations.createOrganizationMembershipRequest({ organizationId, userId, status? })` | `POST /v1/organizations/:id/membership_requests` |
+| `client.organizations.acceptOrganizationMembershipRequest({ organizationId, requestId })` | `POST /v1/organizations/:id/membership_requests/:rid/accept` (returns the membership) |
+| `client.organizations.rejectOrganizationMembershipRequest({ organizationId, requestId })` | `POST /v1/organizations/:id/membership_requests/:rid/reject` (returns the request) |
+| `client.users.getUserTrustedDeviceList({ userId })` | `GET /v1/users/:id/trusted_devices` |
+| `client.users.revokeUserTrustedDevice({ userId, deviceId })` | `DELETE /v1/users/:id/trusted_devices/:device_id` |
+| `client.instance.rotateSigningKey()` | `POST /v1/instance/signing_keys/rotate` |
+| `client.jwtTemplates.createJwtTemplate({ …, customSigningKey, signingAlgorithm })` | `POST /v1/jwt_templates` |
+| `client.jwtTemplates.updateJwtTemplate(id, { customSigningKey, signingAlgorithm })` | `PATCH /v1/jwt_templates/:id` |
+
+A `passwordDigest` is rejected unless `passwordHasher` names the hasher that produced it. A JWT
+template with `customSigningKey: true` signs with its own key (`RS256`, `ES256` or `HS256`), returned
+as `signingKey`, instead of the instance session key. Rotating the instance signing key leaves old
+keys in the JWKS until their tokens expire, so cached verifiers keep working.
 
 ## Testing your integration
 

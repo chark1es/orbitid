@@ -12,9 +12,9 @@ import {
 export function SiteHeader() {
   return (
     <header className="border-b">
-      <div className="container-page flex h-16 items-center justify-between gap-4">
-        <nav className="flex items-center gap-6 text-sm font-medium">
-          <Link href="/" className="text-base font-semibold">
+      <div className="container-page flex min-h-16 flex-wrap items-center justify-between gap-x-4 gap-y-2 py-2">
+        <nav className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-1 text-sm font-medium">
+          <Link href="/" className="min-w-0 truncate text-base font-semibold">
             OrbitID Example
           </Link>
           <SignedIn>
@@ -28,7 +28,7 @@ export function SiteHeader() {
             </Protect>
           </SignedIn>
         </nav>
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-3">
           <SignedIn>
             <OrganizationSwitcher />
             <UserButton />

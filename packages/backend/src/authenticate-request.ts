@@ -10,7 +10,9 @@ export type AuthenticateRequestReason =
   | "session-token-missing-refresh-needed"
   | "session-token-expired"
   | "session-token-expired-refresh-needed"
-  | "session-token-invalid";
+  | "session-token-invalid"
+  /** The token is valid but its session is still `pending` (e.g. required MFA not finished). */
+  | "session-pending";
 
 export interface AuthenticateRequestOptions extends VerifyTokenOptions {
   publishableKey?: string;
@@ -140,6 +142,9 @@ export async function authenticateRequest(request: Request, options: Authenticat
   try {
     // Tokens are issued by the Frontend API, so that URL (explicit or from the publishable key) is the expected issuer.
     const claims = await verifyToken(token, { ...options, issuer: options.issuer ?? publishableKeyUrl(options) ?? frontendApiUrl(options) ?? undefined });
+    // A valid token can still belong to a pending session (required MFA not set up yet). `toAuth()` already
+    // refuses it, so admitting the request as "signed-in" here would let status-based gates in before MFA.
+    if (claims.sts === "pending") return signedOut("session-pending");
     currentSessionId = claims.sid;
     presentedToken = token;
     return {

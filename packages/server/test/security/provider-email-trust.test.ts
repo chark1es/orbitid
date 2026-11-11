@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { setSafeFetchTransportForTests } from "../../src/lib/safe-fetch";
 import { setup } from "../core/helpers";
 import { getOAuthAdapter } from "../../src/services/oauth-providers";
+import { mappedProfile } from "../../src/services/oauth-providers/custom";
+import { profileEmailMayLink } from "../../src/services/external-identity";
 
 async function profileFor(key: string, userinfo: unknown, extra: Record<string, unknown> = {}) {
   const { ctx } = await setup();
@@ -40,5 +42,32 @@ describe("provider email trust", () => {
     expect((await profileFor("google", { sub: "g1", email: "a@example.com", email_verified: true })).emailVerified).toBe(true);
     expect((await profileFor("google", { sub: "g2", email: "a@example.com", email_verified: false })).emailVerified).toBe(false);
     expect((await profileFor("google", { sub: "g3", email: "a@example.com" })).emailVerified).toBe(false);
+  });
+
+  it("trustEmailVerified only fills an ABSENT claim, never an explicit false", () => {
+    const cfg = { key: "custom_test", clientId: "id", clientSecret: "secret", trustEmailVerified: true };
+    const tokens = { accessToken: "t", raw: {} };
+
+    const explicitFalse = mappedProfile(cfg as never, { sub: "1", email: "victim@example.com", email_verified: false }, tokens as never);
+    expect(explicitFalse.emailVerified).toBe(false);
+    expect(profileEmailMayLink(explicitFalse)).toBe(false);
+
+    const stringFalse = mappedProfile(cfg as never, { sub: "2", email: "victim@example.com", email_verified: "false" }, tokens as never);
+    expect(stringFalse.emailVerified).toBe(false);
+    expect(profileEmailMayLink(stringFalse)).toBe(false);
+
+    const numericFalse = mappedProfile(cfg as never, { sub: "3", email: "victim@example.com", email_verified: 0 }, tokens as never);
+    expect(numericFalse.emailVerified).toBe(false);
+    expect(profileEmailMayLink(numericFalse)).toBe(false);
+
+    // No claim at all: the operator's explicit promise applies.
+    const absent = mappedProfile(cfg as never, { sub: "4", email: "ada@example.com" }, tokens as never);
+    expect(absent.emailVerified).toBe(true);
+    expect(profileEmailMayLink(absent)).toBe(true);
+
+    // Without the promise an absent claim is unverified.
+    const untrusted = mappedProfile({ ...cfg, trustEmailVerified: false } as never, { sub: "5", email: "ada@example.com" }, tokens as never);
+    expect(untrusted.emailVerified).toBe(false);
+    expect(profileEmailMayLink(untrusted)).toBe(false);
   });
 });

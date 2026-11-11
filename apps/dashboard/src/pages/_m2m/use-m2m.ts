@@ -1,14 +1,18 @@
 import { useState } from "react";
 import type { M2MMachineJSON, M2MTokenJSON, PaginatedList } from "@orbitid/shared";
 import { toast } from "sonner";
-import { api, useApi } from "../../lib/api";
+import { api, apiAllPages, useApi } from "../../lib/api";
 import { oneTimeSecret, unwrapList } from "../_config/data";
 import { errorMessage, parseJsonRecord } from "../_config/settings";
 import { type MachineForm, type MintForm, EMPTY_MACHINE, EMPTY_MINT } from "./model";
 
 export function useM2M() {
-  const machinesQuery = useApi<PaginatedList<M2MMachineJSON>>(["m2m-machines"], "/m2m/machines?limit=100");
-  const tokensQuery = useApi<PaginatedList<M2MTokenJSON>>(["m2m-tokens"], "/m2m/tokens?limit=100");
+  const machinesQuery = useApi<PaginatedList<M2MMachineJSON>>(["m2m-machines"], "/m2m/machines", {
+    queryFn: ({ signal }) => apiAllPages<M2MMachineJSON>("/m2m/machines", { signal }),
+  });
+  const tokensQuery = useApi<PaginatedList<M2MTokenJSON>>(["m2m-tokens"], "/m2m/tokens", {
+    queryFn: ({ signal }) => apiAllPages<M2MTokenJSON>("/m2m/tokens", { signal }),
+  });
   const machines = unwrapList<M2MMachineJSON>(machinesQuery.data);
   const tokens = unwrapList<M2MTokenJSON>(tokensQuery.data);
 

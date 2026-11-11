@@ -21,7 +21,7 @@ bun run --filter @orbitid/server start keys
 bun run --filter orbitid-playground dev
 ```
 
-Open http://localhost:3300.
+Open http://localhost:3300, not http://127.0.0.1:3300: the instance's cross-site session cookie is scoped to `localhost`, so the IP form looks signed out.
 
 The publishable key carries the Frontend API URL, so `ORBITID_API_URL` is optional. When the key is missing or the server does not answer, the Setup page shows the variables to set and the commands above.
 
@@ -75,4 +75,4 @@ The unit tests cover the feature matrix builder against an `EnvironmentJSON` fix
 
 ## Local only
 
-The playground holds your secret key and calls Backend API helpers (seed data, webhook registration, email test), so it is meant to run on your own machine. `bun run dev` and `bun run start` bind to `127.0.0.1`, which is the real boundary: nothing on your network can reach it. As a second guard it answers only when the request's `Host` header is `localhost`, `127.0.0.1` or `[::1]`; that header is client-controlled, so it protects against mistakes (a reverse proxy, a changed bind address), not against someone who can already reach the port. To expose it anyway, change the bind address yourself and set `ORBITID_PLAYGROUND_ALLOW_REMOTE=true` (WEBSITE · BACKEND), and only on a network you trust.
+The playground holds your secret key and calls Backend API helpers (seed data, webhook registration, email test), so it is meant to run on your own machine. `bun run dev` and `bun run start` bind to `localhost` (`next -H localhost`), which resolves to loopback only, so nothing on your network can reach it and the browser origin matches the `localhost` cookie the instance sets. As a second guard it answers only when the request's `Host` header is `localhost`, `127.0.0.1` or `[::1]`; that header is client-controlled, so it protects against mistakes (a reverse proxy, a changed bind address), not against someone who can already reach the port. To expose it anyway, change the bind address yourself and set `ORBITID_PLAYGROUND_ALLOW_REMOTE=true` (WEBSITE · BACKEND), and only on a network you trust.

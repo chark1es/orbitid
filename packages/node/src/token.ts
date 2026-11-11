@@ -15,8 +15,21 @@ export interface VerifyTokenOptions {
   audience?: string | string[];
   /** Accepted `azp` values (your app origins). */
   authorizedParties?: string[];
-  /** Clock skew allowed for `exp`/`nbf`, in seconds. Defaults to 5. */
+  /**
+   * Clock skew allowed for `nbf`/`iat` when the verifier's clock is *behind* the issuer, in seconds. Defaults to
+   * 60, so a 60 s token minted milliseconds apart verifies. This tolerance does not apply to `exp`.
+   */
   clockToleranceSeconds?: number;
+  /**
+   * Clock skew allowed for `exp`, in seconds. Defaults to 10. Keeping this separate from `clockToleranceSeconds`
+   * is what bounds revocation: a 60 s JWT stays usable for at most ~70 s after it was minted, not ~120 s.
+   */
+  expClockToleranceSeconds?: number;
+  /**
+   * Expected token kind. Defaults to `"session"`, which refuses a JWT-template token even when it is signed with
+   * the instance key. Pass `"jwt_template"` to verify a template token deliberately.
+   */
+  tokenType?: "session" | "jwt_template";
 }
 
 export interface TokenVerifierOptions {
@@ -24,6 +37,7 @@ export interface TokenVerifierOptions {
   audience?: string | string[];
   authorizedParties?: string[];
   clockToleranceSeconds?: number;
+  expClockToleranceSeconds?: number;
   jwks: JwksCache;
 }
 
@@ -87,22 +101,48 @@ export async function verifySessionToken(options: VerifyTokenOptions, verifier: 
   const key = await verifier.jwks.getKey(typeof header.kid === "string" ? header.kid : undefined, alg);
   const audience = options.audience ?? verifier.audience;
 
+  const earlyTolerance = options.clockToleranceSeconds ?? verifier.clockToleranceSeconds ?? 60;
+  const expTolerance = options.expClockToleranceSeconds ?? verifier.expClockToleranceSeconds ?? 10;
+
   let result: JWTVerifyResult;
   try {
     result = await jwtVerify(token, key, {
       issuer: options.issuer ?? verifier.issuer,
       algorithms: [alg],
       ...(audience === undefined ? {} : { audience }),
-      clockTolerance: options.clockToleranceSeconds ?? verifier.clockToleranceSeconds ?? 5,
+      // `jose` applies one tolerance to every time claim. Give it the larger (early) value so `nbf` skew is
+      // accepted, then enforce `exp` below with its own, much smaller tolerance.
+      clockTolerance: Math.max(earlyTolerance, expTolerance),
     });
   } catch (error) {
     throw mapJoseError(error);
   }
 
   const payload = result.payload as unknown as SessionClaims;
+  const nowSeconds = Date.now() / 1000;
+  // A token is not usable past its own `exp` plus the small expiry tolerance. This is the real revocation bound:
+  // a 60 s JWT can never be replayed ~120 s after mint because the verifier's clock runs behind.
+  if (typeof payload.exp === "number" && payload.exp + expTolerance < nowSeconds) {
+    throw verificationError("token-expired", "token_expired", "The session token has expired");
+  }
+  // `iat`/`nbf` are allowed to be early (verifier behind issuer) by the early tolerance only.
+  for (const claim of ["nbf", "iat"] as const) {
+    const value = payload[claim];
+    if (typeof value === "number" && value > nowSeconds + earlyTolerance) {
+      throw verificationError("token-not-active-yet", "token_not_active_yet", "The session token is not active yet");
+    }
+  }
   // Machine and OIDC tokens share the instance key but carry an audience; they are not sessions.
   if (payload.aud !== undefined && audience === undefined) {
     throw verificationError("not-session-token", "token_not_session", "That token is not a session token");
+  }
+  // A template token is an integration credential with its own lifetime; it is not proof of a session.
+  if (options.tokenType === "jwt_template") {
+    if (payload.token_type !== "jwt_template") {
+      throw verificationError("not-session-token", "token_not_template", "That token is not a JWT template token");
+    }
+  } else if (payload.token_type === "jwt_template") {
+    throw verificationError("not-session-token", "token_not_session", "JWT template tokens cannot be used as session tokens");
   }
   if (typeof payload.sub !== "string" || typeof payload.sid !== "string") {
     throw verificationError("invalid-claims", "token_invalid", "The session token is missing the sub/sid claims");

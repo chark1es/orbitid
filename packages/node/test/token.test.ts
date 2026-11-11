@@ -4,7 +4,7 @@ import { createOrbitId } from "../src/client";
 import { OrbitIdError } from "../src/errors";
 import { JwksCache } from "../src/jwks";
 import { createTransport } from "../src/transport";
-import { startRealServer, createUserWithSession, type RealServer } from "./helpers/server";
+import { startRealServer, createUserWithSession, backend, fetchJson, type RealServer } from "./helpers/server";
 
 let server: RealServer | null = null;
 
@@ -138,6 +138,29 @@ describe("verifyToken against the real instance JWKS", () => {
     const orbit = sdkFor(server);
     await expect(orbit.verifyToken("not-a-jwt")).rejects.toMatchObject({ reason: "invalid-claims" });
     await expect(orbit.verifyToken("")).rejects.toMatchObject({ code: "token_missing", reason: "token-missing" });
+  });
+
+  it("rejects a JWT template token as a session unless explicitly requested", async () => {
+    server = await startRealServer();
+    const user = await createUserWithSession(server);
+    await backend(server, "POST", "/v1/jwt_templates", { name: "long-lived", claims: { plan: "pro" }, lifetime: 315_360_000 });
+    const minted = await fetchJson(`${server.url}/v1/client/sessions/${user.sessionId}/tokens/long-lived`, {
+      method: "POST",
+      headers: { cookie: user.cookie, "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(minted.status).toBe(200);
+    const template = (minted.body as { jwt: string }).jwt;
+
+    const orbit = sdkFor(server);
+    await expect(orbit.verifyToken(template)).rejects.toMatchObject({ code: "token_not_session", reason: "not-session-token" });
+    await expect(orbit.authenticate({ headers: { authorization: `Bearer ${template}` } })).resolves.toBeNull();
+
+    await expect(orbit.verifyToken(template, { tokenType: "jwt_template" })).resolves.toMatchObject({
+      sub: user.userId,
+      sid: user.sessionId,
+      plan: "pro",
+    });
   });
 
   it("rejects a machine token (audience, no session id) as not a session token", async () => {
@@ -338,6 +361,36 @@ describe("transport wiring for JWKS", () => {
   it("surfaces a JWKS outage as a typed error rather than signed-out", async () => {
     const orbit = createOrbitId({ secretKey: "sk_test_abc12345", apiUrl: "http://127.0.0.1:1", retries: 0, timeoutMs: 500 });
     await expect(orbit.verifyToken("a.b.c")).rejects.toBeInstanceOf(OrbitIdError);
+  });
+});
+
+describe("split clock tolerances", () => {
+  it("accepts nbf skew but rejects a token 20 s past exp even with the 60 s early tolerance", async () => {
+    const { publicKey, privateKey } = await generateKeyPair("RS256");
+    const { exportJWK } = await import("jose");
+    const jwk = { ...(await exportJWK(publicKey)), kid: "kid_skew", alg: "RS256", use: "sig" };
+    const cache = new JwksCache({
+      url: "https://auth.example.com/.well-known/jwks.json",
+      fetch: async () => new Response(JSON.stringify({ keys: [jwk] }), { status: 200 }),
+    });
+    const { verifySessionToken } = await import("../src/token");
+    const verifier = { issuer: "https://auth.example.com", clockToleranceSeconds: 60, jwks: cache };
+    const now = Math.floor(Date.now() / 1000);
+    const sign = (exp: number, nbf: number) => new SignJWT({ sid: "sess_skew", sts: "active" })
+      .setProtectedHeader({ alg: "RS256", kid: "kid_skew", typ: "JWT" })
+      .setSubject("user_skew")
+      .setIssuer("https://auth.example.com")
+      .setIssuedAt(now - 70)
+      .setNotBefore(nbf)
+      .setExpirationTime(exp)
+      .sign(privateKey);
+
+    // A verifier whose clock is 20 s fast: `nbf` is still accepted.
+    await expect(verifySessionToken({ token: await sign(now + 60, now + 20) }, verifier)).resolves.toMatchObject({ sub: "user_skew" });
+    // 5 s past exp is inside the 10 s expiry bound.
+    await expect(verifySessionToken({ token: await sign(now - 5, now - 70) }, verifier)).resolves.toMatchObject({ sub: "user_skew" });
+    // 20 s past exp is not: the old single 60 s tolerance made a 60 s token usable for ~120 s.
+    await expect(verifySessionToken({ token: await sign(now - 20, now - 80) }, verifier)).rejects.toMatchObject({ code: "token_expired", reason: "token-expired" });
   });
 });
 

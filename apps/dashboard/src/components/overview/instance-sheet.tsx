@@ -18,16 +18,18 @@ function Delta({ value, label }: { value: number | null; label: string }) {
   if (value === 0) return <p className="text-xs leading-5 text-muted-foreground">No change vs previous 7 days</p>;
   const Icon = value > 0 ? ArrowUpRight : ArrowDownRight;
   return (
-    <p className="flex items-center gap-1 text-xs leading-5 text-muted-foreground">
-      {/* The arrow and the printed sign carry the direction; colour is a second cue only. */}
-      <Icon className={value > 0 ? "size-3 text-go" : "size-3 text-signal"} strokeWidth={1.5} aria-hidden />
-      <span className="tabular-nums text-foreground">{value > 0 ? `+${formatNumber(value)}` : formatNumber(value)}</span>
-      <span>vs previous 7 days</span>
+    <p className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs leading-5 text-muted-foreground">
+      {/* The arrow and the number are one unit; on a phone the label moves below instead of splitting it. */}
+      <span className="inline-flex items-center gap-1 whitespace-nowrap">
+        <Icon className={value > 0 ? "size-4 text-go" : "size-4 text-signal"} aria-hidden />
+        <span className="tabular-nums text-foreground">{value > 0 ? `+${formatNumber(value)}` : formatNumber(value)}</span>
+      </span>
+      <span className="whitespace-nowrap">vs previous 7 days</span>
     </p>
   );
 }
 
-function Cell({
+function CountRow({
   label,
   value,
   note,
@@ -39,66 +41,68 @@ function Cell({
   loading: boolean;
 }) {
   return (
-    <div className="min-w-0 border-b border-border px-4 py-4 lg:border-b-0">
-      <dt className="text-[0.75rem] font-semibold uppercase tracking-[0.04em] text-muted-foreground">{label}</dt>
-      <dd className="mt-1.5 text-[1.75rem] font-[650] leading-none tracking-[-0.02em] tabular-nums text-foreground">
-        {loading ? <span className="inline-block h-6 w-14 animate-pulse rounded-[2px] bg-muted align-middle" /> : value}
+    <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 px-4 py-2.5">
+      <dt className="w-40 shrink-0 text-sm text-muted-foreground">{label}</dt>
+      <dd className="text-sm font-medium tabular-nums text-foreground">
+        {loading ? <span className="inline-block h-3.5 w-10 animate-pulse rounded-[3px] bg-muted align-middle" /> : value}
       </dd>
-      <dd className="mt-1.5">{note}</dd>
+      <dd className="min-w-0 flex-1 text-xs leading-5 text-muted-foreground">{note}</dd>
     </div>
   );
 }
 
 /**
- * The instance sheet: every headline number on one ruled strip, aligned figures, no cards.
- * Figures come from `GET /stats`; the block counts come from the same payload.
+ * The instance sheet: counts set as ruled rows at body size. Real numbers, no hero figures and no
+ * grid of identical cards. Figures come from `GET /stats`; the block counts come from the same payload.
  */
 export function InstanceSheet({ stats, loading }: { stats: InstanceStatsJSON | undefined; loading: boolean }) {
   const signUps30d = (stats?.signups_by_day ?? []).reduce((total, point) => total + point.count, 0);
   const signIns30d = (stats?.signins_by_day ?? []).reduce((total, point) => total + point.count, 0);
+  const banned = stats?.banned_users ?? 0;
+  const locked = stats?.locked_users ?? 0;
 
   return (
     <div className="border-y border-border">
-      <dl className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
-        <Cell
+      <dl className="divide-y divide-border">
+        <CountRow
           label="Users"
           loading={loading}
           value={formatNumber(stats?.users_total)}
           note={
-            <p className="text-xs leading-5 text-muted-foreground">
+            <>
               <span className="tabular-nums">{formatNumber(stats?.users_active_7d)}</span> active in the last 7 days
-            </p>
+            </>
           }
         />
-        <Cell
+        <CountRow
           label="Active sessions"
           loading={loading}
           value={formatNumber(stats?.sessions_active)}
-          note={<p className="text-xs leading-5 text-muted-foreground">Unexpired, status active</p>}
+          note="Unexpired, status active"
         />
-        <Cell
+        <CountRow
           label="Organizations"
           loading={loading}
           value={formatNumber(stats?.organizations_total)}
-          note={<p className="text-xs leading-5 text-muted-foreground">Across the whole instance</p>}
+          note="Across the whole instance"
         />
-        <Cell
+        <CountRow
           label="MFA adoption"
           loading={loading}
           value={stats ? percent(stats.mfa_enabled_users, stats.users_total) : "—"}
           note={
-            <p className="text-xs leading-5 text-muted-foreground">
+            <>
               <span className="tabular-nums">{formatNumber(stats?.mfa_enabled_users)}</span> users with a second factor
-            </p>
+            </>
           }
         />
-        <Cell
+        <CountRow
           label="Sign-ups (30d)"
           loading={loading}
           value={formatNumber(signUps30d)}
           note={<Delta value={weeklyDelta(stats?.signups_by_day)} label="New accounts per day, last 30 days" />}
         />
-        <Cell
+        <CountRow
           label="Sign-ins (30d)"
           loading={loading}
           value={formatNumber(signIns30d)}
@@ -106,13 +110,13 @@ export function InstanceSheet({ stats, loading }: { stats: InstanceStatsJSON | u
         />
       </dl>
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-border px-4 py-2.5 text-xs text-muted-foreground">
-        <span className="font-semibold uppercase tracking-[0.04em]">Blocked accounts</span>
+        <span className="text-sm font-medium text-foreground">Blocked accounts</span>
         <span className="flex items-center gap-1.5">
-          <span className="size-1.5 rounded-full bg-signal" aria-hidden />
+          {banned > 0 ? <span className="size-1.5 rounded-full bg-signal" aria-hidden /> : null}
           Banned <span className="tabular-nums text-foreground">{formatNumber(stats?.banned_users)}</span>
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="size-1.5 rounded-full bg-caution" aria-hidden />
+          {locked > 0 ? <span className="size-1.5 rounded-full bg-caution" aria-hidden /> : null}
           Locked <span className="tabular-nums text-foreground">{formatNumber(stats?.locked_users)}</span>
         </span>
         <Link

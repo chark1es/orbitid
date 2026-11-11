@@ -1,5 +1,13 @@
 import { afterEach, vi } from "vitest";
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
+
+/**
+ * `findBy*`/`waitFor` default to a 1s window. These suites run beside every other workspace, and a page
+ * that loads a record and then the active tab's list needs two serialized request/render rounds, so a
+ * loaded machine can exceed 1s without any UI bug. Give the async utilities headroom below
+ * `testTimeout` rather than encoding a timeout in each test that happens to be slow that day.
+ */
+configure({ asyncUtilTimeout: 5_000 });
 
 class ResizeObserverStub {
   observe() {}
@@ -43,6 +51,8 @@ if (!("scrollIntoView" in HTMLElement.prototype)) {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  // A test that enables fake timers and throws before its `finally` must not freeze the next test.
+  vi.useRealTimers();
   sessionStorage.clear();
   localStorage.clear();
 });

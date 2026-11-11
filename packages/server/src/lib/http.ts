@@ -144,7 +144,7 @@ function warnMissingForwardedFor(): void {
 }
 
 export function clientIp(c: Context): string {
-  const hops = process.env.ORBITID_TRUST_PROXY === "true" ? 1 : Number(process.env.ORBITID_TRUST_PROXY ?? 0);
+  const hops = trustProxyHops();
   if (hops > 0) {
     const chain = (c.req.header("x-forwarded-for") ?? "").split(",").map((part) => part.trim()).filter(Boolean);
     // `X-Real-IP` is not consulted: a client could set it, and only the proxy-appended hop of `X-Forwarded-For` is trustworthy.
@@ -156,6 +156,31 @@ export function clientIp(c: Context): string {
     return getConnInfo(c).remote.address ?? "127.0.0.1";
   } catch {
     return "127.0.0.1";
+  }
+}
+
+/** Configured number of trusted reverse proxies (`ORBITID_TRUST_PROXY`). */
+function trustProxyHops(): number {
+  return process.env.ORBITID_TRUST_PROXY === "true" ? 1 : Number(process.env.ORBITID_TRUST_PROXY ?? 0);
+}
+
+/**
+ * Whether the browser reached this request over TLS, including through a trusted reverse proxy that terminated
+ * TLS (`X-Forwarded-Proto: https`). Cookie `Secure` is only added when this is true, so an https deployment behind
+ * a proxy that talks plain http to the container does not ship a cookie a browser would refuse to store, and a
+ * plain-http localhost deployment does not get a `Secure` cookie it cannot use. `X-Forwarded-Proto` is read only
+ * at the trust level configured for `X-Forwarded-For`; otherwise a client could choose it.
+ */
+export function requestIsSecure(c: Context, baseUrl: string): boolean {
+  if (/^https:\/\//i.test(baseUrl)) return true;
+  if (trustProxyHops() > 0) {
+    const proto = (c.req.header("x-forwarded-proto") ?? "").split(",")[0]?.trim().toLowerCase();
+    if (proto) return proto === "https";
+  }
+  try {
+    return new URL(c.req.url).protocol === "https:";
+  } catch {
+    return false;
   }
 }
 export const now = () => Date.now();

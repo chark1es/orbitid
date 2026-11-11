@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import { useTheme } from "next-themes";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, buttonVariants } from "@orbitid/ui";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, buttonVariants, useTheme } from "@orbitid/ui";
 import { Check, Monitor, Moon, Sun } from "lucide-react";
 
 const OPTIONS = [
@@ -35,7 +34,7 @@ export function ThemeToggle() {
           <DropdownMenuItem key={option.value} onClick={() => setTheme(option.value)}>
             <option.icon aria-hidden />
             <span className="flex-1">{option.label}</span>
-            {mounted && active === option.value ? <Check aria-hidden className="size-3.5 text-signal" /> : null}
+            {mounted && active === option.value ? <Check aria-hidden className="size-4 text-foreground" /> : null}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

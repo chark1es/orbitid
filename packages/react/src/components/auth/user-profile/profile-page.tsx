@@ -23,11 +23,7 @@ import {
 import { EmailAddressDialog, PhoneNumberDialog } from "./email-phone-dialogs";
 import { ConnectAccountDialog, EnterpriseAccountsSection } from "./connect-account";
 
-interface PageProps {
-  onNavigate: (page: string) => void;
-}
-
-export function ProfilePage({ onNavigate }: PageProps) {
+export function ProfilePage() {
   const runtime = useAuthRuntime();
   const { orbit, t, environment } = runtime;
   const { el } = useElementClasses();
@@ -115,7 +111,7 @@ export function ProfilePage({ onNavigate }: PageProps) {
                   {verified ? t("userProfile.emailAddresses.verified") : t("userProfile.emailAddresses.unverified")}
                 </Badge>
                 {!verified ? (
-                  <Button type="button" variant="link" size="sm" className="h-auto p-0" onClick={() => setEmailDialog({ open: true, email })}>
+                  <Button type="button" variant="link" size="sm" className="h-auto min-h-6 px-0 py-1" onClick={() => setEmailDialog({ open: true, email })}>
                     {t("common.verify")}
                   </Button>
                 ) : null}
@@ -124,7 +120,7 @@ export function ProfilePage({ onNavigate }: PageProps) {
                     type="button"
                     variant="link"
                     size="sm"
-                    className="h-auto p-0"
+                    className="h-auto min-h-6 px-0 py-1"
                     onClick={() => void runAction(() => user.update?.({ primaryEmailAddressId: email.id }) ?? Promise.resolve())}
                   >
                     {t("userProfile.emailAddresses.setPrimary")}
@@ -174,7 +170,7 @@ export function ProfilePage({ onNavigate }: PageProps) {
                   {isPrimary ? <Badge variant="secondary">{t("common.primary")}</Badge> : null}
                   {phone.reserved_for_second_factor ? <Badge variant="outline">{t("userProfile.mfaPhones.default")}</Badge> : null}
                   {!verified ? (
-                    <Button type="button" variant="link" size="sm" className="h-auto p-0" onClick={() => setPhoneDialog({ open: true, phone })}>
+                    <Button type="button" variant="link" size="sm" className="h-auto min-h-6 px-0 py-1" onClick={() => setPhoneDialog({ open: true, phone })}>
                       {t("common.verify")}
                     </Button>
                   ) : null}
@@ -183,7 +179,7 @@ export function ProfilePage({ onNavigate }: PageProps) {
                       type="button"
                       variant="link"
                       size="sm"
-                      className="h-auto p-0"
+                      className="h-auto min-h-6 px-0 py-1"
                       onClick={() => void runAction(() => user.update?.({ primaryPhoneNumberId: phone.id }) ?? Promise.resolve())}
                     >
                       {t("userProfile.phoneNumbers.setPrimary")}
@@ -228,7 +224,7 @@ export function ProfilePage({ onNavigate }: PageProps) {
                   type="button"
                   variant="link"
                   size="sm"
-                  className="h-auto p-0"
+                  className="h-auto min-h-6 px-0 py-1"
                   onClick={() => setConnectProvider(account.provider.replace(/^oauth_/, ""))}
                 >
                   {t("userProfile.connectedAccounts.reconnect")}
@@ -255,11 +251,11 @@ export function ProfilePage({ onNavigate }: PageProps) {
                 type="button"
                 variant="outline"
                 size="sm"
-                className="gap-2"
+                className="max-w-full gap-2"
                 onClick={() => setConnectProvider(provider.id)}
               >
                 <ProviderIcon provider={provider.id} />
-                {provider.name}
+                <span className="min-w-0 truncate">{provider.name}</span>
               </Button>
             ))}
           </div>
@@ -267,10 +263,6 @@ export function ProfilePage({ onNavigate }: PageProps) {
       </section>
 
       <EnterpriseAccountsSection />
-
-      <Button type="button" variant="link" className="mx-auto h-auto p-0" onClick={() => onNavigate("security")}>
-        {t("userProfile.nav.security")}
-      </Button>
 
       <EmailAddressDialog
         open={emailDialog.open}

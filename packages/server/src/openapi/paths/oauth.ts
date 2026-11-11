@@ -16,7 +16,15 @@ const redirect = (description: string) => ({
 export const oauthPaths: DocumentedOperation[] = [
   op("get", "/.well-known/openid-configuration", "OAuth/OIDC", "getOpenIdConfiguration", "Read the OIDC discovery document", {
     security: "none",
-    description: "Issuer, endpoints and capabilities. Public; standard OIDC clients discover everything from here.",
+    description:
+      "Issuer, endpoints and capabilities. Public; standard OIDC clients discover everything from here. The same document " +
+      "is served at `/.well-known/oauth-authorization-server` and at path-based variants for issuers with a path prefix.",
+    success: { status: 200, schema: ref("OpenIdConfiguration") },
+    errors: [],
+  }),
+  op("get", "/.well-known/oauth-authorization-server", "OAuth/OIDC", "getAuthorizationServerMetadata", "Read RFC 8414 authorization-server metadata", {
+    security: "none",
+    description: "Same values as the OIDC discovery document, for OAuth 2.0 clients that do not use OIDC discovery.",
     success: { status: 200, schema: ref("OpenIdConfiguration") },
     errors: [],
   }),
@@ -41,21 +49,29 @@ export const oauthPaths: DocumentedOperation[] = [
   op("get", "/oauth/authorize", "OAuth/OIDC", "authorize", "Authorization endpoint", {
     security: "none",
     description:
-      "Standard authorization code flow. PKCE (`S256`) is required for public clients. Without a session the browser is " +
-      "sent to the app's sign-in page and brought back; with consent enabled the consent screen data comes from " +
-      "`/oauth/consent_info`. Ends in a redirect carrying `code` and `state`, or `error` and `error_description`.",
+      "Standard authorization code flow. PKCE (`S256`) is required for public clients and optional for confidential " +
+      "clients unless the application sets `pkce_required`. Without a session the browser is sent to the app's sign-in " +
+      "page and brought back; with consent enabled the consent screen data comes from `/oauth/consent_info`. Ends in a " +
+      "redirect or, with `response_mode=form_post`, a self-submitting form carrying `code` and `state` (or `error`).",
     parameters: [
       queryParam("response_type", { type: "string", enum: ["code"] }, "Only `code` is supported."),
       queryParam("client_id", { type: "string" }),
-      queryParam("redirect_uri", { type: "string" }, "Must match a registered redirect URI exactly."),
+      queryParam("redirect_uri", { type: "string" }, "Must match a registered redirect URI exactly (loopback ports may vary)."),
       queryParam("scope", { type: "string" }, "Space separated. `openid` is required for OIDC."),
-      queryParam("state", { type: "string" }, "Returned unchanged in the redirect."),
+      queryParam("state", { type: "string" }, "Returned unchanged in the response."),
+      queryParam("response_mode", { type: "string", enum: ["query", "form_post"] }, "Defaults to `query`."),
       queryParam("code_challenge", { type: "string" }),
-      queryParam("code_challenge_method", { type: "string", enum: ["S256", "plain"] }),
-      queryParam("nonce", { type: "string" }, "Included in the id_token."),
-      queryParam("prompt", { type: "string", enum: ["none", "consent", "login"] }),
+      queryParam("code_challenge_method", { type: "string", enum: ["S256"] }, "`plain` is refused."),
+      queryParam("nonce", { type: "string" }, "Included in the id_token and checked by the client."),
+      queryParam("prompt", { type: "string" }, "Space separated: `none`, `login`, `consent`, `select_account`."),
+      queryParam("max_age", { type: "integer" }, "Require a sign-in newer than this many seconds."),
+      queryParam("login_hint", { type: "string" }, "Username, email, phone or user id to prefer."),
     ],
-    ...redirect("Redirect to the client's `redirect_uri` (302)."),
+    success: {
+      status: 302 as const,
+      description: "Redirect to the client's `redirect_uri` (302), or an auto-post HTML form for `response_mode=form_post`.",
+      headers: { Location: { type: "string", description: "Where the browser goes next." } },
+    },
     errors: [400],
   }),
   op("get", "/oauth/consent_info", "OAuth/OIDC", "getConsentInfo", "Read consent screen data", {
@@ -83,8 +99,9 @@ export const oauthPaths: DocumentedOperation[] = [
     security: "none",
     description:
       "Exchanges an authorization code or a refresh token for an access token, and (with the `openid` scope) an " +
-      "id_token. Confidential clients authenticate with HTTP Basic (`client_id:client_secret`) or with `client_id` and " +
-      "`client_secret` in the body. Errors use the OAuth error shape, not the OrbitID error envelope.",
+      "id_token. Confidential clients authenticate with HTTP Basic (`client_id:client_secret`, encoded or raw) or with " +
+      "`client_id` and `client_secret` in the body. Refresh tokens rotate; a just-rotated token can be retried inside " +
+      "the grace window without revoking the grant. Errors use the OAuth error shape, not the OrbitID error envelope.",
     body: { schema: body.oauthTokenRequest, contentType: "application/x-www-form-urlencoded" },
     success: { status: 200, schema: ref("OAuthTokenResponse") },
     errors: [400, 401],
@@ -155,6 +172,29 @@ export const oauthPaths: DocumentedOperation[] = [
     errors: [400, 401],
     errorShape: "oauth",
   }),
+  op("get", "/oauth/end_session", "OAuth/OIDC", "oidcEndSession", "RP-initiated logout", {
+    security: "none",
+    description:
+      "Validates `id_token_hint` (signature and issuer, not expiry) and the registered `post_logout_redirect_uri`, ends the " +
+      "browser session carried by the hint's `sid`, revokes the grants minted from it, and redirects. `state` is returned unchanged.",
+    parameters: [
+      queryParam("id_token_hint", { type: "string" }),
+      queryParam("client_id", { type: "string" }, "Used instead of `id_token_hint` to identify the application."),
+      queryParam("post_logout_redirect_uri", { type: "string" }, "Must be registered on the application."),
+      queryParam("state", { type: "string" }),
+    ],
+    ...redirect("Redirect to the registered post-logout URI, or the app's home URL (302)."),
+    errors: [400],
+    errorShape: "oauth",
+  }),
+  op("post", "/oauth/end_session", "OAuth/OIDC", "oidcEndSessionPost", "RP-initiated logout (form post)", {
+    security: "none",
+    description: "Same as the GET form, for clients that submit the request as a form.",
+    body: { schema: body.oauthLogout, contentType: "application/x-www-form-urlencoded" },
+    ...redirect("Redirect to the registered post-logout URI, or the app's home URL (302)."),
+    errors: [400],
+    errorShape: "oauth",
+  }),
   op("post", "/oauth/m2m/token", "OAuth/OIDC", "machineClientCredentials", "Mint a machine token with client credentials", {
     security: "machineSecret",
     description:
@@ -185,7 +225,7 @@ export const oauthPaths: DocumentedOperation[] = [
   }),
   op("post", "/v1/oauth_applications", "OAuth/OIDC", "createOAuthApplication", "Create an OAuth application", {
     security: "backend",
-    description: "`client_secret` is returned once, in this response. Public clients get no secret and must use PKCE.",
+    description: "`client_secret` is returned once, in this response. Public clients get no secret and must use PKCE. Confidential clients may leave `pkce_required` off for clients that send no challenge.",
     body: { schema: body.oauthApplicationCreate },
     success: { status: 201, schema: ref("OAuthApplication") },
     errors: [422],

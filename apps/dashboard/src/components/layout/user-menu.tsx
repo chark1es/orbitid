@@ -8,11 +8,10 @@ import {
   DropdownMenuTrigger,
   buttonVariants,
 } from "@orbitid/ui";
-import { ChevronsUpDown, LogOut, ShieldCheck } from "lucide-react";
+import { ChevronsUpDown, LogOut, ShieldCheck, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "../../lib/auth";
 import { ApiError, getApiUrl } from "../../lib/api";
-import { UserAvatar } from "../shared/user-avatar";
 
 export function UserMenu() {
   const { signOut } = useAuth();
@@ -27,7 +26,7 @@ export function UserMenu() {
           className={buttonVariants({ variant: "ghost", size: "sm", className: "gap-2 pl-1 pr-1.5" })}
           aria-label="Instance menu"
         >
-          <UserAvatar name="Instance admin" size="sm" />
+          <UserRound className="size-4 text-muted-foreground sm:hidden" aria-hidden />
           <span className="hidden text-[0.8125rem] font-medium sm:inline">Admin</span>
           <ChevronsUpDown className="hidden size-3.5 text-muted-foreground sm:inline" aria-hidden />
         </button>

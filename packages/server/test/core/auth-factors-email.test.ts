@@ -91,6 +91,37 @@ describe("email code as a second factor", () => {
     expect(errorsOf(blocked)[0]?.code).toBe("strategy_for_user_invalid");
   });
 
+  it("verifies the secondary email chosen at prepare time, not the first verified address", async () => {
+    const { app, ctx } = await setup();
+    await enableEmailSecondFactor(ctx);
+    const user = await signUpUser(app);
+
+    const second = await user.client.json<{ response: { id: string; email_address: string } }>("/v1/client/me/email_addresses", {
+      body: { email_address: "second@example.com" },
+    });
+    await user.client.json(`/v1/client/me/email_addresses/${second.response.id}/prepare_verification`, { body: {} });
+    const verifyCode = latestCodeFor(second.response.email_address);
+    await user.client.json(`/v1/client/me/email_addresses/${second.response.id}/attempt_verification`, { body: { code: verifyCode } });
+
+    const client = testClient(app);
+    const created = await client.json<{ response: { id: string; supported_second_factors: { strategy: string; email_address_id?: string }[] } }>(
+      "/v1/client/sign_ins",
+      { body: { identifier: user.email, password: user.password } },
+    );
+    // Both verified addresses are offered; choose the second one.
+    expect(created.response.supported_second_factors.filter((f) => f.strategy === "email_code")).toHaveLength(2);
+    await client.json(`/v1/client/sign_ins/${created.response.id}/prepare_second_factor`, {
+      body: { strategy: "email_code", email_address_id: second.response.id },
+    });
+    const code = latestCodeFor(second.response.email_address);
+    expect(code).toMatch(/^\d{6}$/);
+
+    const done = await client.json<{ response: { status: string } }>(`/v1/client/sign_ins/${created.response.id}/attempt_second_factor`, {
+      body: { strategy: "email_code", code },
+    });
+    expect(done.response.status).toBe("complete");
+  });
+
   it("is listed in the environment's second_factors", async () => {
     const { app, ctx } = await setup();
     await enableEmailSecondFactor(ctx);

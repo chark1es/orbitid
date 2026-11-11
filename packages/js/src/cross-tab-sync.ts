@@ -5,6 +5,10 @@ export type SyncMessage =
 
 const CHANNEL_NAME = "orbitid";
 const STORAGE_KEY = "__orbitid_sync";
+/** Storage key for the cross-tab refresh lock. It holds no credential, only an owner id and an expiry. */
+const REFRESH_LOCK_KEY = "__orbitid_refresh_lock";
+/** A refresh request is short; a lock older than this belongs to a tab that died mid-refresh. */
+const REFRESH_LOCK_TTL_MS = 15_000;
 
 /**
  * Cross-tab synchronisation: `BroadcastChannel` where available, `localStorage` + `storage` events otherwise.
@@ -19,6 +23,8 @@ export class CrossTabSync {
   private channel: BroadcastChannel | null = null;
   private storageHandler: ((event: StorageEvent) => void) | null = null;
   private closed = false;
+  /** Unique per instance, so two tabs of one app never consider each other's lock their own. */
+  private readonly ownerId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 
   constructor(private readonly onMessage: (message: SyncMessage) => void) {
     if (typeof BroadcastChannel !== "undefined") {
@@ -81,8 +87,51 @@ export class CrossTabSync {
     }
   }
 
+  /**
+   * Best-effort exclusive lock shared by every tab on this origin, used so N tabs do not all mint a token at
+   * the same moment. `localStorage` writes are serialised by the browser, so write-then-read-back is a usable
+   * compare-and-set. Without storage (or in SSR) there is nothing to coordinate and the caller may proceed.
+   */
+  tryAcquireRefreshLock(ttlMs = REFRESH_LOCK_TTL_MS): boolean {
+    if (this.closed) return true;
+    if (typeof localStorage === "undefined") return true;
+    const now = Date.now();
+    const current = this.readLock();
+    if (current && current.expiresAt > now && current.owner !== this.ownerId) return false;
+    try {
+      localStorage.setItem(REFRESH_LOCK_KEY, JSON.stringify({ owner: this.ownerId, expiresAt: now + ttlMs }));
+      return this.readLock()?.owner === this.ownerId;
+    } catch {
+      // Storage can be unavailable (private mode, quota): a missing lock must never block a refresh.
+      return true;
+    }
+  }
+
+  releaseRefreshLock(): void {
+    if (typeof localStorage === "undefined") return;
+    try {
+      if (this.readLock()?.owner !== this.ownerId) return;
+      localStorage.removeItem(REFRESH_LOCK_KEY);
+    } catch {
+      /* storage unavailable */
+    }
+  }
+
+  private readLock(): { owner: string; expiresAt: number } | null {
+    try {
+      const raw = localStorage.getItem(REFRESH_LOCK_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as { owner?: unknown; expiresAt?: unknown };
+      if (typeof parsed.owner !== "string" || typeof parsed.expiresAt !== "number") return null;
+      return { owner: parsed.owner, expiresAt: parsed.expiresAt };
+    } catch {
+      return null;
+    }
+  }
+
   close(): void {
     this.closed = true;
+    this.releaseRefreshLock();
     this.channel?.close();
     this.channel = null;
     if (this.storageHandler && typeof window !== "undefined") window.removeEventListener("storage", this.storageHandler);

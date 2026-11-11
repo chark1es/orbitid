@@ -11,6 +11,7 @@ import {
   Label,
   Switch,
 } from "@orbitid/ui";
+import { OVERLAY_WIDTH } from "../shared/overlay-sizes";
 import { Loader2 } from "lucide-react";
 import { useApiMutation } from "../../lib/api";
 import { errorMessage } from "../../lib/errors";
@@ -90,7 +91,7 @@ export function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpen
 
   return (
     <Dialog open={open} onOpenChange={close}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className={`max-h-[90vh] overflow-y-auto ${OVERLAY_WIDTH.sheet}`}>
         <DialogHeader>
           <DialogTitle>Create user</DialogTitle>
           <DialogDescription>

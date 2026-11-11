@@ -160,6 +160,40 @@ describe("SignIn", () => {
     orbit.dispose();
   });
 
+  it("exposes a reset that has to sign in again with the new password", async () => {
+    const failure = {
+      code: "needs_second_factor",
+      message: "MFA is required. Sign in with your new password to complete a second factor.",
+    };
+    const api = new ApiMock((call) => {
+      if (call.method === "POST" && call.path === "/v1/client/sign_ins/sia_1/reset_password") {
+        return {
+          body: {
+            response: signInJSON({
+              status: "needs_first_factor",
+              first_factor_verification: {
+                status: "unverified",
+                strategy: "password",
+                attempts: null,
+                expire_at: null,
+                error: failure,
+              },
+            }),
+          },
+        };
+      }
+      return { status: 404, body: {} };
+    });
+    const fapi = new FapiClient({ publishableKey, fetch: api.fetch, frontendApi: API_URL });
+    const signIn = new SignIn(fapi, signInJSON({ status: "needs_new_password" }));
+    await signIn.resetPassword({ password: "N3w-Password!23" });
+    expect(signIn.status).toBe("needs_first_factor");
+    expect(signIn.supportedFirstFactors?.[0]?.strategy).toBe("password");
+    expect(signIn.firstFactorVerification?.strategy).toBe("password");
+    expect(signIn.firstFactorVerification?.error).toEqual(failure);
+    expect(api.lastCall("POST", "/v1/client/sign_ins/sia_1/reset_password")?.body?.password).toBe("N3w-Password!23");
+  });
+
   it("polls a magic-link flow and can cancel it", async () => {
     vi.useFakeTimers();
     try {

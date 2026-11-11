@@ -55,6 +55,90 @@ const USER: UserJSON = {
 };
 
 describe("users table", () => {
+  it("labels every filter in the bar, including the date fields", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      const body = url.includes("/v1/users") ? { data: [USER], total_count: 1 } : { application: { homeUrl: "" } };
+      return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/users"]}>
+          <Routes>
+            <Route path="/users" element={<UsersPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByLabelText("Search")).toBeTruthy();
+    // An email address is not an id or a key: it reads in the sans family, not 11px monospace.
+    const email = await screen.findByText("ada@example.com");
+    expect(email.className).not.toContain("font-data");
+    expect(email.className).toContain("text-[0.8125rem]");
+    expect(screen.getByRole("combobox", { name: "Status" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "MFA" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Account type" })).toBeTruthy();
+    for (const name of ["Search", "Status", "MFA", "Account type", "Created after", "Created before"]) {
+      const label = screen.getByText(name, { selector: "label" });
+      expect(label.className, `${name} label`).toContain("text-[0.75rem]");
+      expect(label.className).toContain("font-semibold");
+      expect(label.className).toContain("tracking-[0.04em]");
+    }
+    for (const name of ["Created after", "Created before"]) {
+      const input = screen.getByLabelText(name) as HTMLInputElement;
+      // The native picker must remain: only its glyph is hidden under the select-style chevron.
+      expect(input.getAttribute("type")).toBe("date");
+      expect(input.className).toContain("text-sm");
+      expect(input.className).not.toContain("text-[0.8125rem]");
+      expect(input.className).toContain("::-webkit-calendar-picker-indicator");
+      expect(input.parentElement?.querySelector("svg")).toBeTruthy();
+    }
+  });
+
+  it("commits a date filter only once the typed date is complete", async () => {
+    const requested: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      requested.push(url);
+      const body = url.includes("/v1/users") ? { data: [USER], total_count: 1 } : { application: { homeUrl: "" } };
+      return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/users"]}>
+          <Routes>
+            <Route path="/users" element={<UsersPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText("ada@example.com");
+    const input = screen.getByLabelText("Created after") as HTMLInputElement;
+
+    // Typing the year 2026 goes through 0002, 0020 and 0202. None of those may reach the URL,
+    // or the controlled value is replaced mid-entry and the rest of the year is lost.
+    for (const draft of ["0002-01-15", "0020-01-15", "0202-01-15"]) {
+      fireEvent.change(input, { target: { value: draft } });
+      expect(input.value).toBe(draft);
+      expect(requested.some((url) => url.includes("created_at_after"))).toBe(false);
+      expect(screen.queryByRole("button", { name: "Clear" })).toBeNull();
+    }
+
+    fireEvent.change(input, { target: { value: "2026-01-15" } });
+    await waitFor(() => expect(requested.some((url) => url.includes("created_at_after="))).toBe(true));
+    expect(await screen.findByRole("button", { name: "Clear" })).toBeTruthy();
+
+    fireEvent.change(input, { target: { value: "" } });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Clear" })).toBeNull());
+    expect(requested.at(-1)).not.toContain("created_at_after");
+  });
+
   it("navigates server-side pages through the query string", async () => {
     const requested: string[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
@@ -117,7 +201,7 @@ describe("users table", () => {
 
     expect(await screen.findByText("Ada Lovelace")).toBeTruthy();
 
-    const trigger = screen.getByRole("combobox", { name: "Filter users by status" });
+    const trigger = screen.getByRole("combobox", { name: "Status" });
     trigger.focus();
     fireEvent.keyDown(trigger, { key: "Enter" });
     fireEvent.click(await screen.findByRole("option", { name: "Locked" }));
@@ -167,7 +251,7 @@ describe("users table", () => {
     // A registered user keeps the plain status chip, so the word Guest is never ambiguous.
     expect(screen.getAllByText("Active")).toHaveLength(1);
 
-    const trigger = screen.getByRole("combobox", { name: "Filter users by account type" });
+    const trigger = screen.getByRole("combobox", { name: "Account type" });
     trigger.focus();
     fireEvent.keyDown(trigger, { key: "Enter" });
     fireEvent.click(await screen.findByRole("option", { name: "Guests" }));
@@ -176,11 +260,57 @@ describe("users table", () => {
       expect(requested.some((url) => url.includes("/v1/users") && url.includes("is_anonymous=true"))).toBe(true);
     });
 
-    fireEvent.keyDown(screen.getByRole("combobox", { name: "Filter users by account type" }), { key: "Enter" });
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Account type" }), { key: "Enter" });
     fireEvent.click(await screen.findByRole("option", { name: "Registered" }));
     await waitFor(() => {
       expect(requested.some((url) => url.includes("/v1/users") && url.includes("is_anonymous=false"))).toBe(true);
     });
+  });
+
+  it("toggles order_by from a column header and exposes aria-sort", async () => {
+    const requested: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      requested.push(url);
+      const body = url.includes("/v1/users")
+        ? { data: [USER], total_count: 1 }
+        : url.includes("/v1/instance")
+          ? { application: { homeUrl: "http://localhost:3000" } }
+          : { data: [], total_count: 0 };
+      return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/users"]}>
+          <Routes>
+            <Route path="/users" element={<UsersPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText("Ada Lovelace");
+    expect(screen.getByRole("button", { name: "Sort by Username" }).closest("th")?.getAttribute("aria-sort")).toBe("none");
+    // Username is the first column to go: it keeps the row inside 768/1024 without hiding the actions.
+    const usernameHeader = screen.getByRole("button", { name: "Sort by Username" }).closest("th")!;
+    expect(usernameHeader.className).toContain("hidden");
+    expect(usernameHeader.className).toContain("xl:table-cell");
+
+    fireEvent.click(screen.getByRole("button", { name: "Sort by Username" }));
+    await waitFor(() => {
+      expect(requested.some((url) => url.includes("/v1/users?") && url.includes("order_by=username"))).toBe(true);
+    });
+    expect(screen.getByRole("button", { name: "Sort by Username" }).closest("th")?.getAttribute("aria-sort")).toBe("ascending");
+
+    fireEvent.click(screen.getByRole("button", { name: "Sort by Username" }));
+    await waitFor(() => {
+      expect(requested.some((url) => url.includes("/v1/users?") && url.includes("order_by=-username"))).toBe(true);
+    });
+    expect(screen.getByRole("button", { name: "Sort by Username" }).closest("th")?.getAttribute("aria-sort")).toBe(
+      "descending",
+    );
   });
 
   it("confirms a bulk delete against the selected user", async () => {

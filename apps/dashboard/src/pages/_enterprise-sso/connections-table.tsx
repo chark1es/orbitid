@@ -10,13 +10,14 @@ export function ConnectionsTable({ ctl }: { ctl: EnterpriseSsoController }) {
   return (
     <section className="space-y-3">
       <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-sm font-semibold">Connections</h2>
+        <h2 className="text-sm font-heading">Connections</h2>
         <p className="text-xs text-muted-foreground">Only active connections take part in domain routing.</p>
       </div>
       {query.isLoading ? (
         <TableSkeleton />
       ) : connections.length === 0 ? (
         <EmptyState
+          compact
           title="No enterprise connections"
           description="Connect any SAML 2.0 or OpenID Connect identity provider your organization already uses."
           icon={<Building2 className="size-5" />}
@@ -31,20 +32,22 @@ export function ConnectionsTable({ ctl }: { ctl: EnterpriseSsoController }) {
           <TableHeader>
             <TableRow>
               <TableHead>Connection</TableHead>
-              <TableHead>Protocol</TableHead>
-              <TableHead>Domains</TableHead>
+              <TableHead className="hidden xl:table-cell">Protocol</TableHead>
+              <TableHead className="hidden lg:table-cell">Domains</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead>Created</TableHead>
+              <TableHead className="hidden xl:table-cell">Created</TableHead>
               <TableHead className="w-24 text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {connections.map((connection) => (
               <TableRow key={connection.id}>
-                <TableCell className="text-sm font-medium">{connection.name}</TableCell>
-                <TableCell className="font-data text-xs uppercase">{connection.protocol}</TableCell>
-                <TableCell>
-                  <span className="block max-w-[22rem] truncate text-xs text-muted-foreground">{connection.domains.join(", ")}</span>
+                <TableCell className="text-sm font-medium">
+                  <span className="block max-w-[32ch] truncate" title={connection.name}>{connection.name}</span>
+                </TableCell>
+                <TableCell className="hidden text-xs font-medium xl:table-cell">{connection.protocol}</TableCell>
+                <TableCell className="hidden lg:table-cell">
+                  <span className="block max-w-[22rem] truncate text-xs text-muted-foreground" title={connection.domains.join(", ")}>{connection.domains.join(", ")}</span>
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-2.5">
@@ -52,7 +55,7 @@ export function ConnectionsTable({ ctl }: { ctl: EnterpriseSsoController }) {
                     <StatusBadge status={connection.active ? "active" : "disabled"} />
                   </div>
                 </TableCell>
-                <TableCell className="font-data text-xs text-muted-foreground">{formatDate(connection.created_at)}</TableCell>
+                <TableCell className="hidden font-data text-xs text-muted-foreground xl:table-cell">{formatDate(connection.created_at)}</TableCell>
                 <TableCell>
                   <div className="flex items-center justify-end gap-1">
                     <Button variant="ghost" size="icon-sm" onClick={() => setDetail(connection)} title="Details">

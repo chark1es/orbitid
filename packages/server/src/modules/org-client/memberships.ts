@@ -10,6 +10,7 @@ import { parseBody } from "../../lib/http";
 import { emitEvent } from "../../services/webhooks";
 import { serializeMembership } from "../../serializers";
 import { PERMISSIONS, assertNotLastAdmin, assertOrganizationRole, isAdminRole, isLastAdmin, roleByKey } from "../../services/rbac";
+import { revokeOrganizationAuthorityGrants } from "../../services/oidc/revocation";
 import { deletedObject, listParams, orgAccess, page, requireMembership, sortRows } from "../orgs/shared";
 import { first } from "../../lib/db";
 
@@ -49,6 +50,9 @@ export function registerMembershipRoutes(app: Hono, ctx: AppContext) {
     }
     await ctx.db.update(s.organizationMemberships).set({ roleKey: role.key, updatedAt: Date.now() }).where(eq(s.organizationMemberships.id, membership.id));
     const updated = first(await ctx.db.select().from(s.organizationMemberships).where(eq(s.organizationMemberships.id, membership.id)))!;
+    // Tokens issued for the old role carry its permissions. Only organization/group-authority grants are revoked;
+    // the browser session and unrelated grants stay.
+    await revokeOrganizationAuthorityGrants(ctx, membership.userId);
     await emitEvent(ctx, "organizationMembership.updated", await serializeMembership(ctx, updated, { backend: true }));
     return c.json({ response: await serializeMembership(ctx, updated) });
   });
@@ -59,6 +63,7 @@ export function registerMembershipRoutes(app: Hono, ctx: AppContext) {
     await assertNotLastAdmin(ctx, membership);
     const payload = await serializeMembership(ctx, membership, { backend: true });
     await ctx.db.delete(s.organizationMemberships).where(eq(s.organizationMemberships.id, membership.id));
+    await revokeOrganizationAuthorityGrants(ctx, membership.userId);
     await emitEvent(ctx, "organizationMembership.deleted", payload);
     return c.json({ response: deletedObject("organization_membership", membership.id) });
   });

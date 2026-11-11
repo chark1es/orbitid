@@ -35,7 +35,7 @@ export function OrganizationRoleSelect({
 
   return (
     <Select value={role} onValueChange={(value) => void change(value)} disabled={pending}>
-      <SelectTrigger className="h-8 w-[150px] text-sm" aria-label="Membership role">
+      <SelectTrigger size="sm" className="w-[150px]" aria-label="Membership role">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>

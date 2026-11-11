@@ -52,8 +52,6 @@ export function UserTrustedDevices({ userId }: { userId: string }) {
     {
       id: "ip",
       header: "IP address",
-      headerClassName: "hidden sm:table-cell",
-      className: "hidden sm:table-cell",
       cell: (device) => (
         <span className="font-data text-xs text-muted-foreground">{device.ip_address || "Unknown IP"}</span>
       ),

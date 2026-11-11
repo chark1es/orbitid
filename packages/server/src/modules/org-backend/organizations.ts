@@ -10,6 +10,7 @@ import { parseBody } from "../../lib/http";
 import { emitEvent } from "../../services/webhooks";
 import { serializeOrganization } from "../../serializers";
 import { addMembership, creatorRoleKey } from "../../services/orgs";
+import { revokeOrganizationAuthorityGrants } from "../../services/oidc/revocation";
 import { deletedObject, listParams, mergeMetadata, page, requireOrganization, resolveSlug, sortRows } from "../orgs/shared";
 import { deleteLogoFile, readLogoPayload, storeLogo } from "../orgs/assets";
 import { first } from "../../lib/db";
@@ -113,8 +114,12 @@ export function registerOrganizationRoutes(app: Hono, ctx: AppContext) {
   app.delete("/organizations/:id", async (c) => {
     const org = await requireOrganization(ctx, c.req.param("id"));
     const payload = await orgEventPayload(ctx, org);
+    // Read the members before the cascade removes their rows: their tokens may still assert this organization.
+    const members = await ctx.db.select({ userId: s.organizationMemberships.userId })
+      .from(s.organizationMemberships).where(eq(s.organizationMemberships.organizationId, org.id));
     deleteLogoFile(ctx, org.imageUrl);
     await ctx.db.delete(s.organizations).where(eq(s.organizations.id, org.id));
+    for (const member of members) await revokeOrganizationAuthorityGrants(ctx, member.userId);
     await emitEvent(ctx, "organization.deleted", payload);
     return c.json(deletedObject("organization", org.id));
   });

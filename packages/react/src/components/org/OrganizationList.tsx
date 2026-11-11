@@ -7,6 +7,7 @@ import {
   DialogTitle,
   Input,
   Separator,
+  OVERLAY_WIDTH,
 } from "@orbitid/ui";
 import { CheckIcon, PlusIcon, SearchIcon } from "lucide-react";
 import { useLocalizations } from "../../localization";
@@ -190,7 +191,7 @@ function OrganizationListView({
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-5">
+    <div className="mx-auto flex w-full min-w-0 max-w-2xl flex-col gap-5">
       <header className="flex flex-col gap-1">
         <h2 className="text-lg font-semibold">
           {hidePersonal ? t("organizationList.titleWithoutPersonal") : t("organizationList.title")}
@@ -218,7 +219,7 @@ function OrganizationListView({
         />
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-2">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-2 sm:grid-cols-2">
         {memberships.map((item) => (
           <Button
             key={item.id}
@@ -226,7 +227,7 @@ function OrganizationListView({
             variant="outline"
             disabled={selectAction.isPending}
             onClick={() => void select(item.organization)}
-            className="h-auto w-full items-center justify-start gap-3 p-3 text-left font-normal"
+            className="h-auto w-full min-w-0 max-w-full items-center justify-start gap-3 p-3 text-left font-normal"
             data-testid={`org-list-membership-${item.organization.id}`}
           >
             <OrgAvatar
@@ -256,7 +257,7 @@ function OrganizationListView({
             variant="outline"
             disabled={selectAction.isPending}
             onClick={() => void select(null)}
-            className="h-auto w-full items-center justify-start gap-3 p-3 text-left font-normal"
+            className="h-auto w-full min-w-0 max-w-full items-center justify-start gap-3 p-3 text-left font-normal"
           >
             <OrgAvatar name={self.name || t("organizationSwitcher.personalWorkspace")} size="md" />
             <span className="flex min-w-0 flex-1 flex-col">
@@ -274,12 +275,12 @@ function OrganizationListView({
             type="button"
             variant="outline"
             onClick={() => setCreateOpen(true)}
-            className="h-auto w-full items-center justify-start gap-3 border-dashed p-3 text-left font-normal"
+            className="h-auto w-full min-w-0 max-w-full items-center justify-start gap-3 border-dashed p-3 text-left font-normal"
           >
             <span className="flex size-10 items-center justify-center rounded-md bg-muted">
               <PlusIcon className="size-5" aria-hidden="true" />
             </span>
-            <span className="font-medium">{t("organizationList.action__createOrganization")}</span>
+            <span className="min-w-0 truncate font-medium">{t("organizationList.action__createOrganization")}</span>
           </Button>
         ) : null}
       </div>
@@ -303,7 +304,7 @@ function OrganizationListView({
                 className="flex items-center justify-between gap-2 rounded-lg border p-3"
                 data-testid={`org-list-suggestion-${suggestion.id}`}
               >
-                <span className="flex min-w-0 items-center gap-2">
+                <span className="flex min-w-0 flex-1 items-center gap-2">
                   <OrgAvatar
                     name={suggestion.publicOrganizationData.name}
                     imageUrl={suggestion.publicOrganizationData.imageUrl}
@@ -331,7 +332,7 @@ function OrganizationListView({
       ) : null}
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className={OVERLAY_WIDTH.form}>
           <DialogTitle className="sr-only">{t("createOrganization.title")}</DialogTitle>
           <CreateOrganization
             afterCreateOrganizationUrl={afterCreateOrganizationUrl}

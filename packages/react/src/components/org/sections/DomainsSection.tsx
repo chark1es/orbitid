@@ -212,8 +212,8 @@ function DomainCard({
   return (
     <div className="flex flex-col gap-3 rounded-lg border p-3" data-testid={`domain-${domain.id}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className="font-medium">{domain.name}</span>
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="min-w-0 max-w-[28ch] truncate font-medium" title={domain.name}>{domain.name}</span>
           <Badge variant={verified ? "secondary" : "outline"}>
             {verified
               ? t("organizationProfile.domainsSection.verifiedDomain")

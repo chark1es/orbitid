@@ -96,6 +96,16 @@ describe("login guard", () => {
     expect(screen.getByRole("button", { name: "Show secret key" })).toBeTruthy();
   });
 
+  it("tells the operator how to print the key rather than promising it in the startup log", async () => {
+    mockApi({ sessionActive: false });
+    renderApp("/login");
+
+    expect((await screen.findAllByText(/orbitid keys/)).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Startup prints the publishable key and leaves the secret key hidden/)).toBeTruthy();
+    expect(screen.queryByText(/Printed when the server starts/)).toBeNull();
+    expect(screen.queryByText(/The first start prints the publishable key and the secret key once/)).toBeNull();
+  });
+
   it("names the problem when the instance does not answer", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);
@@ -117,12 +127,12 @@ describe("login guard", () => {
     expect(await screen.findByText("Checking your session…")).toBeTruthy();
   });
 
-  it("renders the shell when the cookie session is live, without any key in storage", { timeout: 20_000 }, async () => {
+  it("renders the shell when the cookie session is live, without any key in storage", async () => {
     mockApi({ sessionActive: true, health: { status: "ok", database: "sqlite", publishable_key: "pk_test_demo" } });
     renderApp("/");
-    expect(await screen.findAllByText("Overview", {}, { timeout: 10_000 })).not.toHaveLength(0);
+    expect(await screen.findAllByText("Overview")).not.toHaveLength(0);
     expect(screen.queryByText("Sign in with your secret key")).toBeNull();
-    expect(await screen.findByText("SQLite", {}, { timeout: 10_000 })).toBeTruthy();
+    expect(await screen.findByText("SQLite")).toBeTruthy();
     expect(document.title).toBe("Overview \u00b7 OrbitID");
     expect(JSON.stringify(sessionStorage)).not.toContain("sk_");
   });
@@ -137,7 +147,7 @@ describe("operator sign-in", () => {
     fireEvent.change(screen.getByLabelText("Secret key"), { target: { value: "sk_test_one_time" } });
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
-    expect(await screen.findAllByText("Overview", {}, { timeout: 10_000 })).not.toHaveLength(0);
+    expect(await screen.findAllByText("Overview")).not.toHaveLength(0);
 
     const exchange = calls.find((call) => call.method === "POST" && call.url.includes("/v1/operator_sessions"))!;
     expect(exchange.body).toEqual({ secret_key: "sk_test_one_time" });

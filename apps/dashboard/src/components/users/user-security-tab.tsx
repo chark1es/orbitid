@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Badge, Button } from "@orbitid/ui";
+import { Button } from "@orbitid/ui";
 import { Ban, KeyRound, Lock, LogOut, ShieldCheck, ShieldOff, Unlock } from "lucide-react";
 import type { UserJSON } from "@orbitid/shared";
 import { useInstance } from "../../lib/instance";
@@ -7,7 +7,7 @@ import { useUserAdmin } from "../../lib/user-admin";
 import { formatDateTime } from "../../lib/format";
 import { ConfirmDialog } from "../shared/confirm-dialog";
 import { Panel, Section } from "../shared/section";
-import { StatusBadge } from "../shared/status-badge";
+import { LabelChip, StatusBadge } from "../shared/status-badge";
 
 export function UserSecurityTab({ user }: { user: UserJSON; onUpdated: () => void }) {
   const admin = useUserAdmin(user.id);
@@ -96,9 +96,9 @@ export function UserSecurityTab({ user }: { user: UserJSON; onUpdated: () => voi
           ) : null}
           <div className="mt-4 flex flex-wrap items-center gap-2">
             {user.passkeys.length ? (
-              <Badge variant="outline">
+              <LabelChip>
                 {user.passkeys.length} {user.passkeys.length === 1 ? "passkey" : "passkeys"}
-              </Badge>
+              </LabelChip>
             ) : null}
           </div>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">

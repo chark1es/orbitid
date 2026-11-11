@@ -199,13 +199,14 @@ describe("custom roles", () => {
     expect(claims.role_permissions).toEqual([]);
     expect(claims.org_role).toBeUndefined();
 
-    // Revoking the assignment ends the user's sessions, so the old token is not merely stale but unusable.
+    // Revoking the assignment does not sign the user out: instance roles are read on every mint, so the next
+    // token simply carries no role. Ending sessions for a permission change is what we are avoiding.
     const cleared = await backend<{ roles: string[] }>(app, "PUT", `/v1/users/${user.id}/roles`, { roles: [] });
     expect(cleared.body.roles).toEqual([]);
     const sessions = await ctx.db.select().from(s.sessions).where(eq(s.sessions.userId, user.id));
-    expect(sessions.every((row) => row.status !== "active")).toBe(true);
-    const after = await sessionClaims(app, ctx, auth.sessionId).catch(() => null);
-    expect(after).toBeNull();
+    expect(sessions.some((row) => row.id === auth.sessionId && row.status === "active")).toBe(true);
+    const after = await sessionClaims(app, ctx, auth.sessionId);
+    expect(after.roles).toEqual([]);
   });
 
   it("keeps organization roles out of the instance claims and vice versa", async () => {
@@ -217,7 +218,7 @@ describe("custom roles", () => {
 
     await backend<RoleJSON>(app, "POST", "/v1/roles", { key: "app:support", name: "Support" });
     await backend(app, "PUT", `/v1/users/${user.id}/roles`, { roles: ["app:support"] });
-    // Assigning roles ends the user's sessions, so mint from a session created afterwards with the org active.
+    // Assigning roles leaves existing sessions alone; this session was created afterwards with the org active.
     const session = await seedAuth(ctx, user.id, { activeOrganizationId: org.id });
     const claims = await sessionClaims(app, ctx, session.sessionId);
     expect(claims.org_role).toBe("org:admin");

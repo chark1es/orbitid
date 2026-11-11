@@ -7,7 +7,6 @@ import { useElementClasses } from "../../_shared/appearance";
 import { FormError } from "../../_shared/form-error";
 import { Field } from "../../_shared/field";
 import { SocialButtons } from "../../_shared/social-buttons";
-import type { OrbitInstance } from "../../_shared/w6";
 import {
   Divider,
   FooterSwitch,
@@ -52,7 +51,7 @@ export function StartStep({ flow, props }: StepProps) {
     <SocialButtons
       providers={environment.social}
       disabled={flow.busy}
-      lastUsedStrategy={readLastUsedStrategy(orbit)}
+      lastUsedStrategy={orbit.lastUsedStrategy ?? null}
       onSelect={(provider) => void flow.authenticateWithRedirect(provider.strategy)}
     />
   ) : null;
@@ -137,9 +136,4 @@ export function StartStep({ flow, props }: StepProps) {
       ) : null}
     </div>
   );
-}
-
-function readLastUsedStrategy(orbit: OrbitInstance): string | null {
-  const value = Reflect.get(orbit, "lastUsedStrategy");
-  return typeof value === "string" ? value : null;
 }

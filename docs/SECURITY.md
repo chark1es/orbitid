@@ -70,11 +70,15 @@ access (`requireSecretKey` in `packages/server/src/middleware.ts`). The operator
 same rule. Frontend API requests and federation callbacks ignore this cookie and keep their own authentication
 rules, so being signed into the dashboard does not prevent an operator from using their application.
 
-Cookies are audited in one place each: `__client` is `HttpOnly`, `SameSite=Lax`, `Path=/`, one year, and
-`Secure` whenever the base URL is https. The dashboard's `__orbit_operator` is `HttpOnly`, `SameSite=Strict`,
-`Path=/v1`, 8 hours, and `Secure` over https. The OAuth/SAML browser-binding cookie `__orbit_oauth` is
-`HttpOnly`, `Path=/v1`, 10 minutes, and `SameSite=None; Secure` over https because SAML ACS and Apple
-`form_post` callbacks are cross-site POSTs.
+Cookies are audited in one place each: `__client` is `HttpOnly`, `SameSite=Lax`, `Path=/`, 400 days (the
+browser maximum), and `Secure` when the request is https — either `ORBITID_BASE_URL` or, behind a
+TLS-terminating proxy at the configured `ORBITID_TRUST_PROXY` level, `X-Forwarded-Proto: https`. A plain-http
+localhost instance gets no `Secure` attribute because the browser would refuse the cookie. `__session` and
+`__client_uat` are written by the browser SDK with the same 400-day cap; the JWT inside `__session` still
+expires in about 60 s and is refreshed continuously. The dashboard's `__orbit_operator` is `HttpOnly`,
+`SameSite=Strict`, `Path=/v1`, 8 hours, and `Secure` over https. The OAuth/SAML browser-binding cookie
+`__orbit_oauth` is `HttpOnly`, `Path=/v1`, 10 minutes, and `SameSite=None; Secure` over https because SAML ACS
+and Apple `form_post` callbacks are cross-site POSTs.
 
 ### 3. Request limits
 
@@ -135,6 +139,15 @@ and `Content-Security-Policy: sandbox`. The existing path-traversal guard on the
   `/v1/client/me` only reads the fields its schema names.
 - **JWT templates** resolve dot-paths against a fixed, per-user context; they cannot execute code, cannot reach
   `Object.prototype`, and cannot read secrets (the context holds only user, session, org and membership data).
+  A template token is marked `token_type: "jwt_template"` and is refused everywhere a session is accepted —
+  the server's bearer-session routes, `@orbitid/backend` `verifyToken`/`authenticateRequest` and the `@orbitid/node`
+  adapters — even when it is signed with the instance key. A 10-year template lifetime therefore cannot become a
+  10-year session that survives logout, a ban or a role change. Verify one deliberately with
+  `verifyToken(token, { tokenType: "jwt_template" })` (Node: `orbit.verifyToken(token, { tokenType: "jwt_template" })`).
+- **API keys follow their subject.** A key is invalid while its user is banned or currently locked, and banning a
+  user revokes every key issued for them, so a credential cannot outlive the account's access.
+- **Disabled webhook endpoints stop delivery.** Queued attempts are skipped without consuming a retry while the
+  endpoint is disabled; re-enabling it resumes the queue.
 - **Log injection**: values written to logs are passed through `logSafe`, which escapes control characters
   (including CR/LF), so a crafted header or email cannot forge log lines. Secrets, tokens, codes and passwords
   are never logged.
@@ -172,6 +185,21 @@ and `Content-Security-Policy: sandbox`. The existing path-traversal guard on the
 - Account lockout: `settings.mfa.maxAttempts` failures lock the account for `lockoutDurationSeconds`.
 - Backup codes are 10 characters from a 32-symbol alphabet (50 bits each), single-use, stored as SHA-256 hashes.
 - Every token, code and signature comparison uses `safeEqual`.
+- **A first-factor attempt cannot relabel what was prepared.** `attempt_first_factor` refuses a `strategy`
+  different from the one `prepare_first_factor` recorded (`400 client_state_invalid`), and password recovery
+  derives its channel and identifier from the verified `reset_password` row rather than the request body. A code
+  sent to an email address can never be submitted — or persisted — as a phone recovery, or vice versa.
+- **First-factor steps are state-bound and single use.** `prepare_first_factor` and `attempt_first_factor` are
+  refused (`400 client_state_invalid`) unless the sign-in is still waiting for a first factor, so an attempt that
+  already escalated to MFA or completed a password reset cannot be walked back to an earlier step. A
+  `reset_password` verification is consumed with a conditional `UPDATE` when the password is written: replaying
+  the code — even in a parallel request — finds it spent and changes nothing. The same state gate stops replayed
+  `email_code`, `phone_code` and `email_link` attempts after they produced a session or reached the second factor.
+- **Required MFA fails closed after recovery.** When `mfa.required` is on and the account has enrolled a factor,
+  recovery cannot mint a session if excluding the channel it just used leaves no eligible second factor. The
+  password reset still completes, but the sign-in returns `needs_first_factor` for the new password instead of an
+  active session; the normal password flow then asks for the second factor. An account that never enrolled a
+  factor keeps the previous pending-session behaviour, so nobody is locked out for lacking MFA.
 
 **No operator path to a user's session.** Holding the secret key is not the same as being any user, and the Backend
 API is built so that administration cannot be turned into a sign-in:
@@ -208,7 +236,24 @@ it is hidden and points at `orbitid keys`, which the operator runs deliberately.
 land in shared logs (which are read by more people and kept longer than the rows they concern) are simply not
 written.
 
-### 8. Secrets
+### 8. Session persistence
+
+Sessions have **no expiry by default** (`session.lifetimeSeconds: 0`, `inactivityTimeoutSeconds: 0`). A session
+ends only on the user's sign-out, an operator revocation, or a ban; a password change, role change, email change,
+reverification, organization switch or MFA enrolment does not end it. Refreshes are never treated as failures:
+the browser SDK backs off and retries, only a confirmed 401/403 clears local state, and the Next.js handshake
+recovers an expired 60 s JWT from the live `__client` cookie instead of redirecting to sign-in. Signing keys live
+in the database and a changed `ORBITID_ENCRYPTION_KEY` aborts startup rather than silently invalidating every
+session. See [SESSIONS.md](SESSIONS.md) for the full guarantees, the causes that were audited, and the cookie
+attributes.
+
+**Clock tolerance is split.** 60 s on `nbf`/`iat` but 10 s on `exp`: a 60 s JWT is usable ~70 s. SDK verifiers
+share it; backend's verifier is exact.
+
+**Session end ends OIDC credentials.** Sign-out, revoke, ban, removal and expiry revoke the session's
+grants; userinfo, introspection and refresh re-check it. Recovery revokes grants and trusted devices.
+
+### 9. Secrets
 
 `GET /v1/instance` (and any settings response) masks credentials — `smtpUrl`, `resendApiKey`, `captchaSecret`,
 `twilioAuthToken`, social `clientSecret`, `applePrivateKey` and enterprise connection secrets — as `••••` with a
@@ -224,7 +269,7 @@ instead of crashing the instance.
 Webhook endpoint secrets are returned only when the endpoint is created (and when the secret is rotated, or read
 from the dedicated secret endpoint). They never appear in list or detail responses.
 
-### 9. Dependencies
+### 10. Dependencies
 
 `bun audit` checks dependency advisories against the committed lockfile and currently reports no known
 vulnerabilities. `drizzle-orm` and `nodemailer` include fixes for the identifier-escaping and message-level

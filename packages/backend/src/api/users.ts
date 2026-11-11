@@ -3,6 +3,8 @@ import type {
   DeletedObject,
   ListParams,
   OrganizationMembership,
+  PasswordHasher,
+  TrustedDevice,
   User,
   UserRoles,
   VerifyPasswordResult,
@@ -24,7 +26,10 @@ export interface CreateUserParams {
   phoneNumber?: string[];
   username?: string;
   password?: string;
+  /** Pre-hashed password for an import. Requires `passwordHasher`; the server refuses one without it. */
   passwordDigest?: string;
+  /** Hasher that produced `passwordDigest`; must be one the server can verify. */
+  passwordHasher?: PasswordHasher;
   firstName?: string;
   lastName?: string;
   externalId?: string;
@@ -128,6 +133,14 @@ export function createUsersApi(http: BackendHttp) {
     },
     getUserRoles(userId: string) {
       return http.get<UserRoles>(`/v1/users/${userId}/roles`);
+    },
+    /** Trusted devices (MFA "remember this browser") for a user, newest first. */
+    getUserTrustedDeviceList(params: { userId: string }) {
+      return http.get<TrustedDevice[]>(`/v1/users/${params.userId}/trusted_devices`);
+    },
+    /** Forces the browser to complete its second factor on the next sign-in. */
+    revokeUserTrustedDevice(params: { userId: string; deviceId: string }) {
+      return http.delete<DeletedObject>(`/v1/users/${params.userId}/trusted_devices/${params.deviceId}`);
     },
     /**
      * Replaces a user's instance-wide (`app:...`) roles. Operator-only, and independent of any organization:

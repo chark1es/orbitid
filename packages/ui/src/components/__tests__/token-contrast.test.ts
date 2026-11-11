@@ -35,4 +35,15 @@ describe.each([["light", light], ["dark", dark]])("%s theme opaque token contras
   it("keeps input/unchecked-control boundaries distinguishable", () => {
     for (const surface of ["background", "card", "muted", "accent"]) expect(contrast(block, "input", surface), `input on ${surface}`).toBeGreaterThanOrEqual(3);
   });
+  it("keeps signal text readable where signal is used as type", () => {
+    for (const surface of ["background", "card"]) expect(contrast(block, "signal", surface), `signal on ${surface}`).toBeGreaterThanOrEqual(4.5);
+  });
+  it("keeps secondary labels readable on every ordinary surface", () => {
+    for (const surface of ["background", "card", "muted", "accent"]) expect(contrast(block, "muted-foreground", surface), `muted-foreground on ${surface}`).toBeGreaterThanOrEqual(4.5);
+  });
+  it("keeps the active rail item's label readable", () => {
+    expect(contrast(block, "primary-foreground", "sidebar-primary")).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(block, "sidebar-primary-foreground", "sidebar-primary")).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(block, "rail-muted", "rail")).toBeGreaterThanOrEqual(4.5);
+  });
 });

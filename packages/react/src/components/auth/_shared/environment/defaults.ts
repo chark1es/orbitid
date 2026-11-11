@@ -105,7 +105,7 @@ export function createDefaultEnvironment(): EnvironmentJSON {
     },
     organization_settings: {
       enabled: false,
-      max_allowed_memberships: 5,
+      max_allowed_memberships: 0,
       max_created_organizations_per_user: null,
       creation_enabled: true,
       domains_enabled: false,

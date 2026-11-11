@@ -14,6 +14,7 @@ import { hit } from "../../lib/rate-limit";
 import { audit, listAuditLogs } from "../../services/audit";
 import { instanceStats } from "../../services/stats";
 import { rotateSigningKey } from "../../services/tokens";
+import { previewProvider } from "../../services/oauth-providers";
 import type { AppContext, DeepPartial } from "../../context";
 import { listParams } from "./shared";
 import { first } from "../../lib/db";
@@ -162,6 +163,41 @@ export default function routes(ctx: AppContext) {
     const { provider } = await sendTestEmail(ctx, body.to);
     await audit(ctx, { actor: "secret_key", action: "instance.email_test", targetType: "instance", targetId: "default", metadata: { provider } });
     return c.json({ provider, ok: true as const });
+  });
+
+  app.post("/instance/social/test", async (c) => {
+    const body = await parseBody(c, z.object({
+      protocol: z.enum(["oidc", "oauth2"]).optional(),
+      discoveryUrl: z.string().optional(),
+      issuer: z.string().optional(),
+      authorizationUrl: z.string().optional(),
+      tokenUrl: z.string().optional(),
+      userinfoUrl: z.string().optional(),
+      jwksUrl: z.string().optional(),
+    }));
+    await hit(ctx, `instance:social_test:${clientIp(c)}`, 20, 60_000);
+    await hit(ctx, "instance:social_test", 120, 60_000);
+    const preview = await previewProvider(ctx, body);
+    await audit(ctx, {
+      actor: "secret_key",
+      action: "instance.social_tested",
+      targetType: "instance",
+      targetId: "default",
+      metadata: { ok: preview.ok, discovery: Boolean(body.discoveryUrl), protocol: preview.protocol },
+    });
+    return c.json(preview);
+  });
+
+  /** Deletes a custom social provider. Built-in presets cannot be deleted, only turned off. */
+  app.delete("/instance/social/:provider", async (c) => {
+    const provider = c.req.param("provider");
+    if (!provider.startsWith("custom_")) {
+      throw new OrbitError(422, ErrorCodes.form_param_format_invalid, "Only custom providers can be deleted. Turn a built-in provider off instead.", { param_name: "provider" });
+    }
+    if (!ctx.settings.get().social[provider]) throw new OrbitError(404, ErrorCodes.resource_not_found, "Social provider not found");
+    await ctx.settings.removeSocialProviders([provider]);
+    await audit(ctx, { actor: "secret_key", action: "instance.social_deleted", targetType: "instance", targetId: "default", metadata: { provider } });
+    return c.json(instanceJson(ctx));
   });
 
   app.post("/instance/signing_keys/rotate", async (c) => {

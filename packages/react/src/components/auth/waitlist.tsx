@@ -62,7 +62,7 @@ function WaitlistInner({ afterJoinWaitlistUrl, signInUrl }: WaitlistProps) {
           <Button
             type="button"
             variant="link"
-            className="mx-auto h-auto p-0"
+            className="mx-auto h-auto min-h-6 px-0 py-1"
             onClick={() => navigate(signInUrl ?? "/sign-in")}
           >
             {t("waitlist.backToSignIn")}
@@ -100,7 +100,7 @@ function WaitlistInner({ afterJoinWaitlistUrl, signInUrl }: WaitlistProps) {
         <Button
           type="button"
           variant="link"
-          className="mx-auto h-auto p-0"
+          className="mx-auto h-auto min-h-6 px-0 py-1"
           onClick={() => navigate(signInUrl ?? "/sign-in")}
         >
           {t("waitlist.backToSignIn")}

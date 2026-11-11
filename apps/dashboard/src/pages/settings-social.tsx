@@ -1,66 +1,36 @@
-import { useEffect, useState } from "react";
-import { SOCIAL_PROVIDERS, type SocialProviderConfig } from "@orbitid/shared";
-import { Button, Input, Switch, Textarea } from "@orbitid/ui";
+import { useState } from "react";
+import { Page as PageLayout } from "../components/shared/page";
+import type { InstanceSettings, SocialProviderConfig } from "@orbitid/shared";
+import { Button, Input, Switch } from "@orbitid/ui";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
-import { getApiUrl } from "../lib/api";
+import { api, getApiUrl } from "../lib/api";
+import { ConfirmDialog } from "../components/shared/confirm-dialog";
 import {
   isCustomProviderKey,
-  isHttpUrl,
-  socialProviderConfig,
-  listToText,
   oauthCallbackUrl,
   providerInitial,
   providerLabel,
-  secretInputValue,
   secretIsConfigured,
-  textToList,
+  socialProviderConfig,
 } from "./_config/settings";
 import {
-  CheckboxRow,
-  CopyButton,
-  DetailSheet,
   ErrorAlert,
-  Field,
   LoadingPage,
   MetaChip,
   PageHeader,
   SaveBar,
-  SecretInput,
-  SecretSetChip,
   SettingsSection,
-  ValidationSummary,
 } from "./_config/ui";
 import { useSettingsEditor } from "./_config/use-settings";
-
-const BUILT_IN_KEYS: string[] = [...SOCIAL_PROVIDERS];
-
-function ScopesInput({ value, onChange }: { value: string[]; onChange: (scopes: string[]) => void }) {
-  const [text, setText] = useState(() => listToText(value));
-  useEffect(() => {
-    if (textToList(text).join("\u0000") !== value.join("\u0000")) setText(listToText(value));
-    // Resync only on external changes (save or discard) so typing is preserved.
-  }, [value.join("\u0000")]);
-  return (
-    <Input
-      value={text}
-      onChange={(event) => {
-        setText(event.target.value);
-        onChange(textToList(event.target.value));
-      }}
-      placeholder="openid, email, profile"
-      className="font-data text-xs"
-    />
-  );
-}
+import { AddProviderSheet } from "./_settings-social/add-provider-sheet";
+import { BUILT_IN_KEYS, customProviderErrors } from "./_settings-social/model";
+import { ProviderSheet } from "./_settings-social/provider-sheet";
 
 function ProviderLine({ label, initial }: { label: string; initial: string }) {
   return (
     <span className="flex min-w-0 items-center gap-3">
-      <span
-        className="grid size-[22px] shrink-0 place-items-center bg-foreground font-data text-[11px] font-medium text-background"
-        aria-hidden
-      >
+      <span className="grid size-[22px] shrink-0 place-items-center bg-foreground font-data text-[11px] font-medium text-background" aria-hidden>
         {initial}
       </span>
       <span className="truncate text-sm font-medium">{label}</span>
@@ -68,23 +38,77 @@ function ProviderLine({ label, initial }: { label: string; initial: string }) {
   );
 }
 
+function ProviderRow({
+  view,
+  callbackUrl,
+  onToggle,
+  onConfigure,
+}: {
+  view: {
+    key: string;
+    config: SocialProviderConfig;
+    configured: boolean;
+    label: string;
+  };
+  callbackUrl: string;
+  onToggle: (enabled: boolean) => void;
+  onConfigure: () => void;
+}) {
+  return (
+    <li className="flex flex-wrap items-center gap-3 border-t border-border py-2 first:border-t-0">
+      <div className="flex min-w-0 flex-1 items-center gap-2.5">
+        <ProviderLine label={view.label} initial={providerInitial(view.key, view.config)} />
+        {isCustomProviderKey(view.key) ? (
+          <MetaChip>{view.config.protocol === "oauth2" ? "Custom OAuth 2.0" : "Custom OIDC"}</MetaChip>
+        ) : null}
+        {view.configured ? <MetaChip>Configured</MetaChip> : null}
+      </div>
+      <span className="hidden max-w-[32ch] truncate font-data text-xs text-muted-foreground 2xl:block" title={callbackUrl}>
+        {callbackUrl}
+      </span>
+      <span className="w-7 text-right text-xs text-muted-foreground">{view.config.enabled ? "On" : "Off"}</span>
+      <Switch
+        checked={view.config.enabled}
+        onCheckedChange={onToggle}
+        aria-label={`Enable ${view.label}`}
+      />
+      <Button variant="outline" size="sm" onClick={onConfigure}>
+        Configure
+      </Button>
+    </li>
+  );
+}
+
+/** Validation shared with the server policy, plus the Apple .p8 triple that replaces a client secret. */
+function providerErrors(key: string, config: SocialProviderConfig): string[] {
+  const errors = customProviderErrors(key, config);
+  if (!config.enabled || key !== "apple") return errors;
+  const label = providerLabel(key, config);
+  const usesAppleKey = Boolean(config.appleTeamId?.trim() || config.appleKeyId?.trim() || secretIsConfigured(config.applePrivateKey));
+  if (usesAppleKey) {
+    if (!config.appleTeamId?.trim()) errors.push(`${label}: team ID is required when the .p8 key is used.`);
+    if (!config.appleKeyId?.trim()) errors.push(`${label}: key ID is required when the .p8 key is used.`);
+    if (!secretIsConfigured(config.applePrivateKey)) errors.push(`${label}: paste the .p8 private key, or use a client secret instead.`);
+  }
+  return errors;
+}
+
 export default function Page() {
   const editor = useSettingsEditor();
   const settings = editor.settings;
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
-  const [customName, setCustomName] = useState("");
-  const [customKey, setCustomKey] = useState("");
-  const [customDiscovery, setCustomDiscovery] = useState("");
-  const [customClientId, setCustomClientId] = useState("");
-  const [customSecret, setCustomSecret] = useState("");
-  const [customScopes, setCustomScopes] = useState("openid, email, profile");
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
+  const [deletePending, setDeletePending] = useState(false);
+  const [providerQuery, setProviderQuery] = useState("");
+  const [showMoreProviders, setShowMoreProviders] = useState(false);
+  const apiUrl = getApiUrl();
 
   if (editor.isLoading) return <LoadingPage rows={3} />;
   if (!settings) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Social connections" description="OAuth providers and custom OpenID Connect connections." />
+        <PageHeader title="Social connections" description="OAuth providers and custom OpenID Connect or OAuth 2.0 connections." />
         <ErrorAlert error={editor.error ?? "Instance settings did not load."} onRetry={editor.refetch} />
       </div>
     );
@@ -93,365 +117,161 @@ export default function Page() {
   const customKeys = Object.keys(settings.social).filter((key) => !BUILT_IN_KEYS.includes(key));
   const providers = [...BUILT_IN_KEYS, ...customKeys];
   const enabledCount = providers.filter((key) => settings.social[key]?.enabled).length;
-  const socialErrors: string[] = [];
-  for (const key of providers) {
+  const socialErrors = providers.flatMap((key) => providerErrors(key, socialProviderConfig(settings, key)));
+
+  const providerViews = providers.map((key, index) => {
     const config = socialProviderConfig(settings, key);
-    if (!config.enabled) continue;
-    const label = providerLabel(key, config);
-    if (!config.clientId.trim()) socialErrors.push(`${label}: client ID is required.`);
-    // Apple signs its own client secret from the .p8 key, so a stored client secret is optional there.
-    const usesAppleKey = key === "apple" && (Boolean(config.appleTeamId?.trim()) || Boolean(config.appleKeyId?.trim()) || secretIsConfigured(config.applePrivateKey));
-    if (!config.clientSecret && !usesAppleKey) socialErrors.push(`${label}: client secret is required.`);
-    if (key === "apple" && usesAppleKey) {
-      if (!config.appleTeamId?.trim()) socialErrors.push(`${label}: team ID is required when the .p8 key is used.`);
-      if (!config.appleKeyId?.trim()) socialErrors.push(`${label}: key ID is required when the .p8 key is used.`);
-      if (!secretIsConfigured(config.applePrivateKey)) socialErrors.push(`${label}: paste the .p8 private key, or use a client secret instead.`);
-    }
-    if (isCustomProviderKey(key) && !isHttpUrl(config.discoveryUrl ?? "")) socialErrors.push(`${label}: discovery URL must be an http(s) URL.`);
-  }
+    const appleKey =
+      key === "apple" &&
+      Boolean(config.appleTeamId?.trim() || config.appleKeyId?.trim() || secretIsConfigured(config.applePrivateKey));
+    const configured = Boolean(config.clientId && (config.clientSecret || appleKey || isCustomProviderKey(key)));
+    return { key, index, config, appleKey, configured, label: providerLabel(key, config) };
+  });
+  const providerRank = (view: (typeof providerViews)[number]) =>
+    view.config.enabled ? 0 : view.configured ? 1 : 2;
+  const search = providerQuery.trim().toLowerCase();
+  const matching = [...providerViews]
+    .sort((a, b) => providerRank(a) - providerRank(b) || a.index - b.index)
+    .filter((view) => !search || view.label.toLowerCase().includes(search) || view.key.toLowerCase().includes(search));
+  // Enabled and configured providers stay on top. The untouched presets are one disclosure away, so
+  // the page is a short list of what this instance actually uses instead of a wall of switches.
+  const pinnedProviders = matching.filter((view) => providerRank(view) < 2);
+  const presetProviders = matching.filter((view) => providerRank(view) === 2);
+  const showPresets = search.length > 0 || showMoreProviders;
 
   const selectedConfig = selectedKey ? socialProviderConfig(settings, selectedKey) : null;
-
-  const resetDialog = () => {
-    setCustomName("");
-    setCustomKey("");
-    setCustomDiscovery("");
-    setCustomClientId("");
-    setCustomSecret("");
-    setCustomScopes("openid, email, profile");
-  };
-
-  const customKeyValue = customKey.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-");
-  const customErrors: string[] = [];
-  if (!customName.trim()) customErrors.push("Name is required.");
-  if (!/^[a-z0-9][a-z0-9_-]{0,31}$/.test(customKeyValue)) customErrors.push("Key must use lowercase letters, numbers, dashes or underscores.");
-  if (providers.includes(`custom_${customKeyValue}`)) customErrors.push("That provider key already exists.");
-  if (!isHttpUrl(customDiscovery)) customErrors.push("Discovery URL must be an http(s) URL.");
-  if (!customClientId.trim()) customErrors.push("Client ID is required.");
-  if (!customSecret.trim()) customErrors.push("Client secret is required.");
-
-  const addCustomProvider = () => {
-    if (customErrors.length > 0) return;
-    editor.patch({
-      social: {
-        [`custom_${customKeyValue}`]: {
-          enabled: true,
-          name: customName.trim(),
-          clientId: customClientId.trim(),
-          clientSecret: customSecret,
-          discoveryUrl: customDiscovery.trim(),
-          scopes: textToList(customScopes),
-          authenticatableAtSignIn: true,
-        },
-      },
-    });
-    toast.success("Custom provider added. Save settings to turn it on.");
-    setAddOpen(false);
-    resetDialog();
-  };
 
   const updateProvider = (key: string, patch: Partial<SocialProviderConfig>) => {
     editor.patch({ social: { [key]: { ...socialProviderConfig(settings, key), ...patch } } });
   };
 
-  const callbackFor = (key: string) => oauthCallbackUrl(getApiUrl(), key);
+  const addProvider = (key: string, config: SocialProviderConfig) => {
+    editor.patch({ social: { [key]: config } });
+    toast.success("Provider added. Save settings to turn it on.");
+    setAddOpen(false);
+    setSelectedKey(key);
+  };
+
+  const deleteProvider = async () => {
+    if (!deletingKey) return;
+    setDeletePending(true);
+    try {
+      const next = await api<InstanceSettings>("DELETE", `/instance/social/${deletingKey}`);
+      toast.success("Provider deleted");
+      if (selectedKey === deletingKey) setSelectedKey(null);
+      setDeletingKey(null);
+      editor.apply(next);
+    } catch (error) {
+      toast.error("Could not delete provider", { description: error instanceof Error ? error.message : "Try again." });
+    } finally {
+      setDeletePending(false);
+    }
+  };
+
+  const callbackFor = (key: string) => oauthCallbackUrl(apiUrl, key);
+  const deletingLabel = deletingKey ? providerLabel(deletingKey, socialProviderConfig(settings, deletingKey)) : "";
 
   return (
-    <div className="space-y-6">
+    <PageLayout>
       <PageHeader
         title="Social connections"
         description="Let users sign in with an external identity provider. Credentials stay on the server and secrets are write-only."
         badge={<MetaChip>{enabledCount} enabled</MetaChip>}
         actions={
           <Button size="sm" onClick={() => setAddOpen(true)}>
-            <Plus className="size-4" aria-hidden /> Add custom OIDC provider
+            <Plus className="size-4" aria-hidden /> Add custom provider
           </Button>
         }
       />
 
       {editor.error ? <ErrorAlert error={editor.error} onRetry={editor.refetch} /> : null}
 
-      <SettingsSection
-        title="Providers"
-        description="Turn a provider on, then add its client credentials. The callback URL must be registered with the provider."
-      >
+      <SettingsSection title="Providers" description="Turn a provider on, then add its client credentials. The callback URL must be registered with the provider.">
+        <div className="flex flex-wrap items-center gap-2 pb-2">
+          <Input
+            value={providerQuery}
+            onChange={(event) => setProviderQuery(event.target.value)}
+            placeholder="Search providers"
+            aria-label="Search providers"
+            className="h-8 max-w-xs"
+          />
+          <span className="text-xs text-muted-foreground" aria-live="polite">
+            {search ? `${matching.length} matching` : `${pinnedProviders.length} enabled or configured`}
+          </span>
+        </div>
         <ul className="-mt-3 border-b border-border">
-          {providers.map((key) => {
-            const config = socialProviderConfig(settings, key);
-            const appleKey = key === "apple" && Boolean(config.appleTeamId?.trim() || config.appleKeyId?.trim() || secretIsConfigured(config.applePrivateKey));
-            const configured = Boolean(config.clientId && (config.clientSecret || appleKey));
-            return (
-              <li key={key} className="flex flex-wrap items-center gap-3 border-t border-border py-3 first:border-t-0">
-                <div className="flex min-w-0 flex-1 items-center gap-3">
-                  <ProviderLine label={providerLabel(key, config)} initial={providerInitial(key, config)} />
-                  {isCustomProviderKey(key) ? <MetaChip>Custom OIDC</MetaChip> : null}
-                  {configured ? <MetaChip>Configured</MetaChip> : null}
-                </div>
-                <span className="hidden max-w-[42ch] truncate font-data text-xs text-muted-foreground xl:block">{callbackFor(key)}</span>
-                <span className="text-xs text-muted-foreground">{config.enabled ? "On" : "Off"}</span>
-                <Switch
-                  checked={config.enabled}
-                  onCheckedChange={(enabled) => updateProvider(key, { enabled })}
-                  aria-label={`Enable ${providerLabel(key, config)}`}
-                />
-                <Button variant="outline" size="sm" onClick={() => setSelectedKey(key)}>
-                  Configure
-                </Button>
-              </li>
-            );
-          })}
-        </ul>
-      </SettingsSection>
-
-      <DetailSheet
-        open={Boolean(selectedKey && selectedConfig)}
-        onOpenChange={(open) => !open && setSelectedKey(null)}
-        title={selectedKey && selectedConfig ? providerLabel(selectedKey, selectedConfig) : "Provider"}
-        description={
-          selectedKey && selectedConfig
-            ? isCustomProviderKey(selectedKey)
-              ? "Custom OpenID Connect provider."
-              : "OAuth provider settings. Changes apply after you save the page."
-            : undefined
-        }
-        footer={
-          <>
-            <Button variant="outline" onClick={() => setSelectedKey(null)}>
-              Close
-            </Button>
-            {selectedKey && selectedConfig && isCustomProviderKey(selectedKey) && selectedConfig.enabled ? (
-              <Button
-                variant="destructive"
-                onClick={() => {
-                  updateProvider(selectedKey, { enabled: false });
-                  toast.success("Provider disabled. Save settings to apply it.");
-                }}
-              >
-                Disable provider
-              </Button>
-            ) : null}
-          </>
-        }
-      >
-        {selectedKey && selectedConfig ? (
-          <div className="space-y-5">
-            <div className="flex items-center justify-between gap-4 border-b border-border pb-3">
-              <div className="space-y-0.5">
-                <p className="text-sm font-medium">Enabled</p>
-                <p className="text-xs text-muted-foreground">Offer this provider on the sign-in and sign-up forms.</p>
-              </div>
-              <Switch
-                checked={selectedConfig.enabled}
-                onCheckedChange={(enabled) => updateProvider(selectedKey, { enabled })}
-                aria-label={`Enable ${providerLabel(selectedKey, selectedConfig)}`}
-              />
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Client ID" htmlFor={`${selectedKey}-client-id`} description={selectedKey === "apple" ? "The Apple Services ID." : undefined}>
-                <Input
-                  id={`${selectedKey}-client-id`}
-                  value={selectedConfig.clientId}
-                  disabled={!selectedConfig.enabled}
-                  onChange={(event) => updateProvider(selectedKey, { clientId: event.target.value })}
-                  className="font-data text-xs"
-                />
-              </Field>
-              {selectedKey === "apple" ? (
-                <Field label="Team ID" htmlFor="apple-team-id" description="From the Apple developer account.">
-                  <Input
-                    id="apple-team-id"
-                    value={selectedConfig.appleTeamId ?? ""}
-                    disabled={!selectedConfig.enabled}
-                    onChange={(event) => updateProvider(selectedKey, { appleTeamId: event.target.value })}
-                    placeholder="TEAM123456"
-                    className="font-data text-xs"
-                  />
-                </Field>
-              ) : (
-                <SecretInput
-                  id={`${selectedKey}-client-secret`}
-                  label="Client secret"
-                  configured={secretIsConfigured(selectedConfig.clientSecret)}
-                  disabled={!selectedConfig.enabled}
-                  value={secretInputValue(selectedConfig.clientSecret)}
-                  onChange={(clientSecret) => updateProvider(selectedKey, { clientSecret })}
-                  description={
-                    secretIsConfigured(selectedConfig.clientSecret)
-                      ? "A secret is stored. Leave blank to keep it."
-                      : "Shown once by the provider when you create the app."
-                  }
-                />
-              )}
-            </div>
-            {selectedKey === "apple" ? (
-              <>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Key ID" htmlFor="apple-key-id" description="The 10-character identifier of the .p8 key.">
-                    <Input
-                      id="apple-key-id"
-                      value={selectedConfig.appleKeyId ?? ""}
-                      disabled={!selectedConfig.enabled}
-                      onChange={(event) => updateProvider(selectedKey, { appleKeyId: event.target.value })}
-                      placeholder="KEY7890123"
-                      className="font-data text-xs"
-                    />
-                  </Field>
-                </div>
-                <Field
-                  label={
-                    <span className="flex flex-wrap items-center gap-2">
-                      Private key (.p8)
-                      <SecretSetChip configured={secretIsConfigured(selectedConfig.applePrivateKey)} />
-                    </span>
-                  }
-                  htmlFor="apple-private-key"
-                  description="Paste the whole file, including the BEGIN PRIVATE KEY and END PRIVATE KEY lines. The server uses it to sign the client secret for each token request."
-                >
-                  <Textarea
-                    id="apple-private-key"
-                    rows={6}
-                    spellCheck={false}
-                    autoComplete="off"
-                    disabled={!selectedConfig.enabled}
-                    value={secretInputValue(selectedConfig.applePrivateKey)}
-                    onChange={(event) => updateProvider(selectedKey, { applePrivateKey: event.target.value })}
-                    placeholder={secretIsConfigured(selectedConfig.applePrivateKey) ? "Stored key, leave blank to keep" : "-----BEGIN PRIVATE KEY-----"}
-                    className="font-data text-xs"
-                  />
-                </Field>
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  Register <code className="font-data">{callbackFor(selectedKey)}</code> as the return URL in the Apple
-                  developer console, and request the <code className="font-data">name</code> and{" "}
-                  <code className="font-data">email</code> scopes. A client secret is optional: if one is stored it is used
-                  verbatim instead of signing the .p8 key.
-                </p>
-                <SecretInput
-                  id="apple-client-secret"
-                  label="Client secret (optional)"
-                  configured={secretIsConfigured(selectedConfig.clientSecret)}
-                  disabled={!selectedConfig.enabled}
-                  value={secretInputValue(selectedConfig.clientSecret)}
-                  onChange={(clientSecret) => updateProvider(selectedKey, { clientSecret })}
-                  description="Only when you generate the JWT elsewhere. Leave blank to sign it from the .p8 key."
-                  placeholder={secretIsConfigured(selectedConfig.clientSecret) ? "Stored secret, leave blank to keep" : "Not used"}
-                />
-              </>
-            ) : null}
-            {isCustomProviderKey(selectedKey) ? (
-              <Field label="Discovery URL" htmlFor={`${selectedKey}-discovery`} description="OpenID Connect discovery document.">
-                <Input
-                  id={`${selectedKey}-discovery`}
-                  value={selectedConfig.discoveryUrl ?? ""}
-                  disabled={!selectedConfig.enabled}
-                  onChange={(event) => updateProvider(selectedKey, { discoveryUrl: event.target.value })}
-                  placeholder="https://auth.example.com/.well-known/openid-configuration"
-                  className="font-data text-xs"
-                />
-              </Field>
-            ) : null}
-            <Field label="Scopes" description="Comma-separated OAuth scopes requested from the provider.">
-              <ScopesInput value={selectedConfig.scopes} onChange={(scopes) => updateProvider(selectedKey, { scopes })} />
-            </Field>
-            <div className="flex items-center justify-between gap-4 border-y border-border py-2">
-              <div className="min-w-0">
-                <p className="text-[0.8125rem] font-medium">Callback URL</p>
-                <code className="block truncate font-data text-xs text-muted-foreground">{callbackFor(selectedKey)}</code>
-              </div>
-              <CopyButton value={callbackFor(selectedKey)} size="sm" variant="outline" label="Copy" />
-            </div>
-            <CheckboxRow
-              label="Authenticatable at sign-in"
-              description="Show this provider on the sign-in form."
-              checked={selectedConfig.authenticatableAtSignIn}
-              disabled={!selectedConfig.enabled}
-              onCheckedChange={(authenticatableAtSignIn) => updateProvider(selectedKey, { authenticatableAtSignIn })}
+          {pinnedProviders.map((view) => (
+            <ProviderRow
+              key={view.key}
+              view={view}
+              callbackUrl={callbackFor(view.key)}
+              onToggle={(enabled) => updateProvider(view.key, { enabled })}
+              onConfigure={() => setSelectedKey(view.key)}
             />
+          ))}
+          {matching.length === 0 ? (
+            <li className="border-t border-border py-3 text-sm text-muted-foreground first:border-t-0">
+              No provider matches “{providerQuery.trim()}”.
+            </li>
+          ) : null}
+        </ul>
+        <ul id="social-preset-providers" className={showPresets && presetProviders.length > 0 ? "border-b border-border" : undefined}>
+          {showPresets
+            ? presetProviders.map((view) => (
+                <ProviderRow
+                  key={view.key}
+                  view={view}
+                  callbackUrl={callbackFor(view.key)}
+                  onToggle={(enabled) => updateProvider(view.key, { enabled })}
+                  onConfigure={() => setSelectedKey(view.key)}
+                />
+              ))
+            : null}
+        </ul>
+        {presetProviders.length > 0 && !search ? (
+          <div className="flex items-center justify-between gap-3 border-t border-border pt-2">
+            <p className="text-xs text-muted-foreground">
+              {presetProviders.length} other providers are available, off until you configure them.
+            </p>
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-expanded={showMoreProviders}
+              aria-controls="social-preset-providers"
+              onClick={() => setShowMoreProviders((open) => !open)}
+            >
+              {showMoreProviders ? "Fewer providers" : `More providers (${presetProviders.length})`}
+            </Button>
           </div>
         ) : null}
-      </DetailSheet>
+      </SettingsSection>
 
-      <DetailSheet
-        open={addOpen}
-        onOpenChange={(open) => {
-          setAddOpen(open);
-          if (!open) resetDialog();
-        }}
-        title="Add custom OIDC provider"
-        description="Connect any OpenID Connect provider that publishes a discovery document."
-        footer={
-          <>
-            <Button variant="outline" onClick={() => setAddOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={addCustomProvider} disabled={customErrors.length > 0}>
-              Add provider
-            </Button>
-          </>
-        }
-      >
-        <div className="space-y-4">
-          <Field label="Display name" htmlFor="custom-name" required>
-            <Input id="custom-name" value={customName} onChange={(event) => setCustomName(event.target.value)} placeholder="Acme SSO" />
-          </Field>
-          <Field
-            label="Provider key"
-            htmlFor="custom-key"
-            required
-            description="Stored as custom_<key>. It appears in strategies and in the callback URL."
-          >
-            <Input
-              id="custom-key"
-              value={customKey}
-              onChange={(event) => setCustomKey(event.target.value)}
-              placeholder="acme"
-              className="font-data text-xs"
-            />
-          </Field>
-          <Field label="Discovery URL" htmlFor="custom-discovery" required>
-            <Input
-              id="custom-discovery"
-              value={customDiscovery}
-              onChange={(event) => setCustomDiscovery(event.target.value)}
-              placeholder="https://auth.acme.com/.well-known/openid-configuration"
-              className="font-data text-xs"
-            />
-          </Field>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Client ID" htmlFor="custom-client-id" required>
-              <Input
-                id="custom-client-id"
-                value={customClientId}
-                onChange={(event) => setCustomClientId(event.target.value)}
-                className="font-data text-xs"
-              />
-            </Field>
-            <Field label="Client secret" htmlFor="custom-client-secret" required>
-              <Input
-                id="custom-client-secret"
-                type="password"
-                autoComplete="new-password"
-                value={customSecret}
-                onChange={(event) => setCustomSecret(event.target.value)}
-              />
-            </Field>
-          </div>
-          <Field label="Scopes" htmlFor="custom-scopes">
-            <Input id="custom-scopes" value={customScopes} onChange={(event) => setCustomScopes(event.target.value)} className="font-data text-xs" />
-          </Field>
-          {customKeyValue ? (
-            <div className="flex items-center justify-between gap-4 border-y border-border py-2">
-              <div className="min-w-0">
-                <p className="text-[0.8125rem] font-medium">Callback URL</p>
-                <code className="block truncate font-data text-xs text-muted-foreground">
-                  {oauthCallbackUrl(getApiUrl(), `custom_${customKeyValue}`)}
-                </code>
-              </div>
-              <CopyButton value={oauthCallbackUrl(getApiUrl(), `custom_${customKeyValue}`)} size="sm" variant="outline" label="Copy" />
-            </div>
-          ) : null}
-          <ValidationSummary errors={customErrors} title="Fill the required fields" />
-        </div>
-      </DetailSheet>
+      {selectedKey && selectedConfig ? (
+        <ProviderSheet
+          key={selectedKey}
+          providerKey={selectedKey}
+          config={selectedConfig}
+          apiUrl={apiUrl}
+          open
+          onOpenChange={(open) => !open && setSelectedKey(null)}
+          callbackUrl={callbackFor(selectedKey)}
+          onChange={(patch) => updateProvider(selectedKey, patch)}
+          onDelete={() => setDeletingKey(selectedKey)}
+        />
+      ) : null}
+
+      <AddProviderSheet open={addOpen} onOpenChange={setAddOpen} apiUrl={apiUrl} existingKeys={providers} onAdd={addProvider} />
+
+      <ConfirmDialog
+        open={Boolean(deletingKey)}
+        onOpenChange={(open) => !open && setDeletingKey(null)}
+        title={`Delete ${deletingLabel || "provider"}?`}
+        description="Users can no longer sign in with this provider. Linked accounts stay on their users, so existing users keep their details. This cannot be undone."
+        confirmLabel="Delete provider"
+        destructive
+        pending={deletePending}
+        onConfirm={() => void deleteProvider()}
+      />
 
       <SaveBar
         dirty={editor.dirty}
@@ -462,6 +282,6 @@ export default function Page() {
         onSave={editor.save}
         onDiscard={editor.reset}
       />
-    </div>
+    </PageLayout>
   );
 }

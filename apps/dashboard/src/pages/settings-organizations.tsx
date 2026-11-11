@@ -1,4 +1,5 @@
 import type { PaginatedList, RoleJSON } from "@orbitid/shared";
+import { Page as PageLayout } from "../components/shared/page";
 import { Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@orbitid/ui";
 import { useApi } from "../lib/api";
 import { unwrapList } from "./_config/data";
@@ -30,7 +31,7 @@ export default function Page() {
   if (!settings) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Organizations" description="Organization creation, membership limits, domains, and default roles." />
+        <PageHeader title="Organization settings" description="Organization creation, membership limits, domains, and default roles." />
         <ErrorAlert error={editor.error ?? "Instance settings did not load."} onRetry={editor.refetch} />
       </div>
     );
@@ -38,7 +39,7 @@ export default function Page() {
 
   const orgs = settings.organizations;
   const errors: string[] = [];
-  if (orgs.maxAllowedMemberships < 1) errors.push("Maximum memberships must be at least 1.");
+  if (orgs.maxAllowedMemberships < 0) errors.push("Maximum memberships must be 0 (no limit) or greater.");
   if (orgs.maxCreatedOrganizationsPerUser !== null && orgs.maxCreatedOrganizationsPerUser < 0)
     errors.push("Per-user organization limit cannot be negative.");
   if (!orgs.creatorRole) errors.push("Choose a creator role.");
@@ -71,9 +72,9 @@ export default function Page() {
   };
 
   return (
-    <div className="space-y-6">
+    <PageLayout>
       <PageHeader
-        title="Organizations"
+        title="Organization settings"
         description="Organizations group users, roles, domains, and invitations. These settings apply to the whole instance."
         badge={<MetaChip>{orgs.enabled ? "Enabled" : "Disabled"}</MetaChip>}
       />
@@ -98,11 +99,11 @@ export default function Page() {
             }
           />
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Maximum memberships per user" htmlFor="org-max-memberships" description="Organizations a user can belong to at once.">
+            <Field label="Maximum memberships per user" htmlFor="org-max-memberships" description="Organizations a user can belong to at once. 0 means no limit.">
               <Input
                 id="org-max-memberships"
                 type="number"
-                min={1}
+                min={0}
                 disabled={!orgs.enabled}
                 value={orgs.maxAllowedMemberships}
                 onChange={(event) => editor.patch({ organizations: { maxAllowedMemberships: number(event.target.value) } })}
@@ -191,6 +192,6 @@ export default function Page() {
         onSave={editor.save}
         onDiscard={editor.reset}
       />
-    </div>
+    </PageLayout>
   );
 }

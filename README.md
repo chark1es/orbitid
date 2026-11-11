@@ -6,6 +6,8 @@ Open-source authentication and user management that runs on your own Postgres. O
 
 You write `useUser`, `useAuth`, `<SignIn />`, `<UserButton />`, `auth()` and `has({ permission })` in your app, and the data lands in a database you control.
 
+**Everything is free.** Every feature in this repository — social and custom OAuth/OIDC sign-in, enterprise SAML/OIDC SSO, organizations, webhooks and the dashboard — is available to every self-hosted instance. There are no plans, license keys, seat limits or paid tiers.
+
 ## What's in the box
 
 | Package | What it is |
@@ -28,7 +30,7 @@ You write `useUser`, `useAuth`, `<SignIn />`, `<UserButton />`, `auth()` and `ha
 |---|---|
 | Email + password, username, phone identifiers | ✅ |
 | Email code, magic link ("email link"), SMS code | ✅ Email through Resend or SMTP; SMS via Twilio or an HTTPS webhook; no console/file fallback |
-| Social OAuth (Google, GitHub, GitLab, Discord, Microsoft, Apple, Facebook, X, LinkedIn, Slack, Twitch, Spotify, …) + custom OIDC providers | ✅ |
+| Social OAuth (Google, GitHub, GitLab, Discord, Microsoft, Apple, Facebook, X, LinkedIn, Slack, Twitch, Spotify, Zoom, …) + custom OIDC and OAuth 2.0 providers | ✅ |
 | Passkeys (WebAuthn) | ✅ tested end to end with a software authenticator |
 | MFA: TOTP authenticator, backup codes, SMS, email code, trusted devices | ✅ |
 | Anonymous (guest) accounts that upgrade in place | ✅ |
@@ -69,6 +71,8 @@ Check it with the playground, a separate test site that reads the instance and b
 cp playground/.env.example playground/.env.local   # paste the keys from the server
 bun run --filter orbitid-playground dev            # http://localhost:3300
 ```
+
+Open the test site at `http://localhost:3300`, not `http://127.0.0.1:3300`: the instance's cross-site session cookie is scoped to `localhost`, so the IP form looks signed out.
 
 In the dashboard, configure **Email & SMS** and send a test before enabling email/phone verification or sign-in. Then use **Authentication** to choose identifiers and strategies, **Organizations** to turn organizations on, and **Social connections** to add provider credentials. Missing required fields or provider configuration are refused by the server. **Roles & permissions** supports instance roles even when organizations are off.
 
@@ -154,7 +158,7 @@ Webhooks are signed Svix-style; verify them with `verifyWebhook` from `@orbitid/
 
 ## How it works
 
-A **client** (browser) holds an httpOnly `__client` cookie; it owns **sessions**; the SDK mints a 60-second RS256 **session JWT** from the Frontend API and refreshes it before expiry. Your backend verifies that JWT offline against `/.well-known/jwks.json`. The Backend API (secret key) manages users, organizations, sessions and settings. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full API contract.
+A **client** (browser) holds an httpOnly `__client` cookie; it owns **sessions**; the SDK mints a 60-second RS256 **session JWT** from the Frontend API and refreshes it before expiry. Your backend verifies that JWT offline against `/.well-known/jwks.json`. A session has no expiry by default: it stays signed in until the user signs out, an operator revokes it or bans the user, and transient refresh failures never sign anybody out (see [docs/SECURITY.md](docs/SECURITY.md#8-session-persistence)). The Backend API (secret key) manages users, organizations, sessions and settings. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full API contract.
 
 ## Configuration
 
@@ -183,10 +187,12 @@ suites after database/auth changes, and regenerate `docs/openapi.json` after API
 | Run it yourself | [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md), [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md), [docs/DATA_MOVE.md](docs/DATA_MOVE.md) |
 | HTTP API | [docs/API.md](docs/API.md), the live reference at `/docs`, and [docs/openapi.json](docs/openapi.json) |
 | Security | [docs/SECURITY.md](docs/SECURITY.md) |
+| Sessions and persistence | [docs/SESSIONS.md](docs/SESSIONS.md) |
 | Roles and permissions | [docs/RBAC.md](docs/RBAC.md) |
 | Email | [docs/EMAIL.md](docs/EMAIL.md) |
 | Sign-in features | [docs/AUTH_FEATURES.md](docs/AUTH_FEATURES.md), [docs/PASSKEYS.md](docs/PASSKEYS.md), [docs/HANDSHAKE.md](docs/HANDSHAKE.md) |
 | Identity provider and federation | [docs/OIDC.md](docs/OIDC.md), [docs/FEDERATION.md](docs/FEDERATION.md) |
+| OIDC client guides | [Tinyauth](docs/integrations/tinyauth.md), [Authentik](docs/integrations/authentik.md), [generic clients](docs/integrations/generic.md) |
 | SDKs | [docs/NODE_SDK.md](docs/NODE_SDK.md), [packages/nextjs](packages/nextjs/README.md), [packages/react](packages/react/README.md) |
 | Dashboard | [docs/DASHBOARD.md](docs/DASHBOARD.md) |
 | Architecture | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |

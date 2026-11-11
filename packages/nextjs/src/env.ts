@@ -139,6 +139,8 @@ export interface ServerEnvOverrides {
   afterSignInUrl?: string;
   afterSignUpUrl?: string;
   clockSkewInMs?: number;
+  /** Expiry skew (`exp`) in milliseconds. Defaults to 10 s; bounds the real revocation window. */
+  expClockSkewInMs?: number;
 }
 
 export interface ResolvedServerEnv {
@@ -155,6 +157,7 @@ export interface ResolvedServerEnv {
   afterSignInUrl: string;
   afterSignUpUrl: string;
   clockSkewInMs: number | undefined;
+  expClockSkewInMs: number | undefined;
 }
 
 /** Merge explicit options with environment variables. Used by middleware, `auth()` and helpers. */
@@ -178,6 +181,7 @@ export function getServerEnv(overrides: ServerEnvOverrides = {}): ResolvedServer
     afterSignInUrl: overrides.afterSignInUrl ?? readEnv(ENV_KEYS.afterSignInUrl) ?? DEFAULT_AFTER_SIGN_IN_URL,
     afterSignUpUrl: overrides.afterSignUpUrl ?? readEnv(ENV_KEYS.afterSignUpUrl) ?? DEFAULT_AFTER_SIGN_UP_URL,
     clockSkewInMs: overrides.clockSkewInMs,
+    expClockSkewInMs: overrides.expClockSkewInMs,
   };
 }
 

@@ -59,8 +59,8 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { title: "Authentication", href: "/settings/authentication", icon: LockKeyhole },
       { title: "Social connections", href: "/settings/social", icon: Share2 },
-      { title: "Sessions", href: "/settings/sessions", icon: MonitorSmartphone },
-      { title: "Organizations", href: "/settings/organizations", icon: Building2 },
+      { title: "Session settings", href: "/settings/sessions", icon: MonitorSmartphone },
+      { title: "Organization settings", href: "/settings/organizations", icon: Building2 },
       { title: "Email & SMS", href: "/settings/email-sms", icon: Mail },
       { title: "Appearance", href: "/settings/appearance", icon: Palette },
       { title: "JWT templates", href: "/jwt-templates", icon: FileJson },
@@ -105,6 +105,12 @@ export const ROUTE_LABELS: Record<string, string> = {
 };
 
 export const ALL_NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap((group) => group.items);
+
+/** Configure pages that share a word with a Manage page carry a qualifier in the rail and the breadcrumb. */
+export const SETTINGS_LABELS: Record<string, string> = {
+  sessions: "Session settings",
+  organizations: "Organization settings",
+};
 
 /** Nav groups without the entries whose feature is off. Groups left empty are dropped. */
 export function visibleNavGroups(features: { organizations: boolean }): NavGroup[] {

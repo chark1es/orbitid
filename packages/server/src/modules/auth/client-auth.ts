@@ -3,12 +3,12 @@ import { findAsync } from "../../lib/async";
 import type { Context } from "hono";
 import { deleteCookie, setCookie } from "hono/cookie";
 import { and, desc, eq } from "drizzle-orm";
-import { COOKIES, ErrorCodes, OrbitError, type ClientJSON, type SessionJSON } from "@orbitid/shared";
+import { COOKIE_MAX_AGE_SECONDS, COOKIES, ErrorCodes, OrbitError, type ClientJSON, type SessionJSON } from "@orbitid/shared";
 import type { AppContext } from "../../context";
 import * as s from "../../db/schema";
 import { randomToken, sha256 } from "../../lib/crypto";
 import { newId } from "../../lib/ids";
-import { clientIp } from "../../lib/http";
+import { clientIp, requestIsSecure } from "../../lib/http";
 import { serializeSession } from "../../serializers";
 import { evaluateSessionStatus, getSession, isSessionExpired } from "../../services/sessions";
 import { signSessionToken } from "../../services/tokens";
@@ -18,15 +18,22 @@ import { first } from "../../lib/db";
 
 export type ClientRow = typeof s.clients.$inferSelect;
 
-const ONE_YEAR_SECONDS = 365 * 24 * 3600;
+const CLIENT_COOKIE_MAX_AGE_SECONDS = COOKIE_MAX_AGE_SECONDS;
+/** Re-issue the same client cookie when it is at least this old, so an actively used browser never hits the cap. */
+const CLIENT_COOKIE_RENEW_AFTER_MS = 24 * 60 * 60 * 1000;
 
 export function setClientCookie(c: Context, _ctx: AppContext, token: string) {
+  // The browser's client cookie is the thing that keeps a visitor signed in across restarts: it must not be a
+  // session cookie (gone when the browser closes) and must not expire while the account is alive. It is rewritten
+  // on every client creation and sign-in, so the 400-day browser cap keeps rolling forward.
   setCookie(c, COOKIES.client, token, {
     httpOnly: true,
-    secure: _ctx.env.baseUrl.startsWith("https://"),
+    // Behind a TLS-terminating proxy `ORBITID_BASE_URL` is https; for a plain-http localhost instance the
+    // browser would reject `Secure`. `requestIsSecure` also honours a trusted `X-Forwarded-Proto`.
+    secure: requestIsSecure(c, _ctx.env.baseUrl),
     sameSite: "Lax",
     path: "/",
-    maxAge: ONE_YEAR_SECONDS,
+    maxAge: CLIENT_COOKIE_MAX_AGE_SECONDS,
   });
 }
 
@@ -54,7 +61,7 @@ export async function createClient(ctx: AppContext, c: Context): Promise<{ row: 
   const id = newId("client");
   const now = Date.now();
   await ctx.db.insert(s.clients).values({
-            id, tokenHash: sha256(token), ip: clientIp(c), userAgent: c.req.header("user-agent") ?? null, createdAt: now, updatedAt: now,
+            id, tokenHash: sha256(token), tokenIssuedAt: now, ip: clientIp(c), userAgent: c.req.header("user-agent") ?? null, createdAt: now, updatedAt: now,
           });
   return { row: first(await ctx.db.select().from(s.clients).where(eq(s.clients.id, id)))!, token };
 }
@@ -69,7 +76,19 @@ export async function findClient(ctx: AppContext, c: Context): Promise<ClientRow
 /** Returns the request's client, creating one (and setting the httpOnly cookie) when absent. */
 export async function getOrCreateClient(ctx: AppContext, c: Context): Promise<ClientRow> {
   const existing = await findClient(ctx, c);
-  if (existing) return existing;
+  if (existing) {
+    // A browser kept alive only by daily use must not lose its credential at the 400-day cap: re-issue the same
+    // token (no rotation) once it is a day old. Rotation is reserved for sign-in and recovery.
+    await renewClientCookieIfDue(ctx, c, existing);
+    return existing;
+  }
+  // A token was presented but no row matches. It was rotated by a sign-in in another tab, or the database was
+  // restored. Minting a replacement client here and overwriting the cookie would wipe a live sign-in that the
+  // other tab just established (a random-looking sign-out). Only the SDK's own bootstrap (`GET /v1/client`) may
+  // recover by creating a client; every other request is told to reload, leaving the cookie untouched.
+  if (readClientToken(c) !== null && !(c.req.method === "GET" && c.req.path === "/v1/client")) {
+    throw new OrbitError(401, ErrorCodes.client_state_invalid, "This browser's client token is no longer valid. Reload the page to continue.");
+  }
   const { row, token } = await createClient(ctx, c);
   setClientCookie(c, ctx, token);
   return row;
@@ -84,9 +103,25 @@ export async function requireClient(ctx: AppContext, c: Context): Promise<Client
 /** Rotates the opaque client token (used after an OAuth form_post callback where the cookie may be missing). */
 export async function regenerateClientToken(ctx: AppContext, c: Context, clientId: string): Promise<string> {
   const token = randomToken(32);
-  await ctx.db.update(s.clients).set({ tokenHash: sha256(token), updatedAt: Date.now() }).where(eq(s.clients.id, clientId));
+  await ctx.db.update(s.clients).set({ tokenHash: sha256(token), tokenIssuedAt: Date.now(), updatedAt: Date.now() }).where(eq(s.clients.id, clientId));
   setClientCookie(c, ctx, token);
   return token;
+}
+
+/**
+ * Re-issues the *same* opaque client token when the browser's cookie is old enough to be near the 400-day cap.
+ * Nothing rotates: the token hash stays the same, so another tab's cookie keeps working. Called by the SDK
+ * bootstrap (`GET /v1/client`), token refreshes and the handshake, i.e. every path an actively used browser takes.
+ */
+export async function renewClientCookieIfDue(ctx: AppContext, c: Context, client: ClientRow): Promise<boolean> {
+  const token = readClientToken(c);
+  if (!token) return false;
+  const issuedAt = client.tokenIssuedAt ?? client.updatedAt ?? client.createdAt;
+  if (Date.now() - issuedAt < CLIENT_COOKIE_RENEW_AFTER_MS) return false;
+  const now = Date.now();
+  setClientCookie(c, ctx, token);
+  await ctx.db.update(s.clients).set({ tokenIssuedAt: now, updatedAt: now }).where(eq(s.clients.id, client.id));
+  return true;
 }
 
 /**
@@ -154,7 +189,7 @@ export async function serializeClient(ctx: AppContext, client: ClientRow, opts: 
     sign_in: signInRow ? await buildSignInJSON(ctx, signInRow) : null,
     sign_up: signUpRow ? await buildSignUpJSON(ctx, signUpRow) : null,
     last_active_session_id: fresh.lastActiveSessionId ?? null,
-    cookie_expires_at: Date.now() + ONE_YEAR_SECONDS * 1000,
+    cookie_expires_at: Date.now() + CLIENT_COOKIE_MAX_AGE_SECONDS * 1000,
     created_at: fresh.createdAt,
     updated_at: fresh.updatedAt,
   };

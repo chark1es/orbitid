@@ -74,17 +74,24 @@ describe("OIDC — token endpoint hardening", () => {
     expect((await res.json()).error).toBe("invalid_grant");
   });
 
-  it("refuses PKCE downgrades: `plain`, a missing challenge, or a missing verifier", async () => {
+  it("enforces PKCE when configured and allows confidential clients without it by default", async () => {
+    // The default is interop-friendly: Tinyauth, Authentik sources and oauth2-proxy send no challenge.
+    const optional = await authorize(h, {
+      client_id: app.client_id, redirect_uri: REDIRECT_URI, response_type: "code", scope: "openid",
+    }, session.cookie);
+    expect(optional.code).toBeTruthy();
+
+    const strict = await createApp(h, { name: "Strict", pkce_required: true }) as { client_id: string };
     const pkce = verifier();
     // `plain` is refused before a code is ever issued.
     const plain = await authorize(h, {
-      client_id: app.client_id, redirect_uri: REDIRECT_URI, response_type: "code", scope: "openid",
+      client_id: strict.client_id, redirect_uri: REDIRECT_URI, response_type: "code", scope: "openid",
       code_challenge: pkce, code_challenge_method: "plain",
     }, session.cookie);
     expect(plain.error).toBe("invalid_request");
 
     const missing = await authorize(h, {
-      client_id: app.client_id, redirect_uri: REDIRECT_URI, response_type: "code", scope: "openid",
+      client_id: strict.client_id, redirect_uri: REDIRECT_URI, response_type: "code", scope: "openid",
     }, session.cookie);
     expect(missing.error).toBe("invalid_request");
 
@@ -131,16 +138,22 @@ describe("OIDC — token endpoint hardening", () => {
     expect(wrongSecret.status).toBe(401);
   });
 
-  it("does not let a refresh token add scopes it was not granted", async () => {
+  it("refuses refresh scope escalation but accepts a narrower requested scope", async () => {
     const { tokens } = await codeFlow(h, app, session.cookie, "openid email offline_access");
-    const res = await form(h, "/oauth/token", {
+    const escalated = await form(h, "/oauth/token", {
       grant_type: "refresh_token", refresh_token: tokens.refresh_token, scope: "openid email admin",
       client_id: app.client_id, client_secret: app.client_secret,
     });
-    expect(res.status).toBe(200);
-    const next = await res.json() as { scope: string; access_token: string };
-    expect(next.scope).toBe("openid email offline_access");
-    expect(next.scope).not.toContain("admin");
+    expect(escalated.status).toBe(400);
+    expect((await escalated.json()).error).toBe("invalid_scope");
+
+    const narrowed = await form(h, "/oauth/token", {
+      grant_type: "refresh_token", refresh_token: tokens.refresh_token, scope: "openid email",
+      client_id: app.client_id, client_secret: app.client_secret,
+    });
+    expect(narrowed.status).toBe(200);
+    const next = await narrowed.json() as { scope: string; access_token: string };
+    expect(next.scope).toBe("openid email");
     const info = await h.app.request("/oauth/userinfo", { headers: { authorization: `Bearer ${next.access_token}` } });
     expect(await info.json()).toMatchObject({ sub: user.userId, email: "user@example.com" });
   });

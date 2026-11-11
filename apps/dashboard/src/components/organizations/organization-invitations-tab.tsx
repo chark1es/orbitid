@@ -9,13 +9,15 @@ import {
   DialogTitle,
   Input,
   Label,
+  SearchInput,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@orbitid/ui";
-import { Ban, MailPlus, Search } from "lucide-react";
+import { OVERLAY_WIDTH } from "../shared/overlay-sizes";
+import { Ban, MailPlus } from "lucide-react";
 import { toast } from "sonner";
 import type { OrganizationInvitationJSON, OrganizationJSON } from "@orbitid/shared";
 import { api, useApi } from "../../lib/api";
@@ -74,7 +76,7 @@ function InviteDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className={OVERLAY_WIDTH.form}>
         <DialogHeader>
           <DialogTitle>Invite to {org.name}</DialogTitle>
           <DialogDescription>The invitee receives an email with an acceptance link.</DialogDescription>
@@ -169,7 +171,7 @@ export function OrganizationInvitationsTab({ org, onChanged }: { org: Organizati
     {
       id: "email",
       header: "Email",
-      cell: (invitation) => <span className="font-data text-xs">{invitation.email_address}</span>,
+      cell: (invitation) => <span className="text-[0.8125rem]">{invitation.email_address}</span>,
     },
     {
       id: "role",
@@ -214,19 +216,16 @@ export function OrganizationInvitationsTab({ org, onChanged }: { org: Organizati
       description="Invite people by email and track each invitation's status."
       actions={
         <>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-            <Input
-              value={search}
-              onChange={(event) => {
-                setSearch(event.target.value);
-                setPage(1);
-              }}
-              placeholder="Search invitations…"
-              aria-label="Search invitations"
-              className="h-8 w-52 pl-8"
-            />
-          </div>
+          <SearchInput
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setPage(1);
+            }}
+            placeholder="Search invitations…"
+            aria-label="Search invitations"
+            className="w-52"
+          />
           <Select
             value={status}
             onValueChange={(value) => {
@@ -234,7 +233,7 @@ export function OrganizationInvitationsTab({ org, onChanged }: { org: Organizati
               setPage(1);
             }}
           >
-            <SelectTrigger className="h-8 w-[130px]" aria-label="Filter invitations by status">
+            <SelectTrigger className="w-[130px]" aria-label="Filter invitations by status">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -245,7 +244,7 @@ export function OrganizationInvitationsTab({ org, onChanged }: { org: Organizati
               ))}
             </SelectContent>
           </Select>
-          <Button size="sm" onClick={() => setInviteOpen(true)}>
+          <Button onClick={() => setInviteOpen(true)}>
             <MailPlus aria-hidden /> Invite
           </Button>
         </>

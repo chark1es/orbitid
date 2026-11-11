@@ -31,6 +31,7 @@ export const AUTH_REASONS = {
   noToken: "session-token-missing",
   expiredToken: "session-token-expired",
   invalidToken: "session-token-invalid",
+  unverifiableKey: "session-token-unverifiable-key",
   missingKey: "session-token-unverifiable",
   unauthorizedParty: "unauthorized-party",
   handshake: "handshake",
