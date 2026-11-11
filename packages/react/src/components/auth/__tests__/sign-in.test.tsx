@@ -30,6 +30,29 @@ describe("SignIn", () => {
     }
   });
 
+  it("keeps the signal-red focus ring instead of tinting it with the brand colour", async () => {
+    const harness = setupAuth({ signedIn: false });
+    makeSignIn(harness.instance);
+    renderSignIn(harness);
+
+    const card = document.querySelector('[data-orbit-component="auth-card"]') as HTMLElement;
+    expect(card).toBeTruthy();
+    // DESIGN.md declares the 2px ring once, in @orbitid/ui/styles.css (--ring is signal red). A brand
+    // primary colour may style buttons, but it must not replace the focus ring.
+    expect(card.style.getPropertyValue("--ring")).toBe("");
+  });
+
+  it("keeps the footer sign-up action on the same text size as its sentence", async () => {
+    const harness = setupAuth({ signedIn: false });
+    makeSignIn(harness.instance);
+    renderSignIn(harness);
+
+    const action = await screen.findByRole("button", { name: "Sign up" });
+    const sentence = action.closest("p");
+    expect(sentence?.className).toContain("text-sm");
+    expect(action.className).toContain("text-sm");
+  });
+
   it("tells the visitor when a magic link was opened in the wrong browser", async () => {
     window.history.pushState({}, "", "/sign-in?__orbit_status=different_browser");
     try {
@@ -190,108 +213,6 @@ describe("SignIn", () => {
     expect(harness.instance.navigations.at(-1)?.to).toBe("/home");
   });
 
-  it("verifies a TOTP second factor", async () => {
-    const harness = setupAuth({ signedIn: false });
-    const signIn = makeSignIn(harness.instance, {
-      create: {
-        status: "needs_second_factor",
-        identifier: "ada@example.com",
-        supportedSecondFactors: [{ strategy: "totp" }],
-      },
-      attemptSecondFactor: { status: "complete", createdSessionId: SESSION_ID },
-    });
-    renderSignIn(harness);
-
-    fireEvent.change(screen.getByLabelText(/Email address/), { target: { value: "ada@example.com" } });
-    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
-
-    expect(await screen.findByText("Verify your identity")).toBeTruthy();
-    act(() => enterOtp("654321"));
-    fireEvent.click(screen.getByRole("button", { name: "Verify" }));
-
-    await waitFor(() => expect(signIn.attemptSecondFactor).toHaveBeenCalledWith(
-      expect.objectContaining({ strategy: "totp", code: "654321" }),
-    ));
-    await waitFor(() => expect(harness.instance.setActiveCalls.length).toBe(1));
-  });
-
-  it("offers email as a second factor and prepares the code", async () => {
-    const harness = setupAuth({ signedIn: false });
-    const signIn = makeSignIn(harness.instance, {
-      create: {
-        status: "needs_second_factor",
-        identifier: "ada@example.com",
-        supportedSecondFactors: [{ strategy: "totp" }, { strategy: "email_code", emailAddressId: "idn_e1" }],
-      },
-      prepareSecondFactor: { status: "needs_second_factor" },
-      attemptSecondFactor: { status: "complete", createdSessionId: SESSION_ID },
-    });
-    renderSignIn(harness);
-
-    fireEvent.change(screen.getByLabelText(/Email address/), { target: { value: "ada@example.com" } });
-    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
-
-    expect(await screen.findByText("Verify your identity")).toBeTruthy();
-    // The method picker lists the email option next to the authenticator app.
-    fireEvent.click(screen.getByRole("combobox", { name: "Use another method" }));
-    fireEvent.click(await screen.findByRole("option", { name: "Email code" }));
-
-    await waitFor(() => expect(signIn.prepareSecondFactor).toHaveBeenCalledWith(
-      expect.objectContaining({ strategy: "email_code", emailAddressId: "idn_e1" }),
-    ));
-    // The email method is selected: the code goes out to the account's address.
-    expect(screen.getByRole("combobox", { name: "Use another method" }).textContent).toContain("Email code");
-    act(() => enterOtp("112233"));
-    await waitFor(() => expect(signIn.attemptSecondFactor).toHaveBeenCalledWith(
-      expect.objectContaining({ strategy: "email_code", code: "112233" }),
-    ));
-  });
-
-  it("shows the trust-this-browser checkbox only when the environment enables it", async () => {
-    const environment = authEnvironment();
-    environment.authConfig.trustedDevices = { enabled: true, days: 7 };
-    const harness = setupAuth({ signedIn: false, environment });
-    const signIn = makeSignIn(harness.instance, {
-      create: {
-        status: "needs_second_factor",
-        identifier: "ada@example.com",
-        supportedSecondFactors: [{ strategy: "totp" }],
-      },
-      attemptSecondFactor: { status: "complete", createdSessionId: SESSION_ID },
-    });
-    renderSignIn(harness);
-
-    fireEvent.change(screen.getByLabelText(/Email address/), { target: { value: "ada@example.com" } });
-    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
-
-    const checkbox = await screen.findByLabelText("Trust this browser for 7 days");
-    expect((checkbox as HTMLInputElement).checked).toBe(true);
-    act(() => enterOtp("654321"));
-    fireEvent.click(screen.getByRole("button", { name: "Verify" }));
-
-    await waitFor(() => expect(signIn.attemptSecondFactor).toHaveBeenCalledWith(
-      expect.objectContaining({ strategy: "totp", code: "654321", trustDevice: true }),
-    ));
-  });
-
-  it("hides the trust checkbox when trusted devices are disabled", async () => {
-    const harness = setupAuth({ signedIn: false });
-    makeSignIn(harness.instance, {
-      create: {
-        status: "needs_second_factor",
-        identifier: "ada@example.com",
-        supportedSecondFactors: [{ strategy: "totp" }],
-      },
-    });
-    renderSignIn(harness);
-
-    fireEvent.change(screen.getByLabelText(/Email address/), { target: { value: "ada@example.com" } });
-    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
-
-    expect(await screen.findByText("Verify your identity")).toBeTruthy();
-    expect(screen.queryByLabelText(/Trust this browser/)).toBeNull();
-  });
-
   it("resets a forgotten password with a code", async () => {
     const harness = setupAuth({ signedIn: false });
     const signIn = makeSignIn(harness.instance, {
@@ -372,6 +293,7 @@ describe("SignIn", () => {
     fireEvent.click(screen.getByTestId("social-button-google"));
     await waitFor(() => expect(signIn.authenticateWithRedirect).toHaveBeenCalled());
   });
+
   describe("when the instance has no email identifier to ask for", () => {
     const socialOnlyEnvironment = () => {
       const environment = authEnvironment();

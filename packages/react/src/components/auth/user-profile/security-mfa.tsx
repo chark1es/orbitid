@@ -290,7 +290,7 @@ export function MfaPhonesSection({ user, refresh, onError, onNotice }: SectionPr
                 />
               </div>
               {phone.reserved_for_second_factor && !phone.default_second_factor ? (
-                <Button type="button" variant="link" size="sm" className="h-auto p-0" onClick={() => void setDefault(phone.id)}>
+                <Button type="button" variant="link" size="sm" className="h-auto min-h-6 px-0 py-1" onClick={() => void setDefault(phone.id)}>
                   {t("userProfile.mfaPhones.setDefault")}
                 </Button>
               ) : null}

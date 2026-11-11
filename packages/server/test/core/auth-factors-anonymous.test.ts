@@ -129,6 +129,9 @@ describe("anonymous accounts", () => {
     const old = Date.now() - 7200_000;
     await ctx.db.update(schema.users).set({ lastActiveAt: old }).where(eq(schema.users.id, stale.created.created_user_id));
     await ctx.db.update(schema.users).set({ lastActiveAt: old }).where(eq(schema.users.id, regular.userId));
+    // Retention is not a sign-out: a guest with a live session is kept. End the stale guest's session first.
+    await ctx.db.update(schema.sessions).set({ status: "ended" })
+      .where(eq(schema.sessions.userId, stale.created.created_user_id));
 
     expect(await staleAnonymousUserIds(ctx)).toEqual([stale.created.created_user_id]);
     expect(await cleanupAnonymousUsers(ctx)).toBe(1);

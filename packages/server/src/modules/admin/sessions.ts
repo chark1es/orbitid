@@ -8,7 +8,7 @@ import { sha256 } from "../../lib/crypto";
 import * as s from "../../db/schema";
 import { serializeSession } from "../../serializers";
 import { signSessionToken, verifySessionToken } from "../../services/tokens";
-import { emitEvent } from "../../services/webhooks";
+import { endSession } from "../../services/sessions";
 import { audit } from "../../services/audit";
 import type { AppContext } from "../../context";
 import { listParams, page, parseOrderBy } from "./shared";
@@ -75,9 +75,9 @@ export default function routes(ctx: AppContext) {
 
   app.post("/sessions/:id/revoke", async (c) => {
     const row = await sessionOrThrow(ctx, c.req.param("id") ?? "");
-    await ctx.db.update(s.sessions).set({ status: "revoked", updatedAt: Date.now() }).where(eq(s.sessions.id, row.id));
-    const updated = await sessionOrThrow(ctx, row.id);
-    await emitEvent(ctx, "session.revoked", await serializeSession(ctx, updated, { withUser: true }));
+    // `endSession` also clears the client's `last_active_session_id`, so the browser does not fall back to a
+    // stale pointer and a force sign-out takes effect without waiting for the next token refresh.
+    const updated = await endSession(ctx, row, "revoked");
     await audit(ctx, { actor: "secret_key", action: "session.revoked", targetType: "session", targetId: row.id, metadata: { user_id: row.userId } });
     return c.json(await serializeSession(ctx, updated, { withUser: true }));
   });

@@ -13,6 +13,7 @@ import {
 import { applyExternalProfile, assertSignUpIdentifiers, maybeCompleteSignUp } from "../modules/auth/signup-core";
 import { withQuery } from "../modules/auth/redirects";
 import { assertIdentifiersAllowed } from "./restrictions";
+import { assertAdditionalIdentificationsAllowed, syncEnterpriseUserAttributes } from "./enterprise-access";
 import { first } from "../lib/db";
 
 export interface ExternalProfile {
@@ -36,6 +37,14 @@ export interface ExternalIdentityFlow {
 }
 
 const successStatus = (status: string) => ({ __orbit_status: status });
+
+/**
+ * True only when the provider explicitly verified the address. An unverified (or `email_verified: false`) claim
+ * must never be linked to an existing local account, whatever `trustEmailVerified` says.
+ */
+export function profileEmailMayLink(profile: Pick<ExternalProfile, "email" | "emailVerified">): boolean {
+  return profile.emailVerified === true && !!profile.email;
+}
 
 /** Sign-in must honour the instance blocklist (OAuth flows have no identifier at create time). */
 async function assertSignInIdentityAllowed(ctx: AppContext, email: string | undefined) {
@@ -70,6 +79,10 @@ export async function linkExternalAccount(ctx: AppContext, userId: string, profi
   const refreshTokenEnc = profile.refreshToken ? encrypt(ctx.env.encryptionKey, profile.refreshToken) : null;
   const existing = first(await ctx.db.select().from(s.externalAccounts)
       .where(and(eq(s.externalAccounts.provider, profile.provider), eq(s.externalAccounts.providerUserId, profile.providerUserId))));
+  // Refreshing a link that already belongs to this user is fine; creating one is an additional identification.
+  // Every flow (sign-in, sign-up, connect) goes through here, so the enterprise policy cannot be bypassed by
+  // auto-linking a matching verified email.
+  if (!existing || existing.userId !== userId) await assertAdditionalIdentificationsAllowed(ctx, userId);
   if (existing) {
     const owner = existing.userId;
     if (owner && owner !== userId) {
@@ -102,6 +115,8 @@ export async function linkExternalAccount(ctx: AppContext, userId: string, profi
 
 async function signInExistingUser(ctx: AppContext, flow: ExternalIdentityFlow, user: UserRow, profile: ExternalProfile): Promise<ExternalIdentityResult> {
   assertSignInAllowed(user);
+  // `sync_user_attributes` applies to enterprise connections only; social providers leave the local profile alone.
+  await syncEnterpriseUserAttributes(ctx, user.id, profile);
   let ownerId = flow.ownerId;
   if (!ownerId) {
     // Enterprise callbacks may not have a sign-in row: create one so the SDK gets a complete resource.
@@ -182,6 +197,7 @@ async function resolveExternalIdentity(
 
   if (flow.kind === "connect") {
     if (!flow.userId) throw new OrbitError(400, ErrorCodes.client_state_invalid, "No user to connect the account to");
+    await assertAdditionalIdentificationsAllowed(ctx, flow.userId);
     if (account?.userId && account.userId !== flow.userId) {
       throw new OrbitError(409, ErrorCodes.external_account_exists, "This external account is already linked to another user");
     }
@@ -222,7 +238,7 @@ async function resolveExternalIdentity(
       await linkExternalAccount(ctx, existingUser.id, profile);
       return completeSignUpForExistingUser(ctx, flow, signUp.id, existingUser, profile);
     }
-    const verifiedEmailUser = profile.email && profile.emailVerified ? await findUserByVerifiedEmail(ctx, profile.email) : undefined;
+    const verifiedEmailUser = profileEmailMayLink(profile) ? await findUserByVerifiedEmail(ctx, profile.email!) : undefined;
     if (verifiedEmailUser) {
       await assertSignInIdentityAllowed(ctx, profile.email);
       await linkExternalAccount(ctx, verifiedEmailUser.id, profile);
@@ -256,7 +272,9 @@ async function resolveExternalIdentity(
     await ctx.db.delete(s.externalAccounts).where(eq(s.externalAccounts.id, account.id));
   }
 
-  const verifiedEmailUser = profile.email && profile.emailVerified ? await findUserByVerifiedEmail(ctx, profile.email) : undefined;
+  // Only a provider-verified address may be linked to an existing local account. An unverified claim (including an
+  // explicit `email_verified: false` that `trustEmailVerified` must not override) goes through sign-up verification.
+  const verifiedEmailUser = profileEmailMayLink(profile) ? await findUserByVerifiedEmail(ctx, profile.email!) : undefined;
   if (verifiedEmailUser) {
     await linkExternalAccount(ctx, verifiedEmailUser.id, profile);
     return signInExistingUser(ctx, flow, verifiedEmailUser, profile);

@@ -1,7 +1,9 @@
 import { Button } from "@orbitid/ui";
+import { Page as PageLayout } from "../components/shared/page";
 import { Plus } from "lucide-react";
 import { errorMessage } from "./_config/settings";
-import { ConfirmDialog, ErrorAlert, MetaChip, PageHeader } from "./_config/ui";
+import { ErrorAlert, MetaChip, PageHeader } from "./_config/ui";
+import { ConfirmDialog } from "../components/shared/confirm-dialog";
 import { useWebhooks } from "./_webhooks/use-webhooks";
 import { EndpointsTable } from "./_webhooks/endpoints-table";
 import { EndpointFormSheet, SecretSheet } from "./_webhooks/endpoint-sheets";
@@ -12,7 +14,7 @@ export default function Page() {
   const { selected, setSelected, deleting, query, endpoints, openCreate, deleteEndpoint } = ctl;
 
   return (
-    <div className="space-y-6">
+    <PageLayout>
       <PageHeader
         title="Webhooks"
         description="Send signed events to your application and inspect delivery attempts. Failed deliveries retry with exponential backoff."
@@ -49,9 +51,9 @@ export default function Page() {
         }
         confirmLabel="Delete endpoint"
         destructive
-        loading={deleting}
+        pending={deleting}
         onConfirm={() => void deleteEndpoint()}
       />
-    </div>
+    </PageLayout>
   );
 }

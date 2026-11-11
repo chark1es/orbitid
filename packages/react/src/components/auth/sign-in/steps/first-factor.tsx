@@ -23,6 +23,14 @@ export function PasswordStep({ flow }: StepProps) {
   return (
     <div className="flex flex-col gap-4">
       <FormError message={flow.error} />
+      {flow.notice ? (
+        <div
+          role="status"
+          className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-foreground"
+        >
+          {flow.notice}
+        </div>
+      ) : null}
       <IdentifierPreview value={flow.identifier} onEdit={() => flow.go("start")} />
       <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
         <Field control={form.control} name="password" label={t("formFieldLabel__password")} required>

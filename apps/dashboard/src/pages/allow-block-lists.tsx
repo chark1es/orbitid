@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Page as PageLayout } from "../components/shared/page";
 import type { AllowlistIdentifierJSON, BlocklistIdentifierJSON, PaginatedList } from "@orbitid/shared";
 import {
   Button,
@@ -20,12 +21,11 @@ import {
 } from "@orbitid/ui";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { api, useApi, useApiMutation } from "../lib/api";
+import { api, apiAllPages, useApi, useApiMutation } from "../lib/api";
 import { unwrapList } from "./_config/data";
 import { errorMessage, formatDate, normalizeRestrictionIdentifier } from "./_config/settings";
 import {
   CheckboxRow,
-  ConfirmDialog,
   DetailSheet,
   EmptyState,
   ErrorAlert,
@@ -40,6 +40,7 @@ import {
   TableSkeleton,
 } from "./_config/ui";
 import { useSettingsEditor } from "./_config/use-settings";
+import { ConfirmDialog } from "../components/shared/confirm-dialog";
 
 type ListKind = "allow" | "block";
 type IdentifierKind = "email" | "domain" | "phone";
@@ -51,8 +52,8 @@ interface RestrictionRow {
 }
 
 const fetchers = {
-  allow: { path: "/allowlist_identifiers?limit=100", key: ["allowlist-identifiers"] },
-  block: { path: "/blocklist_identifiers?limit=100", key: ["blocklist-identifiers"] },
+  allow: { path: "/allowlist_identifiers", key: ["allowlist-identifiers"] },
+  block: { path: "/blocklist_identifiers", key: ["blocklist-identifiers"] },
 } as const;
 
 export default function Page() {
@@ -67,8 +68,12 @@ export default function Page() {
   const [selected, setSelected] = useState<RestrictionRow | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  const allowQuery = useApi<PaginatedList<AllowlistIdentifierJSON>>([...fetchers.allow.key], fetchers.allow.path);
-  const blockQuery = useApi<PaginatedList<BlocklistIdentifierJSON>>([...fetchers.block.key], fetchers.block.path);
+  const allowQuery = useApi<PaginatedList<AllowlistIdentifierJSON>>([...fetchers.allow.key], fetchers.allow.path, {
+    queryFn: ({ signal }) => apiAllPages<AllowlistIdentifierJSON>(fetchers.allow.path, { signal }),
+  });
+  const blockQuery = useApi<PaginatedList<BlocklistIdentifierJSON>>([...fetchers.block.key], fetchers.block.path, {
+    queryFn: ({ signal }) => apiAllPages<BlocklistIdentifierJSON>(fetchers.block.path, { signal }),
+  });
   const allowRows = unwrapList<RestrictionRow>(allowQuery.data);
   const blockRows = unwrapList<RestrictionRow>(blockQuery.data);
 
@@ -85,7 +90,7 @@ export default function Page() {
   if (editor.isLoading) return <LoadingPage rows={3} />;
   if (!settings) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-4">
         <PageHeader title="Allowlist & blocklist" description="Control who can sign up." />
         <ErrorAlert error={editor.error ?? "Instance settings did not load."} onRetry={editor.refetch} />
       </div>
@@ -147,6 +152,7 @@ export default function Page() {
     if (rows.length === 0) {
       return (
         <EmptyState
+          compact
           title={kind === "allow" ? "No allowed identifiers" : "No blocked identifiers"}
           description={
             kind === "allow"
@@ -174,7 +180,9 @@ export default function Page() {
         <TableBody>
           {rows.map((row) => (
             <TableRow key={row.id}>
-              <TableCell className="font-data text-xs">{row.identifier}</TableCell>
+              <TableCell className="font-data text-xs">
+                <span className="block max-w-[32ch] truncate" title={row.identifier}>{row.identifier}</span>
+              </TableCell>
               <TableCell className="text-xs text-muted-foreground">{row.identifier_type.replace(/_/g, " ")}</TableCell>
               <TableCell className="font-data text-xs text-muted-foreground">{formatDate(row.created_at)}</TableCell>
               <TableCell className="text-right">
@@ -191,7 +199,7 @@ export default function Page() {
   };
 
   return (
-    <div className="space-y-6">
+    <PageLayout>
       <PageHeader
         title="Allowlist & blocklist"
         description="Gate sign-ups by exact email address, an entire email domain, or a phone number."
@@ -356,9 +364,9 @@ export default function Page() {
         }
         confirmLabel="Remove"
         destructive
-        loading={deleting}
+        pending={deleting}
         onConfirm={() => void deleteIdentifier()}
       />
-    </div>
+    </PageLayout>
   );
 }

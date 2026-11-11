@@ -101,7 +101,7 @@ export function EmailChipsInput({
       {label ? <Label htmlFor={inputId}>{label}</Label> : null}
       <div
         className={cn(
-          "flex min-h-9 flex-wrap items-center gap-1.5 rounded-md border border-input bg-transparent px-2 py-1.5 shadow-xs focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50 dark:bg-input/30",
+          "flex min-h-9 flex-wrap items-center gap-1.5 rounded-md border border-input bg-transparent px-2 py-1.5 focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50 dark:bg-input/30",
           disabled && "opacity-50",
         )}
         data-testid="email-chips"

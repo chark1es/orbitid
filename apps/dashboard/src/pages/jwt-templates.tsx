@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { Page as PageLayout } from "../components/shared/page";
 import type { JwtTemplateJSON, PaginatedList } from "@orbitid/shared";
 import {
   Accordion,
@@ -20,7 +21,7 @@ import {
 } from "@orbitid/ui";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { api, useApi } from "../lib/api";
+import { api, apiAllPages, useApi } from "../lib/api";
 import { unwrapList } from "./_config/data";
 import {
   SESSION_SHORTCODES,
@@ -34,7 +35,6 @@ import {
   reservedJwtClaimErrors,
 } from "./_config/settings";
 import {
-  ConfirmDialog,
   DetailSheet,
   EmptyState,
   ErrorAlert,
@@ -47,6 +47,7 @@ import {
   TableSkeleton,
   ValidationSummary,
 } from "./_config/ui";
+import { ConfirmDialog } from "../components/shared/confirm-dialog";
 
 interface TemplateForm {
   id?: string;
@@ -70,12 +71,15 @@ const EMPTY_FORM: TemplateForm = {
 const ALGORITHMS = ["RS256", "ES256", "HS256"];
 
 export default function Page() {
-  const query = useApi<PaginatedList<JwtTemplateJSON>>(["jwt_templates"], "/jwt_templates?limit=100");
+  const query = useApi<PaginatedList<JwtTemplateJSON>>(["jwt_templates"], "/jwt_templates", {
+    queryFn: ({ signal }) => apiAllPages<JwtTemplateJSON>("/jwt_templates", { signal }),
+  });
   const templates = unwrapList<JwtTemplateJSON>(query.data);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [form, setForm] = useState<TemplateForm>(EMPTY_FORM);
   const [claimsError, setClaimsError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [attempted, setAttempted] = useState(false);
   const [selected, setSelected] = useState<JwtTemplateJSON | null>(null);
   const [deleting, setDeleting] = useState(false);
   const claimsRef = useRef<HTMLTextAreaElement>(null);
@@ -177,7 +181,7 @@ export default function Page() {
   };
 
   return (
-    <div className="space-y-6">
+    <PageLayout>
       <PageHeader
         title="JWT templates"
         description="Named claim sets requested with getToken({ template }). Session tokens keep the default lifetime unless a template overrides it."
@@ -193,13 +197,14 @@ export default function Page() {
 
       <section className="space-y-3">
         <div className="flex items-baseline justify-between gap-3">
-          <h2 className="text-sm font-semibold">Templates</h2>
+          <h2 className="text-sm font-heading">Templates</h2>
           <p className="text-xs text-muted-foreground">Available by name to the Frontend API token endpoints.</p>
         </div>
         {query.isLoading ? (
           <TableSkeleton />
         ) : templates.length === 0 ? (
           <EmptyState
+            compact
             title="No JWT templates"
             description="Create a template to add custom claims to session tokens for a specific integration."
             action={
@@ -224,8 +229,8 @@ export default function Page() {
               {templates.map((template) => (
                 <TableRow key={template.id}>
                   <TableCell>
-                    <div className="flex items-center gap-2">
-                      <code className="font-data text-xs font-medium">{template.name}</code>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <code className="max-w-[28ch] truncate font-data text-xs font-medium" title={template.name}>{template.name}</code>
                       {template.custom_signing_key ? <MetaChip>Custom key</MetaChip> : null}
                     </div>
                   </TableCell>
@@ -254,8 +259,10 @@ export default function Page() {
 
       <DetailSheet
         open={sheetOpen}
-        onOpenChange={setSheetOpen}
-        size="lg"
+        onOpenChange={(open) => {
+          setSheetOpen(open);
+          if (!open) setAttempted(false);
+        }}
         title={form.id ? "Edit JWT template" : "New JWT template"}
         description="Claims render per user, session, and active organization. A whole-value shortcode keeps its JSON type."
         footer={
@@ -263,7 +270,13 @@ export default function Page() {
             <Button variant="outline" onClick={() => setSheetOpen(false)} disabled={saving}>
               Cancel
             </Button>
-            <Button onClick={() => void saveTemplate()} disabled={saving || errors.length > 0}>
+            <Button
+              onClick={() => {
+                setAttempted(true);
+                if (errors.length === 0) void saveTemplate();
+              }}
+              disabled={saving}
+            >
               {saving ? "Saving…" : form.id ? "Save changes" : "Create template"}
             </Button>
           </>
@@ -358,7 +371,7 @@ export default function Page() {
               Rendered locally for Ada Lovelace at Acme Inc. The server adds reserved claims (iss, sub, sid, iat, exp).
             </p>
           </div>
-          <ValidationSummary errors={errors} title="Fix these before saving" />
+          <ValidationSummary errors={attempted ? errors : []} title="Fix these before saving" />
         </div>
       </DetailSheet>
 
@@ -375,9 +388,9 @@ export default function Page() {
         }
         confirmLabel="Delete template"
         destructive
-        loading={deleting}
+        pending={deleting}
         onConfirm={() => void deleteTemplate()}
       />
-    </div>
+    </PageLayout>
   );
 }

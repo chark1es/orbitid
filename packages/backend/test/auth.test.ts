@@ -15,8 +15,8 @@ beforeAll(async () => {
   publicKeyPem = await exportSPKI(pair.publicKey);
 });
 
-async function sign(overrides: { expiresAt?: number | string; key?: KeyLike } = {}): Promise<string> {
-  return new SignJWT({ sid: "sess_1", org_role: "org:admin", org_permissions: ["org:sys_memberships:manage", "org:team:read"], fva: [5, 30], sts: "active" })
+async function sign(overrides: { expiresAt?: number | string; key?: KeyLike; claims?: Record<string, unknown> } = {}): Promise<string> {
+  return new SignJWT({ sid: "sess_1", org_role: "org:admin", org_permissions: ["org:sys_memberships:manage", "org:team:read"], fva: [5, 30], sts: "active", ...overrides.claims })
     .setProtectedHeader({ alg: "RS256" })
     .setIssuer(ISSUER)
     .setSubject("user_1")
@@ -145,6 +145,26 @@ describe("authenticateRequest", () => {
     expect(state.toAuth().has({ permission: "org:sys_memberships:manage" })).toBe(true);
   });
 
+  it("rejects a pending session as signed out, with a pending reason", async () => {
+    // Required MFA not finished: the token is valid, but the user must not be admitted yet.
+    const token = await sign({ claims: { sts: "pending" } });
+    const options = { ...baseOptions(), apiUrl: "https://auth.example.com" };
+
+    const bearer = await authenticateRequest(requestWith({ authorization: `Bearer ${token}` }), options);
+    expect(bearer.status).toBe("signed-out");
+    expect(bearer.reason).toBe("session-pending");
+    expect(bearer.token).toBeNull();
+    expect(bearer.handshakeUrl).toBeNull();
+    expect(bearer.toAuth().isAuthenticated).toBe(false);
+    expect(bearer.toAuth().userId).toBeNull();
+    expect(bearer.toAuth().sessionStatus).toBeNull();
+
+    const cookie = await authenticateRequest(requestWith({ cookie: `__session=${token}; __client_uat=1700000000` }), options);
+    expect(cookie.status).toBe("signed-out");
+    expect(cookie.reason).toBe("session-pending");
+    expect(cookie.toAuth().isAuthenticated).toBe(false);
+  });
+
   it("short-circuits signed-out visitors with __client_uat=0", async () => {
     expect((await authenticateRequest(requestWith({}), baseOptions())).reason).toBe("no-session-token");
     expect((await authenticateRequest(requestWith({ cookie: "__client_uat=0" }), baseOptions())).reason).toBe("client-uat-zero");
@@ -203,6 +223,20 @@ describe("authenticateRequest", () => {
     expect(state.handshakeUrl).toBe(
       `https://auth.example.com/v1/client/handshake?redirect_url=${encodeURIComponent("https://app.example.com/settings?tab=2")}`,
     );
+  });
+
+  it("refuses a JWT template token as a session", async () => {
+    const template = new SignJWT({ sid: "sess_1", token_type: "jwt_template", plan: "pro" })
+      .setProtectedHeader({ alg: "RS256" })
+      .setIssuer(ISSUER)
+      .setSubject("user_1")
+      .setIssuedAt()
+      .setExpirationTime("10y")
+      .sign(privateKey);
+    const state = await authenticateRequest(requestWith({ authorization: `Bearer ${template}` }), baseOptions());
+    expect(state.status).toBe("signed-out");
+    expect(state.reason).toBe("session-token-invalid");
+    expect(state.toAuth().isAuthenticated).toBe(false);
   });
 
   it("never suggests a handshake without an API URL or for a bearer token", async () => {

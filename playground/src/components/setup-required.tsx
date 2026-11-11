@@ -28,6 +28,29 @@ const ENV_ROWS: Array<{ name: string; meaning: string }> = [
   },
 ];
 
+/**
+ * Environment names are single long tokens. Break them after each underscore (the natural word
+ * boundary) and let a pathological suffix wrap anywhere, so a 375px screen never splits `is / set`.
+ */
+function EnvName({ value }: { value: string }) {
+  const parts = value.split("_");
+  return (
+    <code className="font-data break-words [overflow-wrap:anywhere]">
+      {parts.map((part, index) => (
+        <span key={`${part}-${index}`}>
+          {part}
+          {index < parts.length - 1 ? (
+            <>
+              _
+              <wbr />
+            </>
+          ) : null}
+        </span>
+      ))}
+    </code>
+  );
+}
+
 export function CommandBlock({ commands, label }: { commands: string; label: string }) {
   return (
     <div className="border">
@@ -40,7 +63,7 @@ export function CommandBlock({ commands, label }: { commands: string; label: str
   );
 }
 
-/** One panel for every "this needs configuration" state. Names the missing value and the fix. */
+/** One compact panel for every "this needs configuration" state. Names the missing value and the fix. */
 export function SetupRequired({
   title,
   description,
@@ -52,22 +75,26 @@ export function SetupRequired({
 }) {
   return (
     <section aria-labelledby="setup-required-title" className="border">
-      <div className="border-b px-5 py-4">
+      <div className="border-b px-4 py-3">
         <h2 id="setup-required-title" className="text-lg">
           {title}
         </h2>
-        <p className="mt-1 max-w-[70ch] text-muted-foreground">{description}</p>
+        <p className="mt-1 max-w-[70ch] text-sm text-muted-foreground">{description}</p>
         {missing ? (
-          <p className="font-data mt-3 inline-block border px-2 py-1 text-xs text-signal">{missing}</p>
+          <p className="mt-2 inline-block max-w-full border px-2 py-1 text-xs text-signal">
+            <EnvName value={missing} />
+          </p>
         ) : null}
       </div>
-      <div className="grid items-start gap-5 p-5 lg:grid-cols-2">
+      <div className="grid items-start gap-4 p-4 lg:grid-cols-2">
         <div>
           <h3 className="text-sm font-semibold">What to set</h3>
           <dl className="mt-2 divide-y border-y">
             {ENV_ROWS.map((row) => (
-              <div key={row.name} className="py-2">
-                <dt className="font-data text-xs text-foreground">{row.name}</dt>
+              <div key={row.name} className="min-w-0 py-1.5">
+                <dt className="min-w-0 text-xs text-foreground">
+                  <EnvName value={row.name} />
+                </dt>
                 <dd className="mt-0.5 text-xs text-muted-foreground">{row.meaning}</dd>
               </div>
             ))}

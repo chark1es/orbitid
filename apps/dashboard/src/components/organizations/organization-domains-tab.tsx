@@ -15,7 +15,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@orbitid/ui";
-import { Globe, Plus } from "lucide-react";
+import { OVERLAY_WIDTH } from "../shared/overlay-sizes";
+import { Globe, Plus, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import type { OrganizationDomainJSON, OrganizationJSON } from "@orbitid/shared";
 import { api, useApi } from "../../lib/api";
@@ -27,14 +28,10 @@ import { EmptyState } from "../shared/empty-state";
 import { StatusBadge } from "../shared/status-badge";
 import { ConfirmDialog } from "../shared/confirm-dialog";
 import { Section } from "../shared/section";
+import { ENROLLMENT_MODES, EnrollmentModeSelect } from "./_domains/enrollment-mode-select";
+import { VerifyDomainDialog } from "./_domains/verify-domain-dialog";
 
-const ENROLLMENT_MODES = [
-  { value: "manual_invitation", label: "Manual invitation" },
-  { value: "automatic_invitation", label: "Automatic invitation" },
-  { value: "automatic_suggestion", label: "Automatic suggestion" },
-] as const;
-
-function AddDomainDialog({
+export function AddDomainDialog({
   org,
   open,
   onOpenChange,
@@ -68,7 +65,7 @@ function AddDomainDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className={OVERLAY_WIDTH.form}>
         <DialogHeader>
           <DialogTitle>Add domain</DialogTitle>
           <DialogDescription>
@@ -90,7 +87,7 @@ function AddDomainDialog({
           <div className="space-y-2">
             <Label>Enrollment mode</Label>
             <Select value={mode} onValueChange={setMode}>
-              <SelectTrigger aria-label="Enrollment mode">
+              <SelectTrigger aria-label="Enrollment mode" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -124,6 +121,7 @@ function AddDomainDialog({
 export function OrganizationDomainsTab({ org, onChanged }: { org: OrganizationJSON; onChanged: () => void }) {
   const [addOpen, setAddOpen] = useState(false);
   const [deleting, setDeleting] = useState<OrganizationDomainJSON | null>(null);
+  const [verifying, setVerifying] = useState<OrganizationDomainJSON | null>(null);
   const [pending, setPending] = useState(false);
   const domainsQuery = useApi<unknown>(["organization-domains", org.id], `/organizations/${org.id}/domains?limit=100`);
   const domains = asList<OrganizationDomainJSON>(domainsQuery.data).data;
@@ -159,10 +157,14 @@ export function OrganizationDomainsTab({ org, onChanged }: { org: OrganizationJS
       id: "enrollment",
       header: "Enrollment",
       cell: (domain) => (
-        <span className="text-sm">
-          {ENROLLMENT_MODES.find((option) => option.value === domain.enrollment_mode)?.label ??
-            domain.enrollment_mode.replace(/_/g, " ")}
-        </span>
+        <EnrollmentModeSelect
+          orgId={org.id}
+          domain={domain}
+          onChanged={() => {
+            void domainsQuery.refetch();
+            onChanged();
+          }}
+        />
       ),
     },
     {
@@ -173,8 +175,6 @@ export function OrganizationDomainsTab({ org, onChanged }: { org: OrganizationJS
     {
       id: "added",
       header: "Added",
-      headerClassName: "hidden sm:table-cell",
-      className: "hidden sm:table-cell",
       cell: (domain) => (
         <span className="font-data text-xs text-muted-foreground">{formatDate(domain.created_at)}</span>
       ),
@@ -182,16 +182,29 @@ export function OrganizationDomainsTab({ org, onChanged }: { org: OrganizationJS
     {
       id: "actions",
       header: <span className="sr-only">Actions</span>,
-      className: "w-24 text-right",
+      className: "w-44 text-right",
       cell: (domain) => (
-        <Button
-          size="sm"
-          variant="ghost"
-          aria-label={`Remove ${domain.name}`}
-          onClick={() => setDeleting(domain)}
-        >
-          Remove
-        </Button>
+        <div className="flex justify-end gap-1">
+          {domain.verification?.status !== "verified" ? (
+            <Button
+              size="sm"
+              variant="outline"
+              aria-label={`Verify ${domain.name}`}
+              onClick={() => setVerifying(domain)}
+            >
+              <ShieldCheck aria-hidden /> Verify
+            </Button>
+          ) : null}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-destructive"
+            aria-label={`Remove ${domain.name}`}
+            onClick={() => setDeleting(domain)}
+          >
+            Remove
+          </Button>
+        </div>
       ),
     },
   ];
@@ -224,6 +237,18 @@ export function OrganizationDomainsTab({ org, onChanged }: { org: OrganizationJS
         open={addOpen}
         onOpenChange={setAddOpen}
         onAdded={() => {
+          void domainsQuery.refetch();
+          onChanged();
+        }}
+      />
+      <VerifyDomainDialog
+        org={org}
+        domain={verifying}
+        onOpenChange={(open) => {
+          if (!open) setVerifying(null);
+        }}
+        onVerified={() => {
+          setVerifying(null);
           void domainsQuery.refetch();
           onChanged();
         }}

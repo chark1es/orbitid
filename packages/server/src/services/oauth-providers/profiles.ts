@@ -278,6 +278,16 @@ export function normalizeProfile(key: string, data: unknown, tokens: OAuthTokenS
         email: str(d.email), emailVerified: false, firstName: str(d.name), imageUrl: str(d.picture), raw: d,
       }, tokens);
     }
+    case "zoom": {
+      const d = rec(data);
+      const email = str(d.email);
+      return profile(key, {
+        providerUserId: strOrEmpty(d.id) || strOrEmpty(email),
+        email, emailVerified: false,
+        firstName: str(d.first_name), lastName: str(d.last_name), username: email?.split("@")[0],
+        imageUrl: str(d.pic_url), raw: d,
+      }, tokens);
+    }
     default: {
       const d = rec(data);
       return profile(key, {

@@ -16,7 +16,7 @@ Set these where OrbitID runs: the container environment, `docker compose`'s `.en
 
 | Variable | Required | Default | Meaning |
 | --- | --- | --- | --- |
-| `ORBITID_ENCRYPTION_KEY` | **yes** (always with Postgres or a public base URL) | none | At least 32 characters. Encrypts signing keys, TOTP secrets, OAuth tokens and stored provider secrets, and derives the secret key. Keep it stable and backed up; changing it makes stored secrets unreadable. |
+| `ORBITID_ENCRYPTION_KEY` | **yes** (always with Postgres or a public base URL) | none | At least 32 characters. Encrypts signing keys, TOTP secrets, OAuth tokens and stored provider secrets, and derives the secret key. Keep it stable and backed up: changing it makes stored secrets unreadable, and the server refuses to start when a stored signing key cannot be decrypted (it never regenerates one, which would sign every user out). |
 | `ORBITID_DATABASE_URL` | recommended | SQLite file in the data dir | `postgres://…`, `pglite://<dir>` or `sqlite:<file>`. `DATABASE_URL` also works. |
 | `ORBITID_BASE_URL` | yes in production | `http://localhost:<port>` | The URL browsers and your apps use to reach the server. It is the token issuer. |
 | `PORT` / `ORBITID_PORT` | no | `4000` | Port to listen on. |
@@ -26,7 +26,7 @@ Set these where OrbitID runs: the container environment, `docker compose`'s `.en
 | `ORBITID_DASHBOARD_DIR` | no | built dashboard next to the server | Folder holding the built dashboard. |
 | `ORBITID_DATABASE_POOL` | no | `10` | Maximum Postgres connections. |
 | `ORBITID_DB_DIALECT` | no | from the URL | Force `postgres` or `sqlite`. |
-| `ORBITID_TRUST_PROXY` | no | `0` | Number of reverse proxies in front of the server. See [SELF_HOSTING.md](SELF_HOSTING.md). |
+| `ORBITID_TRUST_PROXY` | no | `0` | Number of reverse proxies in front of the server. Also makes `X-Forwarded-Proto: https` decide the cookies' `Secure` attribute. See [SELF_HOSTING.md](SELF_HOSTING.md). |
 | `ORBITID_ALLOW_PRIVATE_NETWORKS` | no | `false` | Let outbound calls (webhooks, identity providers) reach private addresses. Development mode allows them anyway. See [SECURITY.md](SECURITY.md). |
 | `ORBITID_DASHBOARD_CONNECT_SRC` | no | none | Extra origins the dashboard may call, when its API lives elsewhere. See [SECURITY.md](SECURITY.md). |
 | `ORBITID_RESEND_API_KEY` | no | none | Send email through Resend. See [EMAIL.md](EMAIL.md). |

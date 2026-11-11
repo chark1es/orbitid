@@ -85,6 +85,10 @@ Verify tokens offline:
 Rotating a signing key with `POST /v1/instance/signing_keys/rotate` keeps the old key in the JWKS until its tokens
 expire, so rotation does not invalidate live sessions.
 
+JWT templates can sign with a key of their own instead of the instance key. Set `custom_signing_key: true` and
+`signing_algorithm` (`RS256`, `ES256` or `HS256`) on `POST /v1/jwt_templates`, or change either on
+`PATCH /v1/jwt_templates/:id`. The verification key is returned as `signing_key` in every response.
+
 ### Rate limits
 
 Sensitive endpoints are rate limited with a fixed-window counter. When you exceed one the answer is `429` with
@@ -233,8 +237,9 @@ curl -sS -g "$ORBITID_URL/v1/users?email_address=ada@example.com" \
 ```
 
 `POST /v1/users` accepts either `password` or a `password_digest` with `password_hasher` (for migrating from another
-system), never both. `public_metadata` is visible to the browser, `private_metadata` stays server-side, and
-`unsafe_metadata` is the one the user themselves may write.
+system), never both. The hasher must be one the instance can verify: `bcrypt`, `argon2` or `scrypt`, and the digest
+must be in that hasher's format. `public_metadata` is visible to the browser, `private_metadata` stays server-side,
+and `unsafe_metadata` is the one the user themselves may write.
 
 ### 3. Verify a session token with JWKS
 
@@ -254,7 +259,7 @@ export async function userIdFromRequest(request) {
   const { payload } = await jwtVerify(token, jwks, {
     issuer: "https://auth.example.com",
     audience: "https://app.example.com",
-    clockTolerance: 5,
+    clockTolerance: 60,
   });
   return payload.sub;
 }
@@ -359,6 +364,9 @@ A delivery counts as successful on any `2xx`. Anything else, including a timeout
 `5s`, `5m`, `30m`, `2h`, `5h` and `10h`; the sixth failure marks it failed. Your endpoint should treat `svix-id` as
 an idempotency key and answer `2xx` quickly — do the real work asynchronously.
 
+A disabled endpoint is not called. Queued attempts stay pending without consuming a retry while the endpoint is
+disabled, and delivery resumes when it is enabled again.
+
 `GET /v1/webhooks/endpoints/:id/deliveries` shows the attempt history with response codes and bodies,
 `POST /v1/webhooks/deliveries/:id/retry` re-queues one, and `POST /v1/webhooks/endpoints/:id/test` sends a test event
 so you can exercise your signature check.
@@ -368,7 +376,10 @@ so you can exercise your signature check.
 - **Organizations and RBAC**: `/v1/client/organizations/*` for the browser (memberships, invitations, domains, roles,
   membership requests), `/v1/organizations/*` for the Backend API. Role changes emit
   `organizationMembership.updated`, and the JWT carries `org_id`, `org_role` and `org_permissions` so your app can
-  check permissions without another request.
+  check permissions without another request. Operators create a membership request with
+  `POST /v1/organizations/:id/membership_requests` and resolve it with
+  `POST /v1/organizations/:id/membership_requests/:rid/accept` (returns the new membership) or `/reject`
+  (returns the rejected request).
 - **No impersonation**: actor (impersonation) tokens and Backend-issued sign-in tokens were removed. Both minting
   endpoints still exist and always answer `403 not_allowed_access`; a ticket that is already in the database is refused
   as invalid. An operator credential must not become another user's session: that would bypass the user's password,
@@ -389,12 +400,15 @@ so you can exercise your signature check.
 
   Initial provisioning is unaffected: `POST /v1/users` still creates an account with verified identifiers, a password,
   a TOTP secret and backup codes (that is an import, not a takeover of an existing person). Names, usernames, metadata,
-  ban/lock status, roles, profile images and trusted-device revocation remain operator-managed.
+  ban/lock status, roles, profile images and trusted-device revocation remain operator-managed. Use
+  `GET /v1/users/:id/trusted_devices` to list a user's trusted browsers and
+  `DELETE /v1/users/:id/trusted_devices/:device_id` to force a second factor on their next sign-in.
 - **Instance-wide custom roles**: `POST /v1/roles` with an `app:` key creates an instance role (as opposed to an
   `org:` organization role). `PUT /v1/users/{id}/roles` assigns them to a user; the session token then carries
   `roles` and `role_permissions`, independent of `org_role` / `org_permissions`. See [RBAC.md](RBAC.md).
 - **API keys**: create them for a user or an organization and verify a presented key with
-  `POST /v1/api_keys/verify`. The secret is shown once; only a hash is stored.
+  `POST /v1/api_keys/verify`. The secret is shown once; only a hash is stored. A user subject's key is invalid
+  while that user is banned or currently locked, and banning a user revokes their keys.
 - **Machines (M2M)**: `POST /v1/m2m/machines` returns the machine secret once. The machine mints its own tokens with
   `POST /oauth/m2m/token` (`client_credentials`) and never needs the instance secret key.
 - **OIDC provider**: publish `/.well-known/openid-configuration` to your clients. Authorization code flow, PKCE
@@ -417,7 +431,11 @@ so you can exercise your signature check.
 ### Session versus template verification
 
 Normal instance session tokens use RS256 and the instance JWKS. JWT-template algorithms (including custom
-HS256) are separate integration credentials, not additional instance session modes. Backend `verifyToken`
-uses an asymmetric public key/JWKS; its deprecated `secretKey` option is unused and never enables HMAC.
-Next.js accepts HMAC only through explicit `hs256:` key configuration. SDKs reject unsupported algorithms
-rather than silently interpreting a public key as a symmetric secret.
+HS256) are separate integration credentials, not additional instance session modes. Every template token is
+marked `token_type: "jwt_template"`, and session verification refuses that marker by default — including a
+template token signed with the instance key. Verify one deliberately with
+`verifyToken(token, { tokenType: "jwt_template" })`; in `@orbitid/node`, pass the same option as the second argument
+to `orbit.verifyToken(token, options)`. Backend `verifyToken` uses an asymmetric public key/JWKS; its deprecated
+`secretKey` option is unused and never enables HMAC. Next.js accepts HMAC only through explicit `hs256:` key
+configuration. SDKs reject unsupported algorithms rather than silently interpreting a public key as a symmetric
+secret.

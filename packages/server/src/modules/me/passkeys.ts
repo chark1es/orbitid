@@ -8,6 +8,7 @@ import * as s from "../../db/schema";
 import { parseBody } from "../../lib/http";
 import { serializePasskey } from "../../serializers";
 import { beginPasskeyRegistration, finishPasskeyRegistration, listPasskeys, relyingParty } from "../../services/passkeys";
+import { assertAdditionalIdentificationsAllowed } from "../../services/enterprise-access";
 import { primaryEmail } from "../../services/users";
 import { requireReverification } from "../auth/reverification";
 import { first } from "../../lib/db";
@@ -25,6 +26,7 @@ export function registerPasskeyRoutes(app: Hono, ctx: AppContext, helpers: MeHel
 
   app.post("/passkeys", async (c) => {
     const { user } = await auth(c);
+    await assertAdditionalIdentificationsAllowed(ctx, user.id);
     if (!ctx.settings.get().attributes.passkey.enabled) throw new OrbitError(400, ErrorCodes.webauthn_not_supported, "Passkeys are disabled for this instance");
     const body = await parseBody(c, passkeyCreateSchema);
     const email = await primaryEmail(ctx, user);
@@ -49,6 +51,7 @@ export function registerPasskeyRoutes(app: Hono, ctx: AppContext, helpers: MeHel
 
   app.post("/passkeys/:id/attempt_verification", async (c) => {
     const { user } = await auth(c);
+    await assertAdditionalIdentificationsAllowed(ctx, user.id);
     const id = c.req.param("id")!;
     const body = await parseBody(c, passkeyAttemptSchema);
     if (!body.public_key_credential) throw new OrbitError(422, ErrorCodes.form_param_missing, "public_key_credential is missing", { param_name: "public_key_credential" });

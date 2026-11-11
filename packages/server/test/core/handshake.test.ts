@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createLocalJWKSet, jwtVerify, type JWK } from "jose";
 import { eq } from "drizzle-orm";
 import * as schema from "../../src/db/schema";
+import { HANDSHAKE_SIGNED_OUT, HANDSHAKE_TRANSIENT } from "../../src/modules/handshake";
+import * as sessions from "../../src/services/sessions";
 import { getClient, setup, signUpUser, testClient, type TestClient } from "./helpers";
 
 const APP = "https://app.example.com";
@@ -86,6 +88,8 @@ describe("GET /v1/client/handshake", () => {
 
   it("redirects with signed_out for an expired session", async () => {
     const { app, ctx } = await setupApp();
+    // A finite lifetime is opt-in now (0 means no maximum), so an expiry test has to ask for one.
+    await ctx.settings.update({ session: { lifetimeSeconds: 3_600 } });
     const user = await signUpUser(app);
     const past = Date.now() - 60_000;
     await ctx.db.update(schema.sessions).set({ expireAt: past }).where(eq(schema.sessions.id, user.sessionId));
@@ -106,14 +110,22 @@ describe("GET /v1/client/handshake", () => {
     expect(handshakeValue(await handshake(user.client, `${APP}/dashboard`))).toBe("signed_out");
   });
 
-  it("redirects with signed_out for a pending (MFA enrolment) session", async () => {
+  it("mints a pending session token for a pending (MFA enrolment) session instead of signing it out", async () => {
     const { app, ctx } = await setupApp();
     await ctx.settings.update({ mfa: { required: true }, attributes: { authenticatorApp: { enabled: true } } });
     const user = await signUpUser(app);
     const stored = (await ctx.db.select().from(schema.sessions).where(eq(schema.sessions.id, user.sessionId)))[0];
     expect(stored?.status).toBe("pending");
 
-    expect(handshakeValue(await handshake(user.client, `${APP}/dashboard`))).toBe("signed_out");
+    const token = handshakeValue(await handshake(user.client, `${APP}/dashboard`));
+    expect(token).toBeTruthy();
+    expect(token).not.toBe(HANDSHAKE_SIGNED_OUT);
+    expect(token).not.toBe(HANDSHAKE_TRANSIENT);
+    const { payload } = await jwtVerify(token!, createLocalJWKSet(await jwks(app)), { issuer: ctx.env.baseUrl });
+    expect(payload.sid).toBe(user.sessionId);
+    expect(payload.sts).toBe("pending");
+    // Still pending: a handshake is not an MFA bypass.
+    expect((await ctx.db.select().from(schema.sessions).where(eq(schema.sessions.id, user.sessionId)))[0]?.status).toBe("pending");
   });
 
   it.each([
@@ -165,10 +177,48 @@ describe("GET /v1/client/handshake", () => {
     const { app } = await setupApp();
     const client = testClient(app);
     let limited: Response | null = null;
-    for (let i = 0; i < 140; i++) {
+    // 600 handshakes per address per minute: a restored browser can replay one per tab, and an office may
+    // share an address, so the budget is deliberately far above a human navigation rate.
+    for (let i = 0; i < 620; i++) {
       const response = await handshake(client, `${APP}/dashboard`);
       if (response.status === 429) { limited = response; break; }
     }
     expect(limited?.status).toBe(429);
+  });
+
+  it("answers an infrastructure failure with a retriable marker, never signed_out", async () => {
+    const { app, ctx } = await setupApp();
+    const user = await signUpUser(app);
+    // Make a newer active signing key unreadable: the same failure class as a changed ORBITID_ENCRYPTION_KEY or a
+    // database error while minting. Minting throws, but the session itself is perfectly alive.
+    await ctx.db.insert(schema.signingKeys).values({
+      kid: "broken-key", alg: "RS256", publicJwk: { kty: "RSA", kid: "broken-key", alg: "RS256", use: "sig" },
+      privateJwkEnc: "v1.bad.bad.bad", active: true, createdAt: Date.now() + 1_000,
+    });
+
+    const response = await handshake(user.client, `${APP}/dashboard`);
+    expect(response.status).toBe(302);
+    expect(handshakeValue(response)).toBe(HANDSHAKE_TRANSIENT);
+    expect(handshakeValue(response)).not.toBe(HANDSHAKE_SIGNED_OUT);
+    expect(response.headers.get("retry-after")).toBe("5");
+    // The browser's credentials must survive: a broken key is not a sign-out.
+    const stored = (await ctx.db.select().from(schema.sessions).where(eq(schema.sessions.id, user.sessionId)))[0]!;
+    expect(stored.status).toBe("active");
+  });
+
+  it("does not fail the handshake when the activity write fails", async () => {
+    const { app } = await setupApp();
+    const user = await signUpUser(app);
+    const spy = vi.spyOn(sessions, "slideSessionActivity").mockRejectedValueOnce(new Error("database is busy"));
+    try {
+      const response = await handshake(user.client, `${APP}/dashboard`);
+      const token = handshakeValue(response);
+      expect(response.status).toBe(302);
+      expect(token).toBeTruthy();
+      expect(token).not.toBe(HANDSHAKE_SIGNED_OUT);
+      expect(token).not.toBe(HANDSHAKE_TRANSIENT);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

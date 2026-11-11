@@ -1,25 +1,20 @@
-// OIDC/OAuth2 provider service: applications, authorization codes, tokens, consent, device grant.
+// OpenID Provider metadata (`/.well-known/openid-configuration` and RFC 8414 authorization-server metadata).
 //
-// Storage notes:
-//  - codes/access/refresh tokens are random opaque strings; only sha256 hashes are stored in `oauth_grants`.
-//  - `family_id` ties the access and refresh tokens of one authorization together (refresh rotation and reuse
-//    detection); `session_id` keeps `sid` and the org claims tied to the authorizing session; `nonce` is the
-//    OIDC nonce of an authorization code.
-import { createHash, randomInt } from "node:crypto";
-import { and, asc, count, desc, eq, gt, inArray } from "drizzle-orm";
-import { createLocalJWKSet, jwtVerify } from "jose";
-import { ErrorCodes, ID_PREFIX, OrbitError, type OAuthApplicationJSON } from "@orbitid/shared";
+// The issuer is always the public origin, never the request's internal origin: discovery, the `iss` claim on every
+// token and the advertised endpoints must agree byte for byte or clients reject the tokens.
 import type { AppContext } from "../../context";
-import * as s from "../../db/schema";
-import { randomToken, safeEqual, sha256 } from "../../lib/crypto";
-import { newId } from "../../lib/ids";
-import { getMembershipContext } from "../orgs";
-import { getJwks, signJwt } from "../tokens";
-import { first } from "../../lib/db";
 import { BASE_OIDC_SCOPES, DEVICE_CODE_GRANT_TYPE } from "./shared";
 
-export function discoveryDocument(ctx: AppContext) {
-  const base = ctx.env.baseUrl;
+/** Claims the provider can emit from the scopes it supports. */
+const CLAIMS_SUPPORTED = [
+  "sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "at_hash", "azp", "sid",
+  "name", "given_name", "family_name", "preferred_username", "picture", "locale", "updated_at",
+  "email", "email_verified", "phone_number", "phone_number_verified", "groups",
+  "org_id", "org_slug", "org_role", "org_permissions", "organizations",
+];
+
+export function discoveryDocument(ctx: AppContext, issuer = ctx.env.baseUrl) {
+  const base = issuer.replace(/\/+$/, "");
   const settings = ctx.settings.get().oidcProvider;
   const jwtFormat = settings.accessTokenFormat === "jwt";
   const doc: Record<string, unknown> = {
@@ -30,28 +25,30 @@ export function discoveryDocument(ctx: AppContext) {
     jwks_uri: `${base}/oauth/jwks`,
     revocation_endpoint: `${base}/oauth/revoke`,
     introspection_endpoint: `${base}/oauth/introspect`,
+    end_session_endpoint: `${base}/oauth/end_session`,
     response_types_supported: ["code"],
-    response_modes_supported: ["query"],
+    response_modes_supported: ["query", "form_post"],
     grant_types_supported: settings.deviceAuthorizationEnabled
       ? ["authorization_code", "refresh_token", DEVICE_CODE_GRANT_TYPE]
       : ["authorization_code", "refresh_token"],
     subject_types_supported: ["public"],
     id_token_signing_alg_values_supported: ["RS256"],
     scopes_supported: [...BASE_OIDC_SCOPES],
+    claims_supported: CLAIMS_SUPPORTED,
     token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post", "none"],
-    revocation_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post"],
+    revocation_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post", "none"],
     introspection_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post"],
     code_challenge_methods_supported: ["S256"],
-    claims_supported: [
-      "sub", "iss", "aud", "exp", "iat", "nonce", "name", "given_name", "family_name", "preferred_username", "picture",
-      "email", "email_verified", "org_id", "org_slug", "org_role", "org_permissions", "organizations",
-    ],
-    prompt_values_supported: ["consent", "none"],
+    prompt_values_supported: ["none", "login", "consent", "select_account"],
+    request_parameter_supported: false,
+    request_uri_parameter_supported: false,
+    claims_parameter_supported: false,
+    service_documentation: `${base}/docs`,
   };
   if (jwtFormat) {
     doc.access_token_format = "jwt";
     doc.access_token_signing_alg_values_supported = ["RS256"];
-    doc.access_token_claims_supported = ["iss", "sub", "aud", "azp", "scope", "iat", "exp", "jti", "sid", "org_id", "org_slug", "org_role", "org_permissions"];
+    doc.access_token_claims_supported = ["iss", "sub", "aud", "azp", "scope", "iat", "exp", "jti", "sid", "groups", "org_id", "org_slug", "org_role", "org_permissions"];
   }
   if (settings.deviceAuthorizationEnabled) {
     doc.device_authorization_endpoint = `${base}/oauth/device_authorization`;

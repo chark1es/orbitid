@@ -53,6 +53,8 @@ export interface SignInFlow {
   setIdentifierDraft: (value: string) => void;
   error: string | null;
   setError: (value: string | null) => void;
+  /** One-time explanation for a step the flow routed to automatically, e.g. after a password reset. */
+  notice: string | null;
   busy: boolean;
   step: SignInStep;
   go: (step: SignInStep) => void;

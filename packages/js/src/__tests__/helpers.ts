@@ -27,6 +27,7 @@ export interface RecordedCall {
 export interface MockResult {
   status?: number;
   body: unknown;
+  headers?: Record<string, string>;
 }
 
 export type MockHandler = (call: RecordedCall) => MockResult | Promise<MockResult>;
@@ -36,6 +37,7 @@ function toResponse(result: MockResult): Response {
   return {
     ok: status >= 200 && status < 300,
     status,
+    headers: new Headers(result.headers ?? {}),
     json: async () => result.body,
   } as unknown as Response;
 }

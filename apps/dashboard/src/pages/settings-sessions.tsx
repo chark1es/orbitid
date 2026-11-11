@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Page as PageLayout } from "../components/shared/page";
 import {
   Accordion,
   AccordionContent,
@@ -44,18 +45,22 @@ export default function Page() {
   if (!settings) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Sessions" description="Session lifetime, token refresh, and custom session token claims." />
+        <PageHeader title="Session settings" description="Session lifetime, token refresh, and custom session token claims." />
         <ErrorAlert error={editor.error ?? "Instance settings did not load."} onRetry={editor.refetch} />
       </div>
     );
   }
 
   const errors: string[] = [];
-  if (settings.session.lifetimeSeconds <= 0) errors.push("Session lifetime must be greater than zero.");
+  if (settings.session.lifetimeSeconds < 0) errors.push("Session lifetime must be 0 (no maximum) or greater.");
   if (settings.session.inactivityTimeoutSeconds < 0) errors.push("Inactivity timeout cannot be negative.");
   if (settings.session.tokenLifetimeSeconds <= 0) errors.push("Token lifetime must be greater than zero.");
-  if (settings.session.inactivityTimeoutSeconds > 0 && settings.session.inactivityTimeoutSeconds > settings.session.lifetimeSeconds)
-    errors.push("Inactivity timeout cannot exceed the session lifetime.");
+  if (settings.session.tokenLifetimeSeconds > 0 && settings.session.tokenLifetimeSeconds < 30)
+    errors.push("Token lifetime must be at least 30 seconds. Shorter values make the browser mint tokens continuously.");
+  if (settings.session.lifetimeSeconds > 0 && settings.session.tokenLifetimeSeconds > settings.session.lifetimeSeconds)
+    errors.push("Token lifetime cannot exceed a finite session lifetime.");
+  if (settings.session.lifetimeSeconds > 0 && settings.session.inactivityTimeoutSeconds > 0 && settings.session.inactivityTimeoutSeconds > settings.session.lifetimeSeconds)
+    errors.push("Inactivity timeout cannot exceed a finite session lifetime.");
   if (settings.session.trustedDevicesEnabled && (settings.session.trustedDeviceDays < 1 || settings.session.trustedDeviceDays > 365))
     errors.push("Trusted device duration must be between 1 and 365 days.");
   if (claimsError) errors.push("Custom claims are not valid JSON.");
@@ -86,26 +91,34 @@ export default function Page() {
   };
 
   return (
-    <div className="space-y-6">
+    <PageLayout>
       <PageHeader
-        title="Sessions"
+        title="Session settings"
         description="Control how long sessions last, how often tokens refresh, and which custom claims session JWTs carry."
+        descriptionClassName="max-w-[60ch]"
         badge={<MetaChip>Instance settings</MetaChip>}
       />
 
       {editor.error ? <ErrorAlert error={editor.error} onRetry={editor.refetch} /> : null}
 
-      <SettingsSection title="Session lifetime" description="A session expires at the maximum lifetime even while it is in use.">
+      <SettingsSection
+        title="Session lifetime"
+        description="By default a session never expires: it stays signed in until the user signs out, an operator revokes it, or the user is banned. Limits below are opt-in."
+      >
         <div className="grid gap-4 sm:grid-cols-2">
           <Field
             label="Maximum session lifetime (seconds)"
             htmlFor="session-lifetime"
-            description={`Currently ${humanDuration(settings.session.lifetimeSeconds)}.`}
+            description={
+              settings.session.lifetimeSeconds > 0
+                ? `A session ends ${humanDuration(settings.session.lifetimeSeconds)} after sign-in, even while it is in use.`
+                : "0 means no maximum. Sessions end only on sign-out, revocation or a ban."
+            }
           >
             <Input
               id="session-lifetime"
               type="number"
-              min={1}
+              min={0}
               value={settings.session.lifetimeSeconds}
               onChange={(event) => editor.patch({ session: { lifetimeSeconds: number(event.target.value) } })}
             />
@@ -115,8 +128,8 @@ export default function Page() {
             htmlFor="session-inactivity"
             description={
               settings.session.inactivityTimeoutSeconds > 0
-                ? `Sessions expire after ${humanDuration(settings.session.inactivityTimeoutSeconds)} without activity.`
-                : "0 disables the inactivity timeout."
+                ? `Sessions expire after ${humanDuration(settings.session.inactivityTimeoutSeconds)} without activity; staying active keeps the session alive.`
+                : "0 disables the inactivity timeout (recommended)."
             }
           >
             <Input
@@ -130,12 +143,12 @@ export default function Page() {
           <Field
             label="Session token lifetime (seconds)"
             htmlFor="session-token-lifetime"
-            description={`The SDK refreshes tokens on this cadence. ${humanDuration(settings.session.tokenLifetimeSeconds)}; 60 seconds is recommended.`}
+            description={`How often the browser SDK mints a fresh short-lived JWT. ${humanDuration(settings.session.tokenLifetimeSeconds)}; 60 seconds is recommended and 30 is the minimum. This is not the session lifetime.`}
           >
             <Input
               id="session-token-lifetime"
               type="number"
-              min={1}
+              min={30}
               value={settings.session.tokenLifetimeSeconds}
               onChange={(event) => editor.patch({ session: { tokenLifetimeSeconds: number(event.target.value) } })}
             />
@@ -143,18 +156,20 @@ export default function Page() {
         </div>
         <SwitchRow
           label="Multi-session mode"
-          description="Allow multiple sessions per client, for example two accounts in one browser."
+          description="Allow multiple sessions per browser, for example two accounts in one browser. On by default; turning it off is a single-session mode that ends the browser's other sessions when a new one starts."
           checked={settings.session.multiSession}
           onCheckedChange={(multiSession) => editor.patch({ session: { multiSession } })}
         />
         <dl className="grid gap-x-8 gap-y-2 border-t border-border pt-3 sm:grid-cols-2">
           <div className="flex items-baseline justify-between gap-4">
-            <dt className="text-xs text-muted-foreground">Effective lifetime</dt>
-            <dd className="font-data text-xs font-medium">{humanDuration(settings.session.lifetimeSeconds)}</dd>
+            <dt className="text-xs text-muted-foreground">Maximum lifetime</dt>
+            <dd className="font-data text-xs font-medium">
+              {settings.session.lifetimeSeconds > 0 ? humanDuration(settings.session.lifetimeSeconds) : "No limit"}
+            </dd>
           </div>
           <div className="flex items-baseline justify-between gap-4">
-            <dt className="text-xs text-muted-foreground">Refresh cadence</dt>
-            <dd className="font-data text-xs font-medium">Every {humanDuration(settings.session.tokenLifetimeSeconds)}</dd>
+            <dt className="text-xs text-muted-foreground">Token refresh cadence</dt>
+            <dd className="text-xs font-medium">Every {humanDuration(settings.session.tokenLifetimeSeconds)}</dd>
           </div>
         </dl>
       </SettingsSection>
@@ -240,6 +255,6 @@ export default function Page() {
         onSave={editor.save}
         onDiscard={editor.reset}
       />
-    </div>
+    </PageLayout>
   );
 }

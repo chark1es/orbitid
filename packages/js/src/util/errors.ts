@@ -8,13 +8,16 @@ export class OrbitAPIResponseError extends Error {
   readonly errors: ApiErrorItem[];
   readonly status: number;
   readonly traceId: string | null;
+  /** Parsed `Retry-After` for a 429/503, in milliseconds, when the server sent one. */
+  readonly retryAfterMs: number | null;
 
-  constructor(status: number, errors: ApiErrorItem[], traceId: string | null = null) {
+  constructor(status: number, errors: ApiErrorItem[], traceId: string | null = null, retryAfterMs: number | null = null) {
     super(errors[0]?.message ?? `OrbitID API request failed with status ${status}`);
     this.name = "OrbitAPIResponseError";
     this.errors = errors;
     this.status = status;
     this.traceId = traceId;
+    this.retryAfterMs = retryAfterMs;
   }
 
   /** First error code, e.g. `form_password_incorrect`. */
@@ -53,13 +56,35 @@ export function parseError(err: unknown): ParsedError {
 }
 
 /** Builds an error from a wire error body, tolerating malformed/empty responses. */
-export function errorFromBody(status: number, body: unknown): OrbitAPIResponseError {
+export function errorFromBody(
+  status: number,
+  body: unknown,
+  retryAfterMs: number | null = null,
+): OrbitAPIResponseError {
   const candidate = body as Partial<ApiErrorBody> | null;
   const traceId = candidate?.trace_id ?? null;
   if (candidate && Array.isArray(candidate.errors) && candidate.errors.length) {
-    return new OrbitAPIResponseError(status, candidate.errors, traceId);
+    return new OrbitAPIResponseError(status, candidate.errors, traceId, retryAfterMs);
   }
-  return new OrbitAPIResponseError(status, [{ code: "unknown_error", message: `Request failed with status ${status}` }], traceId);
+  return new OrbitAPIResponseError(
+    status,
+    [{ code: "unknown_error", message: `Request failed with status ${status}` }],
+    traceId,
+    retryAfterMs,
+  );
+}
+
+/**
+ * Parses a `Retry-After` header (delta seconds or an HTTP date) into milliseconds. An unusable value
+ * returns null so the caller falls back to its own back-off.
+ */
+export function parseRetryAfter(value: string | null, now: number = Date.now()): number | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  const seconds = Number(trimmed);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.round(seconds * 1000);
+  const at = Date.parse(trimmed);
+  return Number.isFinite(at) ? Math.max(0, at - now) : null;
 }
 
 export function networkError(): OrbitAPIResponseError {

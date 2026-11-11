@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useLocation } from "react-router-dom";
-import { ROUTE_LABELS } from "./nav";
+import { ROUTE_LABELS, SETTINGS_LABELS } from "./nav";
 
 function titleFor(pathname: string): string {
   const segments = pathname.split("/").filter(Boolean);
@@ -8,6 +8,7 @@ function titleFor(pathname: string): string {
   if (!root) return "Overview";
   if (root === "users" && second) return "User";
   if (root === "organizations" && second) return "Organization";
+  if (root === "settings" && second) return SETTINGS_LABELS[second] ?? ROUTE_LABELS[second] ?? "Configure";
   return ROUTE_LABELS[root] ?? "Overview";
 }
 

@@ -119,6 +119,37 @@ describe("ActivityBoard", () => {
     expect(screen.queryByText("Ada Lovelace")).toBeNull();
     expect(document.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(0);
   });
+
+  it("stacks the departures board into labelled rows below sm", () => {
+    const original = window.matchMedia;
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      writable: true,
+      value: (query: string) => ({
+        matches: query.includes("639px"),
+        media: query,
+        onchange: null,
+        addListener: () => {},
+        removeListener: () => {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => false,
+      }),
+    });
+    try {
+      render(<ActivityBoard rows={[row({ id: "row-1", at: atToday(14, 2) })]} />);
+      expect(screen.queryByRole("table")).toBeNull();
+      const stack = document.querySelector('[data-slot="activity-stack"]');
+      expect(stack).toBeTruthy();
+      expect(stack?.textContent).toContain("Ada Lovelace");
+      expect(stack?.textContent).toContain("14:02");
+      expect(stack?.textContent).toContain("Chrome 130, Lisbon");
+      expect(stack?.textContent).toContain("Success");
+      expect(screen.getByRole("img", { name: "Password" }).textContent).toBe("P");
+    } finally {
+      Object.defineProperty(window, "matchMedia", { configurable: true, writable: true, value: original });
+    }
+  });
 });
 
 describe("activityMethodLabel", () => {

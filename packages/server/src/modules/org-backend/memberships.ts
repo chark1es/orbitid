@@ -10,6 +10,7 @@ import { emitEvent } from "../../services/webhooks";
 import { serializeMembership } from "../../serializers";
 import { addMembership, assertOrganizationCapacity, defaultRoleKey } from "../../services/orgs";
 import { assertOrganizationRole, isAdminRole, isLastAdmin } from "../../services/rbac";
+import { revokeOrganizationAuthorityGrants } from "../../services/oidc/revocation";
 import { deletedObject, findMembership, listParams, mergeMetadata, page, requireOrganization, sortRows } from "../orgs/shared";
 import { first } from "../../lib/db";
 import { metadata } from "./shared";
@@ -74,8 +75,14 @@ export function registerMembershipRoutes(app: Hono, ctx: AppContext) {
     }
     if (body.public_metadata !== undefined) patch.publicMetadata = mergeMetadata(membership.publicMetadata, body.public_metadata);
     if (body.private_metadata !== undefined) patch.privateMetadata = mergeMetadata(membership.privateMetadata, body.private_metadata);
+    const roleChanged = patch.roleKey !== undefined && patch.roleKey !== membership.roleKey;
     await ctx.db.update(s.organizationMemberships).set(patch).where(eq(s.organizationMemberships.id, membership.id));
     const updated = first(await ctx.db.select().from(s.organizationMemberships).where(eq(s.organizationMemberships.id, membership.id)))!;
+    if (roleChanged) {
+      // Tokens issued for the old role carry the old permissions. Revoke only the grants of applications that
+      // assert organization/group authority; the user's browser session and unrelated grants stay intact.
+      await revokeOrganizationAuthorityGrants(ctx, membership.userId);
+    }
     await emitEvent(ctx, "organizationMembership.updated", await serializeMembership(ctx, updated, { backend: true }));
     return c.json(await serializeMembership(ctx, updated, { backend: true }));
   });
@@ -102,6 +109,9 @@ export function registerMembershipRoutes(app: Hono, ctx: AppContext) {
     }
     const payload = await serializeMembership(ctx, membership, { backend: true });
     await ctx.db.delete(s.organizationMemberships).where(eq(s.organizationMemberships.id, membership.id));
+    // The RP must not keep claims that include an organization the user no longer belongs to. The browser session
+    // is intentionally left alone.
+    await revokeOrganizationAuthorityGrants(ctx, membership.userId);
     await emitEvent(ctx, "organizationMembership.deleted", payload);
     return c.json(deletedObject("organization_membership", membership.id));
   });

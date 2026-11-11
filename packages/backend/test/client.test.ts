@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createOrbitIdClient } from "../src/client";
+import { createOrbitIdClient, type PasswordHasher } from "../src/client";
 import { OrbitIdAPIError, isOrbitIdAPIError } from "../src/errors";
 
 interface RecordedCall {
@@ -185,6 +185,107 @@ describe("createOrbitIdClient", () => {
     expect(endpoints.data[0]?.eventTypes).toEqual(["user.created"]);
   });
 
+  it("creates a user with a password digest and its typed hasher", async () => {
+    const { orbit, backend } = client(() => ({ body: { object: "user", id: "user_9", first_name: "Ada" } }));
+    const hashers: PasswordHasher[] = ["bcrypt", "argon2", "scrypt"];
+    expect(hashers).toEqual(["bcrypt", "argon2", "scrypt"]);
+    // The server refuses a digest without the hasher that produced it.
+    await orbit.users.createUser({
+      emailAddress: ["ada@example.com"],
+      passwordDigest: "$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaA",
+      passwordHasher: "argon2",
+    });
+    expect(backend.last("POST", "/v1/users")?.body).toEqual({
+      email_address: ["ada@example.com"],
+      password_digest: "$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$aGFzaA",
+      password_hasher: "argon2",
+    });
+  });
+
+  it("covers organization membership request create, accept and reject", async () => {
+    const { orbit, backend } = client((call) => {
+      const key = `${call.method} ${call.path}`;
+      if (key === "POST /v1/organizations/org_1/membership_requests") {
+        return { body: { object: "organization_membership_request", id: "orgreq_1", organization_id: "org_1", status: "pending", public_user_data: { user_id: "user_2" } } };
+      }
+      if (key === "POST /v1/organizations/org_1/membership_requests/orgreq_1/accept") {
+        return { body: { object: "organization_membership", id: "orgmem_1", role: "org:member", public_user_data: { user_id: "user_2" } } };
+      }
+      if (key === "POST /v1/organizations/org_1/membership_requests/orgreq_1/reject") {
+        return { body: { object: "organization_membership_request", id: "orgreq_1", organization_id: "org_1", status: "rejected", public_user_data: { user_id: "user_2" } } };
+      }
+      return { status: 404, body: { errors: [{ code: "resource_not_found", message: key }] } };
+    });
+
+    const request = await orbit.organizations.createOrganizationMembershipRequest({ organizationId: "org_1", userId: "user_2" });
+    expect(request.status).toBe("pending");
+    expect(request.publicUserData.userId).toBe("user_2");
+    expect(backend.last("POST", "/v1/organizations/org_1/membership_requests")?.body).toEqual({ user_id: "user_2" });
+
+    const membership = await orbit.organizations.acceptOrganizationMembershipRequest({ organizationId: "org_1", requestId: "orgreq_1" });
+    expect(membership.publicUserData.userId).toBe("user_2");
+
+    const rejected = await orbit.organizations.rejectOrganizationMembershipRequest({ organizationId: "org_1", requestId: "orgreq_1" });
+    expect(rejected.status).toBe("rejected");
+  });
+
+  it("lists and revokes a user's trusted devices", async () => {
+    const { orbit, backend } = client((call) => {
+      const key = `${call.method} ${call.path}`;
+      if (key === "GET /v1/users/user_1/trusted_devices") {
+        return { body: [{ object: "trusted_device", id: "tdev_1", user_id: "user_1", label: "Chrome", expires_at: 123 }] };
+      }
+      if (key === "DELETE /v1/users/user_1/trusted_devices/tdev_1") {
+        return { body: { object: "trusted_device", id: "tdev_1", deleted: true } };
+      }
+      return { status: 404, body: { errors: [{ code: "resource_not_found", message: key }] } };
+    });
+
+    const devices = await orbit.users.getUserTrustedDeviceList({ userId: "user_1" });
+    expect(devices).toHaveLength(1);
+    expect(devices[0]?.label).toBe("Chrome");
+    expect(devices[0]?.userId).toBe("user_1");
+
+    const removed = await orbit.users.revokeUserTrustedDevice({ userId: "user_1", deviceId: "tdev_1" });
+    expect(removed.deleted).toBe(true);
+  });
+
+  it("rotates the signing key and configures custom JWT template signing", async () => {
+    const { orbit, backend } = client((call) => {
+      const key = `${call.method} ${call.path}`;
+      if (key === "POST /v1/instance/signing_keys/rotate") {
+        return { body: { object: "signing_key", kid: "key_2", algorithm: "RS256", active: true } };
+      }
+      if (key === "POST /v1/jwt_templates") {
+        return { body: { object: "jwt_template", id: "jwt_1", name: "custom", custom_signing_key: true, signing_algorithm: "HS256", signing_key: "secret" } };
+      }
+      if (key === "PATCH /v1/jwt_templates/jwt_1") {
+        return { body: { object: "jwt_template", id: "jwt_1", name: "custom", custom_signing_key: true, signing_algorithm: "RS256", signing_key: { kty: "RSA" } } };
+      }
+      return { status: 404, body: { errors: [{ code: "resource_not_found", message: key }] } };
+    });
+
+    const rotated = await orbit.instance.rotateSigningKey();
+    expect(rotated).toEqual({ object: "signing_key", kid: "key_2", algorithm: "RS256", active: true });
+
+    const created = await orbit.jwtTemplates.createJwtTemplate({ name: "custom", claims: { plan: "pro" }, customSigningKey: true, signingAlgorithm: "HS256" });
+    expect(created.customSigningKey).toBe(true);
+    expect(created.signingAlgorithm).toBe("HS256");
+    expect(backend.last("POST", "/v1/jwt_templates")?.body).toEqual({
+      name: "custom",
+      claims: { plan: "pro" },
+      custom_signing_key: true,
+      signing_algorithm: "HS256",
+    });
+
+    const updated = await orbit.jwtTemplates.updateJwtTemplate("jwt_1", { customSigningKey: true, signingAlgorithm: "RS256" });
+    expect(updated.signingAlgorithm).toBe("RS256");
+    expect(backend.last("PATCH", "/v1/jwt_templates/jwt_1")?.body).toEqual({
+      custom_signing_key: true,
+      signing_algorithm: "RS256",
+    });
+  });
+
   it("calls the webhook routes the server actually serves", async () => {
     const { orbit, backend } = client((call) => {
       const key = `${call.method} ${call.path}`;
@@ -277,6 +378,37 @@ describe("createOrbitIdClient", () => {
 
     await orbit.apiKeys.createApiKey({ name: "CI", subject: "user_1", secondsUntilExpiration: 3600 });
     expect(backend.last("POST", "/v1/api_keys")?.body).toEqual({ name: "CI", subject: "user_1", seconds_until_expiration: 3600 });
+  });
+
+  it("calls the organization domain affiliation verification routes", async () => {
+    const { orbit, backend } = client((call) => {
+      const key = `${call.method} ${call.path}`;
+      if (key === "POST /v1/organizations/org_1/domains/orgdom_1/prepare_affiliation_verification") {
+        return { body: { object: "organization_domain", id: "orgdom_1", affiliation_email_address: "admin@acme.test", verification: { status: "unverified" } } };
+      }
+      if (key === "POST /v1/organizations/org_1/domains/orgdom_1/attempt_affiliation_verification") {
+        return { body: { object: "organization_domain", id: "orgdom_1", affiliation_email_address: "admin@acme.test", verification: { status: "verified" } } };
+      }
+      return { status: 404, body: { errors: [{ code: "resource_not_found", message: key }] } };
+    });
+
+    const prepared = await orbit.organizations.prepareOrganizationDomainAffiliationVerification({
+      organizationId: "org_1",
+      domainId: "orgdom_1",
+      affiliationEmailAddress: "admin@acme.test",
+    });
+    expect(prepared.affiliationEmailAddress).toBe("admin@acme.test");
+    expect(backend.last("POST", "/v1/organizations/org_1/domains/orgdom_1/prepare_affiliation_verification")?.body).toEqual({
+      affiliation_email_address: "admin@acme.test",
+    });
+
+    const verified = await orbit.organizations.attemptOrganizationDomainAffiliationVerification({
+      organizationId: "org_1",
+      domainId: "orgdom_1",
+      code: "123456",
+    });
+    expect(verified.verification?.status).toBe("verified");
+    expect(backend.last("POST", "/v1/organizations/org_1/domains/orgdom_1/attempt_affiliation_verification")?.body).toEqual({ code: "123456" });
   });
 
   it("handles 204 responses and empty lists", async () => {

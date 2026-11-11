@@ -21,7 +21,9 @@ import type {
   OrganizationDomainJSON, OrganizationInvitationJSON, OrganizationJSON, OrganizationMembershipJSON, OrganizationMembershipRequestJSON,
   PaginatedList, PermissionJSON, RoleJSON,
 } from "@orbitid/shared";
-import { api, backend, errorCode, seedAuth, seedUser, setup } from "./helpers";
+import { and, eq } from "drizzle-orm";
+import * as s from "../../src/db/schema";
+import { api, backend, errorCode, lastMail, seedAuth, seedUser, setup } from "./helpers";
 
 describe("Backend API organizations", () => {
   it("creates, queries, updates and deletes organizations", async () => {
@@ -182,11 +184,72 @@ describe("Backend API organizations", () => {
     const listed = await backend<PaginatedList<OrganizationDomainJSON>>(app, "GET", `/v1/organizations/${org.body.id}/domains`);
     expect(listed.body.total_count).toBe(1);
 
+    const mismatch = await backend(app, "POST", `/v1/organizations/${org.body.id}/domains/${created.body.id}/prepare_affiliation_verification`, {
+      affiliation_email_address: "owner@other.test",
+    });
+    expect(mismatch.status).toBe(422);
+    expect(errorCode(mismatch.body)).toBe("form_param_value_invalid");
+
+    const prepared = await backend<OrganizationDomainJSON>(app, "POST", `/v1/organizations/${org.body.id}/domains/${created.body.id}/prepare_affiliation_verification`, {
+      affiliation_email_address: "owner@acme.test",
+    });
+    expect(prepared.body.affiliation_email_address).toBe("owner@acme.test");
+    const code = String(lastMail("domain_verification_code").vars.code);
+
+    const wrongCode = code === "000000" ? "111111" : "000000";
+    const wrong = await backend(app, "POST", `/v1/organizations/${org.body.id}/domains/${created.body.id}/attempt_affiliation_verification`, { code: wrongCode });
+    expect(wrong.status).toBe(422);
+    expect(errorCode(wrong.body)).toBe("form_code_incorrect");
+
+    const verified = await backend<OrganizationDomainJSON>(app, "POST", `/v1/organizations/${org.body.id}/domains/${created.body.id}/attempt_affiliation_verification`, { code });
+    expect(verified.body.verification?.status).toBe("verified");
+
     const deleted = await backend<{ deleted: boolean }>(app, "DELETE", `/v1/organizations/${org.body.id}/domains/${created.body.id}`);
     expect(deleted.body.deleted).toBe(true);
 
     const invalid = await backend(app, "POST", `/v1/organizations/${org.body.id}/domains`, { name: "invalid" });
     expect(invalid.status).toBe(422);
+  });
+
+  it("guards affiliation verification with auth, expiry, attempt exhaustion and resend throttling", async () => {
+    const { ctx, app } = await setup();
+    const owner = await seedUser(ctx, { email: "owner@acme.test" });
+    const org = await backend<OrganizationJSON>(app, "POST", "/v1/organizations", { name: "Acme", created_by: owner.id });
+    const domain = await backend<OrganizationDomainJSON>(app, "POST", `/v1/organizations/${org.body.id}/domains`, { name: "acme.test" });
+    const preparePath = `/v1/organizations/${org.body.id}/domains/${domain.body.id}/prepare_affiliation_verification`;
+    const attemptPath = `/v1/organizations/${org.body.id}/domains/${domain.body.id}/attempt_affiliation_verification`;
+    const prepare = (email: string) => backend<OrganizationDomainJSON>(app, "POST", preparePath, { affiliation_email_address: email });
+    const attempt = (code: string) => backend(app, "POST", attemptPath, { code });
+
+    const unauthenticated = await api(app, "POST", preparePath, { body: { affiliation_email_address: "owner@acme.test" } });
+    expect(unauthenticated.status).toBe(401);
+
+    await prepare("expired@acme.test");
+    await ctx.db.update(s.verifications)
+      .set({ expiresAt: Date.now() - 1_000, createdAt: Date.now() - 10_000 })
+      .where(and(eq(s.verifications.purpose, "org_domain"), eq(s.verifications.identifier, "expired@acme.test")));
+    const expired = await attempt(String(lastMail("domain_verification_code").vars.code));
+    expect(expired.status).toBe(422);
+    expect(errorCode(expired.body)).toBe("verification_expired");
+
+    await prepare("attempts@acme.test");
+    const realCode = String(lastMail("domain_verification_code").vars.code);
+    const wrongCode = realCode === "000000" ? "111111" : "000000";
+    for (let i = 0; i < 5; i++) {
+      const wrong = await attempt(wrongCode);
+      expect(wrong.status).toBe(422);
+      expect(errorCode(wrong.body)).toBe("form_code_incorrect");
+    }
+    const exhausted = await attempt(realCode);
+    expect(exhausted.status).toBe(429);
+    expect(errorCode(exhausted.body)).toBe("too_many_attempts");
+
+    for (let i = 0; i < 5; i++) {
+      expect((await prepare("throttled@acme.test")).status).toBe(200);
+    }
+    const throttled = await prepare("throttled@acme.test");
+    expect(throttled.status).toBe(429);
+    expect(errorCode(throttled.body)).toBe("rate_limit_exceeded");
   });
 
   it("manages membership requests", async () => {

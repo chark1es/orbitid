@@ -16,7 +16,13 @@ export async function createApp(h: Harness, overrides: Record<string, unknown> =
   const res = await h.app.request("/v1/oauth_applications", {
     method: "POST",
     headers: authHeaders(),
-    body: json({ name: "Test App", redirect_uris: [REDIRECT_URI], consent_screen_enabled: false, ...overrides }),
+    body: json({
+      name: "Test App", redirect_uris: [REDIRECT_URI], consent_screen_enabled: false,
+      // The provider now enforces the app's configured scopes. Tests that ask for groups/organizations/offline
+      // must configure them, exactly as a real operator would.
+      scopes: "openid profile email phone groups organizations offline_access",
+      ...overrides,
+    }),
   });
   expect(res.status).toBe(201);
   return res.json() as Promise<{ id: string; client_id: string; client_secret?: string }>;

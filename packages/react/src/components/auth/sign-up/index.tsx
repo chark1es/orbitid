@@ -45,7 +45,7 @@ function SignUpInner(props: SignUpProps) {
           <p className="text-center text-sm text-muted-foreground">
             {t("signUp.restricted.message", { applicationName: environment.app.name })}
           </p>
-          <Button type="button" variant="link" className="mx-auto h-auto p-0" onClick={() => navigate(props.signInUrl ?? "/sign-in")}>
+          <Button type="button" variant="link" className="mx-auto h-auto min-h-6 px-0 py-1" onClick={() => navigate(props.signInUrl ?? "/sign-in")}>
             {t("signUp.start.signInAction")}
           </Button>
         </AuthCard>

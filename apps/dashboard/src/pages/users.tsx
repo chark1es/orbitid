@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Page as PageLayout } from "../components/shared/page";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { keepPreviousData, useQueryClient } from "@tanstack/react-query";
 import {
@@ -6,19 +7,21 @@ import {
   Checkbox,
   Input,
   Label,
+  SearchInput,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@orbitid/ui";
-import { Ban, Plus, Search, Trash2, X } from "lucide-react";
+import { Ban, ChevronDown, Plus, Search, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import type { UserJSON } from "@orbitid/shared";
 import { api, useApi } from "../lib/api";
 import { primaryEmail, userLabel } from "../lib/format";
 import { usersListPath } from "../lib/query";
 import { useTableState } from "../lib/use-table-state";
+import { isCompleteDateInput, useDateInputDraft } from "../lib/date-filter";
 import { useDebounced } from "../lib/hooks";
 import { PageHeader } from "../components/shared/page-header";
 import { DataTable, type DataTableColumn } from "../components/shared/data-table";
@@ -32,6 +35,13 @@ import { CreateUserDialog } from "../components/users/create-user-dialog";
 import { UserRowActions } from "../components/users/user-row-actions";
 
 const LIST_KEYS = ["banned", "locked", "mfa", "is_anonymous", "created_after", "created_before"];
+
+/** The label token from DESIGN.md: 0.75rem, weight 600, uppercase with +0.04em tracking. */
+const FILTER_LABEL = "text-[0.75rem] font-semibold tracking-[0.04em] uppercase text-muted-foreground";
+
+/** A date control whose picker stays clickable under a chevron matching the selects. */
+const DATE_INPUT =
+  "w-[142px] pr-8 text-sm tabular-nums [color-scheme:light] dark:[color-scheme:dark] [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-y-0 [&::-webkit-calendar-picker-indicator]:right-0 [&::-webkit-calendar-picker-indicator]:w-8 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-0";
 
 const ACCOUNT_TYPES = [
   { value: "all", label: "All" },
@@ -58,6 +68,8 @@ export default function UsersPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState(table.query);
   const debouncedSearch = useDebounced(search, 300);
+  const [createdAfterDraft, setCreatedAfterDraft] = useDateInputDraft(toDateInput(table.filter("created_after")));
+  const [createdBeforeDraft, setCreatedBeforeDraft] = useDateInputDraft(toDateInput(table.filter("created_before")));
   const [createOpen, setCreateOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkPending, setBulkPending] = useState<"ban" | "delete" | null>(null);
@@ -69,6 +81,15 @@ export default function UsersPage() {
 
   useEffect(() => setSearch(table.query), [table.query]);
   useEffect(() => setSelected(new Set()), [table.searchParams]);
+
+  /** Write a date to the URL only when the draft is a complete date, or when the input was cleared. */
+  const commitDateFilter = (key: "created_after" | "created_before", value: string, endOfDay = false) => {
+    if (!value) {
+      table.setFilter(key, null);
+      return;
+    }
+    if (isCompleteDateInput(value)) table.setFilter(key, dateInputToMs(value, endOfDay)?.toString() ?? null);
+  };
 
   const status = table.filter("banned") === "true" ? "banned" : table.filter("locked") === "true" ? "locked" : "all";
   const mfa = table.filter("mfa") === "true" ? "mfa" : "any";
@@ -188,7 +209,7 @@ export default function UsersPage() {
             >
               {userLabel(user)}
             </Link>
-            <span className="block max-w-[32ch] truncate font-data text-[0.6875rem] text-muted-foreground">
+            <span className="block max-w-[32ch] truncate text-[0.8125rem] text-muted-foreground">
               {primaryEmail(user) || user.id}
             </span>
           </div>
@@ -198,10 +219,14 @@ export default function UsersPage() {
     {
       id: "username",
       header: "Username",
-      headerClassName: "hidden md:table-cell",
-      className: "hidden md:table-cell",
+      headerClassName: "hidden xl:table-cell",
+      className: "hidden xl:table-cell",
       sortKey: "username",
-      cell: (user) => <span className="font-data text-xs text-muted-foreground">{user.username ?? "—"}</span>,
+      cell: (user) => (
+        <span className="block max-w-[24ch] truncate font-data text-xs text-muted-foreground" title={user.username ?? undefined}>
+          {user.username ?? "—"}
+        </span>
+      ),
     },
     {
       id: "status",
@@ -213,7 +238,7 @@ export default function UsersPage() {
           {user.two_factor_enabled ? <StatusBadge status="enabled" label="MFA" /> : null}
           {user.is_anonymous ? <StatusBadge status="guest" tone="info" label="Guest" /> : null}
           {!user.banned && !user.locked && !user.two_factor_enabled && !user.is_anonymous ? (
-            <StatusBadge status="active" tone="neutral" />
+            <StatusBadge status="active" />
           ) : null}
         </div>
       ),
@@ -244,7 +269,7 @@ export default function UsersPage() {
   ];
 
   return (
-    <>
+    <PageLayout>
       <PageHeader
         title="Users"
         description="Search, inspect and administer every account on this instance."
@@ -256,84 +281,114 @@ export default function UsersPage() {
       />
 
       <div className="flex flex-wrap items-end gap-x-2 gap-y-3">
-        <div className="relative min-w-56 flex-1">
-          <Search
-            className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
-            strokeWidth={1.5}
-            aria-hidden
-          />
-          <Input
+        <div className="min-w-56 flex-1 space-y-1">
+          <Label htmlFor="users-search" className={FILTER_LABEL}>
+            Search
+          </Label>
+          <SearchInput
+            id="users-search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search email, phone, username or user ID"
-            aria-label="Search users"
-            className="h-[34px] pl-8"
+            className="min-w-56"
           />
         </div>
-        <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger className="h-[34px] w-[132px]" aria-label="Filter users by status">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Any status</SelectItem>
-            <SelectItem value="banned">Banned</SelectItem>
-            <SelectItem value="locked">Locked</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={mfa} onValueChange={(value) => table.setFilter("mfa", value === "mfa" ? "true" : null)}>
-          <SelectTrigger className="h-[34px] w-[124px]" aria-label="Filter users by second factor">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="any">Any MFA</SelectItem>
-            <SelectItem value="mfa">Has MFA</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select
-          value={accountType}
-          onValueChange={(value) =>
-            table.setFilter("is_anonymous", value === "guests" ? "true" : value === "registered" ? "false" : null)
-          }
-        >
-          <SelectTrigger className="h-[34px] w-[164px]" aria-label="Filter users by account type">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {ACCOUNT_TYPES.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <div className="flex items-end gap-1">
+        <div className="space-y-1">
+          <Label htmlFor="users-status" className={FILTER_LABEL}>
+            Status
+          </Label>
+          <Select value={status} onValueChange={setStatus}>
+            <SelectTrigger id="users-status" className="w-[132px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Any status</SelectItem>
+              <SelectItem value="banned">Banned</SelectItem>
+              <SelectItem value="locked">Locked</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="users-mfa" className={FILTER_LABEL}>
+            MFA
+          </Label>
+          <Select value={mfa} onValueChange={(value) => table.setFilter("mfa", value === "mfa" ? "true" : null)}>
+            <SelectTrigger id="users-mfa" className="w-[124px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="any">Any MFA</SelectItem>
+              <SelectItem value="mfa">Has MFA</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label
+            htmlFor="users-account-type"
+            className={FILTER_LABEL}
+          >
+            Account type
+          </Label>
+          <Select
+            value={accountType}
+            onValueChange={(value) =>
+              table.setFilter("is_anonymous", value === "guests" ? "true" : value === "registered" ? "false" : null)
+            }
+          >
+            <SelectTrigger id="users-account-type" className="w-[164px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {ACCOUNT_TYPES.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex items-end gap-2">
           <div className="space-y-1">
-            <Label htmlFor="created-after" className="text-[0.6875rem] uppercase tracking-[0.04em] text-muted-foreground">
+            <Label htmlFor="created-after" className={FILTER_LABEL}>
               Created after
             </Label>
-            <Input
-              id="created-after"
-              type="date"
-              className="h-[34px] w-[142px] font-data text-xs"
-              value={toDateInput(table.filter("created_after"))}
-              onChange={(event) =>
-                table.setFilter("created_after", dateInputToMs(event.target.value)?.toString() ?? null)
-              }
-            />
+            <div className="relative">
+              <Input
+                id="created-after"
+                type="date"
+                className={DATE_INPUT}
+                value={createdAfterDraft}
+                onChange={(event) => {
+                  setCreatedAfterDraft(event.target.value);
+                  commitDateFilter("created_after", event.target.value);
+                }}
+              />
+              <ChevronDown
+                aria-hidden
+                className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground opacity-50"
+              />
+            </div>
           </div>
           <div className="space-y-1">
-            <Label htmlFor="created-before" className="text-[0.6875rem] uppercase tracking-[0.04em] text-muted-foreground">
+            <Label htmlFor="created-before" className={FILTER_LABEL}>
               Created before
             </Label>
-            <Input
-              id="created-before"
-              type="date"
-              className="h-[34px] w-[142px] font-data text-xs"
-              value={toDateInput(table.filter("created_before"))}
-              onChange={(event) =>
-                table.setFilter("created_before", dateInputToMs(event.target.value, true)?.toString() ?? null)
-              }
-            />
+            <div className="relative">
+              <Input
+                id="created-before"
+                type="date"
+                className={DATE_INPUT}
+                value={createdBeforeDraft}
+                onChange={(event) => {
+                  setCreatedBeforeDraft(event.target.value);
+                  commitDateFilter("created_before", event.target.value, true);
+                }}
+              />
+              <ChevronDown
+                aria-hidden
+                className="pointer-events-none absolute top-1/2 right-2 size-4 -translate-y-1/2 text-muted-foreground opacity-50"
+              />
+            </div>
           </div>
         </div>
         {table.hasFilters ? (
@@ -439,6 +494,6 @@ export default function UsersPage() {
         pending={bulkPending === "delete"}
         onConfirm={() => void bulk("delete")}
       />
-    </>
+    </PageLayout>
   );
 }

@@ -8,7 +8,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  Input,
+  SearchInput,
   Label,
   Select,
   SelectContent,
@@ -16,7 +16,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@orbitid/ui";
-import { Search, UserPlus, Users } from "lucide-react";
+import { OVERLAY_WIDTH } from "../shared/overlay-sizes";
+import { UserPlus, Users } from "lucide-react";
 import { toast } from "sonner";
 import type { OrganizationJSON, OrganizationMembershipJSON, UserJSON } from "@orbitid/shared";
 import { api, useApi } from "../../lib/api";
@@ -76,7 +77,7 @@ function AddMemberDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className={OVERLAY_WIDTH.form}>
         <DialogHeader>
           <DialogTitle>Add member</DialogTitle>
           <DialogDescription>Add an existing user to {org.name} with a role.</DialogDescription>
@@ -84,19 +85,15 @@ function AddMemberDialog({
         <div className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="member-search">Find user</Label>
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-              <Input
-                id="member-search"
-                value={search}
-                onChange={(event) => {
-                  setSearch(event.target.value);
-                  setSelected(null);
-                }}
-                placeholder="Search email, username or user ID…"
-                className="pl-8"
-              />
-            </div>
+            <SearchInput
+              id="member-search"
+              value={search}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setSelected(null);
+              }}
+              placeholder="Search email, username or user ID…"
+            />
             {(users.data?.data?.length ?? 0) > 0 ? (
               <ul className="max-h-48 overflow-y-auto rounded-[4px] border border-border">
                 {users.data?.data?.map((user) => (
@@ -196,7 +193,7 @@ export function OrganizationMembersTab({ org, onChanged }: { org: OrganizationJS
               <Link to={`/users/${membership.public_user_data.user_id}`} className="truncate text-sm font-medium hover:underline">
                 {name}
               </Link>
-              <p className="truncate font-data text-xs text-muted-foreground">{membership.public_user_data.identifier}</p>
+              <p className="truncate text-[0.8125rem] text-muted-foreground">{membership.public_user_data.identifier}</p>
             </div>
           </div>
         );
@@ -220,8 +217,6 @@ export function OrganizationMembersTab({ org, onChanged }: { org: OrganizationJS
     {
       id: "joined",
       header: "Joined",
-      headerClassName: "hidden sm:table-cell",
-      className: "hidden sm:table-cell",
       cell: (membership) => <span className="font-data text-xs text-muted-foreground">{formatDate(membership.created_at)}</span>,
     },
     {
@@ -256,20 +251,17 @@ export function OrganizationMembersTab({ org, onChanged }: { org: OrganizationJS
       description="People who belong to this organization and the role each one holds."
       actions={
         <>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-            <Input
-              value={search}
-              onChange={(event) => {
-                setSearch(event.target.value);
-                setPage(1);
-              }}
-              placeholder="Search members…"
-              aria-label="Search members"
-              className="h-8 w-52 pl-8"
-            />
-          </div>
-          <Button size="sm" onClick={() => setAddOpen(true)}>
+          <SearchInput
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setPage(1);
+            }}
+            placeholder="Search members…"
+            aria-label="Search members"
+            className="w-52"
+          />
+          <Button onClick={() => setAddOpen(true)}>
             <UserPlus aria-hidden /> Add member
           </Button>
         </>

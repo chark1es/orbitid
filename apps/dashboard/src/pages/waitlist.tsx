@@ -1,16 +1,18 @@
 import { useEffect, useState } from "react";
+import { Page as PageLayout } from "../components/shared/page";
 import { keepPreviousData, useQueryClient } from "@tanstack/react-query";
 import {
   Button,
   Checkbox,
   Input,
+  SearchInput,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@orbitid/ui";
-import { Clock, MailPlus, Search, Trash2, UserX, X } from "lucide-react";
+import { Clock, MailPlus, Trash2, UserX, X } from "lucide-react";
 import { toast } from "sonner";
 import type { WaitlistEntryJSON } from "@orbitid/shared";
 import { api, useApi } from "../lib/api";
@@ -18,7 +20,7 @@ import { errorMessage } from "../lib/errors";
 import { formatDate } from "../lib/format";
 import { buildListPath } from "../lib/query";
 import { useTableState } from "../lib/use-table-state";
-import { useDebounced } from "../lib/hooks";
+import { useUrlSyncedInput } from "../lib/hooks";
 import { PageHeader } from "../components/shared/page-header";
 import { DataTable, type DataTableColumn } from "../components/shared/data-table";
 import { TablePagination } from "../components/shared/table-pagination";
@@ -32,18 +34,13 @@ const STATUSES = ["all", "pending", "invited", "completed", "rejected"];
 export default function WaitlistPage() {
   const table = useTableState({ limit: 20, orderBy: "-created_at", filterKeys: ["status"] });
   const queryClient = useQueryClient();
-  const [search, setSearch] = useState(table.query);
-  const debounced = useDebounced(search, 300);
+  const [search, setSearch] = useUrlSyncedInput(table.query, table.setQuery, 300);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState<string | null>(null);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [deleting, setDeleting] = useState<WaitlistEntryJSON | null>(null);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (debounced !== table.query) table.setQuery(debounced);
-  }, [debounced]);
-  useEffect(() => setSearch(table.query), [table.query]);
   useEffect(() => setSelected(new Set()), [table.searchParams]);
 
   const status = table.filter("status") || "all";
@@ -173,7 +170,7 @@ export default function WaitlistPage() {
     {
       id: "email",
       header: "Email",
-      cell: (entry) => <span className="font-data text-[0.8125rem]">{entry.email_address}</span>,
+      cell: (entry) => <span className="text-[0.8125rem]">{entry.email_address}</span>,
     },
     {
       id: "status",
@@ -239,27 +236,20 @@ export default function WaitlistPage() {
   ];
 
   return (
-    <>
+    <PageLayout>
       <PageHeader
         title="Waitlist"
         description="Approve or reject people waiting for access to your application."
       />
 
       <div className="flex flex-wrap items-end gap-x-2 gap-y-3">
-        <div className="relative min-w-56 flex-1 max-w-md">
-          <Search
-            className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
-            strokeWidth={1.5}
-            aria-hidden
-          />
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search waitlist"
-            aria-label="Search waitlist"
-            className="h-[34px] pl-8"
-          />
-        </div>
+        <SearchInput
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search waitlist"
+          aria-label="Search waitlist"
+          className="min-w-56 max-w-md flex-1"
+        />
         <Select value={status} onValueChange={(value) => table.setFilter("status", value === "all" ? null : value)}>
           <SelectTrigger className="h-[34px] w-[132px]" aria-label="Filter waitlist by status">
             <SelectValue />
@@ -380,6 +370,6 @@ export default function WaitlistPage() {
         pending={pending === "bulk"}
         onConfirm={() => void bulk("delete")}
       />
-    </>
+    </PageLayout>
   );
 }

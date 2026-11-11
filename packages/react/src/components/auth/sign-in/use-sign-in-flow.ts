@@ -44,6 +44,8 @@ export function useSignInFlow(props: SignInProps, step: SignInStep, go: (step: S
       "",
   );
   const [error, setError] = useState<string | null>(null);
+  /** One-time explanation for the step that follows an automatic route (for example after a reset). */
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(() =>
     runtime.session?.status === "pending" ? runtime.session.id : null,
@@ -232,6 +234,7 @@ export function useSignInFlow(props: SignInProps, step: SignInStep, go: (step: S
 
   const attemptFirstFactor = useCallback(
     async (params: Record<string, unknown>) => {
+      setNotice(null);
       const next = await run(() =>
         signInAttemptFirstFactor(orbit, params).then((result) => result.signIn),
       );
@@ -274,10 +277,16 @@ export function useSignInFlow(props: SignInProps, step: SignInStep, go: (step: S
         setSignIn(next);
         if (next.status === "complete") await complete(next);
         else if (next.status === "needs_second_factor") await enterSecondFactor(next);
+        else if (next.status === "needs_first_factor") {
+          // The server deliberately refuses to create a session when recovery consumed the channel of the
+          // account's only second factor: the password is now changed, so ask for it again before MFA.
+          setNotice(t("signIn.resetPassword.changed"));
+          go("password");
+        }
       }
       return next;
     },
-    [orbit, run, complete, enterSecondFactor],
+    [orbit, run, complete, enterSecondFactor, go, t],
   );
 
   const authenticateWithRedirect = useCallback(
@@ -426,6 +435,7 @@ export function useSignInFlow(props: SignInProps, step: SignInStep, go: (step: S
     setIdentifierDraft,
     error,
     setError,
+    notice,
     busy,
     step,
     go,

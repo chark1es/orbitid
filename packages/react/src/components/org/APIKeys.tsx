@@ -279,14 +279,16 @@ function APIKeysView({ type = "user", perPage = 10, showDescription }: APIKeysPr
               return (
                 <TableRow key={key.id} data-testid={`api-key-row-${key.id}`}>
                   <TableCell>
-                    <div className="flex flex-col">
-                      <span className="font-medium">{key.name}</span>
+                    <div className="flex min-w-0 flex-col">
+                      <span className="max-w-[28ch] truncate font-medium" title={key.name}>{key.name}</span>
                       {showDescription && key.description ? (
-                        <span className="text-xs text-muted-foreground">{key.description}</span>
+                        <span className="max-w-[28ch] truncate text-xs text-muted-foreground" title={key.description}>{key.description}</span>
                       ) : null}
                     </div>
                   </TableCell>
-                  <TableCell className="font-mono text-xs">{key.prefix ?? key.id}</TableCell>
+                  <TableCell className="font-mono text-xs">
+                    <span className="block max-w-[20ch] truncate" title={key.prefix ?? key.id}>{key.prefix ?? key.id}</span>
+                  </TableCell>
                   <TableCell className="hidden text-muted-foreground sm:table-cell">
                     {formatDate(key.createdAt)}
                   </TableCell>

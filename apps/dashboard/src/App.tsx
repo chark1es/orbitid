@@ -1,9 +1,9 @@
 import { lazy, Suspense } from "react";
 import { Route, Routes } from "react-router-dom";
-import { Loader2 } from "lucide-react";
 import { AppShell } from "./components/layout/app-shell";
 import { RequireAuth } from "./lib/auth";
 import { RequireOrganizations } from "./components/shared/feature-locked";
+import { PageSkeleton } from "./components/shared/page-skeleton";
 
 const LoginPage = lazy(() => import("./pages/login"));
 const OverviewPage = lazy(() => import("./pages/overview"));
@@ -34,8 +34,10 @@ const AuditLogsPage = lazy(() => import("./pages/audit-logs"));
 
 function RouteLoader() {
   return (
-    <div className="flex min-h-svh items-center justify-center gap-2 text-sm text-muted-foreground">
-      <Loader2 className="size-4 animate-spin" aria-hidden /> Loading dashboard…
+    <div className="min-h-svh bg-background">
+      <div className="mx-auto w-full max-w-[1280px] px-6 py-10">
+        <PageSkeleton rows={2} label="Loading dashboard" />
+      </div>
     </div>
   );
 }

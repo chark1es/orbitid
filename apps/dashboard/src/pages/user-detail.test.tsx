@@ -176,6 +176,8 @@ describe("user detail: guest accounts", () => {
 
     expect(await screen.findByRole("heading", { name: "Ada Lovelace" })).toBeTruthy();
     expect(screen.queryByText("Guest account")).toBeNull();
+    // The email in the header is body copy, not a monospace identifier.
+    expect(screen.getByText("ada@example.com").className).not.toContain("font-data");
   });
 });
 
@@ -261,7 +263,40 @@ describe("user detail: second factor summary", () => {
     mockUserDetail();
     renderDetail("/users/user_1?tab=sessions");
 
+    // The Sessions tab mounts only after the user record arrives, so wait for each phase on its own:
+    // the header first, then the session list the tab fetches. One wait would have to cover both
+    // serialized request/render rounds inside the same async window.
+    expect(await screen.findByRole("heading", { name: "Ada Lovelace" })).toBeTruthy();
     expect(await screen.findByText("Second factor skipped: trusted device")).toBeTruthy();
+  });
+
+  it("revokes every active session, not only the page the operator can see", async () => {
+    const calls: Array<{ method: string; url: string }> = [];
+    const second = { ...SESSION, id: "sess_2", second_factor_skipped_by_trusted_device: false };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      calls.push({ method: init?.method ?? "GET", url });
+      const json = (body: unknown, status = 200) =>
+        new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+      if (url.includes("/v1/sessions")) {
+        // The visible page shows one row; the revoke-all helper reads the live active list at 100.
+        return json(url.includes("limit=100") ? { data: [SESSION, second], total_count: 2 } : { data: [SESSION], total_count: 2 });
+      }
+      if (url.includes("/v1/instance")) return json({ attributes: {}, session: {} });
+      if (url.includes("/v1/users/user_1")) return json(USER);
+      return json({ data: [], total_count: 0 });
+    });
+    renderDetail("/users/user_1?tab=sessions");
+
+    expect(await screen.findByRole("heading", { name: "Ada Lovelace" })).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Revoke active sessions" }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog.textContent).toContain("every device");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Revoke" }));
+
+    await waitFor(() => {
+      expect(calls.some((call) => call.method === "POST" && call.url.endsWith("/v1/sessions/sess_2/revoke"))).toBe(true);
+    });
   });
 });
 
@@ -294,6 +329,26 @@ describe("user detail: organizations tab", () => {
     renderDetail();
 
     expect(await screen.findByRole("tab", { name: "Organizations" })).toBeTruthy();
+  });
+});
+
+describe("user detail: danger zone", () => {
+  it("deletes the user from the detail page only after confirmation", async () => {
+    const calls = mockUserDetail();
+    renderDetail("/users/user_1?tab=danger");
+
+    expect(await screen.findByRole("heading", { name: "Ada Lovelace" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Delete user" }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog.textContent).toContain("Delete this user permanently?");
+    expect(calls.some((call) => call.method === "DELETE")).toBe(false);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete user" }));
+
+    await waitFor(() => {
+      expect(calls.some((call) => call.method === "DELETE" && call.url.endsWith("/v1/users/user_1"))).toBe(true);
+    });
   });
 });
 

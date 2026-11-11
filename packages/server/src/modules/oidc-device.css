@@ -1,25 +1,208 @@
-/* Device verification page. Served from the instance origin (CSP: style-src 'self'). */
-:root { color-scheme: light dark; --bg: #f6f7f9; --fg: #111827; --muted: #4b5563; --card: #ffffff; --line: #d1d5db; --accent: #111827; --accent-fg: #ffffff; --danger: #b91c1c; }
-@media (prefers-color-scheme: dark) { :root { --bg: #0b0f14; --fg: #e5e7eb; --muted: #9ca3af; --card: #141a21; --line: #2a3440; --accent: #e5e7eb; --accent-fg: #0b0f14; --danger: #f87171; } }
-* { box-sizing: border-box; }
-body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px 16px; background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.55; }
-.card { width: 100%; max-width: 420px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 24px; }
-.brand { margin: 0 0 12px; font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
-h1 { margin: 0 0 8px; font-size: 20px; }
-p { margin: 0 0 12px; }
-.muted { color: var(--muted); }
-.small { font-size: 13px; }
-.error { color: var(--danger); }
-.scopes { list-style: none; margin: 0 0 16px; padding: 0; border: 1px solid var(--line); border-radius: 8px; }
-.scopes li { padding: 10px 12px; border-top: 1px solid var(--line); }
-.scopes li:first-child { border-top: 0; }
-.scopes strong { display: block; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
-.scopes span { color: var(--muted); font-size: 14px; }
-label { display: block; margin-bottom: 6px; font-size: 14px; font-weight: 600; }
-.code-input { width: 100%; padding: 12px; margin-bottom: 12px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 22px; letter-spacing: .18em; text-align: center; text-transform: uppercase; }
-.code-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
-button, .button { display: inline-block; width: 100%; padding: 11px 16px; border: 1px solid var(--accent); border-radius: 8px; background: var(--accent); color: var(--accent-fg); font: inherit; font-weight: 600; text-align: center; text-decoration: none; cursor: pointer; }
-button.secondary { background: transparent; color: var(--fg); border-color: var(--line); }
-button + button { margin-top: 8px; }
-.code-form button { margin-top: 0; }
-a.button { margin-bottom: 16px; }
+/* Device verification and consent page. Served from the instance origin (CSP: style-src 'self').
+   DESIGN.md tokens: warm paper ground, ink type, one signal red, 6px cards, 4px controls, no shadows. */
+:root {
+  color-scheme: light dark;
+  --paper: oklch(0.975 0.006 85);
+  --card: oklch(0.992 0.004 85);
+  --ink: oklch(0.2 0.01 60);
+  --muted: oklch(0.48 0.012 70);
+  --rule: oklch(0.88 0.008 85);
+  --signal: oklch(0.58 0.235 28);
+  --ring: oklch(0.58 0.235 28);
+  --on-signal: #ffffff;
+  --control-bg: oklch(0.945 0.006 85);
+  /* The instance origin does not serve a Hanken Grotesk file (the dashboard bundles its own webfont),
+     so this page states the DESIGN.md fallback chain explicitly instead of relying on a browser default. */
+  --font-sans: "Hanken Grotesk Variable", "Helvetica Neue", Arial, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: oklch(0.17 0.008 60);
+    --card: oklch(0.21 0.008 60);
+    --ink: oklch(0.94 0.006 85);
+    --muted: oklch(0.72 0.008 85);
+    --rule: oklch(0.32 0.01 60);
+    --signal: oklch(0.68 0.2 27);
+    --ring: oklch(0.68 0.2 27);
+    --on-signal: oklch(0.17 0.008 60);
+    --control-bg: oklch(0.25 0.008 60);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.card {
+  width: 100%;
+  max-width: 400px;
+  padding: 20px;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+}
+
+.brand {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0 0 8px;
+  font-family: var(--font-sans);
+  font-size: 1.375rem;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+
+p {
+  margin: 0 0 12px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.small {
+  font-size: 0.75rem;
+}
+
+.error {
+  color: var(--signal);
+  font-weight: 500;
+}
+
+.scopes {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+}
+
+.scopes li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--rule);
+}
+
+.scopes li:first-child {
+  border-top: 0;
+}
+
+.scopes strong {
+  font-family: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.scopes span {
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.code-input {
+  width: 100%;
+  height: 44px;
+  padding: 0 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-family: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.375rem;
+  letter-spacing: 0.18em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+button,
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--signal);
+  border-radius: 4px;
+  background: var(--signal);
+  color: var(--on-signal);
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  line-height: 1;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+button.secondary {
+  background: transparent;
+  color: var(--ink);
+  border-color: var(--rule);
+}
+
+button.secondary:hover {
+  background: var(--control-bg);
+}
+
+button:hover {
+  opacity: 0.92;
+}
+
+:where(a[href], button, input, [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.code-form button {
+  margin-top: 0;
+}
+
+.decision-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+a.button {
+  margin-bottom: 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

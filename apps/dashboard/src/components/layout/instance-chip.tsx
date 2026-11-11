@@ -43,16 +43,18 @@ export function InstanceChip({ className }: { className?: string }) {
   return (
     <div className={className}>
       <span
-        className="inline-flex h-7 max-w-[7rem] items-center gap-1.5 rounded-sm border border-border bg-card px-2 font-data text-xs text-foreground sm:max-w-[11rem] md:max-w-none"
+        className="inline-flex h-7 min-w-0 max-w-[9rem] items-center gap-1.5 rounded-sm border border-border bg-card px-2 font-data text-xs text-foreground sm:max-w-[11rem] lg:max-w-[16rem]"
         title={`${database} · ${apiUrl}`}
       >
         <span
           aria-hidden="true"
           className={`size-1.5 shrink-0 rounded-full ${unreachable ? "bg-signal" : health ? "bg-go" : "bg-caution"}`}
         />
-        <span className="truncate">{database}</span>
-        <span className="hidden text-muted-foreground md:inline">·</span>
-        <span className="hidden max-w-[16ch] truncate text-muted-foreground md:inline">{hostOf(apiUrl)}</span>
+        {/* Below lg the breadcrumb needs the room more than the URL does: the chip keeps the short
+            environment/database label and the host moves into the tooltip (and the instance sheet). */}
+        <span className="min-w-0 shrink-0 truncate">{database}</span>
+        <span className="hidden shrink-0 text-muted-foreground lg:inline">·</span>
+        <span className="hidden min-w-0 flex-1 truncate text-muted-foreground lg:inline">{hostOf(apiUrl)}</span>
       </span>
       <Button
         type="button"

@@ -80,6 +80,12 @@ export { Verification } from "./resources/verification";
 
 export { inBrowser, isValidBrowserOnline, isWebAuthnSupported, isWebAuthnAutofillSupported, isWebAuthnPlatformAuthenticatorSupported } from "./util/browser";
 export {
+  clearLastUsedStrategy,
+  isSignInStrategy,
+  readLastUsedStrategy,
+  recordLastUsedStrategy,
+} from "./util/last-used-strategy";
+export {
   appendQuery,
   buildRedirectUrl,
   getSafeRedirectUrl,

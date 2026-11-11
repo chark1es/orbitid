@@ -156,7 +156,7 @@ export function EmailAddressDialog({
                 type="button"
                 variant="link"
                 size="sm"
-                className="h-auto p-0"
+                className="h-auto min-h-6 px-0 py-1"
                 disabled={busy}
                 onClick={() => void (resource ? prepareEmailVerification(resource) : Promise.resolve())}
               >
@@ -295,7 +295,7 @@ export function PhoneNumberDialog({
                 type="button"
                 variant="link"
                 size="sm"
-                className="h-auto p-0"
+                className="h-auto min-h-6 px-0 py-1"
                 disabled={busy}
                 onClick={() => void (resource ? preparePhoneVerification(resource) : Promise.resolve())}
               >

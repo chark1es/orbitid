@@ -1,18 +1,45 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type { OAuthApplicationJSON, PaginatedList } from "@orbitid/shared";
 import { toast } from "sonner";
-import { api, getApiUrl, useApi } from "../../lib/api";
+import { api, apiAllPages, getApiUrl, useApi } from "../../lib/api";
 import { oneTimeSecret, unwrapList } from "../_config/data";
 import { errorMessage, isHttpUrl } from "../_config/settings";
 import { useSettingsEditor } from "../_config/use-settings";
-import { type AppForm, EMPTY_FORM } from "./model";
+import { type AppForm, EMPTY_FORM, LIFETIME_LIMITS, uniqueScopes } from "./model";
+
+export interface OidcDiscovery {
+  issuer: string;
+  authorization_endpoint?: string;
+  token_endpoint?: string;
+  userinfo_endpoint?: string;
+  jwks_uri?: string;
+  revocation_endpoint?: string;
+  introspection_endpoint?: string;
+  end_session_endpoint?: string;
+  device_authorization_endpoint?: string;
+}
 
 export function useOAuthApps() {
   const apiBase = getApiUrl();
-  const query = useApi<PaginatedList<OAuthApplicationJSON>>(["oauth_applications"], "/oauth_applications?limit=100");
+  const query = useApi<PaginatedList<OAuthApplicationJSON>>(["oauth_applications"], "/oauth_applications", {
+    queryFn: ({ signal }) => apiAllPages<OAuthApplicationJSON>("/oauth_applications", { signal }),
+  });
   const applications = unwrapList<OAuthApplicationJSON>(query.data);
   const config = useSettingsEditor();
   const settings = config.settings;
+  // Endpoints must be the ones clients reach, not the dashboard's dev proxy. Discovery is the provider's own answer.
+  const discoveryQuery = useQuery<OidcDiscovery | null>({
+    queryKey: ["oidc-discovery", apiBase],
+    queryFn: async () => {
+      const response = await fetch(`${apiBase}/.well-known/openid-configuration`);
+      if (!response.ok) return null;
+      const body = (await response.json()) as OidcDiscovery;
+      return typeof body?.issuer === "string" ? body : null;
+    },
+    staleTime: 5 * 60_000,
+  });
+  const issuer = discoveryQuery.data?.issuer ?? apiBase;
   const [sheetOpen, setSheetOpen] = useState(false);
   const [form, setForm] = useState<AppForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
@@ -31,21 +58,37 @@ export function useOAuthApps() {
       id: application.id,
       name: application.name,
       redirectUris: application.redirect_uris.length > 0 ? application.redirect_uris : [""],
+      postLogoutRedirectUris: application.post_logout_redirect_uris?.length ? application.post_logout_redirect_uris : [""],
       scopes: application.scopes,
       publicClient: application.public,
       pkceRequired: application.pkce_required,
       consentScreenEnabled: application.consent_screen_enabled,
+      accessTokenLifetimeSeconds: application.access_token_lifetime_seconds,
+      refreshTokenLifetimeSeconds: application.refresh_token_lifetime_seconds,
+      idTokenLifetimeSeconds: application.id_token_lifetime_seconds,
+      groupsClaim: application.groups_claim,
     });
     setSheetOpen(true);
   };
 
   const uris = form.redirectUris.map((uri) => uri.trim()).filter(Boolean);
+  const logoutUris = form.postLogoutRedirectUris.map((uri) => uri.trim()).filter(Boolean);
   const formErrors: string[] = [];
   if (!form.name.trim()) formErrors.push("Application name is required.");
   if (uris.length === 0) formErrors.push("Add at least one redirect URI.");
   if (uris.some((uri) => !isHttpUrl(uri))) formErrors.push("Every redirect URI must be an absolute http(s) URL.");
+  if (logoutUris.some((uri) => !isHttpUrl(uri))) formErrors.push("Every post-logout redirect URI must be an absolute http(s) URL.");
   if (form.publicClient && !form.pkceRequired) formErrors.push("Public clients must require PKCE (S256).");
   if (!form.scopes.trim()) formErrors.push("At least one scope is required.");
+  for (const [label, value, bounds] of [
+    ["Access token lifetime", form.accessTokenLifetimeSeconds, LIFETIME_LIMITS.access],
+    ["Refresh token lifetime", form.refreshTokenLifetimeSeconds, LIFETIME_LIMITS.refresh],
+    ["ID token lifetime", form.idTokenLifetimeSeconds, LIFETIME_LIMITS.id],
+  ] as const) {
+    if (!Number.isInteger(value) || value < bounds.min || value > bounds.max) {
+      formErrors.push(`${label} must be between ${bounds.min} and ${bounds.max} seconds.`);
+    }
+  }
 
   const oidcErrors: string[] = [];
   if (settings) {
@@ -53,6 +96,8 @@ export function useOAuthApps() {
     if (settings.oidcProvider.deviceCodeIntervalSeconds < 1) oidcErrors.push("Polling interval must be at least 1 second.");
     if (settings.oidcProvider.deviceCodeIntervalSeconds >= settings.oidcProvider.deviceCodeLifetimeSeconds)
       oidcErrors.push("Polling interval must be shorter than the device code lifetime.");
+    if (settings.oidcProvider.refreshTokenReuseGraceSeconds < 0 || settings.oidcProvider.refreshTokenReuseGraceSeconds > 600)
+      oidcErrors.push("Refresh retry grace must be between 0 and 600 seconds.");
   }
 
   const saveApplication = async () => {
@@ -62,9 +107,14 @@ export function useOAuthApps() {
       const body: Record<string, unknown> = {
         name: form.name.trim(),
         redirect_uris: uris,
-        scopes: form.scopes.trim(),
+        post_logout_redirect_uris: logoutUris,
+        scopes: uniqueScopes(form.scopes).join(" "),
         pkce_required: form.pkceRequired,
         consent_screen_enabled: form.consentScreenEnabled,
+        access_token_lifetime_seconds: form.accessTokenLifetimeSeconds,
+        refresh_token_lifetime_seconds: form.refreshTokenLifetimeSeconds,
+        id_token_lifetime_seconds: form.idTokenLifetimeSeconds,
+        groups_claim: form.groupsClaim,
       };
       if (!form.id) body.public = form.publicClient;
       const response = await api<unknown>(form.id ? "PATCH" : "POST", form.id ? `/oauth_applications/${form.id}` : "/oauth_applications", body);
@@ -133,6 +183,8 @@ export function useOAuthApps() {
     setSelected,
     deleting,
     apiBase,
+    issuer,
+    discovery: discoveryQuery.data ?? null,
     query,
     applications,
     config,

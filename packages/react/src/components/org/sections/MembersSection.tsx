@@ -274,7 +274,11 @@ export function MembersSection({
             <TableBody>
               {pendingInvitations.map((invitation) => (
                 <TableRow key={invitation.id} data-testid={`invitation-row-${invitation.id}`}>
-                  <TableCell className="truncate">{invitation.emailAddress}</TableCell>
+                  <TableCell className="truncate">
+                    <span className="block max-w-[32ch] truncate" title={invitation.emailAddress}>
+                      {invitation.emailAddress}
+                    </span>
+                  </TableCell>
                   <TableCell>
                     <Badge variant="secondary">
                       {roleLabel(invitation.role, invitation.roleName, t)}
@@ -329,7 +333,7 @@ export function MembersSection({
                   return (
                     <TableRow key={request.id} data-testid={`request-row-${request.id}`}>
                       <TableCell>
-                        <div className="flex items-center gap-3">
+                        <div className="flex min-w-0 items-center gap-2">
                           <OrgAvatar
                             name={name}
                             imageUrl={request.publicUserData.imageUrl}

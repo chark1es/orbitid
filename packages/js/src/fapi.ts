@@ -1,5 +1,5 @@
 import { decodePublishableKey, type ClientJSON } from "@orbitid/shared";
-import { errorFromBody, networkError, OrbitAPIResponseError } from "./util/errors";
+import { errorFromBody, networkError, OrbitAPIResponseError, parseRetryAfter } from "./util/errors";
 import { inBrowser } from "./util/browser";
 import { toQueryString, type QueryParams } from "./util/pagination";
 import { delayWithSignal } from "./util/async";
@@ -164,7 +164,7 @@ export class FapiClient {
       json = null;
     }
 
-    if (!res.ok) throw errorFromBody(res.status, json);
+    if (!res.ok) throw errorFromBody(res.status, json, parseRetryAfter(res.headers?.get?.("retry-after") ?? null));
 
     if (json && typeof json === "object" && !Array.isArray(json)) {
       const envelope = json as { client?: ClientJSON };

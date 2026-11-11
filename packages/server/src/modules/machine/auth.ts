@@ -94,14 +94,16 @@ export async function requireUserCaller(ctx: AppContext, c: Context): Promise<Ma
 /** Creates a client row + its opaque cookie token (used for IdP-initiated SSO where no browser client exists yet). */
 export async function createClient(ctx: AppContext, info: { ip?: string; userAgent?: string } = {}): Promise<{ client: ClientRow; token: string }> {
   const token = randomToken(32);
+  const now = Date.now();
   const client: ClientRow = {
     id: newId(ID_PREFIX.client),
     tokenHash: sha256(token),
     lastActiveSessionId: null,
+    tokenIssuedAt: now,
     ip: info.ip ?? null,
     userAgent: info.userAgent ?? null,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+    createdAt: now,
+    updatedAt: now,
   };
   await ctx.db.insert(clients).values(client);
   return { client, token };

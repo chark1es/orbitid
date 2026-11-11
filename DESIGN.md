@@ -102,7 +102,7 @@ Restrained palette with one committed region: the navigation rail is charcoal in
 
 - Ground is warm paper, not white. Cards sit one step lighter than the ground, separated by a 1px rule, never by a shadow.
 - Ink is a warm near-black. Muted ink is used for secondary labels only and always meets 4.5:1 on paper.
-- Signal red marks the active navigation item, the selected row, destructive actions and failures. Nothing decorative is red.
+- Signal red marks the active navigation item, destructive actions and failures. The selected row uses a neutral tint, not red. Nothing decorative is red.
 - Go green, caution amber and info blue exist only as status. Status is never color alone: it always carries a word or a shape.
 - Chart series use ink and signal red first, then ink-muted. No rainbow palettes.
 
@@ -114,7 +114,7 @@ Fixed rem scale at a 1.125 ratio: 0.6875 (captions inside chips and rail labels)
 
 ## Layout
 
-- Shell: 232px charcoal rail on the left (grouped navigation, instance name at the top, sign-out and theme at the bottom), 48px paper top bar (breadcrumb, instance chip, command search), content on paper. Content is fluid to a 1280px maximum with 24px gutters.
+- Shell: 232px charcoal rail on the left (grouped navigation, instance name at the top), 48px paper top bar (breadcrumb, instance chip, command search, theme and the account menu), content on paper. Content is fluid to a 1280px maximum with 24px gutters.
 - Spacing is a 4px base. Tight groups use 4 to 8px, sibling blocks 20px, sections 32px, with more space above a heading than below it.
 - The rail collapses to an icon strip below 1024px and to a sheet below 768px. Tables become stacked rows below 640px.
 - Tables are the primary object. Row height 40px, 1px rule between rows, no zebra, no card around a table that already has a border.
@@ -133,7 +133,7 @@ Near-square. Controls and tables use 4px, small chips and line codes 3px, cards 
 All stock shadcn/ui primitives from `packages/ui`, restyled through tokens only. Every interactive component has default, hover, focus-visible (2px signal ring offset by 2px), active, disabled, loading and error states.
 
 - Buttons: primary is ink on paper (inverted in dark), secondary is a ruled outline, destructive is signal red. One primary action per view.
-- Inputs: 34px, 1px rule, ink focus ring, error text states the problem and the fix.
+- Inputs: 34px, 1px rule, a 2px signal focus ring offset by 2px, error text states the problem and the fix.
 - Status chip: a word plus a 6px dot, for example `Active`, `Banned`, `MFA`, `Failed`. Never a colored dot alone.
 - Empty states say what the screen will contain and give the next action, in a sentence.
 - Skeletons for loading, never a centered spinner over content.

@@ -4,9 +4,9 @@
   "private": true,
   "description": "Test website for exercising a running OrbitID instance. Not for production.",
   "scripts": {
-    "dev": "next dev -H 127.0.0.1 -p 3300",
+    "dev": "next dev -H localhost -p 3300",
     "build": "next build",
-    "start": "next start -H 127.0.0.1 -p 3300",
+    "start": "next start -H localhost -p 3300",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   },

@@ -9,7 +9,7 @@ import { ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../context";
 import * as s from "../db/schema";
 import { mutateAuthorization } from "./authorization-transaction";
-import { permissionsForRoleId, roleByKey, roleScope, systemRoleKey } from "./rbac";
+import { permissionsForRoleIds, roleByKey, roleScope, systemRoleKey } from "./rbac";
 
 /** Every assignment row for a user, sorted by key. */
 export async function userRoleRows(ctx: AppContext, userId: string) {
@@ -31,12 +31,15 @@ export async function roleClaimsForUser(ctx: AppContext, userId: string): Promis
   const stored = await ctx.db.select().from(s.roles).where(inArray(s.roles.key, keys));
   const byKey = new Map(stored.map((role) => [role.key, role]));
   const active: string[] = [];
-  const permissions = new Set<string>();
   for (const key of keys) {
     const role = byKey.get(key);
-    if (!role || roleScope(role.key) !== "instance") continue;
-    active.push(key);
-    for (const permission of await permissionsForRoleId(ctx, role.id)) permissions.add(permission);
+    if (role && roleScope(role.key) === "instance") active.push(key);
+  }
+  // One IN query for every assigned role, not one query per role.
+  const byRoleId = await permissionsForRoleIds(ctx, active.map((key) => byKey.get(key)!.id));
+  const permissions = new Set<string>();
+  for (const key of active) {
+    for (const permission of byRoleId.get(byKey.get(key)!.id) ?? []) permissions.add(permission);
   }
   return { roles: active.sort(), permissions: [...permissions].sort() };
 }

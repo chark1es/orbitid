@@ -4,7 +4,7 @@ import type { OAuthAppsController } from "./use-oauth-apps";
 import { numberFrom } from "./model";
 
 export function ProviderOptions({ ctl }: { ctl: OAuthAppsController }) {
-  const { apiBase, config, settings, oidcErrors } = ctl;
+  const { issuer, config, settings, oidcErrors } = ctl;
 
   return (
     <>
@@ -49,6 +49,22 @@ export function ProviderOptions({ ctl }: { ctl: OAuthAppsController }) {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <Field
+              label="Refresh retry grace (seconds)"
+              htmlFor="oidc-refresh-grace"
+              description="A just-rotated refresh token may be retried for this long. 0 disables the grace."
+            >
+              <Input
+                id="oidc-refresh-grace"
+                type="number"
+                min={0}
+                max={600}
+                value={settings.oidcProvider.refreshTokenReuseGraceSeconds}
+                onChange={(event) =>
+                  config.patch({ oidcProvider: { refreshTokenReuseGraceSeconds: numberFrom(event.target.value) } })
+                }
+              />
+            </Field>
+            <Field
               label="Device code lifetime (seconds)"
               htmlFor="oidc-device-lifetime"
               description="How long the user has to enter the code."
@@ -85,8 +101,8 @@ export function ProviderOptions({ ctl }: { ctl: OAuthAppsController }) {
           {settings.oidcProvider.deviceAuthorizationEnabled ? (
             <div>
               <p className="pb-1 text-sm font-medium">Device flow endpoints</p>
-              <EndpointRow label="Device authorization" url={`${apiBase}/oauth/device_authorization`} />
-              <EndpointRow label="Verification page" url={`${apiBase}/oauth/device`} />
+              <EndpointRow label="Device authorization" url={`${issuer}/oauth/device_authorization`} />
+              <EndpointRow label="Verification page" url={`${issuer}/oauth/device`} />
             </div>
           ) : null}
           {oidcErrors.length > 0 ? <ValidationSummary errors={oidcErrors} title="Fix the provider options" /> : null}

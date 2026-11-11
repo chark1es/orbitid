@@ -89,7 +89,7 @@ export function SecretInput({
         disabled={disabled}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder ?? (configured ? "Stored value, leave blank to keep" : "Not set")}
+        placeholder={placeholder ?? (configured ? "Stored; leave blank to keep" : "Not set")}
       />
     </Field>
   );
@@ -126,7 +126,7 @@ export function SwitchRow({
   return (
     <div
       className={cn(
-        "flex items-start justify-between gap-6 border-b border-border py-3 first:pt-0 last:border-b-0 last:pb-0",
+        "flex items-start justify-between gap-6 border-b border-border py-2.5 first:pt-0 last:border-b-0 last:pb-0",
       )}
     >
       <div className="min-w-0 space-y-0.5">

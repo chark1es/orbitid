@@ -1,24 +1,26 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { Page as PageLayout } from "../components/shared/page";
 import { Link } from "react-router-dom";
 import { keepPreviousData, useQueryClient } from "@tanstack/react-query";
 import {
   Button,
   Input,
+  SearchInput,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@orbitid/ui";
-import { LogOut, MonitorSmartphone, Search } from "lucide-react";
+import { LogOut, MonitorSmartphone } from "lucide-react";
 import { toast } from "sonner";
 import type { SessionJSON } from "@orbitid/shared";
 import { api, useApi } from "../lib/api";
 import { errorMessage } from "../lib/errors";
-import { formatDateTime } from "../lib/format";
+import { formatSessionExpiry } from "../lib/format";
 import { buildListPath } from "../lib/query";
 import { useTableState } from "../lib/use-table-state";
-import { useDebounced } from "../lib/hooks";
+import { useUrlSyncedInput } from "../lib/hooks";
 import { PageHeader } from "../components/shared/page-header";
 import { DataTable, type DataTableColumn } from "../components/shared/data-table";
 import { TablePagination } from "../components/shared/table-pagination";
@@ -32,15 +34,12 @@ const STATUSES = ["all", "active", "ended", "expired", "revoked", "removed", "pe
 export default function SessionsPage() {
   const table = useTableState({ limit: 20, orderBy: "-created_at", filterKeys: ["status", "user_id"] });
   const queryClient = useQueryClient();
-  const [userId, setUserId] = useState(table.filter("user_id"));
-  const debouncedUserId = useDebounced(userId.trim(), 400);
+  const [userId, setUserId] = useUrlSyncedInput(table.filter("user_id"), (value) =>
+    table.setFilter("user_id", value || null),
+  400,
+  );
   const [revoking, setRevoking] = useState<SessionJSON | null>(null);
   const [pending, setPending] = useState(false);
-
-  useEffect(() => {
-    if (debouncedUserId !== table.filter("user_id")) table.setFilter("user_id", debouncedUserId || null);
-  }, [debouncedUserId]);
-  useEffect(() => setUserId(table.filter("user_id")), [table.searchParams]);
 
   const status = table.filter("status") || "all";
   const path = buildListPath("/sessions", {
@@ -89,7 +88,7 @@ export default function SessionsPage() {
               {[session.public_user_data.first_name, session.public_user_data.last_name].filter(Boolean).join(" ") ||
                 session.public_user_data.identifier}
             </Link>
-            <span className="block max-w-[30ch] truncate font-data text-[0.6875rem] text-muted-foreground">
+            <span className="block max-w-[30ch] truncate text-[0.8125rem] text-muted-foreground">
               {session.public_user_data.identifier}
             </span>
           </div>
@@ -115,7 +114,7 @@ export default function SessionsPage() {
       headerClassName: "hidden lg:table-cell",
       className: "hidden lg:table-cell",
       cell: (session) => (
-        <span className="font-data text-xs text-muted-foreground">{formatDateTime(session.expire_at)}</span>
+        <span className="font-data text-xs text-muted-foreground">{formatSessionExpiry(session.expire_at)}</span>
       ),
     },
     {
@@ -124,9 +123,9 @@ export default function SessionsPage() {
       headerClassName: "hidden xl:table-cell",
       className: "hidden xl:table-cell",
       cell: (session) => (
-        <div className="text-xs text-muted-foreground">
-          <p className="font-data">{session.latest_activity?.ip_address || "No activity recorded"}</p>
-          <p>{session.latest_activity?.browser_name || "Unknown browser"}</p>
+        <div className="min-w-0 text-xs text-muted-foreground">
+          <p className="truncate font-data" title={session.latest_activity?.ip_address ?? undefined}>{session.latest_activity?.ip_address || "No activity recorded"}</p>
+          <p className="truncate" title={session.latest_activity?.browser_name ?? undefined}>{session.latest_activity?.browser_name || "Unknown browser"}</p>
         </div>
       ),
     },
@@ -149,27 +148,21 @@ export default function SessionsPage() {
   ];
 
   return (
-    <>
+    <PageLayout>
       <PageHeader
         title="Sessions"
         description="Active and historical sessions across every client. Revoking one signs that client out."
       />
 
       <div className="flex flex-wrap items-end gap-x-2 gap-y-3">
-        <div className="relative min-w-56 flex-1 max-w-md">
-          <Search
-            className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
-            strokeWidth={1.5}
-            aria-hidden
-          />
-          <Input
-            value={userId}
-            onChange={(event) => setUserId(event.target.value)}
-            placeholder="Filter by user ID"
-            aria-label="Filter sessions by user"
-            className="h-[34px] pl-8 font-data text-xs"
-          />
-        </div>
+        <SearchInput
+          value={userId}
+          onChange={(event) => setUserId(event.target.value)}
+          placeholder="Filter by user ID"
+          aria-label="Filter sessions by user"
+          className="min-w-56 max-w-md flex-1"
+          inputClassName="font-data"
+        />
         <Select value={status} onValueChange={(value) => table.setFilter("status", value === "all" ? null : value)}>
           <SelectTrigger className="h-[34px] w-[132px]" aria-label="Filter sessions by status">
             <SelectValue />
@@ -240,6 +233,6 @@ export default function SessionsPage() {
         pending={pending}
         onConfirm={() => void revoke()}
       />
-    </>
+    </PageLayout>
   );
 }

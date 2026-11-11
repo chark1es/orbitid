@@ -5,6 +5,8 @@ import * as schema from "../../src/db/schema";
 import { latestCodeFor } from "../../src/services/mail";
 import { sha256 } from "../../src/lib/crypto";
 import { rotateSigningKey, signJwt, signSessionToken, verifySessionToken } from "../../src/services/tokens";
+import { evaluateSessionStatus, isSessionExpired, sessionExpireAt, sessionExpiresAt } from "../../src/services/sessions";
+import { SESSION_NEVER_EXPIRES_AT } from "@orbitid/shared";
 import { errorsOf, getClient, setup, signUpUser, testClient } from "./helpers";
 
 describe("sessions & tokens", () => {
@@ -208,7 +210,9 @@ describe("sessions & tokens", () => {
   });
 
   it("refuses a second session in single-session mode", async () => {
-    const { app } = await setup();
+    const { app, ctx } = await setup();
+    // Single-session is opt-in; multi-session is the default.
+    await ctx.settings.update({ session: { multiSession: false } });
     const user = await signUpUser(app);
     const res = await user.client.json("/v1/client/sign_ins", { body: { identifier: user.email, password: user.password } });
     expect(errorsOf(res)[0]?.code).toBe("identifier_already_signed_in");
@@ -246,14 +250,53 @@ describe("sessions & tokens", () => {
     expect(allowed.response.email_address).toBe("second@example.com");
   });
 
-  it("expires sessions past their lifetime", async () => {
+  it("expires sessions past an explicitly configured lifetime", async () => {
     const { app, ctx } = await setup();
+    // Without a configured maximum (the default) a stored `expire_at` never ends a session.
+    await ctx.settings.update({ session: { lifetimeSeconds: 3_600 } });
     const user = await signUpUser(app);
     await ctx.db.update(schema.sessions).set({ expireAt: Date.now() - 1 }).where(eq(schema.sessions.id, user.sessionId));
     const me = await user.client.json("/v1/client/me");
     expect(errorsOf(me)[0]?.code).toBe("authentication_invalid");
     const state = await getClient(user.client);
     expect(state.response.sessions).toHaveLength(0);
+  });
+
+  it("enforces an explicit per-session cap under an unlimited policy, while the sentinel never expires", async () => {
+    const { app, ctx } = await setup();
+    const user = await signUpUser(app);
+    const stored = (await ctx.db.select().from(schema.sessions).where(eq(schema.sessions.id, user.sessionId)))[0]!;
+    // Default policy: no maximum. The sentinel therefore means "never" and a positive policy is opt-in only.
+    expect(ctx.settings.get().session.lifetimeSeconds).toBe(0);
+    expect(stored.expireAt).toBe(SESSION_NEVER_EXPIRES_AT);
+    expect(sessionExpiresAt(ctx, stored)).toBe(Number.POSITIVE_INFINITY);
+    expect(isSessionExpired(ctx, stored)).toBe(false);
+
+    // An explicit cap passed at creation (maxLifetimeSeconds) is a concrete `expire_at`: enforce it even though the
+    // instance policy is unlimited. Previously `sessionExpiresAt` returned Infinity here and ignored it.
+    const cappedAt = sessionExpireAt(Date.now(), 0, 3_600);
+    const capped = { ...stored, expireAt: cappedAt };
+    expect(sessionExpiresAt(ctx, capped)).toBe(cappedAt);
+    await ctx.db.update(schema.sessions).set({ expireAt: Date.now() - 1 }).where(eq(schema.sessions.id, user.sessionId));
+    const me = await user.client.json("/v1/client/me");
+    expect(errorsOf(me)[0]?.code).toBe("authentication_invalid");
+
+    // An instance-wide lifetime still caps a sentinel row from `created_at`.
+    await ctx.settings.update({ session: { lifetimeSeconds: 3_600 } });
+    expect(sessionExpiresAt(ctx, stored)).toBe(stored.createdAt + 3_600_000);
+  });
+
+  it("never lets a stale expiry read overwrite a revocation", async () => {
+    const { app, ctx } = await setup();
+    const user = await signUpUser(app);
+    const stale = (await ctx.db.select().from(schema.sessions).where(eq(schema.sessions.id, user.sessionId)))[0]!;
+    // The realistic ordering: this request reads an active row, then an operator revokes it, then the request's
+    // lazy expiry check runs against the stale copy.
+    await ctx.db.update(schema.sessions).set({ status: "revoked", updatedAt: Date.now() }).where(eq(schema.sessions.id, user.sessionId));
+    const expiredCopy = { ...stale, expireAt: Date.now() - 1 };
+    expect(await evaluateSessionStatus(ctx, expiredCopy)).toBe("expired");
+    const stored = (await ctx.db.select().from(schema.sessions).where(eq(schema.sessions.id, user.sessionId)))[0]!;
+    expect(stored.status).toBe("revoked");
   });
 
   it("enforces the inactivity timeout", async () => {
@@ -263,5 +306,19 @@ describe("sessions & tokens", () => {
     await ctx.db.update(schema.sessions).set({ lastActiveAt: Date.now() - 120_000 }).where(eq(schema.sessions.id, user.sessionId));
     const me = await user.client.json("/v1/client/me");
     expect(errorsOf(me)[0]?.code).toBe("authentication_invalid");
+  });
+
+  it("bounds exp tolerance to 10 s while allowing 60 s of early nbf skew", async () => {
+    const { ctx } = await setup();
+    const now = Math.floor(Date.now() / 1000);
+    const sign = (expiresInSeconds: number, nbfOffset = 0) => signJwt(ctx, {
+      sub: "user_skew", sid: "sess_skew", sts: "active", nbf: now + nbfOffset,
+    }, { expiresInSeconds, issuer: ctx.env.baseUrl });
+
+    // `nbf` 20 s in the future (verifier clock fast) is accepted.
+    await expect(verifySessionToken(ctx, await sign(60, 20))).resolves.toMatchObject({ sub: "user_skew" });
+    // 5 s past exp is inside the 10 s bound; 20 s past is not, even though the early tolerance is 60 s.
+    await expect(verifySessionToken(ctx, await sign(-5))).resolves.toMatchObject({ sub: "user_skew" });
+    await expect(verifySessionToken(ctx, await sign(-20))).rejects.toMatchObject({ code: "authentication_invalid" });
   });
 });

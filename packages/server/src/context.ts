@@ -7,6 +7,8 @@ export interface SettingsStore {
   get(): InstanceSettings;
   /** Deep-merges `patch`, validates, persists to the `instance` table, refreshes the cache. */
   update(patch: DeepPartial<InstanceSettings>): Promise<InstanceSettings>;
+  /** Removes social provider entries entirely (deep merge alone cannot delete a key). */
+  removeSocialProviders(keys: string[]): Promise<InstanceSettings>;
 }
 export type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K] };
 

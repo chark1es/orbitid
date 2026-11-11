@@ -1,7 +1,9 @@
 import { Button } from "@orbitid/ui";
+import { Page as PageLayout } from "../components/shared/page";
 import { Plus } from "lucide-react";
 import { errorMessage } from "./_config/settings";
-import { ConfirmDialog, ErrorAlert, MetaChip, PageHeader } from "./_config/ui";
+import { ErrorAlert, MetaChip, PageHeader } from "./_config/ui";
+import { ConfirmDialog } from "../components/shared/confirm-dialog";
 import { useEnterpriseSso } from "./_enterprise-sso/use-enterprise-sso";
 import { ConnectionsTable } from "./_enterprise-sso/connections-table";
 import { SsoWizard } from "./_enterprise-sso/sso-wizard";
@@ -12,7 +14,7 @@ export default function Page() {
   const { selected, setSelected, deleting, query, connections, openWizard, deleteConnection } = ctl;
 
   return (
-    <div className="space-y-6">
+    <PageLayout>
       <PageHeader
         title="Enterprise SSO"
         description="Domain-routed SAML 2.0 and OpenID Connect connections. Users with a matching email domain are sent to the identity provider."
@@ -43,9 +45,9 @@ export default function Page() {
         }
         confirmLabel="Delete connection"
         destructive
-        loading={deleting}
+        pending={deleting}
         onConfirm={() => void deleteConnection()}
       />
-    </div>
+    </PageLayout>
   );
 }

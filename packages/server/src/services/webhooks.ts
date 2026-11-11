@@ -163,16 +163,22 @@ async function attemptDelivery(ctx: AppContext, delivery: DeliveryRow, endpoint:
  */
 export async function deliverDue(ctx: AppContext, opts: { limit?: number } = {}): Promise<number> {
   const now = Date.now();
+  // Disabled endpoints are filtered in the query, before the limit: skipping them afterwards let 20 queued
+  // deliveries for disabled endpoints crowd enabled ones out of every tick.
   const due = (await ctx.db
-      .select()
+      .select({ delivery: s.webhookDeliveries, endpoint: s.webhookEndpoints })
       .from(s.webhookDeliveries)
-      .where(and(eq(s.webhookDeliveries.status, "pending"), lte(s.webhookDeliveries.nextAttemptAt, now)))
+      .innerJoin(s.webhookEndpoints, eq(s.webhookDeliveries.endpointId, s.webhookEndpoints.id))
+      .where(and(
+        eq(s.webhookDeliveries.status, "pending"),
+        lte(s.webhookDeliveries.nextAttemptAt, now),
+        eq(s.webhookEndpoints.disabled, false),
+      ))
       .limit(opts.limit ?? 20));
   let attempted = 0;
-  for (const delivery of due) {
-    const endpoint = first(await ctx.db.select().from(s.webhookEndpoints).where(eq(s.webhookEndpoints.id, delivery.endpointId)));
+  for (const { delivery, endpoint } of due) {
     const event = first(await ctx.db.select().from(s.webhookEvents).where(eq(s.webhookEvents.id, delivery.eventId)));
-    if (!endpoint || !event) continue;
+    if (!event) continue;
     // Claim the row before the network call so overlapping ticks cannot deliver it twice.
     const claimed = first(await ctx.db.update(s.webhookDeliveries).set({ nextAttemptAt: Date.now() + CLAIM_WINDOW_MS })
       .where(and(

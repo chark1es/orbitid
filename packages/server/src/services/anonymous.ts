@@ -1,5 +1,5 @@
 // Guest-account cleanup: anonymous users idle longer than `settings.anonymous.retentionSeconds` are deleted.
-import { and, eq, lt } from "drizzle-orm";
+import { and, eq, inArray, lt, notExists, sql } from "drizzle-orm";
 import type { AppContext } from "../context";
 import * as s from "../db/schema";
 import { onUserDeleted } from "./orgs";
@@ -9,10 +9,16 @@ import { emitEvent } from "./webhooks";
 export const ANONYMOUS_CLEANUP_BATCH = 100;
 export const ANONYMOUS_CLEANUP_INTERVAL_MS = 5 * 60_000;
 
-/** Conditions that identify a user as a stale guest; shared by the read and the atomic delete. */
+/** Conditions that identify a stale guest; shared by the read and the atomic delete. */
 const staleAnonymous = (ctx: AppContext, cutoff: number) => and(
   eq(s.users.isAnonymous, true),
   lt(s.users.lastActiveAt, cutoff),
+  // A guest with a session that has not ended is still signed in. Retention is housekeeping, not a sign-out:
+  // deleting the user would cascade into that session and silently end it. Purge only once no live session remains.
+  notExists(ctx.db.select({ one: sql`1` }).from(s.sessions).where(and(
+    eq(s.sessions.userId, s.users.id),
+    inArray(s.sessions.status, ["active", "pending"]),
+  ))),
 );
 
 /**

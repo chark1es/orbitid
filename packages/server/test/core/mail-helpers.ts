@@ -1,4 +1,7 @@
 /** Shared fixtures for the mail tests: an instance wired to the test outbox and a Backend API client. */
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect } from "vitest";
 import { createApp } from "../../src/app";
 import { createContext } from "../../src/bootstrap";
@@ -14,6 +17,9 @@ export async function instance(overrides: Parameters<typeof createContext>[0] = 
     secretKey: SECRET,
     baseUrl: "http://localhost:4000",
     nodeEnv: "test",
+    // A per-instance directory: other test files upload profile images into the default one in parallel,
+    // which would make the "nothing was written" assertion in mail.test.ts depend on timing.
+    dataDir: mkdtempSync(join(tmpdir(), "orbitid-mail-")),
     ...overrides,
   });
   clearMailOutbox();

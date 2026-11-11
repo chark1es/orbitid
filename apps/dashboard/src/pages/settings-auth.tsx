@@ -1,4 +1,5 @@
 import type { AttributeConfig } from "@orbitid/shared";
+import { Page as PageLayout } from "../components/shared/page";
 import { Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@orbitid/ui";
 import {
   CheckboxRow,
@@ -73,7 +74,7 @@ export default function Page() {
     errors.push("Email code as a second factor needs a verification method on the email address.");
 
   return (
-    <div className="space-y-6">
+    <PageLayout>
       <PageHeader
         title="User & authentication"
         description="Choose how users identify themselves, how passwords are enforced, and which second factors they can use."
@@ -333,8 +334,8 @@ export default function Page() {
           />
         </Field>
         <p className="text-xs leading-relaxed text-muted-foreground">
-          Guests count against your user totals and can reach anything a signed-in user can, so keep the list short in
-          the Users page.
+          Guests are ordinary user rows and can reach anything a signed-in user can, so keep the list short in the
+          Users page. There is no per-user billing or cap.
         </p>
       </SettingsSection>
 
@@ -433,6 +434,6 @@ export default function Page() {
         onSave={editor.save}
         onDiscard={editor.reset}
       />
-    </div>
+    </PageLayout>
   );
 }

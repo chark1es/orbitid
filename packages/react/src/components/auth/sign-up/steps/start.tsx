@@ -304,7 +304,7 @@ export function SignUpStartStep({ flow, props }: SignUpStepProps) {
           type="button"
           variant="link"
           size="sm"
-          className="h-auto p-0 font-medium"
+          className="h-auto min-h-6 px-0 py-1 font-medium"
           onClick={() => navigate(props.signInUrl ?? (typeof runtime.orbit.buildSignInUrl === "function" ? runtime.orbit.buildSignInUrl() : "/sign-in"))}
         >
           {t("signUp.start.signInAction")}

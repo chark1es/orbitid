@@ -36,6 +36,8 @@ export type {
   OrganizationListParams,
 } from "./api/organizations";
 
+export type { PasswordHasher, SigningKey, TrustedDevice } from "./types";
+
 export interface CreateOrbitIdClientOptions extends BackendHttpOptions {}
 
 export interface OrbitIdClient {

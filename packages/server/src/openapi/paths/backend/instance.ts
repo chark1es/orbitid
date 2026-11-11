@@ -1,6 +1,6 @@
 /** backend paths: instance. */
-import { obj, ref, str } from "../../schema";
-import { backendListParams, idPath, op, queryParam, type DocumentedOperation } from "../../operation";
+import { obj, opt, ref, str } from "../../schema";
+import { backendListParams, idPath, op, pathParam, queryParam, type DocumentedOperation } from "../../operation";
 import * as body from "../../requests";
 import { list, ok } from "../common";
 
@@ -73,6 +73,47 @@ export const operations: DocumentedOperation[] = [
     body: { schema: obj({ to: str({ description: "Recipient address." }) }) },
     success: { status: 200, schema: obj({ provider: { type: "string", enum: ["resend", "smtp"] }, ok: { const: true } }) },
     errors: [422, 429, 502, 503],
+  }),
+  op("post", "/v1/instance/social/test", "Instance", "testSocialProvider", "Check a custom identity provider's endpoints", {
+    security: "backend",
+    description:
+      "Resolves a discovery document (or validates manual endpoints), probes each endpoint and reports what the " +
+      "provider advertises: issuer, scopes, PKCE support and token-endpoint authentication methods. Nothing is " +
+      "saved. Errors are returned in the body so a dashboard can show all of them at once. Rate limited.",
+    body: {
+      schema: obj({
+        protocol: opt({ type: "string", enum: ["oidc", "oauth2"] }),
+        discoveryUrl: opt(str({ format: "uri" })),
+        issuer: opt(str()),
+        authorizationUrl: opt(str({ format: "uri" })),
+        tokenUrl: opt(str({ format: "uri" })),
+        userinfoUrl: opt(str({ format: "uri" })),
+        jwksUrl: opt(str({ format: "uri" })),
+      }),
+    },
+    success: {
+      status: 200,
+      schema: obj({
+        ok: { type: "boolean" },
+        protocol: { type: "string", enum: ["oidc", "oauth2"] },
+        issuer: opt(str()),
+        endpoints: obj({ authorization: str(), token: str(), userinfo: opt(str()), jwks: opt(str()) }),
+        scopes_supported: opt({ type: "array", items: { type: "string" } }),
+        pkce_supported: opt({ type: "boolean" }),
+        client_auth_methods: opt({ type: "array", items: { type: "string" } }),
+        checks: { type: "array", items: obj({ name: str(), url: str(), reachable: { type: "boolean" }, status: opt({ type: "integer" }), error: opt(str()) }) },
+        warnings: { type: "array", items: { type: "string" } },
+        errors: { type: "array", items: { type: "string" } },
+      }),
+    },
+    errors: [429],
+  }),
+  op("delete", "/v1/instance/social/{provider}", "Instance", "deleteSocialProvider", "Delete a custom social provider", {
+    security: "backend",
+    description: "Removes a `custom_<key>` provider from instance settings. Built-in providers can only be turned off.",
+    parameters: [pathParam("provider", "Custom provider key, for example `custom_acme`.")],
+    ...ok(ref("Instance")),
+    errors: [404, 422],
   }),
   op("post", "/v1/instance/signing_keys/rotate", "Instance", "rotateSigningKey", "Rotate the session signing key", {
     security: "backend",

@@ -407,17 +407,27 @@ export const machineTokenVerify = z.object({ token: z.string() });
 export const oauthApplicationCreate = partial({
   name: z.string(),
   redirect_uris: z.array(z.string().url()),
-  scopes: z.string().describe("Space separated scopes. Defaults to `openid profile email`."),
+  post_logout_redirect_uris: z.array(z.string().url()).describe("Allowed return URIs for RP-initiated logout."),
+  scopes: z.string().describe("Space separated scopes. Defaults to `openid profile email phone groups organizations offline_access`."),
   public: z.boolean().describe("Public clients have no secret and must use PKCE."),
-  consent_screen_enabled: z.boolean(),
-  pkce_required: z.boolean(),
+  consent_screen_enabled: z.boolean().describe("Off skips consent for a first-party/trusted application."),
+  pkce_required: z.boolean().describe("Off by default for confidential clients, so clients that send no challenge work."),
+  access_token_lifetime_seconds: z.number().int().describe("60–86400 seconds. Default 3600."),
+  refresh_token_lifetime_seconds: z.number().int().describe("60–31536000 seconds. Default 2592000."),
+  id_token_lifetime_seconds: z.number().int().describe("60–86400 seconds. Default 3600."),
+  groups_claim: z.enum(["none", "organizations", "roles", "all"]).describe("What the groups claim contains."),
 }).required({ name: true });
 export const oauthApplicationUpdate = partial({
   name: z.string(),
   redirect_uris: z.array(z.string().url()),
+  post_logout_redirect_uris: z.array(z.string().url()),
   scopes: z.string(),
   consent_screen_enabled: z.boolean(),
   pkce_required: z.boolean(),
+  access_token_lifetime_seconds: z.number().int(),
+  refresh_token_lifetime_seconds: z.number().int(),
+  id_token_lifetime_seconds: z.number().int(),
+  groups_claim: z.enum(["none", "organizations", "roles", "all"]),
 });
 
 // ---------- OAuth / OIDC protocol ----------
@@ -432,6 +442,14 @@ export const oauthTokenRequest = partial({
   scope: z.string(),
 }).required({ grant_type: true });
 export const oauthRevoke = partial({ token: z.string(), token_type_hint: z.string(), client_id: z.string(), client_secret: z.string() }).required({ token: true });
+export const oauthLogout = partial({
+  id_token_hint: z.string(),
+  client_id: z.string(),
+  post_logout_redirect_uri: z.string(),
+  state: z.string(),
+  logout_hint: z.string(),
+  ui_locales: z.string(),
+});
 export const oauthIntrospect = oauthRevoke;
 export const oauthConsent = partial({
   client_id: z.string(),

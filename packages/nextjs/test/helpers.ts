@@ -57,15 +57,16 @@ export async function signTestToken(
   return jwt.sign(privateKey);
 }
 
-export async function signExpiredToken(claims: TestClaims = {}): Promise<string> {
+export async function signExpiredToken(claims: TestClaims = {}, issuer = "http://localhost:4000"): Promise<string> {
   const { privateKey } = await getTestKeys();
   const now = Math.floor(Date.now() / 1000);
   return new SignJWT({ sid: "sess_test", ...claims })
     .setProtectedHeader({ alg: "RS256", kid: "test-key" })
     .setSubject(claims.sub ?? "user_test")
-    .setIssuedAt(now - 120)
-    .setNotBefore(now - 120)
-    .setExpirationTime(now - 60)
-    .setIssuer("http://localhost:4000")
+    .setIssuedAt(now - 180)
+    .setNotBefore(now - 180)
+    // Well past any verifier tolerance, so this is unambiguously an expired token (not merely skewed).
+    .setExpirationTime(now - 120)
+    .setIssuer(issuer)
     .sign(privateKey);
 }

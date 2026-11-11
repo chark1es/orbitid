@@ -8,6 +8,7 @@ import { newId } from "../../lib/ids";
 import { parseBody } from "../../lib/http";
 import { hit } from "../../lib/rate-limit";
 import { assertIdentifiersAllowed } from "../../services/restrictions";
+import { assertAdditionalIdentificationsAllowed } from "../../services/enterprise-access";
 import { serializeEmail, serializePhone } from "../../serializers";
 import { verifiedSecondFactorPhones } from "../../services/mfa";
 import { sendEmail, sendSms } from "../../services/mail";
@@ -31,6 +32,7 @@ export function registerIdentifierRoutes(app: Hono, ctx: AppContext, helpers: Me
 
   app.post("/email_addresses", requireReverification(ctx, "first_factor", 10), async (c) => {
     const { user } = await auth(c);
+    await assertAdditionalIdentificationsAllowed(ctx, user.id);
     const body = await parseBody(c, emailCreateSchema);
     if (!ctx.settings.get().attributes.emailAddress.enabled) throw new OrbitError(422, ErrorCodes.form_param_unknown, "Email addresses are disabled for this instance", { param_name: "email_address" });
     const email = normalizeEmail(body.email_address);
@@ -73,6 +75,7 @@ export function registerIdentifierRoutes(app: Hono, ctx: AppContext, helpers: Me
 
   app.post("/email_addresses/:id/prepare_verification", requireReverification(ctx, "first_factor", 10), async (c) => {
     const { user } = await auth(c);
+    await assertAdditionalIdentificationsAllowed(ctx, user.id);
     const id = c.req.param("id")!;
     const row = first(await ctx.db.select().from(s.emailAddresses).where(and(eq(s.emailAddresses.id, id), eq(s.emailAddresses.userId, user.id))));
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Email address not found");
@@ -90,6 +93,7 @@ export function registerIdentifierRoutes(app: Hono, ctx: AppContext, helpers: Me
 
   app.post("/email_addresses/:id/attempt_verification", async (c) => {
     const { user } = await auth(c);
+    await assertAdditionalIdentificationsAllowed(ctx, user.id);
     const id = c.req.param("id")!;
     const row = first(await ctx.db.select().from(s.emailAddresses).where(and(eq(s.emailAddresses.id, id), eq(s.emailAddresses.userId, user.id))));
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Email address not found");
@@ -118,6 +122,7 @@ export function registerIdentifierRoutes(app: Hono, ctx: AppContext, helpers: Me
 
   app.post("/phone_numbers", requireReverification(ctx, "first_factor", 10), async (c) => {
     const { user } = await auth(c);
+    await assertAdditionalIdentificationsAllowed(ctx, user.id);
     const body = await parseBody(c, phoneCreateSchema);
     if (!ctx.settings.get().attributes.phoneNumber.enabled) throw new OrbitError(422, ErrorCodes.form_param_unknown, "Phone numbers are disabled for this instance", { param_name: "phone_number" });
     const phone = normalizePhone(body.phone_number);
@@ -189,6 +194,7 @@ export function registerIdentifierRoutes(app: Hono, ctx: AppContext, helpers: Me
 
   app.post("/phone_numbers/:id/prepare_verification", requireReverification(ctx, "first_factor", 10), async (c) => {
     const { user } = await auth(c);
+    await assertAdditionalIdentificationsAllowed(ctx, user.id);
     const id = c.req.param("id")!;
     const row = first(await ctx.db.select().from(s.phoneNumbers).where(and(eq(s.phoneNumbers.id, id), eq(s.phoneNumbers.userId, user.id))));
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Phone number not found");
@@ -205,6 +211,7 @@ export function registerIdentifierRoutes(app: Hono, ctx: AppContext, helpers: Me
 
   app.post("/phone_numbers/:id/attempt_verification", async (c) => {
     const { user } = await auth(c);
+    await assertAdditionalIdentificationsAllowed(ctx, user.id);
     const id = c.req.param("id")!;
     const row = first(await ctx.db.select().from(s.phoneNumbers).where(and(eq(s.phoneNumbers.id, id), eq(s.phoneNumbers.userId, user.id))));
     if (!row) throw new OrbitError(404, ErrorCodes.resource_not_found, "Phone number not found");

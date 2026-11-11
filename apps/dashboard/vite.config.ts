@@ -36,7 +36,8 @@ export default defineConfig({
     proxy: {
       "/v1": sameOriginProxy(),
       "/health": sameOriginProxy(),
-      "/oauth": sameOriginProxy(),
+      // Anchored so the dashboard's own `/oauth-apps` route is not proxied to the API in dev.
+      "^/oauth/": sameOriginProxy(),
       "/.well-known": sameOriginProxy(),
       "/docs": sameOriginProxy(),
     },

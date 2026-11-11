@@ -11,6 +11,7 @@ import { serializeMembership } from "../../serializers";
 import { acceptInvitation, addMembership, defaultRoleKey } from "../../services/orgs";
 import { hasSuggestionForOrganization, suggestedOrganizations, userVerifiedEmails } from "../../services/org-domains";
 import { assertNotLastAdmin } from "../../services/rbac";
+import { revokeOrganizationAuthorityGrants } from "../../services/oidc/revocation";
 import { resolveCaller } from "../orgs/auth";
 import { deletedObject, listParams, page, requireMembership, requireOrganization, requireOrganizationsEnabled } from "../orgs/shared";
 import { orgIdFromSuggestionId, serializeOrganizationInvitation, serializeSuggestion } from "../orgs/serializers";
@@ -61,6 +62,7 @@ export function registerCurrentUserRoutes(app: Hono, ctx: AppContext) {
     await assertNotLastAdmin(ctx, membership, "You are the last admin of this organization and cannot leave it");
     const payload = await serializeMembership(ctx, membership, { backend: true });
     await ctx.db.delete(s.organizationMemberships).where(eq(s.organizationMemberships.id, membership.id));
+    await revokeOrganizationAuthorityGrants(ctx, caller.userId);
     await emitEvent(ctx, "organizationMembership.deleted", payload);
     return c.json({ response: deletedObject("organization_membership", membership.id) });
   });

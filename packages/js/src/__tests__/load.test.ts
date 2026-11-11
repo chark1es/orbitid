@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { OrbitID } from "../orbit";
-import { clientJSON, clearCookies, cookieValue, environmentJSON, fakeJwt, publishableKey, sessionJSON, userJSON, ApiMock } from "./helpers";
+import { clientJSON, clearCookies, cookieValue, environmentJSON, fakeJwt, publishableKey, sessionJSON, userJSON, ApiMock, API_URL } from "./helpers";
 
 describe("OrbitID.load", () => {
   beforeEach(() => clearCookies());
@@ -45,6 +45,14 @@ describe("OrbitID.load", () => {
     expect(clientCall?.headers["x-orbitid-client"]).toMatch(/^@orbitid\/js\//);
     expect(clientCall?.init.credentials).toBe("include");
 
+    orbit.dispose();
+  });
+
+  it("exposes the publishable key and the Frontend API origin it encodes", () => {
+    const { orbit } = setup();
+    // React components resolve the API origin from these (the OAuth consent screen calls /oauth/*).
+    expect(orbit.publishableKey).toBe(publishableKey);
+    expect(orbit.fapi.baseUrl).toBe(API_URL);
     orbit.dispose();
   });
 

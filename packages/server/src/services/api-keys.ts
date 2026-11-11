@@ -191,7 +191,7 @@ export async function verifyApiKey(ctx: AppContext, secret: string, opts: { touc
   const row = first(await ctx.db.select().from(s.apiKeys).where(eq(s.apiKeys.secretHash, sha256(secret))));
   if (!row) throw invalid();
   if (!isApiKeyValid(row)) throw invalid();
-  if (!await subjectExists(ctx, row.subject)) throw invalid();
+  if (!await subjectUsable(ctx, row.subject)) throw invalid();
   if (opts.touch !== false) {
     await ctx.db.update(s.apiKeys).set({ lastUsedAt: Date.now() }).where(eq(s.apiKeys.id, row.id));
     return { ...row, lastUsedAt: Date.now() };
@@ -199,10 +199,26 @@ export async function verifyApiKey(ctx: AppContext, secret: string, opts: { touc
   return row;
 }
 
-async function subjectExists(ctx: AppContext, subject: string): Promise<boolean> {
-  if (subject.startsWith("user_")) return !!first(await ctx.db.select().from(s.users).where(eq(s.users.id, subject)));
+/** A key is only as usable as the account it acts for. Banned or currently-locked users cannot use one. */
+async function subjectUsable(ctx: AppContext, subject: string): Promise<boolean> {
+  const now = Date.now();
+  if (subject.startsWith("user_")) {
+    const user = first(await ctx.db.select().from(s.users).where(eq(s.users.id, subject)));
+    if (!user) return false;
+    if (user.banned) return false;
+    if (user.locked && (!user.lockoutExpiresAt || user.lockoutExpiresAt > now)) return false;
+    return true;
+  }
   if (subject.startsWith("org_")) return !!first(await ctx.db.select().from(s.organizations).where(eq(s.organizations.id, subject)));
   return false;
+}
+
+/** Banning a subject is a credential revocation, not a flag the verifier merely reads later. */
+export async function revokeApiKeysForSubject(ctx: AppContext, subject: string, reason = "subject revoked"): Promise<number> {
+  const rows = (await ctx.db.select().from(s.apiKeys)
+      .where(and(eq(s.apiKeys.subject, subject), eq(s.apiKeys.revoked, false))));
+  for (const row of rows) await revokeApiKey(ctx, row, reason);
+  return rows.length;
 }
 
 /**

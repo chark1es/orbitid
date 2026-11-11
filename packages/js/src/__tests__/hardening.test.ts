@@ -143,6 +143,39 @@ describe("TokenCache lifecycle", () => {
     now += 120_000;
     expect(cache.setFromSync("sess_1", null, token)).toBe(false);
   });
+
+  it("refuses a synced token minted by a different issuer", () => {
+    const now = 1_700_000_000_000;
+    const cache = new TokenCache({ now: () => now, issuer: API_URL });
+    const forged = fakeJwt({ sid: "sess_1", iss: "https://evil.example.com" }, { now });
+    expect(cache.trustsIssuer("https://evil.example.com")).toBe(false);
+    expect(cache.setFromSync("sess_1", null, forged)).toBe(false);
+    expect(cache.get("sess_1", null)).toBeUndefined();
+    // The instance's own token, trailing slash included, still syncs.
+    const mine = fakeJwt({ sid: "sess_1", iss: `${API_URL}/` }, { now });
+    expect(cache.setFromSync("sess_1", null, mine)).toBe(true);
+  });
+
+  it("does not adopt a cookie token whose issuer is foreign", async () => {
+    const api = new ApiMock((call) => {
+      if (call.method === "GET" && call.path === "/v1/client") {
+        const client = clientJSON({ sessions: [sessionJSON()], last_active_session_id: "sess_1" });
+        return { body: { response: client, client } };
+      }
+      if (call.method === "GET" && call.path === "/v1/client/environment") return { body: { response: environmentJSON() } };
+      return { status: 404, body: {} };
+    });
+    const orbit = new OrbitID(publishableKey, { fetch: api.fetch });
+    await orbit.load();
+    clearCookies();
+
+    const forged = fakeJwt({ sid: "sess_1", iss: "https://evil.example.com" });
+    document.cookie = `__session=${forged}; path=/`;
+    const authCookies = (orbit as unknown as { authCookies: { adoptSharedToken(sessionId: string): boolean } }).authCookies;
+    expect(authCookies.adoptSharedToken("sess_1")).toBe(false);
+    orbit.dispose();
+    clearCookies();
+  });
 });
 
 describe("cross-tab sync never persists a token", () => {
@@ -239,7 +272,9 @@ describe("cross-tab sync never persists a token", () => {
     });
     const orbit = new OrbitID(publishableKey, { fetch: api.fetch });
     await orbit.load();
-    const handle = (orbit as unknown as { handleSyncMessage(message: unknown): void }).handleSyncMessage.bind(orbit);
+    // The cross-tab message handler lives in `AuthCookies`; the test drives it directly.
+    const authCookies = (orbit as unknown as { authCookies: { handleMessage(message: unknown): void } }).authCookies;
+    const handle = authCookies.handleMessage.bind(authCookies);
 
     const fresh = fakeJwt({ sid: "sess_1", nonce: 99 });
     handle({ type: "token", sessionId: "sess_1", template: null, token: fresh });

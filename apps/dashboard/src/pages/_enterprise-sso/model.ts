@@ -10,6 +10,9 @@ export interface SsoForm {
   idpEntityId: string;
   idpSsoUrl: string;
   idpCertificate: string;
+  /** Optional import: a metadata URL, or the XML itself pasted/uploaded. */
+  idpMetadataUrl: string;
+  idpMetadataXml: string;
   attributeMappingText: string;
   discoveryUrl: string;
   clientId: string;
@@ -27,6 +30,8 @@ export const EMPTY_FORM: SsoForm = {
   idpEntityId: "",
   idpSsoUrl: "",
   idpCertificate: "",
+  idpMetadataUrl: "",
+  idpMetadataXml: "",
   attributeMappingText: formatJson({
     email: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
     first_name: "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",

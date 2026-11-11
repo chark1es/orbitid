@@ -1,11 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { ID_PREFIX, type JwtTemplateJSON, type PaginatedList } from "@orbitid/shared";
+import { ErrorCodes, ID_PREFIX, type JwtTemplateJSON, type PaginatedList } from "@orbitid/shared";
 import { eq } from "drizzle-orm";
 import * as s from "../../src/db/schema";
 import { newId } from "../../src/lib/ids";
 import {
   buildShortcodeContext, renderClaimsWithContext, renderTemplateClaims, renderTemplateValue,
 } from "../../src/services/jwt-templates";
+import { signSessionToken, verifySessionToken } from "../../src/services/tokens";
 import { createSessionFixture, createUser, json, testApp, type ErrorBody } from "./helpers";
 import { first } from "../../src/lib/db";
 
@@ -112,6 +113,38 @@ describe("jwt template shortcodes", () => {
   });
 });
 
+describe("jwt template tokens", () => {
+  it("are marked and refused as sessions, but can be verified deliberately", async () => {
+    const { api, app, ctx } = await testApp();
+    const user = await createUser(api);
+    const { sessionId } = await createSessionFixture(ctx, user.id);
+    await api("POST", "/v1/jwt_templates", { name: "long-lived", claims: { plan: "pro" }, lifetime: 315_360_000 });
+
+    const templateJwt = await signSessionToken(ctx, sessionId, { template: "long-lived" });
+    const payload = JSON.parse(Buffer.from(templateJwt.split(".")[1]!, "base64url").toString()) as Record<string, unknown>;
+    expect(payload.token_type).toBe("jwt_template");
+    expect(payload.plan).toBe("pro");
+    expect(Number(payload.exp) - Number(payload.iat)).toBe(315_360_000);
+
+    await expect(verifySessionToken(ctx, templateJwt)).rejects.toMatchObject({ code: ErrorCodes.authentication_invalid });
+    await expect(verifySessionToken(ctx, templateJwt, { tokenType: "jwt_template" })).resolves.toMatchObject({ sub: user.id, sid: sessionId });
+
+    // Ordinary session tokens are still accepted.
+    const sessionJwt = await signSessionToken(ctx, sessionId);
+    await expect(verifySessionToken(ctx, sessionJwt)).resolves.toMatchObject({ sub: user.id, sid: sessionId });
+
+    // The Frontend API's bearer-session routes use the same verifier: a template token is not a session there either.
+    await ctx.settings.update({ organizations: { enabled: true } });
+    const res = await app.request("/v1/client/organizations", {
+      method: "POST",
+      headers: { authorization: `Bearer ${templateJwt}`, "content-type": "application/json" },
+      body: JSON.stringify({ name: "Acme" }),
+    });
+    expect(res.status).toBe(401);
+    expect(await ctx.db.select().from(s.organizations)).toHaveLength(0);
+  });
+});
+
 describe("jwt template CRUD", () => {
   it("creates, lists, updates and deletes templates", async () => {
     const { api, ctx } = await testApp();
@@ -136,7 +169,7 @@ describe("jwt template CRUD", () => {
   it("rejects reserved claims and out-of-range options", async () => {
     const { api } = await testApp();
     // `roles` / `role_permissions` are the instance-role claims: a template must not be able to grant one.
-    for (const claim of ["sub", "iss", "exp", "azp", "sid", "act", "org_id", "org_role", "org_permissions", "roles", "role_permissions", "fva", "sts", "anonymous"]) {
+    for (const claim of ["sub", "iss", "exp", "azp", "sid", "act", "org_id", "org_role", "org_permissions", "roles", "role_permissions", "fva", "sts", "anonymous", "token_type"]) {
       const res = await api("POST", "/v1/jwt_templates", { name: `t-${claim}`, claims: { [claim]: "x" } });
       expect(res.status).toBe(422);
       expect((await json<ErrorBody>(res)).errors[0]!.code).toBe("form_param_value_invalid");
@@ -146,6 +179,32 @@ describe("jwt template CRUD", () => {
     expect((await api("POST", "/v1/jwt_templates", { name: "skew", allowed_clock_skew: 301 })).status).toBe(422);
     expect((await api("POST", "/v1/jwt_templates", { name: "bad name!" })).status).toBe(422);
     expect((await api("POST", "/v1/jwt_templates", { name: "vectors", claims: [] })).status).toBe(422);
+  });
+
+  it("changes only the fields a PATCH sends", async () => {
+    const { api } = await testApp();
+    const created = await json<JwtTemplateJSON>(await api("POST", "/v1/jwt_templates", {
+      name: "keep-options",
+      claims: { plan: "pro" },
+      lifetime: 120,
+      allowed_clock_skew: 30,
+      custom_signing_key: true,
+    }));
+    const updated = await json<JwtTemplateJSON>(await api("PATCH", `/v1/jwt_templates/${created.id}`, { name: "renamed" }));
+    expect(updated).toMatchObject({
+      name: "renamed",
+      claims: { plan: "pro" },
+      lifetime: 120,
+      allowed_clock_skew: 30,
+      custom_signing_key: true,
+      signing_algorithm: "RS256",
+    });
+
+    // Changing the algorithm under a custom key rotates that key instead of turning custom signing off.
+    const rotated = await json<JwtTemplateJSON>(await api("PATCH", `/v1/jwt_templates/${created.id}`, { signing_algorithm: "HS256" }));
+    expect(rotated.custom_signing_key).toBe(true);
+    expect(rotated.signing_algorithm).toBe("HS256");
+    expect(typeof rotated.signing_key).toBe("string");
   });
 
   it("generates and rotates custom signing keys", async () => {

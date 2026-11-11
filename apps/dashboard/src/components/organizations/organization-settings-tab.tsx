@@ -98,7 +98,8 @@ export function OrganizationSettingsTab({ org, onChanged }: { org: OrganizationJ
                 <Input
                   id="org-settings-max"
                   type="number"
-                  min={1}
+                  min={0}
+                  title="0 means no limit"
                   value={maxMemberships}
                   onChange={(event) => setMaxMemberships(event.target.value)}
                 />

@@ -10,6 +10,7 @@ import { serializeUser } from "../serializers";
 import { getMembershipContext } from "./orgs";
 import { renderTemplateClaims } from "./jwt-templates";
 import { roleClaimsForUser } from "./user-roles";
+import { isSessionExpired } from "./sessions";
 import { RESERVED_SESSION_CLAIMS } from "../lib/reserved-claims";
 
 export { RESERVED_SESSION_CLAIMS };
@@ -88,6 +89,36 @@ export async function getJwks(ctx: AppContext): Promise<{ keys: JWK[] }> {
   }
   return { keys: rows.map((r) => r.publicJwk as unknown as JWK) };
 }
+
+/**
+ * Boot-time guard: every stored signing key must be decryptable with the encryption key this process has.
+ * Without it a changed (or missing) `ORBITID_ENCRYPTION_KEY` would surface as a 500 on the first token mint,
+ * which every browser experiences as "signed out at random". Failing here names the cause instead of silently
+ * generating a new key, which would invalidate every outstanding session.
+ */
+export async function assertSigningKeysReadable(ctx: AppContext): Promise<void> {
+  const rows = (await ctx.db.select().from(s.signingKeys));
+  for (const row of rows) {
+    try {
+      await loadKey(ctx, row);
+    } catch (cause) {
+      throw new Error(
+        `Cannot decrypt signing key "${row.kid}" with the configured ORBITID_ENCRYPTION_KEY. ` +
+          "Restore the key value this instance was created with: a different key cannot read the stored signing keys, " +
+          "and generating new ones would sign every user out. No key was regenerated.",
+        { cause },
+      );
+    }
+  }
+}
+
+/** Additional clock skew tolerated when verifying a stored session JWT (server-side possession checks). */
+const SERVER_CLOCK_TOLERANCE_SECONDS = 60;
+/**
+ * Expiry skew for those checks. Deliberately much smaller than the early-clock tolerance: a 60 s session JWT must
+ * stop verifying ~70 s after mint, or a revoked session would remain usable for another minute.
+ */
+const SERVER_EXP_CLOCK_TOLERANCE_SECONDS = 10;
 
 // ───────────── claim helpers ─────────────
 
@@ -213,7 +244,7 @@ export async function signSessionToken(ctx: AppContext, sessionId: string, opts:
   if (user.banned) throw new OrbitError(403, ErrorCodes.user_banned, "This user has been banned");
   const nowMs = Date.now();
   const inactivityMs = ctx.settings.get().session.inactivityTimeoutSeconds * 1000;
-  if (session.expireAt <= nowMs || (inactivityMs > 0 && nowMs - session.lastActiveAt > inactivityMs)) {
+  if (isSessionExpired(ctx, session) || (inactivityMs > 0 && nowMs - session.lastActiveAt > inactivityMs)) {
     throw new OrbitError(401, ErrorCodes.authentication_invalid, "This session has expired");
   }
 
@@ -245,6 +276,9 @@ export async function signSessionToken(ctx: AppContext, sessionId: string, opts:
     exp: nowSeconds + lifetime,
     sts: session.status === "pending" ? "pending" : "active",
     fva: [minutesSince(session.firstFactorVerifiedAt), minutesSince(session.secondFactorVerifiedAt)],
+    // A template token describes the same session but is an integration credential, never a session credential:
+    // a template lifetime must not turn into a long-lived session just because it was signed with the instance key.
+    token_type: opts.template ? "jwt_template" : "session",
   };
   if (user.isAnonymous) base.anonymous = true;
   if (opts.azp) base.azp = opts.azp;
@@ -283,7 +317,11 @@ async function importTemplateKey(ctx: AppContext, encrypted: string, algorithm: 
   return (await importJWK(JSON.parse(plain), algorithm)) as KeyLike;
 }
 
-export async function verifySessionToken(ctx: AppContext, jwt: string): Promise<SessionClaims> {
+export async function verifySessionToken(
+  ctx: AppContext,
+  jwt: string,
+  opts: { tokenType?: "session" | "jwt_template" } = {},
+): Promise<SessionClaims> {
   const jwks = await getJwks(ctx);
   try {
     const { payload } = await jwtVerify(jwt, createLocalJWKSet(jwks), {
@@ -291,10 +329,31 @@ export async function verifySessionToken(ctx: AppContext, jwt: string): Promise<
       // Instance keys are asymmetric only. Pinning the algorithms rejects `none` and HS256 confusion,
       // where a public key would otherwise be tried as an HMAC secret.
       algorithms: ["RS256"],
+      // A token minted by this server can be presented back seconds later from a process whose clock is
+      // slightly behind. Leeway here never extends a session's life (the DB is authoritative) and never
+      // accepts another issuer's token. `exp` is enforced separately below with a 10 s bound.
+      clockTolerance: SERVER_CLOCK_TOLERANCE_SECONDS,
     });
+    const nowSeconds = Date.now() / 1000;
+    if (typeof payload.exp === "number" && payload.exp + SERVER_EXP_CLOCK_TOLERANCE_SECONDS < nowSeconds) {
+      throw new OrbitError(401, ErrorCodes.authentication_invalid, "Invalid session token");
+    }
+    for (const claim of ["nbf", "iat"] as const) {
+      const value = payload[claim];
+      if (typeof value === "number" && value > nowSeconds + SERVER_CLOCK_TOLERANCE_SECONDS) {
+        throw new OrbitError(401, ErrorCodes.authentication_invalid, "Invalid session token");
+      }
+    }
     // Session tokens never carry an audience; machine and OIDC tokens signed by the same key do.
     if (typeof payload.sid !== "string" || typeof payload.sub !== "string" || payload.aud !== undefined) {
       throw new OrbitError(401, ErrorCodes.authentication_invalid, "Not a session token");
+    }
+    if (opts.tokenType === "jwt_template") {
+      if (payload.token_type !== "jwt_template") {
+        throw new OrbitError(401, ErrorCodes.authentication_invalid, "Not a JWT template token");
+      }
+    } else if (payload.token_type === "jwt_template") {
+      throw new OrbitError(401, ErrorCodes.authentication_invalid, "JWT template tokens cannot be used as session tokens");
     }
     return payload as SessionClaims;
   } catch {

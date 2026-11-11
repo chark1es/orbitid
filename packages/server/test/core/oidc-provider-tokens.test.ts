@@ -166,7 +166,8 @@ describe("OIDC — introspection and revocation", () => {
     expect(doc.introspection_endpoint).toBe(`${BASE_URL}/oauth/introspect`);
     expect(doc.revocation_endpoint).toBe(`${BASE_URL}/oauth/revoke`);
     expect(doc.introspection_endpoint_auth_methods_supported).toEqual(["client_secret_basic", "client_secret_post"]);
-    expect(doc.revocation_endpoint_auth_methods_supported).toEqual(["client_secret_basic", "client_secret_post"]);
+    // RFC 7009 allows a public client to revoke its own token with `none` (client_id only).
+    expect(doc.revocation_endpoint_auth_methods_supported).toEqual(["client_secret_basic", "client_secret_post", "none"]);
   });
 });
 

@@ -1,12 +1,13 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
-import { Button, Input, Label } from "@orbitid/ui";
+import { Button, Input, Label, OrbitMark } from "@orbitid/ui";
 import { Check, Eye, EyeOff, Loader2, Sun, TriangleAlert, X } from "lucide-react";
 import { API_URL, ApiError, DEFAULT_API_URL, getApiUrl, isSameOrigin } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { errorMessage } from "../lib/errors";
 import { databaseLabel, fetchInstanceHealth, type InstanceHealth } from "../lib/instance-health";
 import { ThemeToggle } from "../components/layout/theme-toggle";
+import { FormSkeleton } from "../components/shared/page-skeleton";
 
 type HealthState =
   | { state: "checking" }
@@ -18,15 +19,6 @@ function redirectTarget(state: unknown): string {
     return state.from;
   }
   return "/";
-}
-
-function OrbitMark() {
-  return (
-    <svg viewBox="0 0 32 32" className="size-5" aria-hidden="true">
-      <circle cx="16" cy="16" r="9" fill="none" stroke="currentColor" strokeWidth="2.5" />
-      <circle cx="16" cy="16" r="2.5" fill="currentColor" />
-    </svg>
-  );
 }
 
 export default function LoginPage() {
@@ -76,7 +68,7 @@ export default function LoginPage() {
       return;
     }
     if (!secretKey.trim()) {
-      setError("Enter the secret key. It is printed when the server starts.");
+      setError("Enter the secret key. Print it with `orbitid keys` if you do not have it.");
       return;
     }
     if (!isSameOrigin(apiUrl.trim())) {
@@ -94,7 +86,7 @@ export default function LoginPage() {
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 401) {
         setError(
-          `The server rejected that secret key. Copy the key that starts with sk_ from ./data/keys.json or the explicit keys command, then sign in again.`,
+          `The server rejected that secret key. Copy the key that starts with sk_ from ./data/keys.json or run the keys command, then sign in again.`,
         );
       } else {
         setError(errorMessage(cause, "The instance did not answer. Check the URL and that the server is running."));
@@ -106,8 +98,20 @@ export default function LoginPage() {
 
   if (checking) {
     return (
-      <div role="status" className="flex min-h-svh items-center justify-center gap-2 text-sm text-muted-foreground">
-        <Loader2 className="size-4 animate-spin" aria-hidden /> Checking your session…
+      <div className="min-h-svh bg-background">
+        <header className="flex h-12 items-center justify-between border-b border-border px-6">
+          <div className="flex items-center gap-2.5">
+            <span className="flex size-6 items-center justify-center rounded-sm bg-primary text-primary-foreground">
+              <OrbitMark />
+            </span>
+            <span className="text-sm font-semibold">OrbitID</span>
+          </div>
+        </header>
+        <main className="mx-auto grid w-full max-w-[1040px] grid-cols-[minmax(0,1fr)] gap-10 px-6 py-12 lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)] lg:gap-16 lg:py-20">
+          <section aria-label="Checking your session">
+            <FormSkeleton label="Checking your session" />
+          </section>
+        </main>
       </div>
     );
   }
@@ -130,8 +134,7 @@ export default function LoginPage() {
             Sign in with your secret key
           </h1>
           <p className="mt-2 max-w-[60ch] text-sm text-muted-foreground">
-            The dashboard exchanges the key for a session cookie and keeps it in this browser only until you sign out or
-            it expires. The key itself is never stored.
+            Exchanged once for an 8-hour session cookie; the key is never stored.
           </p>
 
           <form onSubmit={onSubmit} className="mt-8 space-y-5" noValidate>
@@ -211,19 +214,20 @@ export default function LoginPage() {
         </section>
 
         <aside className="min-w-0 lg:border-l lg:border-border lg:pl-10" aria-labelledby="key-location-heading">
-          <h2 id="key-location-heading" className="text-base font-semibold">
+          <h2 id="key-location-heading" className="text-[0.9375rem] font-heading tracking-[-0.01em]">
             Where the key is
           </h2>
           <p className="mt-2 max-w-[62ch] text-sm leading-6 text-muted-foreground">
-            Printed when the server starts, and stored in <code className="font-data text-foreground">&lt;data dir&gt;/keys.json</code> (default{" "}
-            <code className="font-data text-foreground">./data/keys.json</code>).
+            Stored in <code className="font-data text-foreground">&lt;data dir&gt;/keys.json</code>. The start command
+            hides the secret key; <code className="font-data text-foreground">orbitid keys</code> prints it.
           </p>
 
           <dl className="mt-6 space-y-4 border-t border-border pt-6 text-sm">
             <div>
               <dt className="font-medium">Server log</dt>
               <dd className="mt-0.5 text-muted-foreground">
-                The first start prints the publishable key and the secret key once.
+                Startup prints the publishable key and leaves the secret key hidden.<br />
+                <code className="font-data text-foreground">orbitid keys</code> prints both keys on demand.
               </dd>
             </div>
             <div>
@@ -265,7 +269,7 @@ function ConnectionResult({
   return (
     <section aria-labelledby="connection-heading" className="mt-10 border-t border-border pt-5">
       <div className="flex items-center justify-between gap-3">
-        <h2 id="connection-heading" className="text-[0.8125rem] font-semibold">
+        <h2 id="connection-heading" className="text-[0.9375rem] font-heading tracking-[-0.01em]">
           Connection
         </h2>
         <Button type="button" variant="ghost" size="xs" onClick={onRetry} className="text-muted-foreground">
@@ -296,21 +300,21 @@ function ConnectionResult({
       {health.state === "ok" ? (
         <dl className="mt-3 grid grid-cols-[minmax(0,1fr)] gap-1.5 text-sm">
           <div className="flex items-baseline gap-2">
-            <dt className="flex w-32 shrink-0 items-center gap-1.5 text-muted-foreground">
-              <Check className="size-3.5 text-go" aria-hidden />
+            <dt className="flex w-36 shrink-0 items-center gap-1.5 text-muted-foreground">
+              <Check className="size-4 text-go" aria-hidden />
               Reachable
             </dt>
             <dd className="min-w-0 truncate font-data">{health.result.apiUrl}</dd>
           </div>
           <div className="flex items-baseline gap-2">
-            <dt className="w-32 shrink-0 pl-5 text-muted-foreground">Database</dt>
+            <dt className="w-36 shrink-0 pl-5 text-muted-foreground">Database</dt>
             <dd className="min-w-0">
               {databaseLabel(health.result.database)}
               {health.result.database ? "" : ". This server build does not report it yet."}
             </dd>
           </div>
           <div className="flex items-baseline gap-2">
-            <dt className="w-32 shrink-0 pl-5 text-muted-foreground">Publishable key</dt>
+            <dt className="w-36 shrink-0 pl-5 text-muted-foreground">Publishable key</dt>
             <dd className="min-w-0 truncate font-data">
               {health.result.publishableKey || "Not reported"}
             </dd>

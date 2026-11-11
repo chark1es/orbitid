@@ -89,8 +89,8 @@
   --chart-5: oklch(0.8 0.14 80);
   --sidebar: oklch(0.145 0.008 60);
   --sidebar-foreground: oklch(0.93 0.006 85);
-  --sidebar-primary: oklch(0.57 0.235 28);
-  --sidebar-primary-foreground: oklch(0.995 0.002 85);
+  --sidebar-primary: oklch(0.68 0.2 27);
+  --sidebar-primary-foreground: oklch(0.17 0.008 60);
   --sidebar-accent: oklch(0.22 0.008 60);
   --sidebar-accent-foreground: oklch(0.93 0.006 85);
   --sidebar-border: oklch(0.27 0.008 60);
@@ -142,7 +142,9 @@
 @theme {
   --font-sans: "Hanken Grotesk Variable", "Helvetica Neue", Arial, sans-serif;
   --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
-  --radius-xs: 2px;
+  /* Headings and figures share one weight. `font-heading` is the only heading weight in the product. */
+  --font-weight-heading: 650;
+  --radius-xs: 3px;
   --radius-sm: 3px;
   --radius-md: 4px;
   --radius-lg: 6px;
@@ -157,7 +159,23 @@
   letter-spacing: -0.01em;
 }
 
+/**
+ * Optical centring for one-line control labels. Hanken Grotesk's cap height sits high in its
+ * line box; trimming the box to cap/alphabetic edges puts the visible glyphs on the control's
+ * vertical centre, so no call site needs a `translate-y` nudge.
+ */
+@utility control-optical {
+  line-height: 1;
+  text-box-trim: trim-both;
+  text-box-edge: cap alphabetic;
+}
+
 @layer base {
+  /* Icons are one family at one weight: 1.5px, everywhere. Size utilities still set width/height. */
+  svg.lucide {
+    stroke-width: 1.5;
+  }
+
   * {
     border-color: var(--border);
   }
@@ -263,7 +281,8 @@
       scroll-behavior: auto !important;
     }
 
-    .activity-row-new > td {
+    .activity-row-new > td,
+    li.activity-row-new {
       animation: none !important;
     }
 
@@ -320,6 +339,12 @@
 }
 
 .activity-row-new > td {
+  animation:
+    activity-row-in 160ms cubic-bezier(0.22, 1, 0.36, 1) both,
+    activity-hairline-fade 1100ms ease-out both;
+}
+
+li.activity-row-new {
   animation:
     activity-row-in 160ms cubic-bezier(0.22, 1, 0.36, 1) both,
     activity-hairline-fade 1100ms ease-out both;

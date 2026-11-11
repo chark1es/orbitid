@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { sql, type SQL } from "drizzle-orm";
 import { createContext } from "../../src/bootstrap";
-import { dialect, runMigrations } from "../../src/db";
+import { dialect } from "../../src/db";
 import * as s from "../../src/db/schema";
 import type { AppContext } from "../../src/context";
 
@@ -27,9 +27,12 @@ describe("authorization integrity upgrade", () => {
         { userId: "upgrade_user", roleKey: "app:upgrade", createdAt: now, updatedAt: now },
         { userId: "upgrade_user", roleKey: "app:orphan", createdAt: now, updatedAt: now },
       ]);
-      const journal = dialect === "sqlite" ? '__drizzle_migrations' : 'drizzle.__drizzle_migrations';
-      await execute(ctx, sql.raw(`DELETE FROM ${journal} WHERE created_at = (SELECT MAX(created_at) FROM ${journal})`));
-      await runMigrations({ db: ctx.db, driver: ctx.database.driver, dialect, label: ctx.database.label, close: ctx.close });
+      // Apply the integrity migration itself, exactly as released. Replaying it through the migrator would also
+      // re-run later migrations, and migrations are intentionally not idempotent (an ADD COLUMN cannot run twice);
+      // this test is about the integrity rewrite, not about replaying unrelated DDL.
+      const integrity = dialect === "sqlite" ? "sqlite/0008_authorization_integrity.sql" : "postgres/0006_authorization_integrity.sql";
+      const integritySql = readFileSync(new URL(`../../drizzle/${integrity}`, import.meta.url), "utf8");
+      for (const statement of integritySql.split("--> statement-breakpoint").filter((text) => text.trim())) await execute(ctx, sql.raw(statement));
       expect((await ctx.db.select().from(s.userRoles)).map((row) => row.roleKey)).toEqual(["app:upgrade"]);
       await expect(ctx.db.insert(s.userRoles).values({ userId: "upgrade_user", roleKey: "app:orphan", createdAt: now, updatedAt: now })).rejects.toThrow();
     } finally { await ctx.close(); }

@@ -1,6 +1,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import {
+  OrbitMark,
   Sidebar,
   SidebarContent,
   SidebarGroup,
@@ -14,17 +15,18 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@orbitid/ui";
-import { Loader2 } from "lucide-react";
 import { getApiUrl } from "../../lib/api";
 import { useShowOrganizations } from "../../lib/features";
 import { useInstance } from "../../lib/instance";
 import { Breadcrumbs } from "./breadcrumbs";
+import { BreadcrumbLabelProvider } from "./breadcrumb-label";
 import { CommandPalette } from "./command-palette";
 import { DocumentTitle } from "./document-title";
 import { InstanceChip } from "./instance-chip";
 import { visibleNavGroups } from "./nav";
 import { ThemeToggle } from "./theme-toggle";
 import { UserMenu } from "./user-menu";
+import { PageSkeleton } from "../shared/page-skeleton";
 
 function isActivePath(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";
@@ -47,11 +49,7 @@ function useCompactRail(): boolean {
 }
 
 function PageLoader() {
-  return (
-    <div className="flex min-h-64 flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
-      <Loader2 className="size-4 animate-spin" aria-hidden /> Loading page
-    </div>
-  );
+  return <PageSkeleton rows={2} label="Loading page" />;
 }
 
 function hostOf(url: string): string {
@@ -60,15 +58,6 @@ function hostOf(url: string): string {
   } catch {
     return url;
   }
-}
-
-function OrbitMark() {
-  return (
-    <svg viewBox="0 0 32 32" className="size-5" aria-hidden="true">
-      <circle cx="16" cy="16" r="9" fill="none" stroke="currentColor" strokeWidth="2.5" />
-      <circle cx="16" cy="16" r="2.5" fill="currentColor" />
-    </svg>
-  );
 }
 
 export function AppSidebar() {
@@ -143,23 +132,25 @@ export function AppShell() {
       </a>
       <AppSidebar />
       <SidebarInset className="min-w-0">
-        <header className="sticky top-0 z-20 grid h-12 shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-b border-border bg-background px-3">
-          <SidebarTrigger className="text-muted-foreground" />
-          <div className="hidden min-w-0 sm:block">
-            <Breadcrumbs />
+        <BreadcrumbLabelProvider>
+          <header className="sticky top-0 z-20 grid h-12 shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-b border-border bg-background px-3">
+            <SidebarTrigger className="text-muted-foreground" />
+            <div className="hidden min-w-0 overflow-hidden sm:block">
+              <Breadcrumbs />
+            </div>
+            <div className="flex min-w-0 items-center justify-self-end gap-1.5">
+              <InstanceChip className="flex min-w-0 items-center" />
+              <CommandPalette />
+              <ThemeToggle />
+              <UserMenu />
+            </div>
+          </header>
+          <div id="main-content" className="mx-auto flex w-full max-w-[1280px] flex-1 flex-col gap-6 px-6 py-6">
+            <Suspense fallback={<PageLoader />}>
+              <Outlet />
+            </Suspense>
           </div>
-          <div className="flex items-center justify-self-end gap-1.5">
-            <InstanceChip className="flex items-center" />
-            <CommandPalette />
-            <ThemeToggle />
-            <UserMenu />
-          </div>
-        </header>
-        <div id="main-content" className="mx-auto flex w-full max-w-[1280px] flex-1 flex-col gap-6 px-6 py-6">
-          <Suspense fallback={<PageLoader />}>
-            <Outlet />
-          </Suspense>
-        </div>
+        </BreadcrumbLabelProvider>
       </SidebarInset>
     </SidebarProvider>
   );

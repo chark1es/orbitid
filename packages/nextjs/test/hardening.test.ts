@@ -1,10 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { SignJWT, generateKeyPair, exportSPKI } from "jose";
+import { describe, expect, it, vi } from "vitest";
+import { SignJWT, generateKeyPair, exportSPKI, exportJWK } from "jose";
 import { NextRequest } from "next/server";
 import { orbitIdMiddleware } from "../src/middleware";
 import { createRouteMatcher } from "../src/route-matcher";
 import { buildAuthUrl, getServerEnv, toAbsoluteUrl } from "../src/env";
-import { completeHandshake, HANDSHAKE_MARKER_COOKIE } from "../src/handshake";
+import { completeHandshake, HANDSHAKE_MARKER_COOKIE, HANDSHAKE_RETRY_MARKER } from "../src/handshake";
 import { resolveRequestAuthState } from "../src/resolve";
 import { verifySessionToken } from "../src/token";
 import { getTestKeys, signExpiredToken, signTestToken } from "./helpers";
@@ -255,15 +255,155 @@ describe("handshake cookie boundary", () => {
     expect(outcome?.response.headers.getSetCookie().join(" ")).not.toContain("__session=");
   });
 
-  it("drops a tampered handshake token and clears the session", async () => {
+  it("drops a tampered handshake token without clearing the browser", async () => {
     const env = getServerEnv({ jwtKey: await jwtKey(), apiUrl: "https://auth.test" });
     const request = new NextRequest(`${APP}/dashboard?__orbit_handshake=tampered`, {
-      headers: { cookie: `${HANDSHAKE_MARKER_COOKIE}=1` },
+      headers: { cookie: `__session=stale; __client_uat=1700000000; ${HANDSHAKE_MARKER_COOKIE}=1` },
     });
     const outcome = await completeHandshake(request, env, {});
-    expect(outcome?.status).toBe("signed-out");
+    expect(outcome?.status).toBe("unavailable");
+    expect(outcome?.response.status).toBe(503);
     const cookies = outcome?.response.headers.getSetCookie().join(" ") ?? "";
-    expect(cookies).toContain("__session=;");
-    expect(cookies).toContain("__client_uat=0");
+    // A bad token is a transient verification failure, not the API saying the session ended: keep the
+    // cookies and serve the same retriable 503 as `transient`, with the plain marker no longer re-armed alone.
+    expect(cookies).not.toContain("__session=;");
+    expect(cookies).not.toContain("__client_uat=0");
+    expect(cookies).toContain(`${HANDSHAKE_MARKER_COOKIE}=${HANDSHAKE_RETRY_MARKER}`);
+  });
+});
+
+describe("resolve does not handshake for a tampered token", () => {
+  it("stays signed out for an invalid token even when __client_uat is live", async () => {
+    const other = await generateKeyPair("RS256");
+    const now = Math.floor(Date.now() / 1000);
+    const forged = await new SignJWT({ sid: "sess_forged" })
+      .setProtectedHeader({ alg: "RS256" })
+      .setSubject("user_victim")
+      .setIssuedAt(now)
+      .setExpirationTime(now + 60)
+      .setIssuer("https://auth.test")
+      .sign(other.privateKey);
+    const env = getServerEnv({ jwtKey: await jwtKey(), apiUrl: "https://auth.test" });
+
+    const state = await resolveRequestAuthState(
+      new Headers({ cookie: `__session=${forged}; __client_uat=${now}` }),
+      `${APP}/admin`,
+      env,
+    );
+
+    // Only an expired token may start a handshake; a bad signature is treated as signed out.
+    expect(state.status).toBe("signed-out");
+    expect(state.token).toBeNull();
+    expect(state.claims).toBeNull();
+  });
+});
+
+
+describe("a signing-key rotation is not a tampered token", () => {
+  async function jwksServer(keys: Record<string, unknown>[]) {
+    let fetches = 0;
+    const { createServer } = await import("node:http");
+    const server = createServer((_req, res) => {
+      const key = keys[Math.min(fetches, keys.length - 1)]!;
+      fetches += 1;
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ keys: [key] }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("no test port");
+    return {
+      url: `http://127.0.0.1:${address.port}`,
+      count: () => fetches,
+      close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    };
+  }
+
+  it("forces one JWKS refetch when the token names a key the cache does not know", async () => {
+    const oldPair = await generateKeyPair("RS256");
+    const newPair = await generateKeyPair("RS256");
+    const oldJwk = { ...(await exportJWK(oldPair.publicKey)), kid: "old-key", alg: "RS256", use: "sig" };
+    const newJwk = { ...(await exportJWK(newPair.publicKey)), kid: "new-key", alg: "RS256", use: "sig" };
+    const server = await jwksServer([oldJwk, newJwk]);
+    try {
+      const now = Math.floor(Date.now() / 1000);
+      const token = await new SignJWT({ sid: "sess_rotated" })
+        .setProtectedHeader({ alg: "RS256", kid: "new-key" })
+        .setSubject("user_rotated")
+        .setIssuedAt(now)
+        .setExpirationTime(now + 60)
+        .setIssuer(server.url)
+        .sign(newPair.privateKey);
+
+      const result = await verifySessionToken(token, { apiUrl: server.url, issuer: server.url });
+      expect(result.valid).toBe(true);
+      expect(server.count()).toBeGreaterThanOrEqual(2);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("bounds forced JWKS reloads so an attacker-controlled kid cannot fetch on every request", async () => {
+    const oldPair = await generateKeyPair("RS256");
+    const attackerPair = await generateKeyPair("RS256");
+    const oldJwk = { ...(await exportJWK(oldPair.publicKey)), kid: "old-key", alg: "RS256", use: "sig" };
+    const server = await jwksServer([oldJwk]);
+    try {
+      const now = Math.floor(Date.now() / 1000);
+      for (let index = 0; index < 20; index += 1) {
+        const token = await new SignJWT({ sid: `sess_attacker_${index}` })
+          .setProtectedHeader({ alg: "RS256", kid: `made-up-${index}` })
+          .setSubject("user_attacker")
+          .setIssuedAt(now)
+          .setExpirationTime(now + 60)
+          .setIssuer(server.url)
+          .sign(attackerPair.privateKey);
+        const result = await verifySessionToken(token, { apiUrl: server.url, issuer: server.url });
+        expect(result.valid).toBe(false);
+        if (!result.valid) expect(result.reason).toBe("unverifiable-key");
+      }
+      // One normal key-set fetch plus at most one forced reload for the whole burst of twenty unknown kids.
+      expect(server.count()).toBeLessThanOrEqual(2);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("hands a live client off to the handshake instead of signing it out", async () => {
+    const oldPair = await generateKeyPair("RS256");
+    const unknownPair = await generateKeyPair("RS256");
+    const oldJwk = { ...(await exportJWK(oldPair.publicKey)), kid: "old-key", alg: "RS256", use: "sig" };
+    const server = await jwksServer([oldJwk]);
+    try {
+      const now = Math.floor(Date.now() / 1000);
+      const token = await new SignJWT({ sid: "sess_unknown" })
+        .setProtectedHeader({ alg: "RS256", kid: "rotated-elsewhere" })
+        .setSubject("user_unknown")
+        .setIssuedAt(now)
+        .setExpirationTime(now + 60)
+        .setIssuer(server.url)
+        .sign(unknownPair.privateKey);
+
+      const env = getServerEnv({ apiUrl: server.url });
+      const state = await resolveRequestAuthState(
+        new Headers({ cookie: `__session=${token}; __client_uat=${now}` }),
+        `${APP}/admin`,
+        env,
+      );
+      // A rotation that has not reached this process is exactly what the handshake heals.
+      expect(state.status).toBe("handshake");
+      expect(state.token).toBeNull();
+
+      const withoutLiveClient = await resolveRequestAuthState(
+        new Headers({ cookie: `__session=${token}; __client_uat=0` }),
+        `${APP}/admin`,
+        env,
+      );
+      // With no live client proof there is nothing to hand off: the browser stays signed out.
+      expect(withoutLiveClient.status).toBe("signed-out");
+      expect(withoutLiveClient.reason).toBe("session-token-unverifiable-key");
+    } finally {
+      await server.close();
+    }
   });
 });

@@ -8,6 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@orbitid/ui";
+import { OVERLAY_WIDTH } from "./overlay-sizes";
 import { TriangleAlert } from "lucide-react";
 import { CopyButton } from "./copy-button";
 
@@ -29,9 +30,9 @@ export function SecretReveal({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="rounded-[6px] sm:max-w-lg">
+      <DialogContent className={`rounded-[6px] ${OVERLAY_WIDTH.form}`}>
         <DialogHeader>
-          <DialogTitle className="text-base font-[650] tracking-[-0.01em]">{title}</DialogTitle>
+          <DialogTitle className="text-base font-heading tracking-[-0.01em]">{title}</DialogTitle>
           {description ? (
             <DialogDescription className="text-sm leading-6 text-muted-foreground">{description}</DialogDescription>
           ) : null}

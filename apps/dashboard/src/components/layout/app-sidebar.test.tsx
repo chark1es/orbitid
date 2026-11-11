@@ -17,20 +17,23 @@ describe("navigation rail", () => {
     renderSidebar();
 
     expect(screen.getByRole("link", { name: "Roles & permissions" })).toBeTruthy();
-    await waitFor(() => expect(screen.getAllByRole("link", { name: "Organizations" })).toHaveLength(1));
-    expect(screen.getAllByRole("link", { name: "Organizations" }).map((link) => link.getAttribute("href"))).toEqual([
-      "/settings/organizations",
-    ]);
+    await waitFor(() =>
+      expect(screen.getAllByRole("link", { name: "Organization settings" }).map((link) => link.getAttribute("href"))).toEqual([
+        "/settings/organizations",
+      ]),
+    );
+    expect(screen.queryByRole("link", { name: "Organizations" })).toBeNull();
   });
 
-  it("shows them once organizations are on", async () => {
+  it("shows them once organizations are on, with distinct labels for the settings pages", async () => {
     mockApi({ instance: instanceBody((settings) => (settings.organizations.enabled = true)) });
     renderSidebar();
 
-    await waitFor(() => expect(screen.getAllByRole("link", { name: "Organizations" })).toHaveLength(2));
-    expect(screen.getAllByRole("link", { name: "Organizations" }).map((link) => link.getAttribute("href"))).toEqual([
-      "/organizations",
+    await waitFor(() => expect(screen.getByRole("link", { name: "Organizations" }).getAttribute("href")).toBe("/organizations"));
+    expect(screen.getAllByRole("link", { name: "Organizations" })).toHaveLength(1);
+    expect(screen.getByRole("link", { name: "Session settings" }).getAttribute("href")).toBe("/settings/sessions");
+    expect(screen.getByRole("link", { name: "Organization settings" }).getAttribute("href")).toBe(
       "/settings/organizations",
-    ]);
+    );
   });
 });

@@ -36,7 +36,7 @@ export function MemberRow({
   return (
     <TableRow data-testid={`member-row-${membership.id}`}>
       <TableCell>
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           <OrgAvatar
             name={name}
             imageUrl={membership.publicUserData.imageUrl}
@@ -51,7 +51,7 @@ export function MemberRow({
                 </Badge>
               ) : null}
             </span>
-            <span className="truncate text-muted-foreground">{email}</span>
+            <span className="block max-w-[32ch] truncate text-muted-foreground" title={email}>{email}</span>
           </div>
         </div>
       </TableCell>

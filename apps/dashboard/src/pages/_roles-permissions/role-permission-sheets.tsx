@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Button, Input, Textarea } from "@orbitid/ui";
 import { CheckboxRow, DetailSheet, Field, ValidationSummary } from "../_config/ui";
 import type { RolesPermissionsController } from "./use-roles-permissions";
@@ -17,12 +18,15 @@ export function RoleSheet({ ctl }: { ctl: RolesPermissionsController }) {
     saveRole,
     togglePermission,
   } = ctl;
+  const [attempted, setAttempted] = useState(false);
+  useEffect(() => {
+    if (!roleOpen) setAttempted(false);
+  }, [roleOpen]);
 
   return (
     <DetailSheet
       open={roleOpen}
       onOpenChange={setRoleOpen}
-      size="lg"
       title={roleForm.id ? "Edit role" : "Create role"}
       description={scope === "org" ? "Organization roles use org:<name>." : "Instance roles use app:<name> and are assigned on a user’s Roles tab."}
       footer={
@@ -30,7 +34,13 @@ export function RoleSheet({ ctl }: { ctl: RolesPermissionsController }) {
           <Button variant="outline" onClick={() => setRoleOpen(false)} disabled={roleSaving}>
             Cancel
           </Button>
-          <Button onClick={() => void saveRole()} disabled={roleSaving || roleErrors.length > 0}>
+          <Button
+            onClick={() => {
+              setAttempted(true);
+              if (roleErrors.length === 0) void saveRole();
+            }}
+            disabled={roleSaving}
+          >
             {roleSaving ? "Saving…" : roleForm.id ? "Save changes" : "Create role"}
           </Button>
         </>
@@ -90,7 +100,7 @@ export function RoleSheet({ ctl }: { ctl: RolesPermissionsController }) {
             {Object.keys(roleGroups).length === 0 ? <p className="text-xs text-muted-foreground">No permissions available.</p> : null}
           </div>
         </Field>
-        <ValidationSummary errors={roleErrors} title="Fix these before saving" />
+        <ValidationSummary errors={attempted ? roleErrors : []} title="Fix these before saving" />
       </div>
     </DetailSheet>
   );
@@ -108,6 +118,10 @@ export function PermissionSheet({ ctl }: { ctl: RolesPermissionsController }) {
     permissionError,
     savePermission,
   } = ctl;
+  const [attempted, setAttempted] = useState(false);
+  useEffect(() => {
+    if (!permissionOpen) setAttempted(false);
+  }, [permissionOpen]);
 
   return (
     <DetailSheet
@@ -120,7 +134,13 @@ export function PermissionSheet({ ctl }: { ctl: RolesPermissionsController }) {
           <Button variant="outline" onClick={() => setPermissionOpen(false)} disabled={permissionSaving}>
             Cancel
           </Button>
-          <Button onClick={() => void savePermission()} disabled={permissionSaving || permissionErrors.length > 0}>
+          <Button
+            onClick={() => {
+              setAttempted(true);
+              if (permissionErrors.length === 0) void savePermission();
+            }}
+            disabled={permissionSaving}
+          >
             {permissionSaving ? "Saving…" : permissionForm.id ? "Save changes" : "Create permission"}
           </Button>
         </>
@@ -158,7 +178,7 @@ export function PermissionSheet({ ctl }: { ctl: RolesPermissionsController }) {
             onChange={(event) => setPermissionForm((current) => ({ ...current, description: event.target.value }))}
           />
         </Field>
-        <ValidationSummary errors={permissionErrors} title="Fix these before saving" />
+        <ValidationSummary errors={attempted ? permissionErrors : []} title="Fix these before saving" />
       </div>
     </DetailSheet>
   );

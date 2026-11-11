@@ -9,6 +9,7 @@ import type {
   M2MToken,
   M2MTokenVerification,
   OAuthApplication,
+  SigningKey,
   Stats,
   TestingToken,
   WebhookDelivery,
@@ -163,6 +164,10 @@ export function createInstanceApi(http: BackendHttp) {
     },
     updateInstance(params: Record<string, unknown>) {
       return http.patch<Stats>("/v1/instance", { body: params });
+    },
+    /** Starts signing new session tokens with a fresh key; old keys stay in the JWKS until their tokens expire. */
+    rotateSigningKey() {
+      return http.post<SigningKey>("/v1/instance/signing_keys/rotate");
     },
   };
 }

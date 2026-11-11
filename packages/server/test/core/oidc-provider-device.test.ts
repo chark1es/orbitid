@@ -212,6 +212,10 @@ describe("OIDC — device authorization grant", () => {
     const html = await page.text();
     expect(html).toContain("Test App");
     expect(html).toContain("openid");
+    // The consent view (this is the signed-in, pending state) uses the same branded shell and CSS.
+    expect(html).toContain('class="decision-form"');
+    expect(html).toContain('value="approve"');
+    expect(html).toContain('value="deny"');
     // The page is branded with the instance's application name.
     expect(html).toContain("OrbitID App");
     expect(html).not.toContain("<script>");
@@ -232,7 +236,21 @@ describe("OIDC — device authorization grant", () => {
     expect(js.status).toBe(200);
     expect(js.headers.get("content-type")).toContain("javascript");
     expect(js.headers.get("x-content-type-options")).toBe("nosniff");
-    expect((await h.app.request("/oauth/device.css")).status).toBe(200);
+    const css = await h.app.request("/oauth/device.css");
+    expect(css.status).toBe(200);
+    const cssText = await css.text();
+    // The end-user page follows DESIGN.md: warm ground, Hanken Grotesk, 6px card, 4px controls,
+    // signal-red primary action, one focus ring. None of the old generic admin-page tokens survive.
+    expect(cssText).toContain("Hanken Grotesk Variable");
+    expect(cssText).toContain("--ring:");
+    expect(cssText).toContain("prefers-color-scheme: dark");
+    expect(cssText).toContain("border-radius: 6px");
+    expect(cssText).toContain("border-radius: 4px");
+    expect(cssText).not.toContain("#f6f7f9");
+    expect(cssText).not.toContain("#111827");
+    expect(cssText).not.toContain("border-radius: 12px");
+    expect(cssText).not.toContain("border-radius: 8px");
+    expect(cssText).not.toMatch(/-apple-system|BlinkMacSystemFont|Segoe UI/);
   });
 
   it("approves and denies from the server-rendered page itself", async () => {

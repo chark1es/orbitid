@@ -66,6 +66,8 @@ export interface RedirectCallbackParams {
  */
 export interface OrbitIDInstance {
   loaded: boolean;
+  /** Sign-in method completed last, for the "Last used" badge. Never an identifier. */
+  lastUsedStrategy?: string | null;
   publishableKey?: string;
   client: ClientResource | null;
   session: SessionResource | null;

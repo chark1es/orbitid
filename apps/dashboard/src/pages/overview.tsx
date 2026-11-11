@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { Page as PageLayout } from "../components/shared/page";
 import { ActivityBoard, Button, Skeleton } from "@orbitid/ui";
 import { RefreshCw, Users } from "lucide-react";
 import type { SessionJSON, UserJSON } from "@orbitid/shared";
@@ -37,7 +38,7 @@ export default function OverviewPage() {
   const signIns30d = sumCounts(data?.signins_by_day);
 
   return (
-    <>
+    <PageLayout>
       <PageHeader
         title="Overview"
         description="What this instance holds right now, and the sign-ins that just happened."
@@ -115,8 +116,8 @@ export default function OverviewPage() {
           <div className="space-y-5">
             <div>
               <div className="flex items-baseline gap-2">
-                <h3 className="text-[0.8125rem] font-semibold text-foreground">Sign-ups per day</h3>
-                <span className="font-data text-xs text-muted-foreground">
+                <h3 className="text-[0.8125rem] font-heading text-foreground">Sign-ups per day</h3>
+                <span className="text-xs tabular-nums text-muted-foreground">
                   {formatNumber(sumCounts(data?.signups_by_day))} in 30 days
                 </span>
               </div>
@@ -128,8 +129,8 @@ export default function OverviewPage() {
             </div>
             <div>
               <div className="flex items-baseline gap-2">
-                <h3 className="text-[0.8125rem] font-semibold text-foreground">Sign-ins per day</h3>
-                <span className="font-data text-xs text-muted-foreground">{formatNumber(signIns30d)} in 30 days</span>
+                <h3 className="text-[0.8125rem] font-heading text-foreground">Sign-ins per day</h3>
+                <span className="text-xs tabular-nums text-muted-foreground">{formatNumber(signIns30d)} in 30 days</span>
               </div>
               {stats.isLoading ? (
                 <Skeleton className="mt-2 h-[180px] w-full" />
@@ -177,7 +178,7 @@ export default function OverviewPage() {
                       <UserAvatar name={userLabel(user)} imageUrl={user.image_url} size="sm" />
                       <span className="flex min-w-0 flex-1 flex-col">
                         <span className="truncate text-sm font-medium">{userLabel(user)}</span>
-                        <span className="truncate font-mono text-[0.6875rem] text-muted-foreground">
+                        <span className="truncate text-[0.8125rem] text-muted-foreground">
                           {primaryEmail(user) || user.id}
                         </span>
                       </span>
@@ -199,7 +200,7 @@ export default function OverviewPage() {
                 {providers.map((provider) => (
                   <li key={provider.provider} className="flex items-center justify-between gap-3 py-2 text-sm">
                     <span className="capitalize">{provider.provider.replace(/_/g, " ")}</span>
-                    <span className="font-mono text-xs tabular-nums text-muted-foreground">
+                    <span className="text-xs tabular-nums text-muted-foreground">
                       {formatNumber(provider.count)}
                     </span>
                   </li>
@@ -211,6 +212,6 @@ export default function OverviewPage() {
       </div>
 
       <InstanceKeys health={health.data} healthError={health.error} instance={instance.data} loading={health.isLoading} />
-    </>
+    </PageLayout>
   );
 }

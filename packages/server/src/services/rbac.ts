@@ -1,7 +1,7 @@
 import { mutateAuthorization } from "./authorization-transaction";
 // Role/permission resolution used by both APIs.
 import { filterAsync } from "../lib/async";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { ErrorCodes, OrbitError, type PermissionJSON, type RoleJSON } from "@orbitid/shared";
 import type { AppContext } from "../context";
 import * as s from "../db/schema";
@@ -75,6 +75,20 @@ export async function permissionsForRoleId(ctx: AppContext, roleId: string): Pro
       .innerJoin(s.permissions, eq(s.permissions.id, s.rolePermissions.permissionId))
       .where(eq(s.rolePermissions.roleId, roleId)));
   return rows.map((r) => r.key).sort();
+}
+
+/** Permissions for several roles in one query (token minting, where a user may hold many roles). */
+export async function permissionsForRoleIds(ctx: AppContext, roleIds: string[]): Promise<Map<string, string[]>> {
+  const permissions = new Map<string, string[]>(roleIds.map((id) => [id, []]));
+  if (!roleIds.length) return permissions;
+  const rows = await ctx.db
+      .select({ roleId: s.rolePermissions.roleId, key: s.permissions.key })
+      .from(s.rolePermissions)
+      .innerJoin(s.permissions, eq(s.permissions.id, s.rolePermissions.permissionId))
+      .where(inArray(s.rolePermissions.roleId, roleIds));
+  for (const row of rows) permissions.get(row.roleId)?.push(row.key);
+  for (const keys of permissions.values()) keys.sort();
+  return permissions;
 }
 
 /** Permissions granted by a role key (`org:admin` → all system permissions). */

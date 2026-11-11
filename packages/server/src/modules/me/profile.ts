@@ -12,6 +12,7 @@ import { assertPasswordValid, hashPassword, verifyPassword } from "../../service
 import { endSessionsForUser } from "../../services/sessions";
 import { sendEmail } from "../../services/mail";
 import { assertRequiredProfileField, assertUsernameAvailable, countIdentifications, deleteUser, hasVerifiedIdentifier, primaryEmail, recordFailedAttempt, resetFailedAttempts, upgradeAnonymousUser } from "../../services/users";
+import { assertAdditionalIdentificationsAllowed } from "../../services/enterprise-access";
 import { revokeAllTrustedDevices } from "../../services/trusted-devices";
 import { clearClientCookie } from "../auth/client-auth";
 import { requireReverification } from "../auth/reverification";
@@ -127,6 +128,7 @@ export function registerProfileRoutes(app: Hono, ctx: AppContext, helpers: MeHel
   // ───────────── password ─────────────
   app.post("/change_password", requireReverification(ctx, "first_factor", 10), async (c) => {
     const { session, user } = await auth(c);
+    await assertAdditionalIdentificationsAllowed(ctx, user.id);
     const body = await parseBody(c, passwordChangeSchema);
     // An account without a password (a guest upgrading, or a passwordless account) sets one directly.
     if (user.passwordHash) {

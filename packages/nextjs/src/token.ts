@@ -1,11 +1,11 @@
 import {
   createRemoteJWKSet,
   decodeJwt,
+  errors,
   importPKCS8,
   importSPKI,
   importX509,
   jwtVerify,
-  type JWTVerifyGetKey,
   type KeyLike,
 } from "jose";
 import type { SessionClaims } from "@orbitid/shared";
@@ -32,7 +32,13 @@ export interface VerifySessionTokenOptions {
   /** Values accepted in the `azp` claim (app origins). */
   authorizedParties?: string[];
   audience?: string;
+  /** Skew tolerated for `nbf`/`iat` when this process's clock is behind, in milliseconds. */
   clockSkewInMs?: number;
+  /**
+   * Skew tolerated for `exp`, in milliseconds. Defaults to {@link DEFAULT_EXP_CLOCK_SKEW_MS} (10 s): a 60 s token
+   * stays verifiable for at most ~70 s, which is the real revocation bound.
+   */
+  expClockSkewInMs?: number;
 }
 
 export type SessionVerificationFailureReason =
@@ -40,6 +46,7 @@ export type SessionVerificationFailureReason =
   | "no-key"
   | "expired"
   | "invalid"
+  | "unverifiable-key"
   | "unauthorized-party";
 
 export type SessionVerification =
@@ -47,7 +54,40 @@ export type SessionVerification =
   | { valid: false; reason: SessionVerificationFailureReason; message?: string; claims?: SessionClaims | null };
 
 const keyCache = new Map<string, Promise<KeyLike | Uint8Array>>();
-const jwksCache = new Map<string, JWTVerifyGetKey>();
+const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
+
+/**
+ * How long jose refuses to refetch a JWKS after a successful fetch. The default is 30 s, which turns a
+ * signing-key rotation into a stream of unknown-kid rejections; a short cooldown keeps the cache useful
+ * without making a rotation look like a tampered token. A no-matching-key result additionally forces
+ * one refetch below, so a browser that reaches a rotated instance is verified immediately.
+ */
+export const JWKS_COOLDOWN_MS = 2_000;
+
+/**
+ * `jose`'s `reload()` always fetches, bypassing its own cooldown. A token header is attacker-controlled and needs
+ * no valid signature to name an unknown `kid`, so an unconditional forced reload turns a stream of made-up kids
+ * into a stream of requests to the JWKS endpoint. Allow at most one forced reload per endpoint per window; while it
+ * is suppressed an unknown key keeps returning `unverifiable-key` (which the Next.js layer treats as retryable,
+ * never as a sign-out).
+ */
+export const JWKS_FORCED_RELOAD_COOLDOWN_MS = 5_000;
+
+interface ForcedReloadState {
+  lastAttempt: number;
+  inFlight: Promise<void> | null;
+}
+
+const forcedReloads = new Map<string, ForcedReloadState>();
+
+/**
+ * Clock skew tolerated for `nbf`/`iat` when verifying a session JWT, in milliseconds: a 60 s token verified by a
+ * process whose clock is a few seconds behind must not be reported as inactive. This never extends a server-side
+ * session (the database decides that), and it does not apply to `exp`.
+ */
+export const DEFAULT_CLOCK_SKEW_MS = 60_000;
+/** Expiry skew, deliberately small so a revoked/expired JWT cannot be replayed for another full minute. */
+export const DEFAULT_EXP_CLOCK_SKEW_MS = 10_000;
 
 function isPem(value: string): boolean {
   return value.includes("-----BEGIN ");
@@ -99,13 +139,51 @@ async function importJwtKey(jwtKey: JwtKey): Promise<{ key: KeyLike | Uint8Array
   return { key: jwtKey as KeyLike, algorithms: [...ASYMMETRIC_ALGORITHMS] };
 }
 
-function jwksFor(url: string): JWTVerifyGetKey {
+function jwksFor(url: string): ReturnType<typeof createRemoteJWKSet> {
   const normalized = stripTrailingSlash(url);
   const cached = jwksCache.get(normalized);
   if (cached) return cached;
-  const jwks = createRemoteJWKSet(new URL(normalized));
+  const jwks = createRemoteJWKSet(new URL(normalized), {
+    cooldownDuration: JWKS_COOLDOWN_MS,
+    cacheMaxAge: 600_000,
+  });
   jwksCache.set(normalized, jwks);
   return jwks;
+}
+
+/**
+ * Forces at most one JWKS refetch per endpoint per {@link JWKS_FORCED_RELOAD_COOLDOWN_MS}. Concurrent callers share
+ * the in-flight fetch instead of each issuing one. Returns false when the cooldown suppresses the refetch.
+ */
+async function forceJwksReload(
+  jwksUrl: string,
+  keys: ReturnType<typeof createRemoteJWKSet>,
+): Promise<boolean> {
+  const normalized = stripTrailingSlash(jwksUrl);
+  let state = forcedReloads.get(normalized);
+  if (!state) {
+    state = { lastAttempt: 0, inFlight: null };
+    forcedReloads.set(normalized, state);
+  }
+  if (state.inFlight) {
+    // Coalesce: a concurrent rotation may be fetching right now. Joining it counts as a reload.
+    await state.inFlight;
+    return true;
+  }
+  const now = Date.now();
+  if (now - state.lastAttempt < JWKS_FORCED_RELOAD_COOLDOWN_MS) return false;
+  state.lastAttempt = now;
+  const flight = keys.reload().then(() => undefined).finally(() => {
+    state!.inFlight = null;
+  });
+  state.inFlight = flight;
+  await flight;
+  return true;
+}
+
+/** A token signed by a key this process has not fetched yet: a rotation, not a tampered signature. */
+function isUnknownSigningKey(error: unknown): boolean {
+  return error instanceof errors.JWKSNoMatchingKey || error instanceof errors.JWKSMultipleMatchingKeys;
 }
 
 function isExpiredError(error: unknown): boolean {
@@ -141,7 +219,8 @@ export async function verifySessionToken(
   if (!token) return { valid: false, reason: "no-token" };
 
   let key: KeyLike | Uint8Array | null = null;
-  let getKey: JWTVerifyGetKey | null = null;
+  let getKey: ReturnType<typeof createRemoteJWKSet> | null = null;
+  let jwksUrl: string | undefined;
   let algorithms: string[];
   if (options.jwtKey) {
     try {
@@ -156,24 +235,91 @@ export async function verifySessionToken(
       };
     }
   } else {
-    const jwksUrl = options.jwksUrl ?? (options.apiUrl ? `${stripTrailingSlash(options.apiUrl)}/.well-known/jwks.json` : undefined);
+    jwksUrl = options.jwksUrl ?? (options.apiUrl ? `${stripTrailingSlash(options.apiUrl)}/.well-known/jwks.json` : undefined);
     if (!jwksUrl) return { valid: false, reason: "no-key", message: "Provide `jwtKey`, `jwksUrl` or `apiUrl` to verify session tokens" };
     getKey = jwksFor(jwksUrl);
     algorithms = [...ASYMMETRIC_ALGORITHMS];
   }
 
+  const earlyTolerance = (options.clockSkewInMs ?? DEFAULT_CLOCK_SKEW_MS) / 1000;
+  const expTolerance = (options.expClockSkewInMs ?? DEFAULT_EXP_CLOCK_SKEW_MS) / 1000;
   const verifyOptions = {
     algorithms,
     issuer: options.issuer ? stripTrailingSlash(options.issuer) : undefined,
     audience: options.audience,
-    clockTolerance: options.clockSkewInMs !== undefined ? options.clockSkewInMs / 1000 : undefined,
+    // `jose` has one tolerance for all time claims: use the larger (early) one, then enforce `exp` below.
+    clockTolerance: Math.max(earlyTolerance, expTolerance),
   };
 
+  const verifyOnce = () =>
+    getKey ? jwtVerify(token, getKey, verifyOptions) : jwtVerify(token, key!, verifyOptions);
+
+  let payload: Awaited<ReturnType<typeof verifyOnce>>["payload"];
   try {
-    const { payload } = getKey
-      ? await jwtVerify(token, getKey, verifyOptions)
-      : await jwtVerify(token, key!, verifyOptions);
+    ({ payload } = await verifyOnce());
+  } catch (error) {
+    // A key rotation reaches this process before the new key reaches its JWKS cache. Force one refetch; if
+    // the key is still unknown the token is not provably forged (only old), so it is a distinct, retryable
+    // reason that never signs the visitor out. The forced refetch is bounded per endpoint: an attacker-controlled
+    // `kid` header must not turn each verification into another request to the JWKS endpoint.
+    if (getKey && jwksUrl && isUnknownSigningKey(error)) {
+      let reloaded: boolean;
+      try {
+        reloaded = await forceJwksReload(jwksUrl, getKey);
+      } catch (reloadError) {
+        return {
+          valid: false,
+          reason: "unverifiable-key",
+          message: reloadError instanceof Error ? reloadError.message : String(reloadError),
+        };
+      }
+      if (!reloaded) {
+        // Same retryable answer as a failed reload: the caller may handshake or retry, but nothing is cleared.
+        return {
+          valid: false,
+          reason: "unverifiable-key",
+          message: "The signing key is not cached and a JWKS refetch is cooling down",
+        };
+      }
+      try {
+        ({ payload } = await verifyOnce());
+      } catch (retryError) {
+        if (isExpiredError(retryError)) {
+          return { valid: false, reason: "expired", message: "Session token has expired" };
+        }
+        // `reload()` failed or the refetched set still lacks the key. Neither proves the token was forged:
+        // report a key we cannot currently verify and let the caller decide (handshake when the client is live).
+        return {
+          valid: false,
+          reason: "unverifiable-key",
+          message: retryError instanceof Error ? retryError.message : String(retryError),
+        };
+      }
+    } else if (isExpiredError(error)) {
+      // Decoded, unverified claims are only useful for diagnostics: callers get `valid: false` and no
+      // authorization from them (see `resolveRequestAuthState`).
+      return { valid: false, reason: "expired", message: "Session token has expired" };
+    } else {
+      return {
+        valid: false,
+        reason: "invalid",
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  {
     const claims = payload as unknown as SessionClaims;
+    const nowSeconds = Date.now() / 1000;
+    if (typeof payload.exp === "number" && payload.exp + expTolerance < nowSeconds) {
+      return { valid: false, reason: "expired", message: "Session token has expired" };
+    }
+    for (const claim of ["nbf", "iat"] as const) {
+      const value = payload[claim];
+      if (typeof value === "number" && value > nowSeconds + earlyTolerance) {
+        return { valid: false, reason: "invalid", message: "Token is not valid yet", claims };
+      }
+    }
     if (payload.aud !== undefined && options.audience === undefined) {
       return { valid: false, reason: "invalid", message: "Token is not a session token" };
     }
@@ -186,17 +332,6 @@ export async function verifySessionToken(
       return { valid: false, reason: "unauthorized-party", claims };
     }
     return { valid: true, claims, token };
-  } catch (error) {
-    if (isExpiredError(error)) {
-      // Decoded, unverified claims are only useful for diagnostics: callers get `valid: false` and no
-      // authorization from them (see `resolveRequestAuthState`).
-      return { valid: false, reason: "expired", message: "Session token has expired" };
-    }
-    return {
-      valid: false,
-      reason: "invalid",
-      message: error instanceof Error ? error.message : String(error),
-    };
   }
 }
 

@@ -50,10 +50,36 @@ Browser                      App (Next.js)                OrbitID API
    |----------------------------->|  signed in                 |
 ```
 
-No active session (or an expired, idle, ended, revoked or pending-MFA one): the API answers
-`302 -> redirect_url?__orbit_handshake=signed_out`. The middleware then clears `__session`, sets
-`__client_uat=0` and continues as signed out, so the visitor sees the normal signed-out experience
-instead of an error.
+No live session (an expired, idle, ended or revoked one): the API answers
+`302 -> redirect_url?__orbit_handshake=signed_out`. That answer is authoritative, so the middleware
+clears `__session`, sets `__client_uat=0` and continues as signed out, so the visitor sees the normal
+signed-out experience instead of an error.
+
+A **pending session** (required MFA not yet enrolled) is live, not signed out. The API mints the same
+`sts: "pending"` token the token endpoint returns; the middleware writes the cookies and reports
+signed-in-incomplete. Apps can then route the user to enrolment. It is never cleared as a sign-out and never
+treated as fully authenticated.
+
+If the returned token cannot be verified — a few seconds of clock skew, a key rotation the process has
+not fetched yet, a truncated URL — the middleware keeps `__client` and `__client_uat` and answers the same
+retriable **503** as an infrastructure failure: `Retry-After`, a small meta-refresh page (or JSON for a
+fetch), and the handshake marker set to `retry`. The next clean navigation therefore retries the handshake
+instead of reaching `protect()` as signed-out and redirecting to sign-in. A
+`__orbit_handshake_unavailable` counter bounds this: after three consecutive unavailable answers the
+middleware stops the automatic retries and serves a **terminal 503** with a manual "Try again" link. That
+page never redirects to sign-in and never meta-refreshes; the credentials stay untouched, and the link
+clears the counter so the visitor can start a fresh bounded set of attempts. `Retry-After` is capped at
+60 s, and the marker/counter cookies live `max(300 s, 3 × Retry-After)`, so a long delay can never outlive
+the counter and reset the bound. A verification failure is still not proof that the session ended; only
+the API's `signed_out` answer is.
+
+An **infrastructure failure** while minting (an unreadable signing key, a database error) is not a sign-out
+either. The API answers `302 -> redirect_url?__orbit_handshake=transient` with `Retry-After: 5`. The
+middleware treats this as an explicit **unavailable** state: cookies stay, the marker becomes `retry`, and the
+request answers **503** with `Retry-After: 3` — a document gets a tiny meta-refresh page that retries the
+handshake, a fetch gets JSON. It never calls the unauthenticated redirect, so a database outage cannot turn a
+signed-in visitor into a sign-in redirect. Only a positive re-read showing that the session (or user) is
+ended/banned produces `signed_out`. A failed activity write is logged and never fails the handshake.
 
 ## Endpoint
 
@@ -62,9 +88,11 @@ instead of an error.
 | Situation | Answer |
 |---|---|
 | Active session for the `__client` cookie | `302` to `redirect_url` with `__orbit_handshake=<jwt>` |
-| No client cookie, no session, expired / idle / ended / revoked session, `pending` (MFA enrolment) session | `302` to `redirect_url` with `__orbit_handshake=signed_out` |
+| Pending session (required MFA not enrolled) | `302` to `redirect_url` with a `sts: "pending"` token; cookies stay, the visitor is signed-in-incomplete |
+| No client cookie, no session, expired / idle / ended / revoked session | `302` to `redirect_url` with `__orbit_handshake=signed_out` |
 | Missing `redirect_url`, malformed URL, `javascript:`/`data:`/other scheme, other origin, credentials in the URL | `400` with the standard error body |
-| Too many requests from one address (120 per minute) | `429` |
+| Signing-key or database failure while minting | `302` to `redirect_url` with `__orbit_handshake=transient` and `Retry-After: 5` |
+| Too many requests from one address (600 per minute) | `429` |
 
 Every response carries `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
 
@@ -85,10 +113,11 @@ token, because that is the one `__session` holds.
 
 | Cookie | Set by | Host | Purpose |
 |---|---|---|---|
-| `__client` | API | API | Opaque client token, `httpOnly`, 1 year. This is what the handshake reads. |
-| `__session` | browser SDK, or the middleware after a handshake | app | Session JWT, session cookie, `Path=/; SameSite=Lax; Secure` on https. |
-| `__client_uat` | browser SDK, or the middleware after a handshake | app | Unix seconds of the client's last activity, `0` when signed out, 1 year. Tells the middleware whether a live client exists without calling the API. |
-| `__orbit_handshake_pending` | middleware | app | `1`, `httpOnly`, 30 s. Marks that one handshake attempt is in flight (loop guard). |
+| `__client` | API | API | Opaque client token, `httpOnly`, `SameSite=Lax`, `Path=/`, 400 days (the browser maximum). This is what the handshake reads. |
+| `__session` | browser SDK, or the middleware after a handshake | app | Session JWT, `Path=/; SameSite=Lax; Secure` on https, 400 days as a cookie. The JWT inside still expires in ~60 s and is replaced on every refresh. |
+| `__client_uat` | browser SDK, or the middleware after a handshake | app | Unix seconds of the client's last activity, `0` when signed out, 400 days. Tells the middleware whether a live client exists without calling the API. |
+| `__orbit_handshake_pending` | middleware | app | `1` or `retry`, `httpOnly`, 30 s (the `retry` marker uses `max(300 s, 3 × Retry-After)`). Marks that one handshake attempt is in flight (loop guard), or that the last answer was unavailable and should be retried. |
+| `__orbit_handshake_unavailable` | middleware | app | Count of consecutive unavailable handshake answers, `httpOnly`, `max(300 s, 3 × Retry-After)`. Capped at 3; after that the visitor gets a terminal 503 with a manual retry link. |
 
 The handshake needs `__client` and the app origin on the same site, which is the normal setup: the
 browser sends `__client` to the API host on top-level navigations (`SameSite=Lax`). If your app lives
@@ -108,11 +137,16 @@ sent to the proxied origin instead.
   endpoint cannot be used to hand a token to an attacker's origin. `azp` on the token matches the
   target origin and the middleware's `authorizedParties` check applies to it as usual.
 - **The token is verified, never trusted.** The middleware verifies `__orbit_handshake` through the
-  same `verifySessionToken` path as `__session` (JWKS, issuer, expiry, `azp`). A tampered, expired or
-  foreign token is ignored, cookies are cleared and the visitor continues signed out.
+  same `verifySessionToken` path as `__session` (JWKS, issuer, expiry, `azp`) with a 60 s clock
+  tolerance. A token that does not verify is ignored and never signs anybody in; the visitor's cookies
+  are left intact so the next navigation can try again.
 - **One attempt per navigation.** The middleware sets `__orbit_handshake_pending` before redirecting
   and checks it before redirecting again; a browser that comes back still without a usable token
-  continues signed out. That, plus `signed_out` clearing `__client_uat`, means no redirect loop.
+  continues signed out. A failed verification or a `transient` answer sets the marker to `retry` and
+  serves a 503 that waits before retrying the handshake; the credentials are never cleared on that
+  path. `__orbit_handshake_unavailable` counts consecutive unavailable answers and, after three, serves
+  a terminal 503 with a same-origin "Try again" link. The link clears the counter and marker, so the
+  visitor can retry manually with a fresh, still-bounded budget; there is no automatic loop.
 - **Only a handshake the middleware started is completed.** Without the marker cookie, a
   `?__orbit_handshake=…` parameter is stripped and ignored, so a crafted link carrying someone else's
   token cannot sign a browser in or out.
@@ -122,8 +156,9 @@ sent to the proxied origin instead.
 - **Only top-level navigations.** The handshake runs only for `GET` with `Sec-Fetch-Mode: navigate`
   (or, when that header is missing, `Accept: text/html`), never for `fetch`/XHR, RSC payloads,
   prefetches or non-GET requests. API routes keep returning their own status codes.
-- **Rate limited.** `hit()` per client address, 120 per minute, on top of the normal per-session token
-  mint limits.
+- **Rate limited, generously.** `hit()` per client address, 600 per minute, on top of the normal
+  per-session token mint limits. A restored browser can replay the handshake once per tab and an office
+  may share one address, so a refresh must not look like abuse.
 
 ## What changes for apps
 

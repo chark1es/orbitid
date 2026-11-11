@@ -11,7 +11,7 @@ import { authContextFromClaims, type AuthContext } from "./auth-context";
 import { OrbitIdError, isOrbitIdError } from "./errors";
 import { JwksCache } from "./jwks";
 import { tokenFromRequest, type HeaderLike, type RequestLike } from "./request";
-import { verifySessionToken } from "./token";
+import { verifySessionToken, type VerifyTokenOptions } from "./token";
 import { createTransport, type Transport } from "./transport";
 import { SDK_VERSION } from "./version";
 import * as express from "./adapters/express";
@@ -49,8 +49,13 @@ export interface CreateOrbitIdOptions {
   publishableKey?: string;
   /** Expected `aud` claim. Leave unset for session tokens, which carry no audience. */
   audience?: string | string[];
-  /** Clock skew allowed for `exp`/`nbf`, in seconds. Defaults to 5. */
+  /** Clock skew allowed for `nbf`/`iat` when this process's clock is behind, in seconds. Defaults to 60. */
   clockToleranceSeconds?: number;
+  /**
+   * Clock skew allowed for `exp`, in seconds. Defaults to 10. This bounds how long an expired session JWT remains
+   * verifiable (~70 s for the default 60 s token), independent of the early-clock tolerance above.
+   */
+  expClockToleranceSeconds?: number;
   /** Accepted `azp` values (your app origins). */
   authorizedParties?: string[];
   /** Webhook signing secret (`whsec_…`) used by `webhooks.verify`. `ORBITID_WEBHOOK_SECRET`. */
@@ -94,13 +99,14 @@ export interface ResolvedConfig {
   issuer: string;
   audience: string | string[] | undefined;
   clockToleranceSeconds: number;
+  expClockToleranceSeconds: number;
 }
 
 export interface OrbitIdNode {
   /** Typed Backend API client (`users`, `organizations`, `sessions`, …). */
   readonly client: OrbitIdClient;
   /** Verifies a session JWT and returns its claims. Throws `OrbitIdError` on failure. */
-  verifyToken(token: string): Promise<SessionClaims>;
+  verifyToken(token: string, options?: Pick<VerifyTokenOptions, "tokenType">): Promise<SessionClaims>;
   /**
    * Resolves the caller of a Node `IncomingMessage` or a Fetch `Request`.
    * Returns `null` when the request carries no usable session (missing, expired, invalid, pending);
@@ -261,7 +267,8 @@ export function createOrbitId(options: CreateOrbitIdOptions = {}): OrbitIdNode {
   });
 
   const audience = normalizeAudience(options.audience ?? readEnv(ENV_KEYS.audience));
-  const clockToleranceSeconds = options.clockToleranceSeconds ?? 5;
+  const clockToleranceSeconds = options.clockToleranceSeconds ?? 60;
+  const expClockToleranceSeconds = options.expClockToleranceSeconds ?? 10;
   const issuer = resolveIssuer(options, client.apiUrl);
   // Keys are fetched from where this process reaches the server, whatever the public issuer is.
   const jwksUrl = resolveJwksUrl(options, client.apiUrl);
@@ -276,10 +283,12 @@ export function createOrbitId(options: CreateOrbitIdOptions = {}): OrbitIdNode {
     audience,
     authorizedParties: options.authorizedParties,
     clockToleranceSeconds,
+    expClockToleranceSeconds,
     jwks,
   };
 
-  const verifyToken = (token: string): Promise<SessionClaims> => verifySessionToken({ token }, verifier);
+  const verifyToken = (token: string, options: Pick<VerifyTokenOptions, "tokenType"> = {}): Promise<SessionClaims> =>
+    verifySessionToken({ token, ...options }, verifier);
 
   const authenticate = async (request: RequestLike): Promise<AuthContext | null> => {
     if (!request || typeof request !== "object") return null;
@@ -347,7 +356,7 @@ export function createOrbitId(options: CreateOrbitIdOptions = {}): OrbitIdNode {
     honoRequireAuth: (adapterOptions) => hono.honoRequireAuth(sdk, adapterOptions),
     honoRequirePermission: (permission, adapterOptions) => hono.honoRequirePermission(sdk, permission, adapterOptions),
     honoRequireRole: (role, adapterOptions) => hono.honoRequireRole(sdk, role, adapterOptions),
-    config: { apiUrl: client.apiUrl, jwksUrl, issuer, audience, clockToleranceSeconds },
+    config: { apiUrl: client.apiUrl, jwksUrl, issuer, audience, clockToleranceSeconds, expClockToleranceSeconds },
     version: SDK_VERSION,
   };
   return sdk;

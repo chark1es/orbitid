@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Page as PageLayout } from "../components/shared/page";
 import {
   Button,
   Input,
@@ -113,7 +114,7 @@ export default function Page() {
   };
 
   return (
-    <div className="space-y-6">
+    <PageLayout>
       <PageHeader
         title="Email & SMS"
         description="Branding shown in emails, how mail leaves the server, code lifetimes, and SMS delivery."
@@ -433,6 +434,6 @@ export default function Page() {
         onSave={editor.save}
         onDiscard={editor.reset}
       />
-    </div>
+    </PageLayout>
   );
 }

@@ -10,6 +10,13 @@ function shortDay(value: string): string {
 
 const axisTick = { fontSize: 11, fill: "var(--muted-foreground)", fontFamily: "var(--font-mono, ui-monospace)" };
 
+/**
+ * The plot keeps a non-negative left margin and gives the y-axis its own width: a negative margin moved
+ * the axis ticks under the chart edge, clipping the first label (for example "28").
+ */
+export const CHART_MARGIN = { top: 8, right: 8, bottom: 0, left: 0 } as const;
+export const Y_AXIS_WIDTH = 36;
+
 const tooltipStyle = {
   borderRadius: 4,
   border: "1px solid var(--border)",
@@ -36,7 +43,7 @@ export function TrendChart({
 
   return (
     <ResponsiveContainer width="100%" height={170}>
-      <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -22 }}>
+      <BarChart data={data} margin={CHART_MARGIN}>
         <CartesianGrid strokeDasharray="2 4" vertical={false} stroke="var(--border)" />
         <XAxis
           dataKey="date"
@@ -46,7 +53,9 @@ export function TrendChart({
           minTickGap={28}
           tick={axisTick}
         />
-        <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={40} tick={axisTick} />
+        {/* The axis keeps its own width so the first tick label is drawn inside the plot instead of
+            under the chart's left edge. */}
+        <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={Y_AXIS_WIDTH} tick={axisTick} />
         <Tooltip
           labelFormatter={(value) => shortDay(String(value))}
           formatter={(value) => [formatNumber(Number(value)), label]}

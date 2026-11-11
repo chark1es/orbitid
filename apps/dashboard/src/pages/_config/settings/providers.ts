@@ -26,6 +26,7 @@ export const PROVIDER_LABELS: Record<string, string> = {
   atlassian: "Atlassian",
   xero: "Xero",
   x: "X",
+  zoom: "Zoom",
 };
 
 export const PROVIDER_ACCENTS: Record<string, string> = {
@@ -54,6 +55,7 @@ export const PROVIDER_ACCENTS: Record<string, string> = {
   atlassian: "#0052cc",
   xero: "#13b5ea",
   x: "#111111",
+  zoom: "#2d8cff",
 };
 
 export const PROVIDER_DEFAULT_SCOPES: Record<string, string[]> = {
@@ -82,6 +84,7 @@ export const PROVIDER_DEFAULT_SCOPES: Record<string, string[]> = {
   atlassian: ["read:me"],
   xero: ["openid", "profile", "email"],
   x: ["users.read", "tweet.read"],
+  zoom: ["user:read"],
 };
 
 export const emptySocialProvider = (): SocialProviderConfig => ({
@@ -90,6 +93,10 @@ export const emptySocialProvider = (): SocialProviderConfig => ({
   clientSecret: "",
   scopes: [],
   authenticatableAtSignIn: true,
+  clientAuthMethod: "client_secret_basic",
+  pkce: true,
+  trustEmailVerified: false,
+  claimMapping: { sub: "", email: "", emailVerified: "", name: "", firstName: "", lastName: "", username: "", picture: "" },
 });
 
 export function socialProviderConfig(settings: InstanceSettings, key: string): SocialProviderConfig {

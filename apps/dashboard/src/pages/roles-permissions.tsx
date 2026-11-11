@@ -1,7 +1,9 @@
 import { Button } from "@orbitid/ui";
+import { Page as PageLayout } from "../components/shared/page";
 import { Plus } from "lucide-react";
 import { errorMessage } from "./_config/settings";
-import { ConfirmDialog, ErrorAlert, Field, PageHeader } from "./_config/ui";
+import { ErrorAlert, Field, PageHeader } from "./_config/ui";
+import { ConfirmDialog } from "../components/shared/confirm-dialog";
 import { useRolesPermissions } from "./_roles-permissions/use-roles-permissions";
 import { RolesPermissionsTabs } from "./_roles-permissions/roles-permissions-tabs";
 import { RoleSheet, PermissionSheet } from "./_roles-permissions/role-permission-sheets";
@@ -27,7 +29,7 @@ export default function Page() {
   } = ctl;
 
   return (
-    <div className="space-y-6">
+    <PageLayout>
       <PageHeader
         title="Roles & permissions"
         description="Assign instance roles to users or organization roles to memberships. System entries are read-only."
@@ -75,9 +77,9 @@ export default function Page() {
         }
         confirmLabel="Delete"
         destructive
-        loading={deleting}
+        pending={deleting}
         onConfirm={() => void confirmDelete()}
       />
-    </div>
+    </PageLayout>
   );
 }

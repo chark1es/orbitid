@@ -10,6 +10,31 @@ async function goToSecurity() {
 }
 
 describe("UserProfile", () => {
+  it("keeps the account tab strip inside its container on a phone", () => {
+    const harness = setupAuth();
+    renderAuth(<UserProfile routing="virtual" />, harness);
+    const nav = screen.getByRole("navigation", { name: /Account/ });
+    // A negative margin made the strip wider than its parent (281px in a 277px box).
+    expect(nav.className).not.toContain("-mx-1");
+    expect(nav.className).toContain("overflow-x-auto");
+    // The strip still scrolls, but without a native scrollbar or its stray thumb at 375px.
+    expect(nav.className).toContain("[scrollbar-width:none]");
+    expect(nav.className).toContain("[&::-webkit-scrollbar]:hidden");
+  });
+
+  it("offers Security once, in the navigation, not as a stray link at the card footer", async () => {
+    const harness = setupAuth();
+    renderAuth(<UserProfile routing="virtual" />, harness);
+    const nav = screen.getByRole("navigation", { name: /Account/ });
+    const security = within(nav).getByRole("button", { name: "Security" });
+    expect(security).toBeTruthy();
+    // The profile page used to add a centred "Security" link after its last section, next to the app name.
+    const buttons = screen.getAllByRole("button", { name: "Security" });
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]).toBe(security);
+    expect(security.className).not.toContain("mx-auto");
+  });
+
   it("adds and verifies an email address", async () => {
     const harness = setupAuth();
     const user = harness.instance.user as UserResource;
@@ -55,7 +80,7 @@ describe("UserProfile", () => {
     expect(await screen.findByText("grace@example.com")).toBeTruthy();
   });
 
-  it("changes the password with sign-out-of-other-devices", async () => {
+  it("keeps other devices signed in unless the user opts in", async () => {
     const harness = setupAuth();
     const user = harness.instance.user as UserResource;
     renderAuth(<UserProfile routing="virtual" />, harness);
@@ -70,10 +95,27 @@ describe("UserProfile", () => {
       expect.objectContaining({
         currentPassword: "old-password",
         newPassword: "New-Password!23",
-        signOutOfOtherSessions: true,
+        signOutOfOtherSessions: false,
       }),
     ));
     expect(await screen.findByText("Password updated.")).toBeTruthy();
+  });
+
+  it("signs out other devices when the user turns the switch on", async () => {
+    const harness = setupAuth();
+    const user = harness.instance.user as UserResource;
+    renderAuth(<UserProfile routing="virtual" />, harness);
+    await goToSecurity();
+
+    fireEvent.click(screen.getByRole("switch", { name: /Sign out of all other devices/i }));
+    fireEvent.change(screen.getByLabelText(/Current password/), { target: { value: "old-password" } });
+    fireEvent.change(screen.getByLabelText(/New password/), { target: { value: "New-Password!23" } });
+    fireEvent.change(screen.getByLabelText(/Confirm password/), { target: { value: "New-Password!23" } });
+    fireEvent.click(screen.getByRole("button", { name: "Change password" }));
+
+    await waitFor(() => expect(user.updatePassword).toHaveBeenCalledWith(
+      expect.objectContaining({ signOutOfOtherSessions: true }),
+    ));
   });
 
   it("sets up TOTP with the server-provided QR code", async () => {

@@ -4,53 +4,20 @@ import {
   MicrosoftEntraId, Notion, OAuth2Client, CodeChallengeMethod, Slack, Spotify, Twitch, Twitter,
 } from "arctic";
 import type { OAuth2Tokens } from "arctic";
-import { decodeJwt, importPKCS8, jwtVerify, SignJWT } from "jose";
+import { decodeJwt } from "jose";
 import { ErrorCodes, OrbitError } from "@orbitid/shared";
 import type { AppContext } from "../../context";
-import { sha256 } from "../../lib/crypto";
-import { assertPublicUrl, remoteJwks, safeFetch } from "../../lib/safe-fetch";
 import type { ExternalProfile } from "../external-identity";
 import {
   APPLE_TOKEN_URL, adapterOverrides, appleClientSecret, providerConfig, providerRedirectUri, verifyAppleIdToken,
   type OAuthAdapter, type OAuthProviderConfig, type OAuthTokenSet,
 } from "./core";
 import {
-  arcticTokens, at, bearer, boolOrUndefined, idTokenProfile,
+  arcticTokens, bearer, boolOrUndefined, idTokenProfile,
   normalizeProfile, profile, rec, requestJson, str,
 } from "./profiles";
+import { customAdapter } from "./custom";
 
-interface OidcDiscovery {
-  issuer?: string;
-  authorization_endpoint: string;
-  token_endpoint: string;
-  userinfo_endpoint?: string;
-  jwks_uri?: string;
-}
-const discoveryCache = new Map<string, { doc: OidcDiscovery; expiresAt: number }>();
-
-async function loadDiscovery(ctx: AppContext, url: string): Promise<OidcDiscovery> {
-  const cached = discoveryCache.get(url);
-  if (cached && cached.expiresAt > Date.now()) return cached.doc;
-  const raw = rec(await requestJson(ctx, url));
-  const doc: OidcDiscovery = {
-    issuer: str(raw.issuer),
-    authorization_endpoint: str(raw.authorization_endpoint) ?? "",
-    token_endpoint: str(raw.token_endpoint) ?? "",
-    userinfo_endpoint: str(raw.userinfo_endpoint),
-    jwks_uri: str(raw.jwks_uri),
-  };
-  if (!doc.issuer || !doc.authorization_endpoint || !doc.token_endpoint) {
-    throw new OrbitError(400, ErrorCodes.oauth_provider_not_enabled, "The OIDC discovery document is missing its issuer or endpoints");
-  }
-  // The document is operator-controlled, so every endpoint it names is judged like any other outbound URL.
-  for (const endpoint of [doc.authorization_endpoint, doc.token_endpoint, doc.userinfo_endpoint, doc.jwks_uri]) {
-    if (endpoint) await assertPublicUrl(ctx, endpoint, "discoveryUrl").catch(() => {
-      throw new OrbitError(400, ErrorCodes.oauth_provider_not_enabled, "The OIDC discovery document points at a non-public address");
-    });
-  }
-  discoveryCache.set(url, { doc, expiresAt: Date.now() + 3_600_000 });
-  return doc;
-}
 
 // ───────────── adapter construction ─────────────
 
@@ -93,6 +60,7 @@ const USERINFO_URLS: Record<string, string> = {
   atlassian: "https://api.atlassian.com/me",
   huggingface: "https://huggingface.co/oauth/userinfo",
   linear: "https://api.linear.app/graphql",
+  zoom: "https://api.zoom.us/v2/users/me",
 };
 
 async function fetchProfileFor(ctx: AppContext, cfg: OAuthProviderConfig, tokens: OAuthTokenSet): Promise<ExternalProfile> {
@@ -191,9 +159,6 @@ async function fetchProfileFor(ctx: AppContext, cfg: OAuthProviderConfig, tokens
       return appleProfile(ctx, cfg, tokens);
     case "xero":
       return idTokenProfile(key, tokens);
-    case "custom": {
-      return customOidcProfile(ctx, cfg, tokens);
-    }
     default: {
       const url = USERINFO_URLS[key];
       if (!url) {
@@ -204,55 +169,6 @@ async function fetchProfileFor(ctx: AppContext, cfg: OAuthProviderConfig, tokens
       return normalizeProfile(key, data, tokens);
     }
   }
-}
-
-/**
- * Verifies an ID token from a custom OIDC provider: signature against its published JWKS, `iss` from the
- * discovery document, `aud` = our client id, and (when one was sent) the `nonce`. An ID token the provider
- * returned is never trusted unverified, and a failed check is final — falling back to userinfo after a
- * failed signature check would let a forged token's claims be read from somewhere else.
- */
-async function verifyCustomIdToken(
-  ctx: AppContext,
-  cfg: OAuthProviderConfig,
-  disco: OidcDiscovery,
-  idToken: string,
-  nonce: string | undefined,
-): Promise<Record<string, unknown>> {
-  if (!disco.jwks_uri) {
-    throw new OrbitError(502, ErrorCodes.oauth_callback_error, "The identity provider has no JWKS to verify its ID token");
-  }
-  try {
-    const jwks = await remoteJwks(ctx, disco.jwks_uri);
-    const { payload } = await jwtVerify(idToken, jwks, {
-      issuer: disco.issuer,
-      audience: cfg.clientId,
-      // Pin the algorithms: without this an RS256 key could be used as an HMAC secret ("alg confusion").
-      algorithms: ["RS256", "ES256", "PS256", "EdDSA"],
-    });
-    if (nonce && payload.nonce !== nonce) throw new Error("nonce mismatch");
-    return payload as Record<string, unknown>;
-  } catch (err) {
-    const reason = (err as Error).message === "nonce mismatch" ? "its nonce did not match" : "it could not be verified";
-    throw new OrbitError(502, ErrorCodes.oauth_callback_error, `The identity provider returned an ID token that ${reason}`);
-  }
-}
-
-async function customOidcProfile(ctx: AppContext, cfg: OAuthProviderConfig, tokens: OAuthTokenSet, nonce?: string): Promise<ExternalProfile> {
-  if (!cfg.discoveryUrl) throw new OrbitError(400, ErrorCodes.oauth_provider_not_enabled, "Custom OIDC provider is missing its discovery URL");
-  const disco = await loadDiscovery(ctx, cfg.discoveryUrl);
-  if (tokens.idToken) {
-    // Already verified during the code exchange against the same nonce; reuse those claims rather than refetch.
-    const claims = tokens.idTokenClaims ?? await verifyCustomIdToken(ctx, cfg, disco, tokens.idToken, nonce);
-    return normalizeProfile(cfg.key, claims, tokens);
-  }
-  if (disco.userinfo_endpoint) {
-    const data = rec(await requestJson(ctx, disco.userinfo_endpoint, { headers: bearer(tokens) }));
-    // A userinfo response is only as trustworthy as the access token that fetched it; the nonce cannot
-    // appear here, so callers that demanded one are satisfied by the ID token path above.
-    return normalizeProfile(cfg.key, data, tokens);
-  }
-  throw new OrbitError(502, ErrorCodes.oauth_callback_error, "The identity provider did not return a usable profile");
 }
 
 function manualTikTokAdapter(ctx: AppContext, cfg: OAuthProviderConfig, redirectUri: string): OAuthAdapter {
@@ -344,6 +260,7 @@ const GENERIC_ENDPOINTS: Record<string, { authUrl: string; tokenUrl: string }> =
   xero: { authUrl: "https://login.xero.com/identity/connect/authorize", tokenUrl: "https://identity.xero.com/connect/token" },
   linkedin_oidc: { authUrl: "https://www.linkedin.com/oauth/v2/authorization", tokenUrl: "https://www.linkedin.com/oauth/v2/accessToken" },
   hubspot: { authUrl: "https://app.hubspot.com/oauth/authorize", tokenUrl: "https://api.hubapi.com/oauth/v1/token" },
+  zoom: { authUrl: "https://zoom.us/oauth/authorize", tokenUrl: "https://zoom.us/oauth/token" },
 };
 
 function genericAdapter(ctx: AppContext, cfg: OAuthProviderConfig, redirectUri: string): OAuthAdapter {
@@ -355,57 +272,6 @@ function genericAdapter(ctx: AppContext, cfg: OAuthProviderConfig, redirectUri: 
       client.createAuthorizationURLWithPKCE(endpoints.authUrl, state, CodeChallengeMethod.S256, codeVerifier, scopes),
     validateAuthorizationCode: (code, codeVerifier) => client.validateAuthorizationCode(endpoints.tokenUrl, code, codeVerifier),
   });
-}
-
-/**
- * Custom OIDC provider. Arctic builds the authorization URL (PKCE S256) but the token request goes through
- * `safeFetch`, because arctic uses the global `fetch` and would bypass the SSRF guard for a
- * `discoveryUrl` that resolves to a private address.
- */
-async function customOidcAdapter(ctx: AppContext, cfg: OAuthProviderConfig, redirectUri: string): Promise<OAuthAdapter> {
-  if (!cfg.discoveryUrl) throw new OrbitError(400, ErrorCodes.oauth_provider_not_enabled, "Custom OIDC provider is missing its discovery URL");
-  const client = new OAuth2Client(cfg.clientId, cfg.clientSecret, redirectUri);
-  const discovery = await loadDiscovery(ctx, cfg.discoveryUrl);
-  return {
-    key: cfg.key,
-    usesNonce: true,
-    async createAuthorizationUrl({ state, codeVerifier, scopes, nonce }) {
-      const disco = await discovery;
-      const url = client.createAuthorizationURLWithPKCE(disco.authorization_endpoint, state, CodeChallengeMethod.S256, codeVerifier, scopes);
-      if (nonce) url.searchParams.set("nonce", nonce);
-      return url;
-    },
-    async exchangeCode({ code, codeVerifier, nonce }) {
-      const disco = await discovery;
-      const body = new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: redirectUri, code_verifier: codeVerifier });
-      const raw = rec(await requestJson(ctx, disco.token_endpoint, {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json", authorization: basicAuth(cfg) },
-        body,
-      }));
-      const accessToken = str(raw.access_token);
-      if (!accessToken) throw new OrbitError(502, ErrorCodes.oauth_callback_error, "Identity provider did not return an access token");
-      const idToken = str(raw.id_token);
-      const tokens: OAuthTokenSet = {
-        accessToken,
-        refreshToken: str(raw.refresh_token),
-        expiresAt: typeof raw.expires_in === "number" ? Date.now() + raw.expires_in * 1000 : undefined,
-        scopes: str(raw.scope),
-        idToken,
-        raw,
-      };
-      if (idToken) tokens.idTokenClaims = await verifyCustomIdToken(ctx, cfg, disco, idToken, nonce);
-      return tokens;
-    },
-    async fetchProfile({ tokens }) {
-      return customOidcProfile(ctx, cfg, tokens);
-    },
-  };
-}
-
-/** `client_secret_basic`: base64 of `client_id:client_secret` (RFC 6749 §2.3.1). */
-function basicAuth(cfg: OAuthProviderConfig): string {
-  return `Basic ${Buffer.from(`${cfg.clientId}:${cfg.clientSecret}`, "utf8").toString("base64")}`;
 }
 
 /** Builds (or returns the test override for) a provider adapter. Null when the provider is not configured. */
@@ -441,9 +307,10 @@ export async function getOAuthAdapter(ctx: AppContext, key: string): Promise<OAu
     case "hubspot":
     case "huggingface":
     case "xero":
+    case "zoom":
     case "linkedin_oidc": return genericAdapter(ctx, cfg, redirectUri);
     default:
-      if (key.startsWith("custom_")) return customOidcAdapter(ctx, cfg, redirectUri);
+      if (key.startsWith("custom_")) return customAdapter(ctx, cfg, redirectUri);
       return null;
   }
 }

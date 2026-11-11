@@ -6,6 +6,7 @@ existing instance behaves exactly as before after an upgrade.
 - [1. Email code as a second factor](#1-email-code-as-a-second-factor)
 - [2. Trusted devices](#2-trusted-devices)
 - [3. Anonymous (guest) accounts](#3-anonymous-guest-accounts)
+- [Social sign-in and federation](#social-sign-in-and-federation)
 - [Security notes](#security-notes)
 
 ---
@@ -48,9 +49,48 @@ a wrong code also increments the account's failed-attempt counter.
 
 ### A second factor is never the first factor
 
-Email is **not** offered as a second factor when the first factor was `email_code` or `email_link`:
-`supported_second_factors` omits it and `prepare_second_factor` answers
-`400 strategy_for_user_invalid`. Covering one mailbox twice is not a second factor.
+The channel and the exact identifier used as the first factor are not offered again:
+`supported_second_factors` omits that email or phone number, and both `prepare_second_factor` and
+`attempt_second_factor` refuse it with `400 strategy_for_user_invalid`. This covers `email_code`,
+`email_link` and `reset_password_email_code` for email, and `phone_code` / `reset_password_phone_code`
+for SMS. Another verified email or phone can still be used, and TOTP or a backup code remains available:
+covering one mailbox or handset twice is not a second factor.
+
+When several verified addresses can serve as the second factor, pass `email_address_id` to
+`prepare_second_factor`. The code is checked against that address, not whichever address happens to be
+first on the account.
+
+### Recovery is bound to the prepared factor
+
+`prepare_first_factor` records the strategy and the verification row it created. `attempt_first_factor`
+refuses a different `strategy` with `400 client_state_invalid` — for `email_code`, `email_link`,
+`phone_code` and both `reset_password_*` strategies — so a valid code for one channel cannot be submitted
+under another channel's name. `password` is the exception: it issues no prepared artifact and is validated
+by its own credential check plus the sign-in state gate, so after preparing an email code a caller may still
+complete the sign-in with the account password (the UI's "Use another method" path). The verified reset
+record, not the request body, determines the recovered channel and identifier; `reset_password` re-derives
+them from that record before it escalates to MFA.
+
+The recovery authorization is single use. `reset_password` consumes the verified record with a conditional
+update before it writes the password, so replaying the same code — even concurrently — finds it spent and
+returns `400 client_state_invalid` without another change. `prepare_first_factor` and `attempt_first_factor`
+are also refused unless the sign-in is still waiting for a first factor, so a sign-in that is already at
+`needs_new_password`, `needs_second_factor` or `complete` cannot be walked back to re-authorize a reset. The
+same state gate rejects replayed `email_code`, `phone_code` and `email_link` attempts after they produced a
+session or escalated to the second factor.
+
+**Recovery ends the attacker's access.** After the new password is written, `reset_password` ends every other
+session, revokes every OIDC grant and every trusted device, and only then sends the notification email; a mail
+delivery failure never skips the revocation. The recovering browser receives a fresh session with the new
+password. `password.signOutOfOtherSessionsOnReset` defaults to `true` (separate from the password-change
+preference `password.signOutOfOtherSessionsOnChange`, which defaults to `false`).
+
+With `mfa.required`, recovery still does not bypass the second factor. If the account has enrolled MFA but
+the only eligible factor is the same mailbox or handset that recovery just used, the password change
+completes and the sign-in returns `needs_first_factor` with `first_factor_verification.strategy: "password"`
+and error `needs_second_factor`; no session is created. The user signs in with the new password, and the
+normal password flow then asks for the second factor. An account that has never enrolled a factor keeps the
+previous behaviour (a pending session when the instance offers a factor to enrol).
 
 ### SDK
 
@@ -173,7 +213,7 @@ It gets an active session immediately and upgrades **in place** as soon as it ga
 {
   "anonymous": {
     "enabled": true,                 // default false: the strategy is refused
-    "retentionSeconds": 2592000      // 30 days; 0 keeps guests forever
+    "retentionSeconds": 0            // opt-in; 0 (default) keeps guests forever
   }
 }
 ```
@@ -224,11 +264,14 @@ and deleting the account.
 ### Cleanup
 
 A background worker (started from `startServer`, alongside the webhook worker; it ticks every 5 minutes)
-deletes guests whose `last_active_at` is older than `anonymous.retentionSeconds`. `retentionSeconds: 0`
-disables cleanup. Up to 100 users are removed per tick, each with a conditional
-`DELETE … WHERE is_anonymous = true AND last_active_at < cutoff … RETURNING`, so a user who upgraded or
-was active between the read and the delete is never touched. Deleting a guest removes its sessions,
-identifiers and trusted devices through the usual cascades and emits `user.deleted`.
+deletes guests whose `last_active_at` is older than `anonymous.retentionSeconds`. Retention is opt-in:
+`retentionSeconds: 0` is the default and keeps guests forever. A guest that still has a live (active or
+pending) session is never deleted, even when it looks idle: retention is housekeeping, not a sign-out, and
+deleting the row would cascade into that session. The guest is purged on a later tick once its sessions have
+ended. Up to 100 users are removed per tick, each with a conditional
+`DELETE … WHERE is_anonymous = true AND last_active_at < cutoff AND NOT EXISTS (live session) … RETURNING`, so a
+user who upgraded or was active between the read and the delete is never touched. Deleting a guest removes its
+sessions, identifiers and trusted devices through the usual cascades and emits `user.deleted`.
 
 ### API and webhooks
 
@@ -255,12 +298,28 @@ The public environment exposes `auth_config.anonymous: { enabled }`. `useUser()`
 
 ---
 
+## Social sign-in and federation
+
+Built-in presets cover Google, GitHub, GitLab, Discord, Microsoft, Apple, Facebook, X/Twitter, LinkedIn,
+Slack, Twitch, Spotify, Bitbucket, Dropbox, Notion, HubSpot, TikTok, Coinbase, LINE, Linear, Hugging Face,
+Box, Atlassian, Xero and Zoom. Each is just a credential pair in **Social connections**; nothing is gated by
+a plan.
+
+Anything else is a `custom_<key>` provider: OpenID Connect through a discovery document **or** manual
+endpoints, plain OAuth 2.0 with a userinfo endpoint, dotted claim/JSON-path mapping, `client_secret_basic`
+or `client_secret_post`, PKCE on or off, a logo URL and an optional "trust email as verified" switch.
+**Test connection** checks the endpoints without saving. Enterprise SAML 2.0 and OIDC connections add
+domain routing and JIT provisioning. See [FEDERATION.md](FEDERATION.md) for the full contract, the claim
+rules and the security checks (nonce, issuer, audience, rotated JWKS, clock skew, SSRF guard).
+
 ## Security notes
 
 - **Only hashes at rest.** Second-factor codes and trusted-device tokens are stored as sha256 hashes;
   codes are compared with a constant-time comparison (`safeEqual`).
-- **Second factors stay second factors.** A second factor must differ from the first one: email is never
-  offered after an email sign-in, so one compromised mailbox cannot satisfy both steps.
+- **Second factors stay second factors.** A second factor must differ from the first one: the same email
+  address is never offered after an email sign-in, and the same phone number is never offered after an
+  SMS sign-in (including the reset-password strategies), so one compromised mailbox or handset cannot
+  satisfy both steps.
 - **Rotation without a sliding window.** Each use of a trusted-device token rotates its value; a replayed
   cookie therefore fails, and the lifetime never extends itself. Revocation is immediate because the
   server checks the row on every sign-in, not a client-held claim.

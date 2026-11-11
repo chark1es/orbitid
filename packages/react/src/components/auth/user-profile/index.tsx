@@ -151,7 +151,7 @@ function UserProfileInner(props: UserProfileProps) {
         <nav
           aria-label={t("userProfile.title")}
           className={cn(
-            "-mx-1 flex shrink-0 gap-1 overflow-x-auto px-1 pb-1 md:mx-0 md:w-44 md:flex-col md:overflow-visible md:px-0 md:pb-0",
+            "flex shrink-0 gap-1 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:w-44 md:flex-col md:overflow-visible md:px-0 md:pb-0",
             el("userProfileNavbar"),
             el("navbar"),
           )}
@@ -185,7 +185,7 @@ function UserProfileInner(props: UserProfileProps) {
           ) : null}
         </nav>
         <div className={cn("min-w-0 flex-1", el("userProfilePage"), el("pageScrollBox"))}>
-          {step === "profile" ? <ProfilePage onNavigate={setStep} /> : null}
+          {step === "profile" ? <ProfilePage /> : null}
           {step === "security" ? <SecurityPage onNavigate={setStep} /> : null}
           {step === "api-keys" && ApiKeys ? <ApiKeys /> : null}
           {activePage ? <div data-orbit-page={activePage.url}>{activePage.children}</div> : null}

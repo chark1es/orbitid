@@ -23,7 +23,9 @@ describe("role scopes", () => {
     expect(screen.queryByRole("option", { name: "Organization" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Role" }));
     fireEvent.change(screen.getByLabelText(/Name/, { selector: "input" }), { target: { value: "Reviewer" } });
-    expect(screen.getByRole("button", { name: "Create role" }).hasAttribute("disabled")).toBe(true);
+    // A fresh form is not an error state; the button stays live so the attempt can reveal the list.
+    expect(screen.queryByText("Fix these before saving")).toBeNull();
+    expect(screen.getByRole("button", { name: "Create role" }).hasAttribute("disabled")).toBe(false);
     fireEvent.change(screen.getByLabelText(/Role key/), { target: { value: "app:reviewer" } });
     expect(screen.queryByLabelText("Creator eligible")).toBeNull();
     expect(screen.queryByText("org:reports:read")).toBeNull();

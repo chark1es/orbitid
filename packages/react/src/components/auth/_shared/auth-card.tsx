@@ -9,20 +9,13 @@ import {
   CardFooter,
   CardHeader,
   CardTitle,
+  OrbitMark,
   cn,
 } from "@orbitid/ui";
 import { useAuthAppearance, useElementClasses, useResolvedTheme } from "./appearance";
 import { contrastForeground, LIGHT_FOREGROUND } from "../../../appearance";
 import { useAuthRuntime } from "./w6";
 import { SecuredByOrbitID } from "./form-error";
-
-const OrbitMark = ({ color }: { color: string }) => (
-  <svg viewBox="0 0 32 32" role="img" aria-hidden="true" className="size-10">
-    <circle cx="16" cy="16" r="13" fill="none" stroke={color} strokeWidth="2.5" opacity="0.35" />
-    <ellipse cx="16" cy="16" rx="13" ry="5.5" fill="none" stroke={color} strokeWidth="2.5" transform="rotate(-30 16 16)" />
-    <circle cx="16" cy="16" r="4" fill={color} />
-  </svg>
-);
 
 export interface AuthCardProps {
   title: string;
@@ -61,7 +54,6 @@ export function AuthCard({
     const vanishesOnDark = resolvedTheme === "dark" && foreground === LIGHT_FOREGROUND;
     if (!vanishesOnDark) {
       brandingStyle["--primary"] = primaryColor;
-      brandingStyle["--ring"] = primaryColor;
       if (foreground) brandingStyle["--primary-foreground"] = foreground;
     }
   }
@@ -94,7 +86,7 @@ export function AuthCard({
             className={cn("h-10 w-auto max-w-[10rem] object-contain", el("logoImage"))}
           />
         ) : (
-          <OrbitMark color="var(--primary)" />
+          <OrbitMark color="var(--primary)" className="size-10" />
         )}
       </a>
     </div>
@@ -110,13 +102,21 @@ export function AuthCard({
       {logoPlacement === "outside" ? <div className="mb-4">{logo}</div> : null}
       <Card
         className={cn(
-          "w-full max-w-[25rem] gap-0 overflow-hidden border-border/70 shadow-sm",
+          "w-full max-w-[25rem] gap-0 overflow-hidden border-border/70",
           el("card"),
           el("cardBox"),
           className,
         )}
       >
-        <CardHeader className={cn("items-center gap-2 text-center", el("header"))}>
+        <CardHeader
+          className={cn(
+            "items-center gap-2 text-center",
+            // The line boxes of the subtitle and the first field already read as ~10px of air. 6px of
+            // padding lands the subtitle-to-label rhythm on 16px, the same gap the form uses between fields.
+            subtitle ? "pb-1.5" : null,
+            el("header"),
+          )}
+        >
           {logoPlacement === "inside" ? logo : null}
           {eyebrow ? <div className="flex items-center justify-center">{eyebrow}</div> : null}
           <div className="flex w-full items-start justify-between gap-2">
@@ -133,9 +133,9 @@ export function AuthCard({
         </CardHeader>
         <CardContent className={cn("flex flex-col gap-5", el("form"), contentClassName)}>
           {environment.app.developmentMode ? (
-            <Alert className={cn("w-full items-start border-amber-500/30 bg-amber-500/10", el("alert"))}>
-              <AlertTriangleIcon aria-hidden="true" className="text-amber-600 dark:text-amber-400" />
-              <AlertDescription className="text-xs text-amber-900 dark:text-amber-200">
+            <Alert className={cn("w-full items-start border-caution/40 bg-caution/10", el("alert"))}>
+              <AlertTriangleIcon aria-hidden="true" className="text-caution" />
+              <AlertDescription className="text-xs text-caution">
                 {t("devMode.banner")}
               </AlertDescription>
             </Alert>

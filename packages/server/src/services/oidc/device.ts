@@ -123,7 +123,7 @@ export type DeviceTokenResult =
  * Enforces the RFC 8628 interval (`slow_down`, which permanently increases the row's interval) and
  * consumes an approved code exactly once.
  */
-export async function pollDeviceCode(ctx: AppContext, application: ApplicationRow, deviceCode: string): Promise<DeviceTokenResult> {
+export async function pollDeviceCode(ctx: AppContext, application: ApplicationRow, deviceCode: string, issuer?: string): Promise<DeviceTokenResult> {
   const row = await findDeviceGrant(ctx, deviceCode);
   if (!row || row.applicationId !== application.id) return { ok: false, error: "expired_token", description: "The device code is invalid or has expired" };
   const now = Date.now();
@@ -161,6 +161,7 @@ export async function pollDeviceCode(ctx: AppContext, application: ApplicationRo
     family: randomToken(9),
     nonce: null,
     sessionId: null,
+    issuer,
   });
   return { ok: true, tokens };
 }

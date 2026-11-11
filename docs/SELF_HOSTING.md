@@ -59,7 +59,7 @@ The table below is the **SERVER** label: variables for the machine that runs Orb
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `ORBITID_DATABASE_URL` | SQLite file in the data dir | `postgres://…`, `pglite://<dir>` or `sqlite:<file>`. `DATABASE_URL` also works. |
-| `ORBITID_ENCRYPTION_KEY` | none, required in production | At least 32 characters. Encrypts signing keys, TOTP secrets and OAuth tokens in the database. Changing it makes them unreadable. |
+| `ORBITID_ENCRYPTION_KEY` | none, required in production | At least 32 characters. Encrypts signing keys, TOTP secrets and OAuth tokens in the database. Keep it identical across restarts and restores: a changed key cannot decrypt the stored signing keys, so startup now refuses with an explicit error instead of generating new keys (which would sign every user out). |
 | `ORBITID_BASE_URL` | `http://localhost:<port>` | The URL browsers and your apps use to reach the server. It is the token issuer. |
 | `ORBITID_SECRET_KEY` | derived | Backend API key. When unset it is derived from the encryption key, so it stays the same across restarts and rebuilds. |
 | `PORT` | `4000` | Port to listen on. |
@@ -92,11 +92,11 @@ Pull the new image or code and restart. The server applies pending migrations be
 
 ## Backups
 
-Everything lives in the database, plus uploaded profile images and organization logos under `ORBITID_DATA_DIR/uploads`. Back up both, and keep a copy of `ORBITID_ENCRYPTION_KEY` (and `ORBITID_SECRET_KEY` if you set one) somewhere safe. A restore with a different encryption key cannot read the stored signing keys, TOTP secrets or OAuth tokens. A development instance without a key also needs `ORBITID_DATA_DIR/keys.json`.
+Everything lives in the database, plus uploaded profile images and organization logos under `ORBITID_DATA_DIR/uploads`. Back up both, and keep a copy of `ORBITID_ENCRYPTION_KEY` (and `ORBITID_SECRET_KEY` if you set one) somewhere safe. A restore with a different encryption key cannot read the stored signing keys, TOTP secrets or OAuth tokens, and the server fails at startup with an error naming `ORBITID_ENCRYPTION_KEY`; it never silently mints replacement signing keys. Signing keys live in the database and old public keys stay in the JWKS after a rotation, so outstanding session tokens keep verifying. A development instance without a key also needs `ORBITID_DATA_DIR/keys.json`, and the named volumes in `docker-compose.yml` keep both the database and that directory across container rebuilds — do not delete them during a deploy.
 
 ## Behind a reverse proxy
 
-Set `ORBITID_BASE_URL` to the public URL, terminate TLS at the proxy, and set `ORBITID_TRUST_PROXY=1` so rate limits and session records see the client address instead of the proxy's. Do not set it when the server is reachable without a proxy: clients could then choose their own address. Cross-site POST callbacks (SAML, Apple sign-in) need an `https` base URL.
+Set `ORBITID_BASE_URL` to the public URL, terminate TLS at the proxy, and set `ORBITID_TRUST_PROXY=1` so rate limits and session records see the client address instead of the proxy's, and so the cookie code trusts the proxy's `X-Forwarded-Proto: https`. Do not set it when the server is reachable without a proxy: clients could then choose their own address and scheme. Cross-site POST callbacks (SAML, Apple sign-in) need an `https` base URL. A plain-http localhost instance keeps working: the `__client` cookie simply omits `Secure` because the browser would refuse it.
 
 ## What the container check does and does not prove
 

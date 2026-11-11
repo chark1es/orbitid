@@ -112,7 +112,7 @@ describe("the generated document", () => {
     const instance = spec.components.schemas.Instance as Record<string, any>;
     expect(instance.properties.password.properties.minLength.default).toBe(8);
     expect(instance.properties.application.properties.homeUrl.default).toBe("http://localhost:3000");
-    expect(instance.properties.session.properties.lifetimeSeconds.default).toBe(604800);
+    expect(instance.properties.session.properties.lifetimeSeconds.default).toBe(0);
     expect(instance.properties.branding.properties.theme.default).toBe("system");
   });
 

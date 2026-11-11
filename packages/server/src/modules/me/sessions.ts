@@ -5,7 +5,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { ErrorCodes, OrbitError } from "@orbitid/shared";
 import * as s from "../../db/schema";
 import { serializeSession, serializeTrustedDevice } from "../../serializers";
-import { endSession } from "../../services/sessions";
+import { endSession, isSessionExpired } from "../../services/sessions";
 import { listTrustedDevices, revokeTrustedDevice } from "../../services/trusted-devices";
 import { requireReverification } from "../auth/reverification";
 import { first } from "../../lib/db";
@@ -20,7 +20,7 @@ export function registerSessionRoutes(app: Hono, ctx: AppContext, helpers: MeHel
     const rows = (await ctx.db.select().from(s.sessions)
           .where(and(eq(s.sessions.userId, user.id), eq(s.sessions.status, "active")))
           .orderBy(desc(s.sessions.lastActiveAt)))
-      .filter((row) => row.id !== session.id && row.expireAt > Date.now());
+      .filter((row) => row.id !== session.id && !isSessionExpired(ctx, row));
     return c.json({ response: (await Promise.all(rows.map((row) => serializeSession(ctx, row, { withUser: true })))) });
   });
 

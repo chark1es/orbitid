@@ -1,4 +1,5 @@
 import { appendQuery } from "../util/url";
+import { commitPendingSignInStrategy } from "../util/last-used-strategy";
 import type { Client } from "../resources/client";
 import type { SignUp } from "../resources/sign-up";
 import type {
@@ -41,6 +42,9 @@ export async function handleRedirectCallback(
   }
   if (signIn?.status === "complete" && signIn.createdSessionId) {
     await ctx.setActive({ session: signIn.createdSessionId });
+    // The provider leg remembered its strategy before navigating away; now that the session exists
+    // it is the visitor's last-used sign-in method.
+    commitPendingSignInStrategy();
     ctx.navigate(signInRedirect, { replace: true });
     return { signIn, signUp };
   }

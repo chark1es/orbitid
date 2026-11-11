@@ -56,7 +56,7 @@ export function TablePagination({
         <div className="flex items-center gap-1.5">
           <span className="text-xs text-muted-foreground">Rows</span>
           <Select value={String(limit)} onValueChange={(value) => onLimitChange(Number(value))} disabled={disabled}>
-            <SelectTrigger className="h-7 w-[68px] text-xs" aria-label="Rows per page">
+            <SelectTrigger size="sm" className="w-[68px]" aria-label="Rows per page">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -74,8 +74,7 @@ export function TablePagination({
               <Button
                 type="button"
                 variant="outline"
-                size="icon"
-                className="size-7"
+                size="icon-sm"
                 aria-label="Previous page"
                 disabled={disabled || currentPage <= 1}
                 onClick={() => onPageChange(currentPage - 1)}
@@ -95,8 +94,8 @@ export function TablePagination({
                   <Button
                     type="button"
                     variant={entry === currentPage ? "default" : "outline"}
-                    size="icon"
-                    className="size-7 text-xs tabular-nums"
+                    size="icon-sm"
+                    className="text-xs tabular-nums"
                     aria-label={`Page ${entry}`}
                     aria-current={entry === currentPage ? "page" : undefined}
                     disabled={disabled}
@@ -111,8 +110,7 @@ export function TablePagination({
               <Button
                 type="button"
                 variant="outline"
-                size="icon"
-                className="size-7"
+                size="icon-sm"
                 aria-label="Next page"
                 disabled={disabled || currentPage >= totalPages}
                 onClick={() => onPageChange(currentPage + 1)}

@@ -36,6 +36,7 @@ export const componentAuthStrings = {
     resetPassword: {
       action: "Reset password",
       signOutOtherDevices: "Sign out of all other devices",
+      changed: "Your password was changed. Sign in again with your new password.",
     },
     newPassword: {
       action: "Continue",

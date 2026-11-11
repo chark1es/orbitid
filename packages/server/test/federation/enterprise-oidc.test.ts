@@ -189,6 +189,62 @@ describe("enterprise OIDC connection against a real identity provider", () => {
     expect(await rp.ctx.db.select().from(s.externalAccounts)).toHaveLength(0);
   });
 
+  it("refuses additional identifications for a user linked to a restricted connection", async () => {
+    await backend(rp, "PATCH", `/v1/enterprise_connections/${connectionId}`, { disable_additional_identifications: true });
+    const local = await createUser(rp, { email: "linked@other.test" });
+    const now = Date.now();
+    await rp.ctx.db.insert(s.externalAccounts).values({
+      id: "eac_linked", userId: local.id, provider: `oidc_${connectionId}`, providerUserId: "linked-subject",
+      emailAddress: local.email, firstName: "Linked", lastName: "User", approvedScopes: "", createdAt: now, updatedAt: now,
+    });
+    const browser = new Browser();
+    await signIn(browser, rp, local.email, local.password);
+
+    const refused = async (path: string, body: unknown) => {
+      const res = await browser.request(`${rp.url}${path}`, { json: body });
+      expect(res.status, path).toBe(403);
+      expect(res.json<{ errors: { code: string }[] }>().errors[0]!.code, path).toBe("not_allowed_access");
+    };
+    await refused("/v1/client/me/email_addresses", { email_address: "extra@other.test" });
+    await refused("/v1/client/me/phone_numbers", { phone_number: "+15550004444" });
+    await refused("/v1/client/me/change_password", { new_password: "N3wSup3rSecret!" });
+    await refused("/v1/client/me/external_accounts", { strategy: "oauth_google" });
+
+    // A pending address cannot be verified either.
+    await rp.ctx.db.insert(s.emailAddresses).values({
+      id: "idn_e_pending", userId: local.id, email: "pending@other.test", verified: false, createdAt: now, updatedAt: now,
+    });
+    await refused("/v1/client/me/email_addresses/idn_e_pending/prepare_verification", {});
+    await refused("/v1/client/me/email_addresses/idn_e_pending/attempt_verification", { code: "123456" });
+  });
+
+  it("syncs first/last name and avatar from the IdP on each SSO sign-in", async () => {
+    const local = await createUser(rp, {
+      email: `ada@${DOMAIN}`, password: "Sup3rSecret!", firstName: "Old", lastName: "Name",
+    });
+    const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const dataUrl = `data:image/png;base64,${png}`;
+    const uploaded = await backend(idp, "POST", `/v1/users/${idpUser.id}/profile_image`, { file: dataUrl });
+    expect(uploaded.status).toBe(200);
+
+    const browser = new Browser();
+    const created = await browser.request(`${rp.url}/v1/client/sign_ins`, {
+      json: { identifier: `ada@${DOMAIN}`, redirect_url: REDIRECT },
+    });
+    const start = await browser.request(
+      created.json<{ response: { first_factor_verification: { external_verification_redirect_url: string } } }>().response.first_factor_verification.external_verification_redirect_url,
+    );
+    const back = await authorizeAtIdp(idp, idpBrowser, authorizeParams(start.location!));
+    const landing = await browser.get(callbackUrl(connectionId, back));
+    expect(landing.status).toBe(302);
+    expect(landing.location!.searchParams.get("__orbit_status")).toBe("complete");
+
+    const updated = first(await rp.ctx.db.select().from(s.users).where(eq(s.users.id, local.id)))!;
+    expect(updated.firstName).toBe("Ada");
+    expect(updated.lastName).toBe("Lovelace");
+    expect(updated.imageUrl).toBe(dataUrl);
+  });
+
   it("serves the connection over the Backend API without leaking the client secret", async () => {
     const listed = await backend(rp, "GET", "/v1/enterprise_connections");
     expect(listed.text).not.toContain(app.client_secret);

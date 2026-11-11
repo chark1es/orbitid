@@ -51,14 +51,31 @@ export function isTransferable(signIn: SignInResource | null): boolean {
   );
 }
 
+/**
+ * The Frontend API origin every SDK call uses. The transport knows it best (`fapi.baseUrl`, which also
+ * honours `domain`/`proxyUrl`); the publishable key encodes it; the instance may have been built with an
+ * explicit `frontendApi`. A relative fallback would silently point at the *website's* origin — the OAuth
+ * consent screen once posted to the Next app instead of the OrbitID server that way.
+ */
 export function apiOrigin(orbit: OrbitInstance): string {
-  const candidates = [orbit.frontendApi, orbit.frontendApiUrl, orbit.apiUrl];
+  const transport: unknown = orbit.fapi;
+  const transportBaseUrl =
+    isRecord(transport) && typeof transport.baseUrl === "string" ? transport.baseUrl : null;
+  const candidates = [transportBaseUrl, orbit.frontendApi, orbit.frontendApiUrl, orbit.apiUrl];
   if (typeof orbit.publishableKey === "string") {
     try {
       candidates.push(decodePublishableKey(orbit.publishableKey).frontendApi);
     } catch {
       // Not a publishable key (tests/custom instances): fall through.
     }
+  }
+  const options: unknown = orbit.options;
+  if (isRecord(options)) {
+    candidates.push(
+      typeof options.frontendApi === "string" ? options.frontendApi : null,
+      typeof options.proxyUrl === "string" ? options.proxyUrl : null,
+      typeof options.domain === "string" ? options.domain : null,
+    );
   }
   for (const candidate of candidates) {
     if (typeof candidate === "string" && candidate.length > 0) return candidate.replace(/\/$/, "");

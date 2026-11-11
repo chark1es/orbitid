@@ -7,7 +7,7 @@ import * as s from "../../db/schema";
 import { newId } from "../../lib/ids";
 import { clientIp, parseBody } from "../../lib/http";
 import { hit } from "../../lib/rate-limit";
-import { getSession } from "../../services/sessions";
+import { getSession, isSessionExpired } from "../../services/sessions";
 import { verifyCaptcha } from "../../services/captcha";
 import { detectIdentifierType, getUserById, getUserByIdentifier, normalizeEmail, normalizePhone, primaryEmail } from "../../services/users";
 import { assertIdentifiersAllowed } from "../../services/restrictions";
@@ -33,7 +33,7 @@ export function registerCreationRoutes(app: Hono, ctx: AppContext, helpers: Sign
     await verifyCaptcha(ctx, captchaToken(c, body), clientIp(c));
     if (!ctx.settings.get().session.multiSession && client.lastActiveSessionId) {
       const active = await getSession(ctx, client.lastActiveSessionId);
-      if (active && active.status === "active" && active.expireAt > Date.now()) {
+      if (active && active.status === "active" && !isSessionExpired(ctx, active)) {
         const user = await getUserById(ctx, active.userId);
         const email = user ? await primaryEmail(ctx, user) : undefined;
         throw new OrbitError(400, ErrorCodes.identifier_already_signed_in, "You are already signed in", {

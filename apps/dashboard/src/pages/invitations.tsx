@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { Page as PageLayout } from "../components/shared/page";
 import { keepPreviousData, useQueryClient } from "@tanstack/react-query";
 import {
   Button,
@@ -10,6 +11,7 @@ import {
   DialogTitle,
   Input,
   Label,
+  SearchInput,
   Select,
   SelectContent,
   SelectItem,
@@ -18,7 +20,8 @@ import {
   Switch,
   Textarea,
 } from "@orbitid/ui";
-import { Ban, MailPlus, Search } from "lucide-react";
+import { OVERLAY_WIDTH } from "../components/shared/overlay-sizes";
+import { Ban, MailPlus } from "lucide-react";
 import { toast } from "sonner";
 import type { InvitationJSON } from "@orbitid/shared";
 import { api, useApi } from "../lib/api";
@@ -26,7 +29,7 @@ import { errorMessage } from "../lib/errors";
 import { formatDate } from "../lib/format";
 import { buildListPath } from "../lib/query";
 import { useTableState } from "../lib/use-table-state";
-import { useDebounced } from "../lib/hooks";
+import { useUrlSyncedInput } from "../lib/hooks";
 import { PageHeader } from "../components/shared/page-header";
 import { DataTable, type DataTableColumn } from "../components/shared/data-table";
 import { TablePagination } from "../components/shared/table-pagination";
@@ -91,9 +94,9 @@ function CreateInvitationsDialog({ open, onOpenChange }: { open: boolean; onOpen
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="rounded-[6px] sm:max-w-lg">
+        <DialogContent className={`rounded-[6px] ${OVERLAY_WIDTH.form}`}>
           <DialogHeader>
-            <DialogTitle className="text-base font-[650] tracking-[-0.01em]">Create invitation</DialogTitle>
+            <DialogTitle className="text-base font-heading tracking-[-0.01em]">Create invitation</DialogTitle>
             <DialogDescription className="text-sm leading-6 text-muted-foreground">
               Invitations are required when sign-up mode is restricted, or when the allowlist is on.
             </DialogDescription>
@@ -186,16 +189,10 @@ function CreateInvitationsDialog({ open, onOpenChange }: { open: boolean; onOpen
 
 export default function InvitationsPage() {
   const table = useTableState({ limit: 20, orderBy: "-created_at", filterKeys: ["status"] });
-  const [search, setSearch] = useState(table.query);
-  const debounced = useDebounced(search, 300);
+  const [search, setSearch] = useUrlSyncedInput(table.query, table.setQuery, 300);
   const [createOpen, setCreateOpen] = useState(false);
   const [revoking, setRevoking] = useState<InvitationJSON | null>(null);
   const [pending, setPending] = useState(false);
-
-  useEffect(() => {
-    if (debounced !== table.query) table.setQuery(debounced);
-  }, [debounced]);
-  useEffect(() => setSearch(table.query), [table.query]);
 
   const status = table.filter("status") || "all";
   const path = buildListPath("/invitations", {
@@ -229,7 +226,11 @@ export default function InvitationsPage() {
     {
       id: "email",
       header: "Email",
-      cell: (invitation) => <span className="font-data text-[0.8125rem]">{invitation.email_address}</span>,
+      cell: (invitation) => (
+        <span className="block max-w-[36ch] truncate text-[0.8125rem]" title={invitation.email_address}>
+          {invitation.email_address}
+        </span>
+      ),
     },
     {
       id: "status",
@@ -247,8 +248,6 @@ export default function InvitationsPage() {
     {
       id: "expires",
       header: "Expires",
-      headerClassName: "hidden sm:table-cell",
-      className: "hidden sm:table-cell",
       cell: (invitation) => (
         <span className="font-data text-xs text-muted-foreground">{formatDate(invitation.expires_at)}</span>
       ),
@@ -275,7 +274,7 @@ export default function InvitationsPage() {
   ];
 
   return (
-    <>
+    <PageLayout>
       <PageHeader
         title="Invitations"
         description="Instance-level invitations used to gate sign-ups."
@@ -287,20 +286,13 @@ export default function InvitationsPage() {
       />
 
       <div className="flex flex-wrap items-end gap-x-2 gap-y-3">
-        <div className="relative min-w-56 flex-1 max-w-md">
-          <Search
-            className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
-            strokeWidth={1.5}
-            aria-hidden
-          />
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search invitations"
-            aria-label="Search invitations"
-            className="h-[34px] pl-8"
-          />
-        </div>
+        <SearchInput
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search invitations"
+          aria-label="Search invitations"
+          className="min-w-56 max-w-md flex-1"
+        />
         <Select value={status} onValueChange={(value) => table.setFilter("status", value === "all" ? null : value)}>
           <SelectTrigger className="h-[34px] w-[132px]" aria-label="Filter invitations by status">
             <SelectValue />
@@ -365,6 +357,6 @@ export default function InvitationsPage() {
         pending={pending}
         onConfirm={() => void revoke()}
       />
-    </>
+    </PageLayout>
   );
 }

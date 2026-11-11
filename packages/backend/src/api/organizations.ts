@@ -148,12 +148,34 @@ export function createOrganizationsApi(http: BackendHttp) {
     deleteOrganizationDomain(params: { organizationId: string; domainId: string }) {
       return http.delete<DeletedObject>(`/v1/organizations/${params.organizationId}/domains/${params.domainId}`);
     },
+    prepareOrganizationDomainAffiliationVerification(params: { organizationId: string; domainId: string; affiliationEmailAddress: string }) {
+      return http.post<OrganizationDomain>(`/v1/organizations/${params.organizationId}/domains/${params.domainId}/prepare_affiliation_verification`, {
+        body: { affiliation_email_address: params.affiliationEmailAddress },
+      });
+    },
+    attemptOrganizationDomainAffiliationVerification(params: { organizationId: string; domainId: string; code: string }) {
+      return http.post<OrganizationDomain>(`/v1/organizations/${params.organizationId}/domains/${params.domainId}/attempt_affiliation_verification`, {
+        body: { code: params.code },
+      });
+    },
     getOrganizationMembershipRequestList(params: { organizationId: string; status?: string } & ListParams) {
       return list<OrganizationMembershipRequest>(http, `/v1/organizations/${params.organizationId}/membership_requests`, {
         limit: params.limit,
         offset: params.offset,
         status: params.status,
       });
+    },
+    /** Records a user's request to join an organization (the server returns an existing pending request instead of duplicating it). */
+    createOrganizationMembershipRequest(params: { organizationId: string; userId: string; status?: "pending" | "accepted" | "rejected" }) {
+      const { organizationId, ...body } = params;
+      return http.post<OrganizationMembershipRequest>(`/v1/organizations/${organizationId}/membership_requests`, { body });
+    },
+    /** Accepts a pending request, creating a membership with the organization's default role. */
+    acceptOrganizationMembershipRequest(params: { organizationId: string; requestId: string }) {
+      return http.post<OrganizationMembership>(`/v1/organizations/${params.organizationId}/membership_requests/${params.requestId}/accept`);
+    },
+    rejectOrganizationMembershipRequest(params: { organizationId: string; requestId: string }) {
+      return http.post<OrganizationMembershipRequest>(`/v1/organizations/${params.organizationId}/membership_requests/${params.requestId}/reject`);
     },
     getOrganizationRoleList(params: { organizationId: string } & ListParams) {
       return list<Role>(http, `/v1/organizations/${params.organizationId}/roles`, {

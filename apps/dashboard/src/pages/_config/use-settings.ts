@@ -29,6 +29,8 @@ export interface SettingsEditor {
   reset: () => void;
   save: () => Promise<boolean>;
   refetch: () => void;
+  /** Adopts a server response as the new baseline (used after a non-PATCH mutation such as a delete). */
+  apply: (next: InstanceSettings) => void;
 }
 
 /**
@@ -83,6 +85,14 @@ export function useSettingsEditor(): SettingsEditor {
     setRevision((value) => value + 1);
   }, [baseline]);
 
+  const apply = useCallback((next: InstanceSettings) => {
+    queryClient.setQueryData(SETTINGS_QUERY_KEY, next);
+    setDraft(cloneJson(next));
+    setBaseline(cloneJson(next));
+    setSaveError(null);
+    setRevision((value) => value + 1);
+  }, [queryClient]);
+
   const save = useCallback(async (): Promise<boolean> => {
     if (!draft || !baseline || saving) return false;
     const body = buildSettingsPatch(baseline, draft);
@@ -127,5 +137,6 @@ export function useSettingsEditor(): SettingsEditor {
     refetch: () => {
       void query.refetch();
     },
+    apply,
   };
 }

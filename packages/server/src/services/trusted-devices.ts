@@ -8,6 +8,7 @@ import type { AppContext } from "../context";
 import * as s from "../db/schema";
 import { randomToken, sha256 } from "../lib/crypto";
 import { newId } from "../lib/ids";
+import { requestIsSecure } from "../lib/http";
 import { first } from "../lib/db";
 
 export type TrustedDeviceRow = typeof s.trustedDevices.$inferSelect;
@@ -48,7 +49,7 @@ export function setTrustedDeviceCookie(c: Context, ctx: AppContext, token: strin
   const maxAge = Math.max(1, Math.floor((expiresAt - Date.now()) / 1000));
   setCookie(c, COOKIES.trustedDevice, token, {
     httpOnly: true,
-    secure: ctx.env.baseUrl.startsWith("https://"),
+    secure: requestIsSecure(c, ctx.env.baseUrl),
     sameSite: "Lax",
     path: "/",
     maxAge,

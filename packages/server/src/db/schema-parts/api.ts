@@ -1,4 +1,5 @@
 import type { Kit } from "../kit";
+import { dialect } from "../dialect";
 import { sql } from "drizzle-orm";
 import { tableBuilders, type Meta } from "./columns";
 import type { IdentityTables } from "./identity";
@@ -49,9 +50,25 @@ export function apiTables(kit: Kit, users: IdentityTables["users"]) {
     clientSecretHash: text("client_secret_hash"),
     isPublic: bool("is_public").notNull().default(false),
     redirectUris: json<string[]>("redirect_uris").notNull().$defaultFn(() => []),
+    /** RP-initiated logout: only these exact URIs may receive the browser after `end_session`. */
+    postLogoutRedirectUris: json<string[]>("post_logout_redirect_uris").notNull().$defaultFn(() => []).default([]),
     scopes: text("scopes").notNull().default("openid profile email"),
+    /** Show the consent screen; off means this is a first-party/trusted app and consent is skipped. */
     consentScreenEnabled: bool("consent_screen_enabled").notNull().default(true),
-    pkceRequired: bool("pkce_required").notNull().default(true),
+    /**
+     * PKCE is mandatory for public clients; confidential clients may opt in. The product default is false, but the
+     * original SQLite table was created with a physical `DEFAULT true` and SQLite cannot change a column default
+     * without rebuilding the table — forbidden here because `oauth_grants.application_id` cascades from it. The
+     * Drizzle default therefore mirrors each dialect's real table (SQLite true, Postgres false), and every insert
+     * supplies the value explicitly (`createApplication`, the transfer importer), so stored rows are false by
+     * default on both.
+     */
+    pkceRequired: bool("pkce_required").notNull().default(dialect === "sqlite"),
+    accessTokenLifetimeSeconds: int("access_token_lifetime_seconds").notNull().default(3600),
+    refreshTokenLifetimeSeconds: int("refresh_token_lifetime_seconds").notNull().default(2592000),
+    idTokenLifetimeSeconds: int("id_token_lifetime_seconds").notNull().default(3600),
+    /** none | organizations | roles | all — what the `groups` claim contains (see services/oidc/shared.ts). */
+    groupsClaim: text("groups_claim").notNull().default("all"),
     ...created(),
   });
   /** Authorization codes + access/refresh tokens issued by the OIDC provider. `kind`: code | access | refresh */
@@ -71,6 +88,18 @@ export function apiTables(kit: Kit, users: IdentityTables["users"]) {
     familyId: text("family_id"),
     /** Session that authorized the grant; keeps `sid` and organization claims tied to it. */
     sessionId: text("session_id"),
+    /**
+     * When a refresh token was rotated out (epoch ms). A retry of this exact token inside the reuse grace window
+     * returns `successorId` again and never slides the window; outside it the family is revoked.
+     */
+    consumedAt: int("consumed_at"),
+    /** The refresh token that replaced this consumed one (idempotent retry target). */
+    successorId: text("successor_id"),
+    /**
+     * The successor refresh token sealed with the instance encryption key, kept only so a retry inside the grace
+     * window can return the *same* token instead of rotating again. A database dump alone cannot open it.
+     */
+    successorTokenEnc: text("successor_token_enc"),
     revoked: bool("revoked").notNull().default(false),
     expiresAt: int("expires_at").notNull(),
     createdAt: ts("created_at"),

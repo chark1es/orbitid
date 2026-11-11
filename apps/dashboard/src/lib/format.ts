@@ -1,4 +1,4 @@
-import type { UserJSON } from "@orbitid/shared";
+import { SESSION_NEVER_EXPIRES_AT, type UserJSON } from "@orbitid/shared";
 
 const numberFormat = new Intl.NumberFormat("en-US");
 const dateFormat = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -20,6 +20,16 @@ export function formatDate(ms: number | null | undefined): string {
 
 export function formatDateTime(ms: number | null | undefined): string {
   return ms ? dateTimeFormat.format(ms) : "—";
+}
+
+/**
+ * Session expiry for tables: `No expiry` when the operator left `session.lifetimeSeconds` at 0 (the row stores
+ * the far-future sentinel) instead of rendering a meaningless year-2243 date.
+ */
+export function formatSessionExpiry(ms: number | null | undefined): string {
+  if (!ms) return "—";
+  if (ms >= SESSION_NEVER_EXPIRES_AT) return "No expiry";
+  return dateTimeFormat.format(ms);
 }
 
 export function formatRelativeTime(ms: number | null | undefined, now = Date.now()): string {

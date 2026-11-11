@@ -1,4 +1,4 @@
-import { COOKIES } from "@orbitid/shared";
+import { COOKIE_MAX_AGE_SECONDS, COOKIES } from "@orbitid/shared";
 
 export type SameSite = "Lax" | "Strict" | "None";
 
@@ -43,14 +43,19 @@ export function deleteCookie(name: string, options: CookieOptions = {}): void {
   document.cookie = `${name}=; ${cookieSuffix({ ...options, maxAge: 0 })}`;
 }
 
-/** Writes the `__session` JWT cookie read by the app's SSR/middleware (never httpOnly: the SDK owns it). */
+/**
+ * Writes the `__session` JWT cookie read by the app's SSR/middleware (never httpOnly: the SDK owns it).
+ * It carries the browser's maximum lifetime rather than being a session cookie: closing the browser must not
+ * throw away the only proof the middleware has. The JWT itself still expires in ~60 s; the middleware
+ * handshakes with the `__client` cookie for a fresh one, and the SDK rewrites this cookie on every refresh.
+ */
 export function setSessionCookie(jwt: string, options: CookieOptions = {}): void {
-  setCookie(COOKIES.session, jwt, options);
+  setCookie(COOKIES.session, jwt, { maxAge: COOKIE_MAX_AGE_SECONDS, ...options });
 }
 
 /** Writes `__client_uat` (unix seconds, `0` when signed out) so middleware can skip the API for signed-out visitors. */
 export function setClientUatCookie(unixSeconds: number, options: CookieOptions = {}): void {
-  setCookie(COOKIES.clientUat, String(Math.max(0, Math.floor(unixSeconds))), { ...options, maxAge: 60 * 60 * 24 * 365 });
+  setCookie(COOKIES.clientUat, String(Math.max(0, Math.floor(unixSeconds))), { ...options, maxAge: COOKIE_MAX_AGE_SECONDS });
 }
 
 export function clearAuthCookies(options: CookieOptions = {}): void {

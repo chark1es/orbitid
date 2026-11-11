@@ -13,7 +13,7 @@ import { listTrustedDevices, revokeTrustedDevice } from "../../../services/trust
 import { roleClaimsForUser, setUserRoles } from "../../../services/user-roles";
 import { deleted, getUserOrThrow, listParams, page, refuseUserCredentialMutation } from "../shared";
 import { first } from "../../../lib/db";
-import { revokeSessions, AUDIT_ACTOR } from "./shared";
+import { AUDIT_ACTOR } from "./shared";
 
 export function registerRoleRoutes(app: Hono, ctx: AppContext) {
   app.get("/users/:id/oauth_access_tokens/:provider", async (c) => {
@@ -47,9 +47,9 @@ export function registerRoleRoutes(app: Hono, ctx: AppContext) {
     const existing = await getUserOrThrow(ctx, c.req.param("id"));
     const body = await parseBody(c, z.object({ roles: z.array(z.string().min(1)).max(50) }));
     const roles = await setUserRoles(ctx, existing.id, body.roles);
-    // A role change is identity data: every existing JWT keeps its old claim until the next mint, so the
-    // sessions of that user are ended to force a fresh token. Operators expect a revocation to stick.
-    await revokeSessions(ctx, existing.id);
+    // A role change is identity data, and instance roles are read from `user_roles` on every token mint, so the
+    // change applies to the next token (≤ `session.tokenLifetimeSeconds`, 60 s by default) without ending the
+    // user's sessions. Ending them here would sign the user out of every device for a permission change.
     const json = await serializeUser(ctx, await getUserOrThrow(ctx, existing.id), { backend: true });
     await emitEvent(ctx, "user.updated", json);
     await audit(ctx, { actor: AUDIT_ACTOR, action: "user.roles.updated", targetType: "user", targetId: existing.id, metadata: { roles } });

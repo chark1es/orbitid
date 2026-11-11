@@ -69,37 +69,59 @@ function assertSmsTransportShape(settings: InstanceSettings): void {
 }
 
 /**
- * A social provider that is on must be usable: id + secret (Apple may use a .p8 key), custom OIDC a discovery URL.
- * A discovery URL must be absolute https, except in development mode where a plain-http loopback provider (a local
- * test IdP) is explicitly allowed — the same rule the fetcher applies before it connects.
+ * A social provider that is on must be usable: id + secret (Apple may use a .p8 key), a custom provider a
+ * discovery URL or manual endpoints. URLs must be absolute https, except in development mode where a plain-http
+ * loopback provider (a local test IdP) is explicitly allowed — the same rule the fetcher applies before it connects.
  */
 function assertSocialProviders(settings: InstanceSettings): void {
+  const loopbackHosts = ["localhost", "127.0.0.1", "[::1]", "::1"];
+  const urlShape = (raw: string, param: string) => {
+    let url: URL;
+    try {
+      url = new URL(raw);
+    } catch {
+      throw invalid(param, `${param} must be an absolute URL.`);
+    }
+    const loopback = loopbackHosts.includes(url.hostname);
+    // Shape only: plain http is accepted for a loopback host (a local test IdP) and must be https otherwise.
+    // Whether that host is reachable is an SSRF decision made at request time, where DNS is actually resolved.
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
+      throw invalid(param, `${param} must be an absolute https URL (plain http is only accepted for a loopback host).`);
+    }
+  };
   for (const [key, provider] of Object.entries(settings.social)) {
     if (!provider.enabled) continue;
     const param = `social.${key}`;
+    const custom = key.startsWith("custom_");
     if (!provider.clientId.trim()) throw invalid(param, `${param} is enabled but has no clientId. Add the provider's client id or turn the provider off.`);
     const appleWithKey = key === "apple"
       && !!provider.appleTeamId?.trim() && !!provider.appleKeyId?.trim() && !!provider.applePrivateKey?.trim();
-    if (!provider.clientSecret.trim() && !appleWithKey) {
+    // A custom provider may be a public client: PKCE, no secret. Every built-in provider needs a secret.
+    const publicClient = custom && provider.pkce !== false && !provider.clientSecret.trim();
+    if (!provider.clientSecret.trim() && !appleWithKey && !publicClient) {
       throw invalid(param, `${param} is enabled but has no clientSecret (or, for Apple, a team id, key id and private key).`);
     }
-    if (key.startsWith("custom_") && !provider.discoveryUrl?.trim()) {
-      throw invalid(param, `${param} is a custom OIDC provider and needs a discoveryUrl.`);
+    if (custom) {
+      const discovery = provider.discoveryUrl?.trim();
+      if (!discovery && !(provider.authorizationUrl?.trim() && provider.tokenUrl?.trim())) {
+        throw invalid(param, `${param} needs a discoveryUrl, or manual authorizationUrl and tokenUrl endpoints.`);
+      }
+      if (!discovery && provider.protocol === "oauth2" && !provider.userinfoUrl?.trim()) {
+        throw invalid(param, `${param} is an OAuth 2.0 provider and needs a userinfoUrl to read the profile.`);
+      }
+      if (!discovery && provider.protocol !== "oauth2" && !provider.userinfoUrl?.trim() && !provider.jwksUrl?.trim()) {
+        throw invalid(param, `${param} needs a userinfoUrl or a jwksUrl to identify the user.`);
+      }
     }
-    const discovery = provider.discoveryUrl?.trim();
-    if (discovery) {
-      let url: URL;
-      try {
-        url = new URL(discovery);
-      } catch {
-        throw invalid(`${param}.discoveryUrl`, `${param}.discoveryUrl must be an absolute URL.`);
+    for (const field of ["discoveryUrl", "authorizationUrl", "tokenUrl", "userinfoUrl", "jwksUrl", "issuer", "logoUrl"] as const) {
+      const raw = provider[field]?.trim();
+      if (!raw) continue;
+      const paramName = `${param}.${field}`;
+      // `issuer` is an identifier, not necessarily a URL, but when it looks like one its scheme must be sane.
+      if (field === "issuer" && !/^https?:\/\//i.test(raw)) {
+        throw invalid(paramName, `${paramName} must be an absolute http(s) URL when set.`);
       }
-      const loopback = ["localhost", "127.0.0.1", "[::1]", "::1"].includes(url.hostname);
-      // Shape only: plain http is accepted for a loopback host (a local test IdP) and must be https otherwise.
-      // Whether that host is reachable is an SSRF decision made at request time, where DNS is actually resolved.
-      if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
-        throw invalid(`${param}.discoveryUrl`, `${param}.discoveryUrl must be an absolute https URL (plain http is only accepted for a loopback host).`);
-      }
+      urlShape(raw, paramName);
     }
   }
 }
@@ -230,12 +252,17 @@ function assertAttributesUsable(settings: InstanceSettings): void {
   }
 }
 
-/** Session and JWT lifetimes must be positive; a zero-lifetime token can never be verified. */
+/**
+ * Session and JWT lifetimes. `session.lifetimeSeconds: 0` means "no maximum lifetime" and is the default;
+ * a positive value is an absolute cap. The inactivity timeout is opt-in (`0` = disabled) and may exceed a
+ * finite lifetime (it is then simply the weaker of the two). A token lifetime must be positive: a zero-lifetime
+ * token could never be verified.
+ */
 function assertSessionPolicy(settings: InstanceSettings): void {
   const session = settings.session;
-  if (session.lifetimeSeconds <= 0) throw invalid("session.lifetimeSeconds", "session.lifetimeSeconds must be greater than 0.");
+  if (session.lifetimeSeconds < 0) throw invalid("session.lifetimeSeconds", "session.lifetimeSeconds must be 0 (no maximum lifetime) or greater.");
   if (session.tokenLifetimeSeconds <= 0) throw invalid("session.tokenLifetimeSeconds", "session.tokenLifetimeSeconds must be greater than 0.");
-  if (session.tokenLifetimeSeconds > session.lifetimeSeconds) {
+  if (session.lifetimeSeconds > 0 && session.tokenLifetimeSeconds > session.lifetimeSeconds) {
     throw invalid("session.tokenLifetimeSeconds", "session.tokenLifetimeSeconds cannot exceed session.lifetimeSeconds.");
   }
   if (session.inactivityTimeoutSeconds < 0) throw invalid("session.inactivityTimeoutSeconds", "session.inactivityTimeoutSeconds must be 0 (disabled) or greater.");
@@ -252,7 +279,7 @@ function assertOrganizationRoleSettings(settings: InstanceSettings): void {
       throw invalid(`organizations.${field}`, `organizations.${field} must be an organization role key ("org:..."), not "${key}".`);
     }
   }
-  if (orgs.maxAllowedMemberships < 1) throw invalid("organizations.maxAllowedMemberships", "organizations.maxAllowedMemberships must be at least 1.");
+  if (orgs.maxAllowedMemberships < 0) throw invalid("organizations.maxAllowedMemberships", "organizations.maxAllowedMemberships must be 0 (no limit) or greater.");
   if (orgs.maxCreatedOrganizationsPerUser !== null && orgs.maxCreatedOrganizationsPerUser < 0) {
     throw invalid("organizations.maxCreatedOrganizationsPerUser", "organizations.maxCreatedOrganizationsPerUser must be null (no limit) or at least 0.");
   }

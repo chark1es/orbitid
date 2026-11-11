@@ -8,6 +8,8 @@ import { emitEvent } from "../../../services/webhooks";
 import { audit } from "../../../services/audit";
 import { onUserDeleted } from "../../../services/orgs";
 import { revokeAllTrustedDevices } from "../../../services/trusted-devices";
+import { revokeApiKeysForSubject } from "../../../services/api-keys";
+import { revokeGrantsForUser } from "../../../services/oidc/revocation";
 import { deleted, getUserOrThrow, refuseUserCredentialMutation } from "../shared";
 import { revokeSessions, AUDIT_ACTOR } from "./shared";
 
@@ -27,7 +29,9 @@ export function registerModerationRoutes(app: Hono, ctx: AppContext) {
     const existing = await getUserOrThrow(ctx, c.req.param("id"));
     await ctx.db.update(s.users).set({ banned: true, updatedAt: Date.now() }).where(eq(s.users.id, existing.id));
     await revokeSessions(ctx, existing.id);
+    await revokeGrantsForUser(ctx, existing.id);
     await revokeAllTrustedDevices(ctx, existing.id);
+    await revokeApiKeysForSubject(ctx, existing.id, "user banned");
     const json = await serializeUser(ctx, await getUserOrThrow(ctx, existing.id), { backend: true });
     await emitEvent(ctx, "user.updated", json);
     await audit(ctx, { actor: AUDIT_ACTOR, action: "user.banned", targetType: "user", targetId: existing.id });

@@ -65,11 +65,18 @@ export function sessionRows(env: EnvironmentJSON, instance?: InstanceSnapshot): 
       id: "session.lifetime",
       label: "Session lifetime",
       status: typeof lifetime === "number" ? "enabled" : "needs-config",
-      value: typeof lifetime === "number" ? formatDuration(lifetime) : "Not exposed by the public environment",
+      value:
+        typeof lifetime !== "number"
+          ? "Not exposed by the public environment"
+          : lifetime > 0
+            ? formatDuration(lifetime)
+            : "No maximum (until sign-out or revocation)",
       detail:
-        typeof lifetime === "number"
-          ? `${tokenLifetime ? `Session tokens last ${formatDuration(tokenLifetime)} and refresh automatically.` : "Sessions end after this period."}`
-          : "Set ORBITID_SECRET_KEY so the setup page can read session settings from the Backend API.",
+        typeof lifetime !== "number"
+          ? "Set ORBITID_SECRET_KEY so the setup page can read session settings from the Backend API."
+          : lifetime > 0
+            ? `${tokenLifetime ? `Session tokens last ${formatDuration(tokenLifetime)} and refresh automatically.` : "Sessions end after this period."}`
+            : `${tokenLifetime ? `Session tokens last ${formatDuration(tokenLifetime)} and refresh automatically.` : ""} The session itself does not expire unless the operator sets a limit.`,
       tryHref: "/inspector",
     },
     {

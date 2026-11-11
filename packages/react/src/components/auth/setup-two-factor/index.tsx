@@ -266,7 +266,7 @@ export function TwoFactorSetup({ sessionId, onComplete, redirectUrl, className }
             <Button
               type="button"
               variant="link"
-              className="h-auto p-0 text-sm font-medium"
+              className="h-auto min-h-6 px-0 py-1 text-sm font-medium"
               disabled={busy}
               onClick={() => {
                 setError(null);
@@ -305,7 +305,7 @@ export function TwoFactorSetup({ sessionId, onComplete, redirectUrl, className }
           <Button
             type="button"
             variant="link"
-            className="h-auto p-0 text-sm font-medium"
+            className="h-auto min-h-6 px-0 py-1 text-sm font-medium"
             disabled={busy}
             onClick={() => {
               setError(null);

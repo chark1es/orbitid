@@ -323,7 +323,27 @@ export interface WebhookDeliveryJSON { object: "webhook_delivery"; id: string; e
 export interface ApiKeyJSON { object: "api_key"; id: string; name: string; description: string | null; subject: string; prefix: string; secret?: string; scopes: string[]; claims: Record<string, unknown> | null; revoked: boolean; expiration: number | null; last_used_at: number | null; created_by: string | null; created_at: number; updated_at: number }
 export interface M2MMachineJSON { object: "machine"; id: string; name: string; scoped_machines: string[]; default_token_ttl: number; created_at: number; updated_at: number }
 export interface M2MTokenJSON { object: "machine_token"; id: string; machine_id: string; token?: string; claims: Record<string, unknown> | null; revoked: boolean; expired: boolean; expiration: number | null; created_at: number }
-export interface OAuthApplicationJSON { object: "oauth_application"; id: string; name: string; client_id: string; client_secret?: string; public: boolean; redirect_uris: string[]; scopes: string; consent_screen_enabled: boolean; pkce_required: boolean; created_at: number; updated_at: number }
+/**
+ * Defaults for a newly created OAuth application. These are part of the server contract: the dashboard builds its
+ * "new application" form from them, so it never offers scopes or claims an app would not actually get.
+ *
+ * `groups`/`organizations`/`offline_access` are opt-in: an app discloses only what it asked for (see
+ * `applicationScopes` in the server's OIDC service).
+ */
+export const DEFAULT_OAUTH_APPLICATION_SCOPES = "openid profile email";
+/** New applications emit no `groups` claim until an operator chooses a mode. */
+export const DEFAULT_OAUTH_GROUPS_CLAIM = "none";
+/** New applications issue short-lived access tokens; an app may set a longer lifetime explicitly. */
+export const DEFAULT_OIDC_ACCESS_TOKEN_LIFETIME_SECONDS = 300;
+
+export interface OAuthApplicationJSON {
+  object: "oauth_application"; id: string; name: string; client_id: string; client_secret?: string; public: boolean;
+  redirect_uris: string[]; post_logout_redirect_uris: string[]; scopes: string;
+  consent_screen_enabled: boolean; pkce_required: boolean;
+  access_token_lifetime_seconds: number; refresh_token_lifetime_seconds: number; id_token_lifetime_seconds: number;
+  groups_claim: "none" | "organizations" | "roles" | "all";
+  created_at: number; updated_at: number;
+}
 export interface EnterpriseConnectionJSON {
   object: "enterprise_connection"; id: string; name: string; protocol: "saml" | "oidc"; provider: string; domains: string[]; active: boolean;
   allow_subdomains: boolean; allow_idp_initiated: boolean; sync_user_attributes: boolean; disable_additional_identifications: boolean;

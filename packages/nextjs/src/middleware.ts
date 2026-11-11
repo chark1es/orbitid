@@ -17,9 +17,12 @@ import {
 import { resolveRequestAuthState } from "./resolve";
 import {
   completeHandshake,
+  handshakeUnavailableFor,
   hasHandshakeMarker,
+  hasHandshakeRetryMarker,
   isNavigationRequest,
   redirectToHandshake,
+  resetHandshakeRetries,
   type HandshakeOptions,
 } from "./handshake";
 
@@ -257,6 +260,10 @@ export function orbitIdMiddleware(
     // A return from the Frontend API handshake carries a token in the URL: verify it, write the SDK
     // cookies and redirect to the same URL without the parameter before anything else looks at auth.
     if (handshakeEnabled && req.method === "GET") {
+      // The terminal 503 page's manual "Try again" link: clear the bounded-retry counter, then continue to the
+      // clean URL, where the next navigation starts a fresh handshake with a full retry budget.
+      const reset = resetHandshakeRetries(req, handshakeOptions);
+      if (reset) return applyCsp(reset, options.contentSecurityPolicy);
       const completed = await completeHandshake(req, env, handshakeOptions);
       if (completed) return applyCsp(completed.response, options.contentSecurityPolicy);
     }
@@ -280,11 +287,23 @@ export function orbitIdMiddleware(
     // already set the visitor continues signed out instead of looping.
     let effectiveState = state;
     const cookieAuth = !incoming.get("authorization");
-    if (handshakeEnabled && cookieAuth && state.status === "handshake" && isNavigationRequest(req)) {
-      if (!hasHandshakeMarker(req)) {
-        return applyCsp(redirectToHandshake(req, env, handshakeOptions), options.contentSecurityPolicy);
+    if (handshakeEnabled && cookieAuth && state.status === "handshake") {
+      if (isNavigationRequest(req)) {
+        if (!hasHandshakeMarker(req)) {
+          return applyCsp(redirectToHandshake(req, env, handshakeOptions), options.contentSecurityPolicy);
+        }
+        // The last attempt hit a transient API failure. Retry instead of treating a live visitor as signed out;
+        // if the API is still down the return is another 503 page, never a sign-in redirect.
+        if (hasHandshakeRetryMarker(req)) {
+          return applyCsp(redirectToHandshake(req, env, handshakeOptions), options.contentSecurityPolicy);
+        }
+        // Marker already set after a completed attempt: keep the loop guard and treat this navigation as
+        // signed-out for the handler, but never clear the credentials here.
+        effectiveState = { ...state, status: "signed-out", token: null };
+      } else if (hasHandshakeRetryMarker(req)) {
+        // A fetch/API request while the API is known to be down gets an explicit 503, not a sign-in redirect.
+        return applyCsp(handshakeUnavailableFor(req, req.url), options.contentSecurityPolicy);
       }
-      effectiveState = { ...state, status: "signed-out", token: null };
     }
 
     if (!handler) {

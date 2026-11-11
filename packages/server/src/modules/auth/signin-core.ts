@@ -159,7 +159,11 @@ export async function buildSignInJSON(ctx: AppContext, row: SignInRow): Promise<
     supported_identifiers: supportedIdentifiers(ctx),
     supported_first_factors: user ? await computeFirstFactors(ctx, user, { requestedReset }) : null,
     // A second factor must be a different factor than the first one.
-    supported_second_factors: user ? await supportedSecondFactors(ctx, user, { firstFactorStrategy: state.first?.strategy }) : null,
+    supported_second_factors: user ? await supportedSecondFactors(ctx, user, {
+      firstFactorStrategy: state.first?.strategy,
+      firstFactorEmailId: state.first?.emailId,
+      firstFactorPhoneId: state.first?.phoneId,
+    }) : null,
     first_factor_verification: await factorJSON(ctx, state.first),
     second_factor_verification: await factorJSON(ctx, state.second),
     identifier: row.identifier ?? null,
@@ -201,7 +205,7 @@ export async function completeSignIn(ctx: AppContext, row: SignInRow, opts: Comp
 }
 
 export interface AfterFirstFactorResult {
-  status: "needs_second_factor" | "complete";
+  status: "needs_second_factor" | "complete" | "needs_sign_in";
   sessionId?: string;
   /** The rotated trusted-device token to put back into the cookie. */
   trustedDeviceToken?: string;
@@ -218,8 +222,12 @@ export interface AfterFirstFactorResult {
  */
 export async function afterFirstFactor(ctx: AppContext, row: SignInRow, user: UserRow, opts: CompleteSignInOptions = {}): Promise<AfterFirstFactorResult> {
   const state = asSignInState(row);
-  // A second factor must be a different factor than the first one (never email after an email sign-in).
-  const factors = await supportedSecondFactors(ctx, user, { firstFactorStrategy: state.first?.strategy });
+  // A second factor must be a different factor than the first one (never the same email or phone twice).
+  const factors = await supportedSecondFactors(ctx, user, {
+    firstFactorStrategy: state.first?.strategy,
+    firstFactorEmailId: state.first?.emailId,
+    firstFactorPhoneId: state.first?.phoneId,
+  });
   if (factors.length > 0) {
     const st = ctx.settings.get();
     if (st.session.trustedDevicesEnabled && opts.trustedDeviceToken) {
@@ -241,6 +249,14 @@ export async function afterFirstFactor(ctx: AppContext, row: SignInRow, user: Us
     }
     await pendingSecondFactor(ctx, row, user, state, factors);
     return { status: "needs_second_factor" };
+  }
+  // No factor remains after excluding the first factor's channel. Distinguish a user who never enrolled MFA
+  // (normal completion, as before) from one whose only enrolled factor was just used for recovery: the latter
+  // must fail closed, because a recovery mailbox must not also stand in for the second factor.
+  const st = ctx.settings.get();
+  const recoveryFirst = state.first?.strategy.startsWith("reset_password") === true;
+  if (st.mfa.required && recoveryFirst && (await supportedSecondFactors(ctx, user)).length > 0) {
+    return { status: "needs_sign_in" };
   }
   const sessionId = await completeSignIn(ctx, row, opts);
   return { status: "complete", sessionId };

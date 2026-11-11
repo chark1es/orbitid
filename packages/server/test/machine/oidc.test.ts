@@ -5,6 +5,7 @@ import { setup, authHeaders, insertUser, insertClientSession, BASE_URL } from ".
 import { TEST_PUBLIC_JWK } from "./fake-tokens";
 import { eq } from "drizzle-orm";
 import * as schema from "../../src/db/schema";
+import { createApplication } from "../../src/services/oidc/applications";
 
 vi.mock("../../src/services/tokens", () => import("./fake-tokens"));
 
@@ -18,7 +19,11 @@ async function createApp(h: Harness, overrides: Record<string, unknown> = {}) {
   const res = await h.app.request("/v1/oauth_applications", {
     method: "POST",
     headers: authHeaders(),
-    body: json({ name: "Test App", redirect_uris: [REDIRECT_URI], consent_screen_enabled: false, ...overrides }),
+    body: json({
+      name: "Test App", redirect_uris: [REDIRECT_URI], consent_screen_enabled: false,
+      scopes: "openid profile email phone groups organizations offline_access",
+      ...overrides,
+    }),
   });
   expect(res.status).toBe(201);
   return res.json();
@@ -102,11 +107,18 @@ describe("OIDC provider — discovery + authorize", () => {
     expect(query.code).toMatch(/^oac_/);
     expect(query.state).toBe("abc");
 
-    const missingPkce = await authorize(h, {
+    // A confidential client without PKCE works by default (Tinyauth/Authentik/oauth2-proxy).
+    const noPkce = await authorize(h, {
       client_id: app.client_id, redirect_uri: REDIRECT_URI, response_type: "code", scope: "openid", state: "s2",
     }, session.cookie);
+    expect(noPkce.query.code).toBeTruthy();
+
+    const strict = await createApp(h, { name: "Strict PKCE", pkce_required: true });
+    const missingPkce = await authorize(h, {
+      client_id: strict.client_id, redirect_uri: REDIRECT_URI, response_type: "code", scope: "openid", state: "s3",
+    }, session.cookie);
     expect(missingPkce.query.error).toBe("invalid_request");
-    expect(missingPkce.query.state).toBe("s2");
+    expect(missingPkce.query.state).toBe("s3");
 
     const badScope = await authorize(h, {
       client_id: app.client_id, redirect_uri: REDIRECT_URI, response_type: "code", scope: "openid admin",
@@ -142,7 +154,8 @@ describe("OIDC provider — token lifecycle", () => {
     expect(tokens.access_token).toMatch(/^oat_/);
     expect(tokens.refresh_token).toMatch(/^ort_/);
     expect(tokens.token_type).toBe("Bearer");
-    expect(tokens.expires_in).toBe(3600);
+    // New applications default to a short access-token lifetime (<= 5 minutes).
+    expect(tokens.expires_in).toBe(300);
     expect(tokens.scope).toBe("openid profile email offline_access");
 
     const header = decodeProtectedHeader(tokens.id_token);
@@ -178,7 +191,20 @@ describe("OIDC provider — token lifecycle", () => {
     expect(next.access_token).not.toBe(tokens.access_token);
     expect(next.id_token).toBeTruthy();
 
-    // Reusing the rotated-out refresh token is treated as theft.
+    // An immediate retry of a rotated-out token is tolerated: the response may have been lost.
+    const retry = await form(h, "/oauth/token", {
+      grant_type: "refresh_token", refresh_token: tokens.refresh_token,
+      client_id: app.client_id, client_secret: app.client_secret,
+    });
+    expect(retry.status).toBe(200);
+
+    // The retry is idempotent: the same successor comes back and no extra rotation happened.
+    expect((await retry.json()).refresh_token).toBe(next.refresh_token);
+    expect((await h.ctx.db.select().from(schema.oauthGrants).where(eq(schema.oauthGrants.kind, "refresh")))).toHaveLength(2);
+
+    // Outside the retry window (measured from the original consumption) the same token is theft.
+    await h.ctx.db.update(schema.oauthGrants).set({ consumedAt: Date.now() - 60_000 })
+      .where(eq(schema.oauthGrants.kind, "refresh"));
     const reuse = await form(h, "/oauth/token", {
       grant_type: "refresh_token", refresh_token: tokens.refresh_token,
       client_id: app.client_id, client_secret: app.client_secret,
@@ -231,10 +257,19 @@ describe("OIDC provider — token lifecycle", () => {
     const introspectedAfter = await form(h, "/oauth/introspect", { token: tokens.access_token }, auth);
     expect(await introspectedAfter.json()).toEqual({ active: false });
 
-    // Revoking the refresh token revokes the rotated family it belongs to.
-    await form(h, "/oauth/revoke", { token: tokens.refresh_token }, auth);
-    const refreshAfter = await form(h, "/oauth/token", {
+    // Revoking one access token must not turn its still-valid refresh token into "family theft": RFC 7009
+    // separates the two, and a rotation must still succeed.
+    const afterAccessRevoke = await form(h, "/oauth/token", {
       grant_type: "refresh_token", refresh_token: tokens.refresh_token,
+      client_id: app.client_id, client_secret: app.client_secret,
+    });
+    expect(afterAccessRevoke.status).toBe(200);
+    const rotated = await afterAccessRevoke.json() as { refresh_token: string };
+
+    // Revoking the refresh token revokes the rotated family it belongs to.
+    await form(h, "/oauth/revoke", { token: rotated.refresh_token }, auth);
+    const refreshAfter = await form(h, "/oauth/token", {
+      grant_type: "refresh_token", refresh_token: rotated.refresh_token,
       client_id: app.client_id, client_secret: app.client_secret,
     });
     expect(refreshAfter.status).toBe(400);
@@ -386,7 +421,7 @@ describe("OAuth application management", () => {
     expect(app.object).toBe("oauth_application");
     expect(app.client_id).toMatch(/^oa_/);
     expect(app.redirect_uris).toEqual([REDIRECT_URI]);
-    expect(app.pkce_required).toBe(true);
+    expect(app.pkce_required).toBe(false);
 
     const list = await h.app.request("/v1/oauth_applications", { headers: authHeaders() });
     expect((await list.json()).total_count).toBe(1);
@@ -400,5 +435,17 @@ describe("OAuth application management", () => {
     expect((await deleted.json()).deleted).toBe(true);
     const gone = await h.app.request(`/v1/oauth_applications/${app.id}`, { headers: authHeaders() });
     expect(gone.status).toBe(404);
+  });
+
+  it("persists pkce_required=false by default, never relying on the SQLite table's physical default", async () => {
+    // The original SQLite table was created with DEFAULT true. It cannot be rebuilt (grants cascade from it), so
+    // every insert must supply the value explicitly and the stored row must be false on both dialects.
+    const viaApi = await createApp(h);
+    const apiRow = (await h.ctx.db.select().from(schema.oauthApplications).where(eq(schema.oauthApplications.id, viaApi.id)))[0]!;
+    expect(apiRow.pkceRequired).toBe(false);
+
+    const { row: viaService } = await createApplication(h.ctx, { name: "Service default", redirectUris: [] });
+    const serviceRow = (await h.ctx.db.select().from(schema.oauthApplications).where(eq(schema.oauthApplications.id, viaService.id)))[0]!;
+    expect(serviceRow.pkceRequired).toBe(false);
   });
 });

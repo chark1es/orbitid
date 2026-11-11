@@ -12,6 +12,8 @@ import { UserAvatar } from "../components/shared/user-avatar";
 import { EmptyState } from "../components/shared/empty-state";
 import { CopyButton } from "../components/shared/copy-button";
 import { TabStrip } from "../components/shared/tab-strip";
+import { Page as PageLayout } from "../components/shared/page";
+import { useBreadcrumbLabel } from "../components/layout/breadcrumb-label";
 import { UserRowActions } from "../components/users/user-row-actions";
 import { UserRolesTab } from "../components/users/user-roles-tab";
 import { UserProfileTab } from "../components/users/user-profile-tab";
@@ -52,6 +54,7 @@ export default function UserDetailPage() {
 
   const userQuery = useApi<UserJSON>(["user", id], `/users/${id}`, { enabled: !!id });
   const user = userQuery.data;
+  useBreadcrumbLabel(user ? userLabel(user) : null);
 
   function refresh() {
     void queryClient.invalidateQueries({ queryKey: ["user", id] });
@@ -103,7 +106,7 @@ export default function UserDetailPage() {
   }
 
   return (
-    <>
+    <PageLayout>
       <div>
         <Link
           to="/users"
@@ -118,28 +121,28 @@ export default function UserDetailPage() {
           <UserAvatar name={userLabel(user)} imageUrl={user.image_url} size="lg" />
           <div className="min-w-0 space-y-1.5">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-[1.375rem] font-[650] leading-tight tracking-[-0.015em]">{userLabel(user)}</h1>
+              <h1 className="text-[1.375rem] font-heading leading-tight tracking-[-0.015em]">{userLabel(user)}</h1>
               {user.banned ? <StatusBadge status="banned" /> : null}
               {user.locked ? <StatusBadge status="locked" /> : null}
               {user.two_factor_enabled ? <StatusBadge status="enabled" label="MFA" /> : null}
               {user.is_anonymous ? <StatusBadge status="guest" tone="info" label="Guest" /> : null}
               {!user.banned && !user.locked && !user.is_anonymous ? <StatusBadge status="active" /> : null}
             </div>
-            <p className="font-data text-[0.8125rem] text-muted-foreground">{primaryEmail(user) || "No email address"}</p>
+            <p className="text-[0.8125rem] text-muted-foreground">{primaryEmail(user) || "No email address"}</p>
             <div className="flex items-center gap-1">
               <code className="max-w-[46ch] truncate font-data text-[0.75rem] text-muted-foreground">{user.id}</code>
               <CopyButton value={user.id} label="Copy user ID" size="icon-xs" />
             </div>
-            <dl className="flex flex-wrap items-center gap-y-1 pt-1 text-xs text-muted-foreground [&_dt]:text-[0.6875rem] [&_dt]:uppercase [&_dt]:tracking-[0.04em]">
-              <div className="flex items-center gap-1.5 border-l border-border pl-3 first:border-l-0 first:pl-0">
+            <dl className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-1 text-xs text-muted-foreground [&_dt]:text-[0.6875rem] [&_dt]:uppercase [&_dt]:tracking-[0.04em]">
+              <div className="flex items-center gap-1.5">
                 <dt>Username</dt>
                 <dd className="font-data text-foreground">{user.username ? `@${user.username}` : "none"}</dd>
               </div>
-              <div className="flex items-center gap-1.5 border-l border-border pl-3">
+              <div className="flex items-center gap-1.5">
                 <dt>External ID</dt>
                 <dd className="font-data text-foreground">{user.external_id ?? "none"}</dd>
               </div>
-              <div className="flex items-center gap-1.5 border-l border-border pl-3">
+              <div className="flex items-center gap-1.5">
                 <dt>Identifiers</dt>
                 <dd className="font-data text-foreground">
                   {user.email_addresses.length} email, {user.phone_numbers.length} phone, {user.passkeys.length} passkey,{" "}
@@ -171,7 +174,7 @@ export default function UserDetailPage() {
       ) : null}
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabStrip tabs={tabs} />
+        <TabStrip tabs={tabs} value={tab} />
 
         <TabsContent value="profile">
           <UserProfileTab key={`profile-${user.updated_at}`} user={user} onUpdated={refresh} />
@@ -204,6 +207,6 @@ export default function UserDetailPage() {
           <UserDangerTab user={user} onDeleted={() => navigate("/users", { replace: true })} />
         </TabsContent>
       </Tabs>
-    </>
+    </PageLayout>
   );
 }

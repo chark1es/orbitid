@@ -74,7 +74,7 @@ describe("token refresh + cookies", () => {
     vi.useRealTimers();
   });
 
-  it("refreshes the active session token every 50 s and updates cookies", async () => {
+  it("refreshes the active session token just before it expires and updates cookies", async () => {
     vi.useFakeTimers();
     let tokenCounter = 0;
     const api = new ApiMock((call) => {
@@ -96,11 +96,15 @@ describe("token refresh + cookies", () => {
     expect(initial).not.toBeNull();
     expect(api.countCalls("POST", "/v1/client/sessions/sess_1/tokens")).toBe(1);
 
-    await vi.advanceTimersByTimeAsync(50_000);
+    // The deadline comes from the token's own `exp` minus its leeway, not a fixed interval: it is ~50 s but may
+    // be a fraction later because `iat` has whole-second precision. 45 s must not refresh; 10 s more must.
+    await vi.advanceTimersByTimeAsync(45_000);
+    expect(api.countCalls("POST", "/v1/client/sessions/sess_1/tokens")).toBe(1);
+    await vi.advanceTimersByTimeAsync(10_000);
     expect(api.countCalls("POST", "/v1/client/sessions/sess_1/tokens")).toBe(2);
     expect(cookieValue("__session")).not.toBe(initial);
 
-    await vi.advanceTimersByTimeAsync(50_000);
+    await vi.advanceTimersByTimeAsync(55_000);
     expect(api.countCalls("POST", "/v1/client/sessions/sess_1/tokens")).toBe(3);
     orbit.dispose();
   });

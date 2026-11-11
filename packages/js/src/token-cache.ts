@@ -9,9 +9,17 @@ export interface TokenCacheOptions {
   /** Refresh this long before expiry (default 10 s). */
   refreshLeewayMs?: number;
   now?: () => number;
+  /**
+   * The Frontend API origin that issues this client's tokens. When known, a token synced from another tab
+   * or adopted from the shared cookie must carry a matching `iss`, so a same-origin script cannot plant a
+   * token minted by a different instance behind the same `sid`.
+   */
+  issuer?: string;
   /** Fired whenever a freshly fetched token is cached (used for cookies + cross-tab sync). */
   onToken?: (info: { sessionId: string; template: string | null; token: string; expiresAt: number }) => void;
 }
+
+const normalizeIssuer = (issuer: string) => issuer.trim().replace(/\/+$/, "").toLowerCase();
 
 const cacheKey = (sessionId: string, template: string | null) => `${sessionId}::${template ?? ""}`;
 
@@ -25,13 +33,24 @@ export class TokenCache {
   /** Incremented whenever a key is purged, so a request that resolves late cannot repopulate the cache. */
   private readonly generations = new Map<string, number>();
   private readonly leewayMs: number;
+  private readonly issuer: string | null;
   private readonly now: () => number;
   private onToken?: TokenCacheOptions["onToken"];
 
   constructor(options: TokenCacheOptions = {}) {
     this.leewayMs = options.refreshLeewayMs ?? 10_000;
+    this.issuer = options.issuer ? normalizeIssuer(options.issuer) : null;
     this.now = options.now ?? (() => Date.now());
     this.onToken = options.onToken;
+  }
+
+  /**
+   * True when a token's `iss` may be adopted here. With no known issuer every issuer is accepted, which
+   * preserves the previous behaviour for caches constructed without an OrbitID instance.
+   */
+  trustsIssuer(issuer: unknown): boolean {
+    if (this.issuer === null) return true;
+    return typeof issuer === "string" && normalizeIssuer(issuer) === this.issuer;
   }
 
   setOnToken(handler: TokenCacheOptions["onToken"]): void {
@@ -47,6 +66,20 @@ export class TokenCache {
     return !!entry && entry.expiresAt - this.leewayMs > this.now();
   }
 
+  /**
+   * The lifetime the cached token was minted with (`exp - iat`), or null when it cannot be read. The
+   * refresh loop uses it as a ceiling: a backward clock jump must not push the next schedule past one
+   * token's lifetime.
+   */
+  lifetimeMs(sessionId: string, template: string | null = null): number | null {
+    const entry = this.get(sessionId, template);
+    if (!entry) return null;
+    const payload = decodeJwtPayload(entry.token);
+    if (!payload || typeof payload.exp !== "number" || typeof payload.iat !== "number") return null;
+    const lifetime = (payload.exp - payload.iat) * 1000;
+    return lifetime > 0 ? lifetime : null;
+  }
+
   set(sessionId: string, template: string | null, token: string): CachedToken {
     const expiresAt = tokenExpiresAt(token, this.now()) ?? this.now();
     const entry = { token, expiresAt };
@@ -59,9 +92,11 @@ export class TokenCache {
   setFromSync(sessionId: string, template: string | null, token: string): boolean {
     if (!token) return false;
     const payload = decodeJwtPayload(token);
-    // Another tab is same-origin but not necessarily trusted: a token for a different session, or one
-    // that is already expired, must not overwrite this tab's cookie/authorization state.
+    // Another tab is same-origin but not necessarily trusted: a token for a different session, one
+    // minted by another instance, or one that is already expired must not overwrite this tab's
+    // cookie/authorization state.
     if (!payload || payload.sid !== sessionId || typeof payload.exp !== "number") return false;
+    if (!this.trustsIssuer(payload.iss)) return false;
     // Tabs on one machine share a clock, so `exp` is compared directly here; the per-fetch skew estimate
     // `tokenExpiresAt` applies is only valid at the moment a token is minted for *this* client.
     if (payload.exp * 1000 <= this.now()) return false;

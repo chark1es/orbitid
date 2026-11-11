@@ -58,16 +58,27 @@ function serializeTemplate(ctx: AppContext, row: typeof s.jwtTemplates.$inferSel
   };
 }
 
-const createSchema = z.object({
+const templateFields = {
   name: z.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/, "may only contain letters, digits, '-' and '_'"),
-  claims: metadataSchema.default({}),
-  lifetime: z.coerce.number().int().min(30).max(315_360_000).default(60),
-  allowed_clock_skew: z.coerce.number().int().min(0).max(300).default(5),
-  custom_signing_key: bool.default(false),
-  signing_algorithm: z.enum(SIGNING_ALGORITHMS).default("RS256"),
+  claims: metadataSchema,
+  lifetime: z.coerce.number().int().min(30).max(315_360_000),
+  allowed_clock_skew: z.coerce.number().int().min(0).max(300),
+  custom_signing_key: bool,
+  signing_algorithm: z.enum(SIGNING_ALGORITHMS),
+};
+
+const createSchema = z.object({
+  ...templateFields,
+  claims: templateFields.claims.default({}),
+  lifetime: templateFields.lifetime.default(60),
+  allowed_clock_skew: templateFields.allowed_clock_skew.default(5),
+  custom_signing_key: templateFields.custom_signing_key.default(false),
+  signing_algorithm: templateFields.signing_algorithm.default("RS256"),
 });
 
-const updateSchema = createSchema.partial();
+// A PATCH applies only the fields it sends. `createSchema.partial()` would still apply each field's default,
+// silently resetting claims, lifetime, clock skew and custom-signing settings on every update.
+const updateSchema = z.object(templateFields).partial();
 
 export default function routes(ctx: AppContext) {
   const app = new Hono();

@@ -39,8 +39,30 @@ export interface VerifyTokenOptions {
   apiUrl?: string;
   authorizedParties?: string[];
   audience?: string | string[];
+  /**
+   * Early-clock tolerance in milliseconds for `nbf`/`iat` (the verifier's clock may be behind the issuer's).
+   * Defaults to `0`.
+   *
+   * @deprecated This used to apply to `exp` as well, which made a revoked session usable for another full skew
+   * window. It is now early-only; use `expiredToleranceMs` for a deliberate expiry allowance and
+   * `notBeforeToleranceMs` to override the early value. Kept for source compatibility.
+   */
   clockSkewInMs?: number;
+  /**
+   * Tolerance in milliseconds for `exp` only. Defaults to `0` (exact time): an expired token means "fetch a fresh
+   * one", never "the user is signed out". Keep it small; it is the real revocation bound for a session JWT.
+   */
+  expiredToleranceMs?: number;
+  /**
+   * Tolerance in milliseconds for `nbf`/`iat` only. Defaults to `clockSkewInMs`, then `0`.
+   */
+  notBeforeToleranceMs?: number;
   issuer?: string;
+  /**
+   * Expected token kind. Defaults to `"session"`, which refuses a JWT-template token even when it is signed with
+   * the instance key. Pass `"jwt_template"` to verify a template token deliberately.
+   */
+  tokenType?: "session" | "jwt_template";
 }
 
 const jwksCache = new Map<string, JWTVerifyGetKey>();
@@ -115,12 +137,16 @@ export async function verifyToken(token: string, options: VerifyTokenOptions = {
   if (publicKey && !issuer) {
     throw new TokenVerificationError("invalid-issuer", "Verifying with `jwtKey` needs `issuer` (or `apiUrl`): the server's public URL.");
   }
+  const earlyTolerance = (options.notBeforeToleranceMs ?? options.clockSkewInMs ?? 0) / 1000;
+  const expiredTolerance = (options.expiredToleranceMs ?? 0) / 1000;
   let payload: Record<string, unknown>;
   try {
     const verifyOptions = {
       issuer,
       audience: options.audience,
-      clockTolerance: (options.clockSkewInMs ?? 0) / 1000,
+      // `jose` applies one tolerance to every time claim. Give it the larger of the two so a legitimately early
+      // `nbf` is not rejected before our own checks, then enforce each side with its own bound below.
+      clockTolerance: Math.max(earlyTolerance, expiredTolerance),
     };
     const result = publicKey
       ? await jwtVerify(token, publicKey, { ...verifyOptions, algorithms: algorithm ? [algorithm] : undefined })
@@ -130,12 +156,35 @@ export async function verifyToken(token: string, options: VerifyTokenOptions = {
     throw mapJoseError(error);
   }
 
+  const nowSeconds = Date.now() / 1000;
+  // `exp` gets only its own (default zero) tolerance. This is the real revocation bound for a 60 s session JWT.
+  if (typeof payload.exp === "number" && payload.exp + expiredTolerance < nowSeconds) {
+    throw new TokenVerificationError("token-expired", "Session token has expired");
+  }
+  // `nbf` and `iat` may be early (verifier clock behind issuer) by the early tolerance only. A token issued in the
+  // future is refused, exactly like the server and Node verifiers.
+  for (const claim of ["nbf", "iat"] as const) {
+    const value = payload[claim];
+    if (typeof value === "number" && value > nowSeconds + earlyTolerance) {
+      throw new TokenVerificationError("token-not-active-yet", "Session token is not active yet");
+    }
+  }
+
   if (typeof payload.sub !== "string" || typeof payload.sid !== "string") {
     throw new TokenVerificationError("token-invalid", "Session token is missing the sub/sid claims");
   }
   // Machine and OIDC tokens share the signing key but carry an audience; session tokens do not.
   if (payload.aud !== undefined && options.audience === undefined) {
     throw new TokenVerificationError("token-invalid", "Token is not a session token");
+  }
+  // A JWT template keeps the session's sub/sid and may be signed with the instance key, but its lifetime and
+  // claims are an integration contract. It must never be accepted as proof of a session unless asked for.
+  if (options.tokenType === "jwt_template") {
+    if (payload.token_type !== "jwt_template") {
+      throw new TokenVerificationError("token-invalid", "Token is not a JWT template token");
+    }
+  } else if (payload.token_type === "jwt_template") {
+    throw new TokenVerificationError("token-invalid", "JWT template tokens cannot be used as session tokens");
   }
 
   if (options.authorizedParties) {

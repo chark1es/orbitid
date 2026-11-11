@@ -58,7 +58,7 @@ export function ResendButton({
         disabled={unavailable}
         onClick={handleClick}
         className={cn(
-          "h-auto p-0 text-sm font-medium text-muted-foreground hover:text-foreground",
+          "h-auto min-h-6 px-0 py-1 text-sm font-medium text-muted-foreground hover:text-foreground",
           el("formResendCodeLink"),
           className,
         )}

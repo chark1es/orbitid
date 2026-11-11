@@ -35,7 +35,8 @@ function FeatureTable({ section }: { section: FeatureSection }) {
         </h2>
         {section.hint ? <p className="text-xs text-muted-foreground">{section.hint}</p> : null}
       </div>
-      <table className="w-full border-t text-sm">
+      <div className="min-w-0 sm:overflow-x-auto">
+        <table className="w-full border-t text-sm">
         <caption className="sr-only">{section.title}</caption>
         <thead className="hidden sm:table-header-group">
           <tr className="border-b text-left">
@@ -59,14 +60,20 @@ function FeatureTable({ section }: { section: FeatureSection }) {
               <th scope="row" className="block text-left font-medium sm:table-cell sm:py-2.5 sm:pr-4 sm:align-top">
                 {row.label}
               </th>
-              <td className="mt-1 block sm:mt-0 sm:table-cell sm:py-2.5 sm:pr-4 sm:align-top">
+              <td className="mt-2 block sm:mt-0 sm:table-cell sm:py-2.5 sm:pr-4 sm:align-top">
+                <span className="mb-1 block text-[0.6875rem] font-semibold tracking-[0.04em] text-muted-foreground uppercase sm:hidden">
+                  Status
+                </span>
                 <StatusChip kind={CHIP_KIND[row.status] ?? "off"} label={STATUS_LABEL[row.status]} />
               </td>
-              <td className="mt-1 block sm:mt-0 sm:table-cell sm:py-2.5 sm:pr-4 sm:align-top">
-                <p className="text-foreground">{row.value}</p>
-                {row.detail ? <p className="mt-0.5 max-w-[60ch] text-xs text-muted-foreground">{row.detail}</p> : null}
+              <td className="mt-2 block min-w-0 sm:mt-0 sm:table-cell sm:py-2.5 sm:pr-4 sm:align-top">
+                <span className="mb-1 block text-[0.6875rem] font-semibold tracking-[0.04em] text-muted-foreground uppercase sm:hidden">
+                  Detail
+                </span>
+                <p className="break-words text-foreground [overflow-wrap:anywhere]">{row.value}</p>
+                {row.detail ? <p className="mt-0.5 max-w-[60ch] break-words text-xs text-muted-foreground">{row.detail}</p> : null}
               </td>
-              <td className="mt-1 block text-right sm:mt-0 sm:table-cell sm:py-2.5 sm:align-top">
+              <td className="mt-2 block text-left sm:mt-0 sm:table-cell sm:py-2.5 sm:text-right sm:align-top">
                 {row.strategy ? (
                   <SocialStartButton strategy={row.strategy} provider={row.label} />
                 ) : (
@@ -83,6 +90,7 @@ function FeatureTable({ section }: { section: FeatureSection }) {
           ))}
         </tbody>
       </table>
+      </div>
     </section>
   );
 }

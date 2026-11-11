@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger, Button, Input } from "@orbitid/ui";
 import { WEBHOOK_EVENT_TYPES } from "@orbitid/shared";
 import { RotateCw } from "lucide-react";
@@ -26,12 +27,15 @@ export function EndpointFormSheet({ ctl }: { ctl: WebhooksController }) {
     toggleGroup,
     saveEndpoint,
   } = ctl;
+  const [attempted, setAttempted] = useState(false);
+  useEffect(() => {
+    if (!sheetOpen) setAttempted(false);
+  }, [sheetOpen]);
 
   return (
     <DetailSheet
       open={sheetOpen}
       onOpenChange={setSheetOpen}
-      size="lg"
       title={form.id ? "Edit webhook endpoint" : "Add webhook endpoint"}
       description="Events are signed with the endpoint secret. Verify the signature header with the backend SDK."
       footer={
@@ -39,7 +43,13 @@ export function EndpointFormSheet({ ctl }: { ctl: WebhooksController }) {
           <Button variant="outline" onClick={() => setSheetOpen(false)} disabled={saving}>
             Cancel
           </Button>
-          <Button onClick={() => void saveEndpoint()} disabled={saving || formErrors.length > 0}>
+          <Button
+            onClick={() => {
+              setAttempted(true);
+              if (formErrors.length === 0) void saveEndpoint();
+            }}
+            disabled={saving}
+          >
             {saving ? "Saving…" : form.id ? "Save changes" : "Add endpoint"}
           </Button>
         </>
@@ -122,7 +132,7 @@ export function EndpointFormSheet({ ctl }: { ctl: WebhooksController }) {
             </Accordion>
           </div>
         ) : null}
-        <ValidationSummary errors={formErrors} title="Fix this before saving" />
+        <ValidationSummary errors={attempted ? formErrors : []} title="Fix this before saving" />
       </div>
     </DetailSheet>
   );

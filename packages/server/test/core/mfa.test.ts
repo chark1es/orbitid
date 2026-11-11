@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { authenticator } from "otplib";
 import { eq } from "drizzle-orm";
 import * as schema from "../../src/db/schema";
-import { getSmsOutbox } from "../../src/services/mail";
+import { getSmsOutbox, latestCodeFor } from "../../src/services/mail";
+import { supportedSecondFactors } from "../../src/services/mfa";
 import { endSessionsForUser } from "../../src/services/sessions";
 import { errorsOf, setup, signInWithPassword, signUpUser, testClient, type TestClient } from "./helpers";
 import { first } from "../../src/lib/db";
@@ -181,6 +182,140 @@ describe("MFA", () => {
       body: { strategy: "phone_code", code },
     });
     expect(done.response.status).toBe("complete");
+  });
+
+  it("does not offer the same phone as both first and second factor", async () => {
+    const { app, ctx } = await setup();
+    await ctx.settings.update({
+      attributes: {
+        emailAddress: { enabled: true, usedForFirstFactor: true, usedForSecondFactor: true, verifications: ["email_code"], verifyAtSignUp: true },
+        phoneNumber: { enabled: true, usedForFirstFactor: true, usedForSecondFactor: true, verifications: ["phone_code"] },
+      },
+    });
+    const user = await signUpUser(app);
+    const phone = await user.client.json<{ response: { id: string } }>("/v1/client/me/phone_numbers", {
+      body: { phone_number: "+15550002222" },
+    });
+    await user.client.json(`/v1/client/me/phone_numbers/${phone.response.id}/prepare_verification`, { body: {} });
+    const setupCode = /(\d{6})/.exec(getSmsOutbox().at(-1)!.body)?.[1];
+    await user.client.json(`/v1/client/me/phone_numbers/${phone.response.id}/attempt_verification`, { body: { code: setupCode } });
+    await user.client.json(`/v1/client/me/phone_numbers/${phone.response.id}`, {
+      method: "PATCH",
+      body: { reserved_for_second_factor: true, default_second_factor: true },
+    });
+
+    const client = testClient(app);
+    const created = await client.json<{ response: { id: string } }>("/v1/client/sign_ins", {
+      body: { identifier: "+15550002222", strategy: "phone_code" },
+    });
+    await client.json(`/v1/client/sign_ins/${created.response.id}/prepare_first_factor`, { body: { strategy: "phone_code" } });
+    const signInCode = /(\d{6})/.exec(getSmsOutbox().at(-1)!.body)?.[1];
+    const escalated = await client.json<{ response: { status: string; supported_second_factors: { strategy: string }[] } }>(
+      `/v1/client/sign_ins/${created.response.id}/attempt_first_factor`,
+      { body: { strategy: "phone_code", code: signInCode } },
+    );
+    expect(escalated.response.status).toBe("needs_second_factor");
+    // The same number cannot verify the step it just completed; another channel still can.
+    expect(escalated.response.supported_second_factors.map((f) => f.strategy)).not.toContain("phone_code");
+    expect(escalated.response.supported_second_factors.map((f) => f.strategy)).toContain("email_code");
+
+    const blocked = await client.json(`/v1/client/sign_ins/${created.response.id}/prepare_second_factor`, {
+      body: { strategy: "phone_code" },
+    });
+    expect(errorsOf(blocked)[0]?.code).toBe("strategy_for_user_invalid");
+  });
+
+  it("does not offer email as a second factor after a reset-password email code", async () => {
+    const { app, ctx } = await setup();
+    await ctx.settings.update({
+      attributes: {
+        emailAddress: { enabled: true, usedForFirstFactor: true, usedForSecondFactor: true, verifications: ["email_code"], verifyAtSignUp: true },
+      },
+    });
+    const user = await signUpUser(app);
+    await enableTotp(user.client);
+
+    const client = testClient(app);
+    const created = await client.json<{ response: { id: string } }>("/v1/client/sign_ins", {
+      body: { identifier: user.email, strategy: "reset_password_email_code" },
+    });
+    await client.json(`/v1/client/sign_ins/${created.response.id}/prepare_first_factor`, { body: { strategy: "reset_password_email_code" } });
+    const resetCode = latestCodeFor(user.email, "reset_password_code");
+    await client.json(`/v1/client/sign_ins/${created.response.id}/attempt_first_factor`, {
+      body: { strategy: "reset_password_email_code", code: resetCode },
+    });
+    const reset = await client.json<{ response: { status: string; supported_second_factors: { strategy: string }[] } }>(
+      `/v1/client/sign_ins/${created.response.id}/reset_password`,
+      { body: { password: "N3wSup3rSecret!", sign_out_of_other_sessions: false } },
+    );
+    expect(reset.response.status).toBe("needs_second_factor");
+    expect(reset.response.supported_second_factors.map((f) => f.strategy)).not.toContain("email_code");
+    expect(reset.response.supported_second_factors.map((f) => f.strategy)).toContain("totp");
+
+    const blocked = await client.json(`/v1/client/sign_ins/${created.response.id}/prepare_second_factor`, {
+      body: { strategy: "email_code" },
+    });
+    expect(errorsOf(blocked)[0]?.code).toBe("strategy_for_user_invalid");
+  });
+
+  it("keeps the recovery mailbox out of the second factor when reset used a secondary address", async () => {
+    const { app, ctx } = await setup();
+    await ctx.settings.update({
+      attributes: {
+        emailAddress: { enabled: true, usedForFirstFactor: true, usedForSecondFactor: true, verifications: ["email_code"], verifyAtSignUp: true },
+      },
+    });
+    const user = await signUpUser(app, { email: "primary@example.com" });
+    const now = Date.now();
+    await ctx.db.insert(schema.emailAddresses).values({
+      id: "idn_e_secondary", userId: user.userId, email: "secondary@example.com", verified: true, verifiedAt: now,
+      verifiedStrategy: "email_code", createdAt: now, updatedAt: now,
+    });
+
+    const client = testClient(app);
+    const created = await client.json<{ response: { id: string } }>("/v1/client/sign_ins", {
+      body: { identifier: "secondary@example.com", strategy: "reset_password_email_code" },
+    });
+    await client.json(`/v1/client/sign_ins/${created.response.id}/prepare_first_factor`, {
+      body: { strategy: "reset_password_email_code", email_address_id: "idn_e_secondary" },
+    });
+    const resetCode = latestCodeFor("secondary@example.com", "reset_password_code");
+    await client.json(`/v1/client/sign_ins/${created.response.id}/attempt_first_factor`, {
+      body: { strategy: "reset_password_email_code", code: resetCode },
+    });
+    const reset = await client.json<{
+      response: { status: string; supported_second_factors: { strategy: string; email_address_id?: string }[] };
+    }>(`/v1/client/sign_ins/${created.response.id}/reset_password`, {
+      body: { password: "N3wSup3rSecret!", sign_out_of_other_sessions: false },
+    });
+    expect(reset.response.status).toBe("needs_second_factor");
+    const emailFactors = reset.response.supported_second_factors.filter((f) => f.strategy === "email_code");
+    // The recovery mailbox cannot verify the step it just completed; the other verified address still can.
+    expect(emailFactors.map((f) => f.email_address_id)).not.toContain("idn_e_secondary");
+    expect(emailFactors).toHaveLength(1);
+
+    const blocked = await client.json(`/v1/client/sign_ins/${created.response.id}/prepare_second_factor`, {
+      body: { strategy: "email_code", email_address_id: "idn_e_secondary" },
+    });
+    expect(errorsOf(blocked)[0]?.code).toBe("strategy_for_user_invalid");
+  });
+
+  it("fails closed for the whole channel when the reset identifier is missing", async () => {
+    const { app, ctx } = await setup();
+    await ctx.settings.update({
+      attributes: {
+        emailAddress: { enabled: true, usedForFirstFactor: true, usedForSecondFactor: true, verifications: ["email_code"], verifyAtSignUp: true },
+      },
+    });
+    const user = await signUpUser(app, { email: "primary@example.com" });
+    const now = Date.now();
+    await ctx.db.insert(schema.emailAddresses).values({
+      id: "idn_e_secondary", userId: user.userId, email: "secondary@example.com", verified: true, verifiedAt: now,
+      verifiedStrategy: "email_code", createdAt: now, updatedAt: now,
+    });
+    const row = first(await ctx.db.select().from(schema.users).where(eq(schema.users.id, user.userId)))!;
+    const factors = await supportedSecondFactors(ctx, row, { firstFactorStrategy: "reset_password_email_code" });
+    expect(factors.some((f) => f.strategy === "email_code")).toBe(false);
   });
 
   it("signs in with a single-use backup code", async () => {
