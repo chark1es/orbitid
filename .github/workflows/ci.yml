@@ -11,21 +11,7 @@ jobs:
   # rust-toolchain.toml, so CI and a local `cargo` agree on rustfmt/clippy.
   rust:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
-    services:
-      postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_USER: orbit
-          POSTGRES_PASSWORD: orbit
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U orbit -d postgres"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
+    timeout-minutes: 120
     env:
       ORBITID_TEST_PG_ADMIN_URL: postgres://orbit:orbit@localhost:5432/postgres
     steps:
@@ -39,19 +25,27 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             clang pkg-config libxml2-dev libxmlsec1-dev libssl-dev
+      # GitHub `services:` cannot pass server flags, so start Postgres by hand: durability is
+      # off and connections are plentiful because every test makes its own database.
+      - name: Start Postgres
+        run: |
+          docker run -d --name pg -p 5432:5432 \
+            -e POSTGRES_USER=orbit -e POSTGRES_PASSWORD=orbit -e POSTGRES_DB=postgres \
+            postgres:17-alpine \
+            -c fsync=off -c synchronous_commit=off -c full_page_writes=off \
+            -c max_connections=1000 -c shared_buffers=256MB
+          for i in $(seq 1 30); do
+            if docker exec pg pg_isready -U orbit -d postgres; then exit 0; fi
+            sleep 2
+          done
+          echo "Postgres did not become ready within 60 seconds" >&2
+          docker logs pg || true
+          exit 1
       - name: Formatting
         run: cargo fmt --all --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - name: Workspace tests
-        run: cargo test --workspace --all-features --no-fail-fast
-      # One connection per test pool: any handler that takes a second connection
-      # while holding one fails with a pool timeout instead of passing on a big
-      # pool. Set ORBITID_TEST_POOL_ACQUIRE_MS low so a leak fails fast.
-      - name: Workspace tests on a one-connection pool
-        env:
-          ORBITID_TEST_POOL_MAX: "1"
-          ORBITID_TEST_POOL_ACQUIRE_MS: "2000"
         run: cargo test --workspace --all-features --no-fail-fast
       - name: Release binary for the SDK integration tests
         run: cargo build --release --locked -p orbitid-server
@@ -61,11 +55,51 @@ jobs:
           path: target/release/orbitid
           if-no-files-found: error
 
+  # One connection per test pool: any handler that takes a second connection while holding
+  # one fails with a pool timeout instead of passing on a big pool. ORBITID_TEST_POOL_ACQUIRE_MS
+  # is low so a leak fails fast. Runs in parallel with `rust` for its own time budget.
+  rust-pool1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      ORBITID_TEST_PG_ADMIN_URL: postgres://orbit:orbit@localhost:5432/postgres
+      ORBITID_TEST_POOL_MAX: "1"
+      ORBITID_TEST_POOL_ACQUIRE_MS: "2000"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain from rust-toolchain.toml
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: true
+      - name: SAML build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang pkg-config libxml2-dev libxmlsec1-dev libssl-dev
+      # GitHub `services:` cannot pass server flags, so start Postgres by hand: durability is
+      # off and connections are plentiful because every test makes its own database.
+      - name: Start Postgres
+        run: |
+          docker run -d --name pg -p 5432:5432 \
+            -e POSTGRES_USER=orbit -e POSTGRES_PASSWORD=orbit -e POSTGRES_DB=postgres \
+            postgres:17-alpine \
+            -c fsync=off -c synchronous_commit=off -c full_page_writes=off \
+            -c max_connections=1000 -c shared_buffers=256MB
+          for i in $(seq 1 30); do
+            if docker exec pg pg_isready -U orbit -d postgres; then exit 0; fi
+            sleep 2
+          done
+          echo "Postgres did not become ready within 60 seconds" >&2
+          docker logs pg || true
+          exit 1
+      - name: Workspace tests on a one-connection pool
+        run: cargo test --workspace --all-features --no-fail-fast
+
   check:
     runs-on: ubuntu-latest
     # The Node SDK tests spawn the real Rust binary; take it from the job above instead of
     # compiling the workspace twice.
-    needs: rust
+    needs: [rust, rust-pool1]
     services:
       postgres:
         image: postgres:17-alpine
