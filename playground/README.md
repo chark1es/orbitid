@@ -9,14 +9,17 @@ This site is not for production. It exposes the Backend API actions it is config
 Run these from the repository root.
 
 ```bash
-# 1. Start the server. It prints the public URL and publishable key, never the secret key.
-bun run --filter @orbitid/server start
+# 1. Start the Rust server against Postgres. It prints the public URL and publishable key,
+#    never the secret key.
+export ORBITID_DATABASE_URL=postgres://user:password@localhost:5432/orbitid
+export ORBITID_ENCRYPTION_KEY="$(openssl rand -base64 32)"
+cargo run -p orbitid-server -- start
 
 # 2. Create the environment file.
 cp playground/.env.example playground/.env.local
 
-# 3. In another terminal, retrieve the keys explicitly for the same instance/environment.
-bun run --filter @orbitid/server start keys
+# 3. In another terminal, retrieve the keys explicitly for the same environment.
+cargo run -q -p orbitid-server -- keys
 # Put the keys in playground/.env.local, then start the test site.
 bun run --filter orbitid-playground dev
 ```

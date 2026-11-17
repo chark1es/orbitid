@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createOrbitId } from "../src/client";
 import type { ExpressRequest } from "../src/adapters/express";
-import { startRealServer, createUserWithSession, signInCookie, fetchJson } from "./helpers/server";
+import { startRealServer, createUserWithSession, signInCookie, fetchJson, signJwtForTest } from "./helpers/server";
 
 describe("authenticate()", () => {
   it("reads a bearer token from a Fetch Request", async () => {
@@ -76,8 +76,11 @@ describe("authenticate()", () => {
       await expect(orbit.authenticate({ headers: {} })).resolves.toBeNull();
       await expect(orbit.authenticate({ headers: { authorization: "Bearer not-a-jwt" } })).resolves.toBeNull();
 
-      const { signJwt } = await import("../../server/src/services/tokens");
-      const expired = await signJwt(server.context, { sub: "user_x", sid: "sess_x", nbf: Math.floor(Date.now() / 1000) - 120 }, { expiresInSeconds: -60, issuer: server.url });
+      const expired = await signJwtForTest(
+        server,
+        { sub: "user_x", sid: "sess_x", nbf: Math.floor(Date.now() / 1000) - 120 },
+        -60,
+      );
       await expect(orbit.authenticate({ headers: { authorization: `Bearer ${expired}` } })).resolves.toBeNull();
     } finally {
       await server.close();

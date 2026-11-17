@@ -1,0 +1,48 @@
+[package]
+name = "orbitid-credentials"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+orbitid-core = { path = "../orbitid-core" }
+sqlx.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+axum.workspace = true
+tokio = { workspace = true }
+base64.workspace = true
+sha2.workspace = true
+sha1.workspace = true
+hmac.workspace = true
+subtle.workspace = true
+rand.workspace = true
+rand_core.workspace = true
+argon2.workspace = true
+bcrypt.workspace = true
+scrypt.workspace = true
+rsa.workspace = true
+p256.workspace = true
+ed25519-dalek.workspace = true
+ciborium.workspace = true
+qrcode.workspace = true
+image.workspace = true
+base32.workspace = true
+percent-encoding.workspace = true
+url.workspace = true
+regex.workspace = true
+
+[dev-dependencies]
+orbitid-core = { path = "../orbitid-core", features = ["test-util"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tower.workspace = true
+
+[features]
+default = []
+# Exposes the software WebAuthn authenticator for upper-layer tests.
+test-util = []
+
+[lints]
+workspace = true

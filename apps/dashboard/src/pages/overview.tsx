@@ -156,6 +156,17 @@ export default function OverviewPage() {
                   <Skeleton key={index} className="h-9 w-full" />
                 ))}
               </div>
+            ) : recentUsers.error ? (
+              <p role="alert" className="text-sm leading-6 text-muted-foreground">
+                Could not load the newest accounts: {errorMessage(recentUsers.error)}{" "}
+                <button
+                  type="button"
+                  className="underline underline-offset-4 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  onClick={() => void recentUsers.refetch()}
+                >
+                  Retry
+                </button>
+              </p>
             ) : users.length === 0 ? (
               <EmptyState
                 icon={Users}
@@ -191,7 +202,11 @@ export default function OverviewPage() {
           </Section>
 
           <Section title="Social providers" description="Connected external accounts.">
-            {providers.length === 0 ? (
+            {stats.error ? (
+              <p role="alert" className="text-sm leading-6 text-muted-foreground">
+                Provider counts are part of the instance statistics above and could not be loaded.
+              </p>
+            ) : providers.length === 0 ? (
               <p className="text-sm leading-6 text-muted-foreground">
                 No external accounts yet. Enable a provider under Settings, Social.
               </p>

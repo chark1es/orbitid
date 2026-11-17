@@ -1,0 +1,35 @@
+[package]
+name = "orbitid-fapi-auth"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+orbitid-core = { path = "../orbitid-core" }
+axum = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+reqwest = { workspace = true }
+sqlx = { workspace = true }
+url = { workspace = true }
+percent-encoding = { workspace = true }
+orbitid-platform = { path = "../orbitid-platform" }
+orbitid-credentials = { path = "../orbitid-credentials" }
+orbitid-federation = { path = "../orbitid-federation" }
+orbitid-identity = { path = "../orbitid-identity" }
+
+[dev-dependencies]
+tokio = { workspace = true }
+reqwest = { workspace = true }
+tower = { workspace = true }
+orbitid-core = { path = "../orbitid-core", features = ["test-util"] }
+orbitid-identity = { path = "../orbitid-identity", features = ["test-util"] }
+orbitid-credentials = { path = "../orbitid-credentials", features = ["test-util"] }
+orbitid-federation = { path = "../orbitid-federation", features = ["test-util"] }
+orbitid-fapi-account = { path = "../orbitid-fapi-account" }
+
+[lints]
+workspace = true

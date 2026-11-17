@@ -12,7 +12,7 @@ You write `useUser`, `useAuth`, `<SignIn />`, `<UserButton />`, `auth()` and `ha
 
 | Package | What it is |
 |---|---|
-| [`@orbitid/server`](packages/server) | Hono + Drizzle auth server on Postgres (main) or SQLite: Frontend API, Backend API, OIDC provider, SAML, JWKS. Serves the dashboard |
+| [`crates/`](crates/README.md) | Rust auth server (binary `orbitid`) on Postgres: Frontend API, Backend API, OIDC provider, SAML, JWKS. Serves the dashboard |
 | [`@orbitid/js`](packages/js) | Browser SDK (`OrbitID` class): resources, state, token refresh, cookies |
 | [`@orbitid/react`](packages/react) | Provider, hooks, control components and the prebuilt UI (shadcn/ui) |
 | [`@orbitid/nextjs`](packages/nextjs) | Next.js App Router integration: middleware, `auth()`, `currentUser()` |
@@ -44,24 +44,26 @@ You write `useUser`, `useAuth`, `<SignIn />`, `<UserButton />`, `auth()` and `ha
 | API keys, machine-to-machine tokens | ✅ |
 | OIDC / OAuth 2 provider (OrbitID as the identity provider): JWT or opaque access tokens, introspection, revocation, organization claims, device authorization grant | ✅ |
 | Enterprise SSO: SAML 2.0 and OIDC connections (tested against a second instance and a signing SAML IdP) | ✅ |
-| Move data between SQLite and Postgres (`export`, `import`, `copy`) | ✅ |
-| OpenAPI 3.1 description of every route, served at `/docs` | ✅ |
+| Move data between Postgres databases (`export`, `import`); migrate off the TypeScript server's SQLite with its last release | ✅ |
+| OpenAPI 3.1 description of every route, served at `/v1/openapi.json` and linked from `/docs` | ✅ |
 | Admin dashboard, audit logs, stats | ✅ |
 | Web3 wallets, Google One Tap, native mobile SDKs | not planned |
 
 ## Quick start
 
-With Docker, see [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md): `docker compose up -d` starts Postgres and OrbitID, reports the dashboard URL and publishable key, and serves the dashboard at `http://localhost:4000`.
+With Docker, see [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md): copy `.env.example` to `.env`, set `ORBITID_ENCRYPTION_KEY` and `POSTGRES_PASSWORD`, then `docker compose up -d` starts Postgres and OrbitID, reports the dashboard URL and publishable key, and serves the dashboard at `http://localhost:4000`.
 
-From source (Bun for installing and scripts, Node 20 to run the server because the SQLite driver is a native addon):
+From source (Rust for the server, Bun and Node 20 for the SDKs and dashboard). Postgres is required:
 
 ```bash
+# Ubuntu/Debian build dependencies for SAML verification:
+sudo apt-get install -y clang pkg-config libxml2-dev libxmlsec1-dev libssl-dev
 bun install
-export ORBITID_DATABASE_URL=postgres://user:password@localhost:5432/orbitid   # omit to use a local SQLite file
-export ORBITID_ENCRYPTION_KEY="$(openssl rand -base64 32)"   # required with Postgres; keep the same value across restarts
-bun run dev:server          # http://localhost:4000; startup prints no secret key
+export ORBITID_DATABASE_URL=postgres://user:password@localhost:5432/orbitid   # required; postgres:// only
+export ORBITID_ENCRYPTION_KEY="$(openssl rand -base64 32)"   # required; keep the same value across restarts
+cargo run -p orbitid-server -- start   # http://localhost:4000; startup prints no secret key
 # In another terminal, explicitly print the keys for this same instance/environment:
-bun run --filter @orbitid/server start keys
+cargo run -q -p orbitid-server -- keys
 bun run dev:dashboard       # http://localhost:5173, proxies the API; sign in with the secret key
 ```
 
@@ -164,28 +166,45 @@ A **client** (browser) holds an httpOnly `__client` cookie; it owns **sessions**
 
 Environment variables are split by where they go: **SERVER** (the machine running OrbitID), **WEBSITE · BACKEND** (secret, your app's server) and **WEBSITE · BROWSER** (public, compiled into client code). [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md) lists every variable under its label, and the dashboard's **Connect your app** page prints copy-ready blocks for your instance. Server variables are also in [`.env.example`](.env.example). Everything else (identifiers, password policy, social providers, MFA, sessions, organizations, email/SMS, branding) is instance settings, editable in the dashboard or through `PATCH /v1/instance`. Set `ORBITID_ENCRYPTION_KEY` to a long random value before storing real data.
 
+## Scaling and upgrading
+
+The server is stateless: run several replicas behind a load balancer against one Postgres database. Settings,
+sessions, rate-limit windows and uploaded images live in Postgres, and settings changes propagate over
+`LISTEN/NOTIFY`. Set `ORBITID_TRUST_PROXY=1` behind one proxy, and use `/ready` for readiness probes
+(`/health` is liveness; the container image and compose file use `orbitid healthcheck`).
+[`docker-compose.scale.yml`](docker-compose.scale.yml) is a runnable three-replica example.
+
+A Postgres database created by the TypeScript server is adopted in place by the Rust binary. A SQLite or PGlite
+instance must first run the **last TypeScript release's** `orbitid copy --from sqlite:… --to postgres://…`, then
+switch `ORBITID_DATABASE_URL`. See [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md#upgrading) and
+[docs/DATA_MOVE.md](docs/DATA_MOVE.md).
+
 ## Development
 
 ```bash
-bun run typecheck   # every workspace
-bun run test        # every workspace (vitest)
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features   # needs Postgres (ORBITID_TEST_PG_ADMIN_URL)
+bun run typecheck   # every TypeScript workspace
+bun run test        # every TypeScript workspace (vitest)
 bun run test:maintenance # repository guard tests (Node)
 bun run check:files  # maintained text: at most 500 lines and 32 KiB per file
 bun run check:docs   # local Markdown link targets
 ```
 
 Maintained code, tests, scripts and Markdown must stay within both file-size limits. Split by responsibility;
-do not compress code to satisfy the check. Generated OpenAPI JSON, Drizzle migrations/snapshots, build output,
-lockfiles and binary assets keep their required formats and are exempt. Keep public entry points stable when
-extracting modules. Run the affected package tests and typechecks after refactoring, both server database
-suites after database/auth changes, and regenerate `docs/openapi.json` after API changes.
+do not compress code to satisfy the check. Generated OpenAPI JSON, the historical drizzle SQL fixtures used by
+the migration tests, build output, lockfiles and binary assets keep their required formats and are exempt. Keep public entry points stable
+when extracting modules. Run the affected package tests and typechecks after refactoring, the Rust workspace
+tests after server changes (`cargo test --workspace`), and update `docs/openapi.json` by hand when the API
+changes — it is the source of truth the Rust server embeds and serves.
 
 ## Documentation
 
 | Topic | Where |
 |---|---|
 | Run it yourself | [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md), [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md), [docs/DATA_MOVE.md](docs/DATA_MOVE.md) |
-| HTTP API | [docs/API.md](docs/API.md), the live reference at `/docs`, and [docs/openapi.json](docs/openapi.json) |
+| HTTP API | [docs/API.md](docs/API.md), `/v1/openapi.json` on your instance, and [docs/openapi.json](docs/openapi.json) |
 | Security | [docs/SECURITY.md](docs/SECURITY.md) |
 | Sessions and persistence | [docs/SESSIONS.md](docs/SESSIONS.md) |
 | Roles and permissions | [docs/RBAC.md](docs/RBAC.md) |
@@ -204,7 +223,7 @@ suites after database/auth changes, and regenerate `docs/openapi.json` after API
 - Tokens delivered by the handshake appear in the API host's access log for one request. See [docs/HANDSHAKE.md](docs/HANDSHAKE.md).
 - Cross-site POST callbacks (SAML ACS, Apple `form_post`) need an https base URL: the browser-binding cookie is `SameSite=None; Secure` only over https. This is a browser rule, not something the server can relax.
 - The dashboard uses a revocable httpOnly operator session, but has no named operator accounts or per-operator roles yet. Every operator uses the instance secret key to start a session ([docs/SECURITY.md](docs/SECURITY.md)).
-- Switching databases copies data with `export`/`import`; uploaded images are not part of the export and must be copied separately ([docs/DATA_MOVE.md](docs/DATA_MOVE.md)).
+- Uploaded images from the TypeScript server lived on disk and are not migrated into Postgres automatically; re-upload them after the switch ([docs/DATA_MOVE.md](docs/DATA_MOVE.md)).
 
 ## License
 

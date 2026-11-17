@@ -1,13 +1,13 @@
 # Email delivery
 
 OrbitID sends every transactional email — sign-in codes, magic links, sign-up verification, invitations, password
-changed and new sign-in notices — through one service, `packages/server/src/services/mail.ts`. There are two
+changed and new sign-in notices — through one service, `crates/orbitid-platform/src/mail/`. There are two
 transports: Resend (HTTP API) and SMTP (any mail server).
 
 There is deliberately no console or file transport. A sign-in code or magic link is a credential: printed to stdout
 it lands in terminal scrollback, CI logs and support pastes, and written to a file on the server it is the same secret
 with a longer half-life. So when no provider is configured the server **fails closed**: the message is not delivered
-(and not persisted), delivery returns a typed failure, and the startup banner says email is not configured.
+(and not persisted), delivery returns a typed failure, and the dashboard’s setup check reports that email delivery is disabled.
 Authentication can only complete when its required factors succeed; password, passkey and TOTP flows that do not
 require email delivery remain available.
 
@@ -127,11 +127,11 @@ else's address and have the real owner's click sign the attacker in. For sign-in
 ## Without a provider
 
 Without Resend or SMTP nothing is delivered and nothing is printed or written anywhere. This is true in development
-as well: there is no "dev mode" that leaks codes. The startup banner reports `EMAIL IS NOT CONFIGURED`, and
-`POST /v1/instance/email_test` answers `503 email_not_configured` with instructions. Passwords, passkeys, TOTP and
-every flow that does not need a mailbox keep working.
+as well: there is no "dev mode" that leaks codes. The dashboard's setup check reports that delivery is disabled,
+and `POST /v1/instance/email_test` answers `503 email_not_configured` with instructions. Passwords, passkeys, TOTP
+and every flow that does not need a mailbox keep working.
 
-A failed send (no provider, SMTP down, provider rejection) does not print anything either. `sendEmail` returns
+A failed send (no provider, SMTP down, provider rejection) does not print anything either. `send_email` returns
 `{ delivered: false, error }`; the calling auth flow still succeeds where it can, and an `email.delivery_failed` audit
 entry records the template and the reason code — never the recipient, the subject, the code or the provider's
 response. Use `GET /v1/audit_logs?action=email.delivery_failed` and the dashboard's email test to diagnose delivery.

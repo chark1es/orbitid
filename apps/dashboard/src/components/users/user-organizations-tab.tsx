@@ -100,7 +100,8 @@ function AddToOrganizationDialog({
                     <button
                       type="button"
                       onClick={() => setOrganization(option)}
-                      className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-accent ${
+                      aria-pressed={organization?.id === option.id}
+                      className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${
                         organization?.id === option.id ? "bg-accent" : ""
                       }`}
                     >

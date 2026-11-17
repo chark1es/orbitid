@@ -294,10 +294,16 @@ keys in the JWKS until their tokens expire, so cached verifiers keep working.
 
 ## Testing your integration
 
-The package's own tests boot the real server from `@orbitid/server` on a random port and use real
-signing keys, real JWKS, real sessions and real webhook secrets — see
-`packages/node/test/helpers/server.ts` for the harness. There is nothing to mock: point
-`createOrbitId()` at your test instance.
+The package's own tests spawn the real Rust binary (`target/release/orbitid`, or `ORBITID_BIN`) on a random
+port with a throwaway Postgres database and use real signing keys, real JWKS, real sessions and real webhook
+secrets. Build it first with `cargo build --release -p orbitid-server`; the tests need an admin Postgres URL in
+`ORBITID_TEST_PG_ADMIN_URL` (default `postgres://orbit:orbit@localhost:5432/postgres`). See
+`packages/node/test/helpers/server.ts` for the harness. There is nothing to mock: point `createOrbitId()` at
+your test instance.
+
+Token-forgery tests sign custom claims with the instance key entirely inside the test helper: it reads the
+active encrypted signing key from the throwaway database, decrypts it with the known test encryption key
+(scrypt + AES-256-GCM), and signs with `jose`. The server exposes no test-only signing endpoint or CLI hook.
 
 ## Not in this package
 

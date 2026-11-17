@@ -87,24 +87,35 @@ their choice to sign out every client. Nothing else ends a session:
   re-issued with the same value (no rotation) once it is a day old, on `GET /v1/client`, token refreshes and the
   handshake. A browser used regularly therefore never reaches the cap; only an abandoned cookie expires.
 
+Retention is tied to that lifetime: a session-less client row is kept for the full `__client` cookie lifetime
+plus a grace day, and any request that presents the cookie refreshes `updated_at`, so an idle-but-valid browser
+is never swept out from under its own cookie. The hourly retention sweep also marks any `active`/`pending`
+session past its `expire_at` or the inactivity timeout as `expired` (revoking its grants and writing
+`session.ended`, exactly like the lazy read path), so an abandoned session cannot stay `active` forever and
+escape deletion. Ended, revoked, expired and removed session rows are kept for a 90-day audit window before
+deletion (`active`/`pending` rows are never swept); the sweep clears the attempt and client pointers to the
+deleted session (`clients.last_active_session_id`, then `sign_ins`/`sign_ups.created_session_id`) in that lock
+order and in the same transaction.
+
 A client token that was rotated by a sign-in in another tab is not replaced silently: a request that presents
 an unknown token is refused (`401 client_state_invalid`, no `Set-Cookie`) so it cannot overwrite the live
-cookie; only the SDK's `GET /v1/client` bootstrap creates a replacement.
+cookie; only the SDK's `GET /v1/client` bootstrap recovers, by discarding the unknown value and minting a
+fresh random client token. A presented token is never adopted as a credential, because an attacker who can
+plant a cookie (a sibling subdomain or plain-HTTP MITM) could otherwise pre-create the client and read or
+patch the victim's in-flight sign-up.
 
 
-- **Write contention never becomes an error.** SQLite has a single write lock, so every write in the process goes
-  through one asynchronous FIFO queue: an ordinary write issued while a transaction is open waits in JavaScript and
-  then proceeds, and a transaction body always owns its own connection. A contender never sits in the driver's
-  synchronous busy timeout, so contention cannot stall the event loop, time out a token refresh or turn into a 500.
-  Reads stay lock-free under WAL. Transaction bodies that nest join the outer transaction with a `SAVEPOINT`.
+- **Write contention never becomes an error.** Postgres serialises the writes that must be serialised with row
+  locks and unique constraints; ordinary writes do not share one process-wide lock. A request that loses a race
+  retries or gets a defined 409, never a 500. Multi-step invariants run in a transaction, and a nested transaction
+  body joins the outer one with a `SAVEPOINT`.
 
 ## Development storage
 
-`ORBITID_DATABASE_URL=:memory:` opens a throwaway SQLite database. It is backed by a private file in a per-process
-temporary directory (`orbitid-sqlite-<pid>-…`) so a second connection can own write transactions. It is deleted
-when the handle closes and on `exit`/`SIGINT`/`SIGTERM`; at startup a sweep removes leftover `orbitid-sqlite-*`
-directories older than a day whose PID is no longer alive. Nothing in it survives the process: real persistence
-needs a disk path (`sqlite:/var/lib/orbitid/orbitid.db`) or Postgres.
+There is no in-process or in-memory database. Point `ORBITID_DATABASE_URL` at any Postgres database, including a
+disposable one. The Rust test harness creates a migrated template database once per embedded-migration hash
+(`orbit_template_rs_<hash>`) and clones
+it per test through `ORBITID_TEST_PG_ADMIN_URL`, then drops the clone. Nothing survives the test process.
 
 ## What can still end a session
 
@@ -158,5 +169,5 @@ loss outside the product's control:
 | Ended session with an OIDC refresh token | RP stayed signed in | Every session end revokes the linked grants; refresh/userinfo/introspection also check the session |
 | Active guest deleted by `anonymous.retentionSeconds` | Token refreshes did not update `users.last_active_at` | Refresh refreshes user activity (throttled), so only genuinely idle guests are removed |
 | Changed `ORBITID_ENCRYPTION_KEY` | 500 on the first token mint (perceived sign-out) | Startup fails loudly; no signing key is regenerated |
-| Stale `__client` token in a second tab | Created a fresh client and overwrote the live cookie | Refused with `401 client_state_invalid` and no `Set-Cookie`; only the SDK bootstrap may recover |
+| Stale `__client` token in a second tab | Created a fresh client and overwrote the live cookie | Refused with `401 client_state_invalid` and no `Set-Cookie`; the SDK bootstrap recovers with a newly minted random token (the stale value is never adopted) |
 

@@ -119,6 +119,13 @@ request. Presenting it twice — or with the wrong redirect URI or verifier — 
 may be omitted at the token endpoint when the code is unambiguous; if it is sent it must match the authorization
 request exactly.
 
+Presenting an **already consumed** code also revokes every access and refresh token the first exchange issued from
+it, as RFC 6749 §4.1.2 and OIDC Core §3.1.3.2 recommend: a code offered twice may have leaked. The code row records
+the token family the exchange created, and the revocation uses the same family lock as refresh-token reuse, so it
+is atomic and works across replicas. Consuming a code and inserting its token set are one transaction, which means
+a concurrent duplicate cannot revoke the winner's tokens before they exist; exactly one exchange succeeds, and the
+loser's replay revokes the family. A first exchange with no replay is unaffected.
+
 Refresh tokens rotate on every use and are bound to a *token family*. Rotation persists the consumption time and
 the successor token id on the token that was consumed. Consuming the presented token, checking that the family is
 still live and inserting the successor + access token happen in **one transaction**, serialized against family

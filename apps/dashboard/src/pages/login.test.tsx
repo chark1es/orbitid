@@ -106,6 +106,14 @@ describe("login guard", () => {
     expect(screen.queryByText(/The first start prints the publishable key and the secret key once/)).toBeNull();
   });
 
+  it("warns before sign-in when an older server still reports SQLite", async () => {
+    mockApi({ health: { status: "ok", database: "sqlite", publishable_key: "pk_test_demo" } });
+    renderApp("/login");
+
+    expect(await screen.findByText(/This instance runs SQLite/)).toBeTruthy();
+    expect(screen.getByText("SQLite")).toBeTruthy();
+  });
+
   it("names the problem when the instance does not answer", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);
@@ -128,11 +136,11 @@ describe("login guard", () => {
   });
 
   it("renders the shell when the cookie session is live, without any key in storage", async () => {
-    mockApi({ sessionActive: true, health: { status: "ok", database: "sqlite", publishable_key: "pk_test_demo" } });
+    mockApi({ sessionActive: true, health: { status: "ok", database: "postgres", database_driver: "postgres", publishable_key: "pk_test_demo" } });
     renderApp("/");
     expect(await screen.findAllByText("Overview")).not.toHaveLength(0);
     expect(screen.queryByText("Sign in with your secret key")).toBeNull();
-    expect(await screen.findByText("SQLite")).toBeTruthy();
+    expect(await screen.findByText("Postgres")).toBeTruthy();
     expect(document.title).toBe("Overview \u00b7 OrbitID");
     expect(JSON.stringify(sessionStorage)).not.toContain("sk_");
   });

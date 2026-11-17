@@ -1,15 +1,17 @@
 # syntax=docker/dockerfile:1
 #
-# One image, two installs:
-#   build  – the whole workspace, so the dashboard can be built.
-#   deps   – only the workspaces the server needs at runtime, production dependencies only.
-# The runtime stage copies the `deps` node_modules, so it holds no test runner, bundler or type definitions,
-# and every `node_modules/@orbitid/*` link resolves (the server imports `@orbitid/shared`).
+# One image, three stages:
+#   dashboard – builds the React dashboard with Bun.
+#   server    – builds the Rust binary (`orbitid`) from the Cargo workspace.
+#   runtime   – minimal Debian bookworm-slim with the binary, the dashboard and the
+#               shared libraries SAML needs. No Node, no compiler and no curl.
+#
+# The server is Postgres-only. There is no database inside the image and no data
+# volume: settings, signing keys and uploaded avatars/logos all live in Postgres.
 
-FROM node:20-bookworm-slim AS build
+FROM node:20-bookworm-slim AS dashboard
 RUN npm install -g bun@1.4.4
 WORKDIR /app
-
 # Manifests first: the dependency layer is reused until a package.json or the lockfile changes.
 COPY package.json bun.lock bunfig.toml ./
 COPY packages/backend/package.json packages/backend/
@@ -17,64 +19,100 @@ COPY packages/js/package.json packages/js/
 COPY packages/nextjs/package.json packages/nextjs/
 COPY packages/node/package.json packages/node/
 COPY packages/react/package.json packages/react/
-COPY packages/server/package.json packages/server/
 COPY packages/shared/package.json packages/shared/
 COPY packages/ui/package.json packages/ui/
 COPY apps/dashboard/package.json apps/dashboard/
-COPY playground/package.json playground/
 RUN bun install --frozen-lockfile
-
-COPY . .
+COPY packages/shared packages/shared
+COPY packages/ui packages/ui
+COPY apps/dashboard apps/dashboard
+COPY tsconfig.base.json ./
 RUN bun run --filter @orbitid/dashboard build
 
-# Production dependency tree for the server. `better-sqlite3` and `@node-rs/argon2` are native modules: their
-# prebuilt binaries are fetched for the Node 20 ABI of this image and verified below, so the runtime never needs
-# a compiler toolchain.
-FROM node:20-bookworm-slim AS deps
-RUN npm install -g bun@1.4.4
-WORKDIR /app
-COPY package.json bun.lock bunfig.toml ./
-COPY packages/server/package.json packages/server/
-COPY packages/shared/package.json packages/shared/
-RUN bun install --frozen-lockfile --production
+FROM rust:1-slim-bookworm AS server
+# SAML verification links libxmlsec, which links OpenSSL and libxml2. Build-only headers:
+# the runtime image installs the matching shared libraries.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      clang \
+      pkg-config \
+      libxml2-dev \
+      libxmlsec1-dev \
+      libssl-dev \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
 
-FROM node:20-bookworm-slim AS runtime
-# TMPDIR lives in the data volume: the TypeScript runner unpacks a loader there, and a read-only root filesystem
-# must not break `docker exec … cli.ts keys` either. /data is the one path a deployment always makes writable.
+# Manifests first, then a dummy build of the workspace. Cargo compiles every dependency
+# once; the real source copy below only recompiles the OrbitID crates.
+COPY Cargo.toml Cargo.lock ./
+COPY crates/orbitid-core/Cargo.toml crates/orbitid-core/
+COPY crates/orbitid-platform/Cargo.toml crates/orbitid-platform/
+COPY crates/orbitid-credentials/Cargo.toml crates/orbitid-credentials/
+COPY crates/orbitid-federation/Cargo.toml crates/orbitid-federation/
+COPY crates/orbitid-identity/Cargo.toml crates/orbitid-identity/
+COPY crates/orbitid-fapi-auth/Cargo.toml crates/orbitid-fapi-auth/
+COPY crates/orbitid-fapi-account/Cargo.toml crates/orbitid-fapi-account/
+COPY crates/orbitid-bapi/Cargo.toml crates/orbitid-bapi/
+COPY crates/orbitid-oidc/Cargo.toml crates/orbitid-oidc/
+COPY crates/orbitid-server/Cargo.toml crates/orbitid-server/
+RUN for crate in crates/*; do \
+      mkdir -p "$crate/src"; \
+      test -f "$crate/src/lib.rs" || : > "$crate/src/lib.rs"; \
+    done \
+ && printf 'fn main() {}\n' > crates/orbitid-server/src/main.rs \
+ && cargo build --release --locked -p orbitid-server
+
+COPY crates ./crates
+COPY docs/openapi.json docs/openapi.json
+# COPY preserves the source files' mtimes from the build context. The dummy build above
+# just created newer artifacts, so Cargo would consider this real (older) source fresh
+# and silently keep the stub binary. Touch every real input so the workspace crates are
+# recompiled; external dependencies stay cached.
+RUN find crates docs -type f -exec touch {} + \
+ && cargo build --release --locked -p orbitid-server
+
+FROM debian:bookworm-slim AS runtime
+# Only the runtime libraries the binary actually links: confirm with
+#   ldd /usr/local/bin/orbitid
+# The xmlsec1 packages pull their own transitive dependencies from apt.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates \
+      libxml2 \
+      libxmlsec1 \
+      libxmlsec1-openssl \
+      libssl3 \
+ && rm -rf /var/lib/apt/lists/*
+
 ENV NODE_ENV=production \
     PORT=4000 \
-    ORBITID_DATA_DIR=/data \
-    ORBITID_DASHBOARD_DIR=/app/dashboard \
-    TMPDIR=/data/tmp
+    ORBITID_DATA_DIR=/tmp/orbitid \
+    ORBITID_DASHBOARD_DIR=/app/dashboard
+
 WORKDIR /app
+COPY --from=server /src/target/release/orbitid /usr/local/bin/orbitid
+COPY --from=dashboard /app/apps/dashboard/dist /app/dashboard
 
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/package.json ./package.json
-COPY packages/server ./packages/server
-COPY packages/shared ./packages/shared
-COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint
-COPY --from=build /app/apps/dashboard/dist ./dashboard
+# Fail the build, not the deploy, when the layout or the binary is wrong:
+# the binary runs without a database for `help`, the dashboard is a real build,
+# no shared library is missing and nobody runs as root. The OpenAPI document is
+# compiled into the binary, so the runtime image needs no source tree.
+RUN test -x /usr/local/bin/orbitid \
+ && orbitid help | grep -q 'Usage: orbitid' \
+ && test -f /app/dashboard/index.html \
+ && ! ldd /usr/local/bin/orbitid | grep -q "not found" \
+ && groupadd --system --gid 10001 orbitid \
+ && useradd --system --uid 10001 --gid orbitid --home-dir /app --no-create-home orbitid \
+ && install -d -o 10001 -g 10001 -m 1777 /tmp/orbitid
 
-RUN chmod +x /usr/local/bin/docker-entrypoint
-
-# Fail the build, not the deploy, when the layout is wrong: native bindings must load on this Node's ABI, every
-# workspace link must resolve, and the server entry (with its whole import graph) must load under tsx.
-# TMPDIR is overridden here: the runtime value points into the data volume, which must stay untouched (and
-# owned by `node`) in the image, because Docker copies an image's /data into a fresh named volume.
-RUN TMPDIR=/tmp node -e "require('better-sqlite3'); require('@node-rs/argon2'); console.log('native modules load')" \
- && node -e "console.log('shared resolves:', require.resolve('@orbitid/shared'))" \
- && for link in node_modules/@orbitid/*; do test -e "$link" || { echo "dangling workspace link: $link" >&2; exit 1; }; done \
- && test -f dashboard/index.html \
- && TMPDIR=/tmp node node_modules/tsx/dist/cli.mjs -e "import('./packages/server/src/app.ts').then(() => console.log('server entry loads'))"
-
-# The data volume is the only writable path, and it must be owned by the unprivileged user from the first
-# start, so nothing above may have left anything in it.
-RUN mkdir -p /data && chown node:node /data && test -z "$(ls -A /data)"
-USER node
-VOLUME /data
+USER 10001:10001
+# The runtime really is unprivileged, and the application tree is not writable under a read-only root.
+RUN test "$(id -u)" = "10001" && test ! -w /app
 EXPOSE 4000
 STOPSIGNAL SIGTERM
-HEALTHCHECK --interval=15s --timeout=3s --start-period=30s --retries=5 \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||4000)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint"]
+# /ready is the database-aware endpoint (`/health` is liveness only); the binary
+# probes it itself, so the runtime image needs no curl or shell.
+HEALTHCHECK --interval=15s --timeout=3s --start-period=60s --retries=5 \
+  CMD ["/usr/local/bin/orbitid", "healthcheck"]
 CMD ["start"]
+ENTRYPOINT ["/usr/local/bin/orbitid"]

@@ -141,7 +141,7 @@ Organization roles and instance roles are managed by the same endpoints; both ke
 Replacing a user's instance-role set or a role's permission set is all-or-nothing. Each replacement locks its
 stable parent before deleting/inserting grant rows, so concurrent requests produce one complete requested set,
 never a merged set. Insert failures roll back the deletion. Individual permission add/remove operations take the
-same parent lock. SQLite uses synchronous immediate transactions; Postgres holds the parent row lock until commit.
+same parent lock. Postgres holds the parent row lock until commit.
 
 Disabling organizations suppresses organization membership/permission claims in newly minted session and OIDC
 tokens; instance `app:` grants remain available. Already-issued offline JWTs retain their claims until expiry.

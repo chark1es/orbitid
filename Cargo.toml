@@ -1,0 +1,97 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/orbitid-core",
+    "crates/orbitid-platform",
+    "crates/orbitid-credentials",
+    "crates/orbitid-federation",
+    "crates/orbitid-identity",
+    "crates/orbitid-fapi-auth",
+    "crates/orbitid-fapi-account",
+    "crates/orbitid-bapi",
+    "crates/orbitid-oidc",
+    "crates/orbitid-server",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/orbitid/orbitid"
+rust-version = "1.85"
+
+[workspace.dependencies]
+# runtime / web
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time", "sync", "fs", "io-util", "io-std"] }
+axum = { version = "0.8", features = ["macros", "multipart"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["fs", "trace"] }
+# database
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio",
+    "tls-rustls",
+    "postgres",
+    "json",
+    "migrate",
+    "macros",
+    "derive",
+] }
+# serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+serde_path_to_error = "0.1"
+# errors / logging
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+# http client
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2", "charset"] }
+# SMTP client (rustls only; never OpenSSL)
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-rustls-tls", "builder", "hostname", "pool"] }
+# crypto / ids
+rand = "0.9"
+sha2 = "0.10"
+hmac = "0.12"
+base64 = "0.22"
+aes-gcm = "0.10"
+scrypt = "0.11"
+subtle = "2"
+nanoid = "0.4"
+sha1 = "0.10"
+argon2 = "0.5"
+bcrypt = "0.17"
+rsa = { version = "0.9", features = ["sha2"] }
+p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+ciborium = "0.2"
+qrcode = { version = "0.14", default-features = false }
+image = { version = "0.24", default-features = false, features = ["png"] }
+base32 = "0.5"
+# misc
+url = "2"
+regex = "1"
+percent-encoding = "2"
+unicode-normalization = "0.1"
+arc-swap = "1"
+async-trait = "0.1"
+bytes = "1"
+http-body-util = "0.1"
+clap = { version = "4", features = ["derive"] }
+# federation: JWT/JWKS verification, Apple client-secret JWT, and SAML 2.0
+jsonwebtoken = "9"
+chrono = { version = "0.4", features = ["serde"] }
+quick-xml = "0.41"
+flate2 = "1"
+samael = { version = "0.0.22", features = ["xmlsec"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+# `OrbitError` is the single API error type returned by every handler. Boxing it
+# would make every `?` in a handler allocate; the size is deliberate.
+result_large_err = "allow"
+
+[profile.dev]
+debug = 1
