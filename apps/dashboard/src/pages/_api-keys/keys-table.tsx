@@ -50,8 +50,7 @@ export function ApiKeysTable({ keys, onRevoke }: { keys: ApiKeyJSON[]; onRevoke:
                   className="text-destructive"
                   disabled={key.revoked}
                   onClick={() => onRevoke(key)}
-                  title="Revoke"
-                >
+                  title="Revoke">
                   <Trash2 className="size-4" aria-hidden />
                   <span className="sr-only">Revoke {key.name}</span>
                 </Button>

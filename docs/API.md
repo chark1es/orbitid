@@ -9,13 +9,13 @@ The server exposes one HTTP origin with four surfaces:
 | OAuth / OIDC provider | `/oauth/*`, `/.well-known/*` | Third-party OAuth clients | OAuth access token, or none for the protocol endpoints |
 | Health and docs | `/health`, `/docs`, `/v1/openapi.json` | Load balancers, people | None |
 
-The full reference is generated from the server's route table:
+The full reference comes from one hand-maintained document:
 
-- **`/docs`** on your instance is a readable reference: search, one collapsible section per operation, request and
-  response schema trees, and a copyable `curl` example.
-- **`/v1/openapi.json`** is the same document as OpenAPI 3.1, public and cacheable. Point your own tooling at it.
-- **`docs/openapi.json`** in the repository is a snapshot written by `bun run openapi:export` (in
-  `packages/server`). CI fails when it is out of date, so it always describes the code you are running.
+- **`docs/openapi.json`** in the repository is the source of truth, written and reviewed like code. The Rust
+  server serves that exact file at `/v1/openapi.json`, so it always describes the routes it implements.
+- **`/v1/openapi.json`** is OpenAPI 3.1, public and cacheable. Point your own tooling at it.
+- **`/docs`** on your instance is a self-contained interactive reference viewer. The page, its assets and the
+  OpenAPI document are embedded in the binary at build time, so the image needs no source tree at runtime.
 
 ## Authentication
 
@@ -423,8 +423,7 @@ so you can exercise your signature check.
 ## Staying current
 
 - Read `/docs` on the instance you are integrating with. It always matches the running server.
-- `docs/openapi.json` is regenerated with `bun run openapi:export` from `packages/server`; CI fails when the committed
-  file is stale, and a test fails when a registered route is missing from the document.
+- `docs/openapi.json` is edited by hand when a route or shape changes; the Rust server embeds and serves that file.
 - Versioning: the API is `0.1.0`. Additive changes (new fields, new endpoints, new enum values) can land in a patch
   release; read fields you know and branch on error `code`s.
 

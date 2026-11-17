@@ -11,17 +11,25 @@ export interface ServerSummaryRow {
 export function serverSummary(input: {
   apiUrl: string;
   database: string | null | undefined;
+  /** `/health`'s `database_driver`; newer servers report `postgres`. */
+  databaseDriver?: string | null;
   settings: InstanceSettings | null | undefined;
 }): ServerSummaryRow[] {
   const database =
     input.database === "postgres" ? "Postgres"
-    : input.database === "sqlite" ? "SQLite"
+    : input.database === "sqlite" ? "SQLite (unsupported)"
     : "Reported by /health";
+  const databaseDetail =
+    input.database === "sqlite"
+      ? "This server still runs SQLite. The current server requires Postgres; move the data before upgrading (docs/DATA_MOVE.md)."
+      : input.database === "postgres"
+        ? `The instance's own Postgres database${input.databaseDriver ? ` (driver: ${input.databaseDriver})` : ""}. Users, sessions, settings and uploads live here.`
+        : "The instance's own database. Users, sessions, settings and uploads live here.";
   const rows: ServerSummaryRow[] = [
     {
       label: "Database",
       value: database,
-      detail: "The instance's own database. Users, sessions and settings live here.",
+      detail: databaseDetail,
     },
     { label: "Base URL", value: input.apiUrl, detail: "The origin the SDKs and these snippets point at." },
   ];
@@ -108,6 +116,15 @@ export function setupChecks(input: SetupCheckInput): SetupCheck[] {
       state: input.health.status === "ok" ? "ok" : "warn",
       detail: `GET ${input.apiUrl}/health answered "${input.health.status}"${input.health.database ? ` on ${input.health.database}` : ""}.`,
     });
+    if (input.health.database === "sqlite") {
+      checks.push({
+        id: "database",
+        label: "Supported database",
+        state: "fail",
+        detail:
+          "This instance reports SQLite, which the current server no longer supports. Move it to Postgres with the last TypeScript release's copy command, then run the Rust server against that database.",
+      });
+    }
   } else {
     checks.push({ id: "health", label: "Server reachable", state: "warn", detail: "Not checked yet." });
   }

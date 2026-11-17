@@ -69,6 +69,12 @@ export class SignUp {
   createdUserId: string | null;
   abandonAt: number;
   legalAcceptedAt: number | null;
+  /**
+   * Serializes this attempt's mutating requests. The server rejects a PATCH
+   * whose `version` another request already advanced (`client_state_invalid`),
+   * so overlapping updates of one sign-up must not leave the browser.
+   */
+  private mutationQueue: Promise<unknown> = Promise.resolve();
 
   constructor(
     private readonly fapi: FapiClient,
@@ -116,6 +122,15 @@ export class SignUp {
 
   get isComplete(): boolean {
     return this.status === "complete";
+  }
+
+  private enqueue<T>(task: () => Promise<T>): Promise<T> {
+    const result = this.mutationQueue.then(task, task);
+    this.mutationQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }
 
   private get basePath(): string {
@@ -183,43 +198,49 @@ export class SignUp {
   }
 
   /** PATCHes the in-progress sign-up (add/update identifier or profile fields). */
-  async update(params: SignUpCreateParams): Promise<this> {
-    const json = await fetchData<SignUpJSON>(this.fapi, "PATCH", this.basePath, {
-      body: {
-        email_address: params.emailAddress,
-        phone_number: params.phoneNumber,
-        username: params.username,
-        password: params.password,
-        first_name: params.firstName,
-        last_name: params.lastName,
-        unsafe_metadata: params.unsafeMetadata,
-        public_metadata: params.publicMetadata,
-        legal_accepted: params.legalAccepted,
-      },
+  update(params: SignUpCreateParams): Promise<this> {
+    return this.enqueue(async () => {
+      const json = await fetchData<SignUpJSON>(this.fapi, "PATCH", this.basePath, {
+        body: {
+          email_address: params.emailAddress,
+          phone_number: params.phoneNumber,
+          username: params.username,
+          password: params.password,
+          first_name: params.firstName,
+          last_name: params.lastName,
+          unsafe_metadata: params.unsafeMetadata,
+          public_metadata: params.publicMetadata,
+          legal_accepted: params.legalAccepted,
+        },
+      });
+      return this.applyJSON(json);
     });
-    return this.applyJSON(json);
   }
 
   async reload(): Promise<this> {
     return this.applyJSON(await fetchData<SignUpJSON>(this.fapi, "GET", this.basePath));
   }
 
-  async prepareVerification(params: SignUpVerificationParams = {}): Promise<this> {
-    const json = await fetchData<SignUpJSON>(this.fapi, "POST", `${this.basePath}/prepare_verification`, {
-      body: {
-        strategy: params.strategy ?? "email_code",
-        redirect_url: params.redirectUrl,
-        action_complete_redirect_url: params.actionCompleteRedirectUrl,
-      },
+  prepareVerification(params: SignUpVerificationParams = {}): Promise<this> {
+    return this.enqueue(async () => {
+      const json = await fetchData<SignUpJSON>(this.fapi, "POST", `${this.basePath}/prepare_verification`, {
+        body: {
+          strategy: params.strategy ?? "email_code",
+          redirect_url: params.redirectUrl,
+          action_complete_redirect_url: params.actionCompleteRedirectUrl,
+        },
+      });
+      return this.applyJSON(json);
     });
-    return this.applyJSON(json);
   }
 
-  async attemptVerification(params: AttemptVerificationParams): Promise<this> {
-    const json = await fetchData<SignUpJSON>(this.fapi, "POST", `${this.basePath}/attempt_verification`, {
-      body: { strategy: params.strategy, code: params.code },
+  attemptVerification(params: AttemptVerificationParams): Promise<this> {
+    return this.enqueue(async () => {
+      const json = await fetchData<SignUpJSON>(this.fapi, "POST", `${this.basePath}/attempt_verification`, {
+        body: { strategy: params.strategy, code: params.code },
+      });
+      return this.applyJSON(json);
     });
-    return this.applyJSON(json);
   }
 
   async prepareEmailAddressVerification(params: SignUpVerificationParams = {}): Promise<this> {

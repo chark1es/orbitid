@@ -1,10 +1,13 @@
 import { CopyButton } from "./copy-button";
 
-const START_COMMANDS = `# 1. Start the server. It prints both keys once.
-bun run --filter @orbitid/server start
+const START_COMMANDS = `# 1. Start the Rust server against Postgres. It prints the publishable key, never the secret.
+export ORBITID_DATABASE_URL=postgres://user:password@localhost:5432/orbitid
+export ORBITID_ENCRYPTION_KEY="$(openssl rand -base64 32)"
+cargo run -p orbitid-server -- start
 
-# 2. Copy the environment file, then paste both keys into it.
+# 2. Copy the environment file, then print the keys for that same environment.
 cp playground/.env.example playground/.env.local
+cargo run -q -p orbitid-server -- keys
 
 # 3. Start the test site on port 3300.
 bun run --filter orbitid-playground dev`;

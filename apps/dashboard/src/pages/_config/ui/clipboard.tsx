@@ -54,8 +54,7 @@ export function SecretReveal({
           variant="ghost"
           size="icon-sm"
           onClick={() => setRevealed((current) => !current)}
-          title={revealed ? "Hide" : "Reveal"}
-        >
+          title={revealed ? "Hide" : "Reveal"}>
           {revealed ? <EyeOff className="size-3.5" aria-hidden /> : <Eye className="size-3.5" aria-hidden />}
           <span className="sr-only">{revealed ? "Hide secret" : "Reveal secret"}</span>
         </Button>

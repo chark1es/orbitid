@@ -143,23 +143,23 @@ Variable names follow the SDKs (`NEXT_PUBLIC_*` for Next.js, `VITE_*` for Vite, 
 SDKs). The webhook secret is per endpoint — it comes from the Webhooks page — and is left blank in the
 block with a line saying where to find it. `ORBITID_JWT_KEY` is optional and commented out.
 
-The secret key line is a placeholder with a note saying where the real value comes from (`orbitid keys`, or
-`<data dir>/keys.json`; startup logs no longer print it), so copying a block can never move a live credential into
-a chat or a ticket. "Copy
+The secret key line is a placeholder with a note saying where the real value comes from (`orbitid keys`; startup
+logs do not print it), so copying a block can never move a live credential into a chat or a ticket. "Copy
 all" pastes both blocks as one file. A read-only **Server (this instance)** block reports the
 database, base URL, the email provider in effect and whether private networks are allowed, and points at
 `docs/ENVIRONMENT.md`. The encryption key never appears anywhere in the dashboard.
 
 **Check your setup** calls `GET /health` and `GET /v1/client/environment` and reads the saved settings,
 then reports each result with a word and a dot (Works, Check, Failed): server reachable, publishable key
-present, dashboard session live, sign-in methods published, email transport, and whether the
-application home URL is an allowed origin.
+present, dashboard session live, a supported database, sign-in methods published, email transport, and
+whether the application home URL is an allowed origin. An older server that reports SQLite gets a failed
+"Supported database" check with the Postgres migration path instead of a silent warning.
 
 ## Secret fields
 
 Every credential in instance settings is write-only. `GET /v1/instance` replaces a stored secret with a
 mask (`••••`) and adds a `<field>Set` marker, and `PATCH` drops a mask or an unchanged echo instead of
-storing it (`packages/server/src/lib/secrets.ts`).
+storing it (`crates/orbitid-core/src/secrets.rs`).
 
 The dashboard mirrors that convention in `pages/_config/settings/`: `secretInputValue` blanks a masked
 value so the field starts empty, `secretIsConfigured` reads the mask as "Set", and `buildSettingsPatch`

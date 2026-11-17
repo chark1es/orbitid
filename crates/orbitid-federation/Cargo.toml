@@ -1,0 +1,43 @@
+[package]
+name = "orbitid-federation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+orbitid-core = { path = "../orbitid-core" }
+tokio = { workspace = true }
+axum = { workspace = true }
+sqlx = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+base64 = { workspace = true }
+sha2 = { workspace = true }
+subtle = { workspace = true }
+url = { workspace = true }
+percent-encoding = { workspace = true }
+regex = { workspace = true }
+async-trait = { workspace = true }
+jsonwebtoken = { workspace = true }
+chrono = { workspace = true }
+quick-xml = { workspace = true }
+flate2 = { workspace = true }
+samael = { workspace = true }
+openssl = "0.10"
+
+[features]
+# Exposes the reusable OIDC mock provider and SAML test IdP. Upper crates enable
+# it from `[dev-dependencies]` only; production builds never compile them.
+test-util = ["orbitid-core/test-util"]
+
+[dev-dependencies]
+reqwest = { workspace = true }
+orbitid-core = { path = "../orbitid-core", features = ["test-util"] }
+tokio = { workspace = true, features = ["full"] }
+axum = { workspace = true }
+
+[lints]
+workspace = true

@@ -202,8 +202,7 @@ export function StringListEditor({
             variant="ghost"
             size="icon-sm"
             onClick={() => onChange(values.filter((_, itemIndex) => itemIndex !== index))}
-            title="Remove"
-          >
+            title="Remove">
             <X className="size-4" aria-hidden />
             <span className="sr-only">Remove</span>
           </Button>

@@ -5,7 +5,7 @@ import { Check, Eye, EyeOff, Loader2, Sun, TriangleAlert, X } from "lucide-react
 import { API_URL, ApiError, DEFAULT_API_URL, getApiUrl, isSameOrigin } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { errorMessage } from "../lib/errors";
-import { databaseLabel, fetchInstanceHealth, type InstanceHealth } from "../lib/instance-health";
+import { databaseLabel, databaseSupportNote, fetchInstanceHealth, type InstanceHealth } from "../lib/instance-health";
 import { ThemeToggle } from "../components/layout/theme-toggle";
 import { FormSkeleton } from "../components/shared/page-skeleton";
 
@@ -86,7 +86,7 @@ export default function LoginPage() {
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 401) {
         setError(
-          `The server rejected that secret key. Copy the key that starts with sk_ from ./data/keys.json or run the keys command, then sign in again.`,
+          `The server rejected that secret key. Copy the key that starts with sk_ from the orbitid keys command (or ORBITID_SECRET_KEY), then sign in again.`,
         );
       } else {
         setError(errorMessage(cause, "The instance did not answer. Check the URL and that the server is running."));
@@ -180,7 +180,7 @@ export default function LoginPage() {
                 />
                 <button
                   type="button"
-                  className="absolute inset-y-0 right-0 grid w-9 place-items-center rounded-r-md text-muted-foreground hover:text-foreground"
+                  className="absolute inset-y-0 right-0 grid w-9 place-items-center rounded-r-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                   aria-label={showKey ? "Hide secret key" : "Show secret key"}
                   aria-pressed={showKey}
                   onClick={() => setShowKey((current) => !current)}
@@ -218,8 +218,9 @@ export default function LoginPage() {
             Where the key is
           </h2>
           <p className="mt-2 max-w-[62ch] text-sm leading-6 text-muted-foreground">
-            Stored in <code className="font-data text-foreground">&lt;data dir&gt;/keys.json</code>. The start command
-            hides the secret key; <code className="font-data text-foreground">orbitid keys</code> prints it.
+            Derived from <code className="font-data text-foreground">ORBITID_ENCRYPTION_KEY</code>, or set explicitly
+            with <code className="font-data text-foreground">ORBITID_SECRET_KEY</code>. The start command hides the
+            secret key; <code className="font-data text-foreground">orbitid keys</code> prints it.
           </p>
 
           <dl className="mt-6 space-y-4 border-t border-border pt-6 text-sm">
@@ -238,10 +239,10 @@ export default function LoginPage() {
               </dd>
             </div>
             <div>
-              <dt className="font-medium">Data directory</dt>
+              <dt className="font-medium">Encryption key</dt>
               <dd className="mt-0.5 text-muted-foreground">
-                <code className="font-data text-foreground">ORBITID_DATA_DIR</code> moves the directory. The default is{" "}
-                <code className="font-data text-foreground">./data</code> next to the server process.
+                <code className="font-data text-foreground">ORBITID_ENCRYPTION_KEY</code> derives the secret key and
+                decrypts stored secrets. Keep it stable: changing it makes stored signing keys unreadable.
               </dd>
             </div>
           </dl>
@@ -320,6 +321,12 @@ function ConnectionResult({
             </dd>
           </div>
         </dl>
+      ) : null}
+      {health.state === "ok" && databaseSupportNote(health.result.database, health.result.databaseDriver) ? (
+        <p role="status" className="mt-2 flex items-start gap-2 text-sm text-signal">
+          <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+          <span>{databaseSupportNote(health.result.database, health.result.databaseDriver)}</span>
+        </p>
       ) : null}
     </section>
   );

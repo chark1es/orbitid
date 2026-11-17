@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createOrbitId } from "../src/client";
 import { getAuth } from "../src/adapters/express";
-import { startRealServer, createUserWithSession, createOrganization, tokenWithOrganization, type RealServer, type TestUser } from "./helpers/server";
+import { startRealServer, createUserWithSession, createOrganization, tokenWithOrganization, signJwtForTest, type RealServer, type TestUser } from "./helpers/server";
 import { MiniApp, http } from "./helpers/mini-app";
 
 let server: RealServer | null = null;
@@ -79,8 +79,11 @@ describe("express middleware", () => {
   it("requireAuth treats an expired token as signed out, not as a server error", async () => {
     server = await startRealServer();
     const orbit = createOrbitId({ secretKey: server.secretKey, apiUrl: server.url, jwksCooldownMs: 0 });
-    const { signJwt } = await import("../../server/src/services/tokens");
-    const expired = await signJwt(server.context, { sub: "user_x", sid: "sess_x", nbf: Math.floor(Date.now() / 1000) - 120 }, { expiresInSeconds: -60, issuer: server.url });
+    const expired = await signJwtForTest(
+      server,
+      { sub: "user_x", sid: "sess_x", nbf: Math.floor(Date.now() / 1000) - 120 },
+      -60,
+    );
     app = new MiniApp();
     app.get("/protected", orbit.requireAuth(), (req, res) => res.status(200).json({ userId: req.auth!.userId }));
     await app.listen();
@@ -150,8 +153,11 @@ describe("express middleware", () => {
     server = await startRealServer();
     user = await createUserWithSession(server);
     const orbit = createOrbitId({ secretKey: server.secretKey, apiUrl: server.url });
-    const { signJwt } = await import("../../server/src/services/tokens");
-    const wildcard = await signJwt(server.context, { sub: user.userId, sid: user.sessionId, org_permissions: ["org:billing:*"] }, { expiresInSeconds: 60, issuer: server.url });
+    const wildcard = await signJwtForTest(
+      server,
+      { sub: user.userId, sid: user.sessionId, org_permissions: ["org:billing:*"] },
+      600,
+    );
     app = new MiniApp();
     app.get("/billing", orbit.requirePermission("org:billing:manage"), (_req, res) => res.status(200).json({ ok: true }));
     await app.listen();

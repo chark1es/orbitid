@@ -1,0 +1,80 @@
+# Horizontal-scaling override: three OrbitID replicas behind Caddy, one shared Postgres.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d
+#   # or choose a different replica count:
+#   docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d --scale orbitid=5
+#
+# Nothing on the server is per-process state that matters: sessions, settings, rate-limit
+# windows and uploaded images live in Postgres, and settings changes propagate to every
+# replica over LISTEN/NOTIFY. Writes to `instance` serialise on a row lock, and the first
+# boot inserts its row with `ON CONFLICT DO NOTHING`, so replicas may start concurrently
+# against an empty database. A load balancer may therefore send any request to any replica.
+#
+# Caddy must discover **all** replicas, not resolve `orbitid` once: a plain
+# `reverse_proxy orbitid:4000` captures one address per connection attempt instead of
+# building a real multi-upstream pool. The Caddyfile below uses dynamic upstreams
+# (`dynamic a`, Caddy 2.10+) with a 5 s DNS refresh and round-robin balancing, and
+# overwrites the forwarded headers so clients cannot spoof them. Compose starts Caddy
+# only after every replica is healthy; at runtime Caddy retries failed connections and
+# passively removes a replica that answers 503 from `/ready` (Caddy does not run active
+# health checks for dynamic upstreams). ORBITID_TRUST_PROXY=1 tells the server to read the
+# client address and scheme from those headers. Set ORBITID_BASE_URL to the public URL
+# users reach (the Caddy endpoint), not to a replica address.
+#
+# Responses do not reveal which replica handled a request: no upstream address or internal
+# hostname is added. Use each replica's request log (the server logs one line per request)
+# when you need to confirm distribution.
+services:
+  orbitid:
+    # The base file publishes a fixed host port, which would collide between replicas.
+    # `!reset` clears it; Caddy below owns the published port instead.
+    ports: !reset []
+    environment:
+      ORBITID_TRUST_PROXY: 1
+    deploy:
+      replicas: 3
+
+  caddy:
+    # Dynamic upstreams require Caddy 2.10 or newer.
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      orbitid:
+        condition: service_healthy
+    configs:
+      - source: caddyfile
+        target: /etc/caddy/Caddyfile
+    ports:
+      - "${ORBITID_PORT:-4000}:4000"
+
+configs:
+  caddyfile:
+    content: |
+      {
+        admin off
+      }
+
+      :4000 {
+        reverse_proxy {
+          dynamic a {
+            name orbitid
+            port 4000
+            refresh 5s
+          }
+          lb_policy round_robin
+
+          # Caddy does not run active health checks against dynamic upstreams. Compose
+          # starts this proxy only after every replica is healthy, and these settings
+          # remove a replica that fails to connect or answers 503 from `/ready`
+          # (the readiness endpoint runs `SELECT 1`) while it is being restarted.
+          lb_try_duration 5s
+          lb_retries 2
+          fail_duration 10s
+          max_fails 1
+          unhealthy_status 503
+
+          header_up X-Forwarded-For {remote_host}
+          header_up X-Forwarded-Proto {scheme}
+          header_up X-Forwarded-Host {host}
+        }
+      }

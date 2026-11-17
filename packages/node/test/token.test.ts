@@ -4,7 +4,7 @@ import { createOrbitId } from "../src/client";
 import { OrbitIdError } from "../src/errors";
 import { JwksCache } from "../src/jwks";
 import { createTransport } from "../src/transport";
-import { startRealServer, createUserWithSession, backend, fetchJson, type RealServer } from "./helpers/server";
+import { startRealServer, createUserWithSession, backend, fetchJson, signJwtForTest, type RealServer } from "./helpers/server";
 
 let server: RealServer | null = null;
 
@@ -68,44 +68,28 @@ describe("verifyToken against the real instance JWKS", () => {
     server = await startRealServer();
     const orbit = sdkFor(server);
     // A token minted by the instance key with a past `exp` exercises the real verification path.
-    const { signJwt } = await import("../../server/src/services/tokens");
-    const expired = await signJwt(server.context, { sub: "user_x", sid: "sess_x", nbf: Math.floor(Date.now() / 1000) - 120 }, {
-      expiresInSeconds: -60,
-      issuer: server.url,
-    });
+    const expired = await signJwtForTest(server, { sub: "user_x", sid: "sess_x", nbf: Math.floor(Date.now() / 1000) - 120 }, -60);
     await expect(orbit.verifyToken(expired)).rejects.toMatchObject({ code: "token_expired", reason: "token-expired" });
   });
 
   it("rejects a token that is not valid yet", async () => {
     server = await startRealServer();
     const orbit = createOrbitId({ secretKey: server.secretKey, apiUrl: server.url, clockToleranceSeconds: 0, jwksCooldownMs: 0 });
-    const { signJwt } = await import("../../server/src/services/tokens");
-    const future = await signJwt(server.context, { sub: "user_x", sid: "sess_x", nbf: Math.floor(Date.now() / 1000) + 120 }, {
-      expiresInSeconds: 600,
-      issuer: server.url,
-    });
+    const future = await signJwtForTest(server, { sub: "user_x", sid: "sess_x", nbf: Math.floor(Date.now() / 1000) + 120 }, 600);
     await expect(orbit.verifyToken(future)).rejects.toMatchObject({ code: "token_not_active_yet", reason: "token-not-active-yet" });
   });
 
   it("allows a small clock skew for nbf", async () => {
     server = await startRealServer();
     const orbit = createOrbitId({ secretKey: server.secretKey, apiUrl: server.url, clockToleranceSeconds: 120, jwksCooldownMs: 0 });
-    const { signJwt } = await import("../../server/src/services/tokens");
-    const slightlyEarly = await signJwt(server.context, { sub: "user_x", sid: "sess_x", nbf: Math.floor(Date.now() / 1000) + 30 }, {
-      expiresInSeconds: 600,
-      issuer: server.url,
-    });
+    const slightlyEarly = await signJwtForTest(server, { sub: "user_x", sid: "sess_x", nbf: Math.floor(Date.now() / 1000) + 30 }, 600);
     await expect(orbit.verifyToken(slightlyEarly)).resolves.toMatchObject({ sub: "user_x", sid: "sess_x" });
   });
 
   it("rejects a token from another issuer", async () => {
     server = await startRealServer();
     const orbit = sdkFor(server);
-    const { signJwt } = await import("../../server/src/services/tokens");
-    const wrongIssuer = await signJwt(server.context, { sub: "user_x", sid: "sess_x" }, {
-      expiresInSeconds: 600,
-      issuer: "https://evil.example.com",
-    });
+    const wrongIssuer = await signJwtForTest(server, { sub: "user_x", sid: "sess_x" }, 600, "https://evil.example.com");
     await expect(orbit.verifyToken(wrongIssuer)).rejects.toMatchObject({ code: "token_invalid_issuer", reason: "invalid-issuer" });
   });
 
@@ -200,8 +184,9 @@ describe("verifyToken against the real instance JWKS", () => {
     const orbit = sdkFor(server);
     await orbit.verifyToken(user.token);
 
-    const { rotateSigningKey } = await import("../../server/src/services/tokens");
-    await rotateSigningKey(server.context);
+    // Rotate through the Backend API, exactly as an operator would from the dashboard.
+    const rotated = await backend(server, "POST", "/v1/instance/signing_keys/rotate");
+    expect(rotated.status).toBe(200);
     await expect(orbit.verifyToken(user.token)).resolves.toMatchObject({ sub: user.userId });
   });
 });

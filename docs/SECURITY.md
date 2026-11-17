@@ -27,10 +27,10 @@ DNS, and anyone who legitimately holds the secret key or the encryption key.
 
 Every response gets `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`
 and a `Permissions-Policy` that disables camera, microphone, geolocation, payment, USB and interest-cohort
-(`packages/server/src/lib/security.ts`). `Strict-Transport-Security` (`max-age=31536000; includeSubDomains`) is
+(`crates/orbitid-core/src/http/security.rs`). `Strict-Transport-Security` (`max-age=31536000; includeSubDomains`) is
 added when `ORBITID_BASE_URL` is `https://`.
 
-The dashboard HTML (`packages/server/src/modules/dashboard.ts`) gets a strict CSP:
+The dashboard HTML (`crates/orbitid-server/src/dashboard.rs`) gets a strict CSP:
 
 ```
 default-src 'self'; script-src 'self' 'nonce-<per-request>'; style-src 'self' 'unsafe-inline';
@@ -40,9 +40,8 @@ base-uri 'self'; form-action 'self'; frame-ancestors 'none'
 
 The only inline scripts are the page's own theme bootstrap and the injected instance configuration; both are
 served with a fresh nonce per request, and the nonce in the header always matches the one in the HTML. External
-scripts never get a nonce. `style-src` allows inline styles because the UI library injects them.
-`ORBITID_DASHBOARD_CONNECT_SRC` adds extra `connect-src` origins for an operator who hosts the dashboard's API on
-another origin; leave it empty for the normal same-origin deployment.
+scripts never get a nonce. `style-src` allows inline styles because the UI library injects them. The
+dashboard is same-origin with the instance it manages; there is no cross-origin dashboard mode.
 
 JSON API responses are `Cache-Control: no-store` unless the route chose its own public policy (the environment
 and JWKS endpoints are cacheable and secret-free by design).
@@ -51,7 +50,7 @@ and JWKS endpoints are cacheable and secret-free by design).
 
 The Frontend API (`/v1/client/*`) is authenticated by the opaque `__client` cookie, which a browser attaches to
 requests started by *any* site. Every state-changing method (POST/PUT/PATCH/DELETE) that arrives **with that
-cookie** must therefore prove where it came from (`packages/server/src/lib/security.ts`, `csrfProtection`):
+cookie** must therefore prove where it came from (`crates/orbitid-core/src/http/security.rs`, `csrf_protection`):
 
 - `Origin` (or `Referer` when `Origin` is absent) must be one of `settings.application.allowedOrigins`,
   `homeUrl`, or this server's own base URL. In development mode `localhost` is additionally accepted.
@@ -66,7 +65,7 @@ cookie** must therefore prove where it came from (`packages/server/src/lib/secur
 The Backend API checks the dashboard's operator cookie on reads and writes. Its `Origin` (or `Referer` when
 `Origin` is absent) must be this instance's own origin. `Sec-Fetch-Site` must be `same-origin`, `none` or absent,
 and a literal `Origin: null` is refused. Another application origin in `allowedOrigins` does not earn operator
-access (`requireSecretKey` in `packages/server/src/middleware.ts`). The operator-session endpoints apply the
+access (`require_secret_key` in `crates/orbitid-server/src/app.rs`). The operator-session endpoints apply the
 same rule. Frontend API requests and federation callbacks ignore this cookie and keep their own authentication
 rules, so being signed into the dashboard does not prevent an operator from using their application.
 
@@ -82,25 +81,24 @@ and Apple `form_post` callbacks are cross-site POSTs.
 
 ### 3. Request limits
 
-- JSON bodies: 1 MB, enforced by a counting reader before `JSON.parse` (and a `Content-Length` pre-check), so an
-  oversized body is refused while it is still on the wire.
+- JSON bodies: 1 MB. `OrbitJson` caps the body while it is still on the wire and treats an empty body as `{}`.
 - Uploads (multipart, image data URLs): 5 MB, enforced by middleware before any route parses them and again in
   the upload handler.
 - `Content-Type` must be JSON or form-encoded for JSON endpoints; anything else that carries a body is a 415.
 - JSON nested deeper than 32 levels is a 400, because such documents only exist to exhaust recursive validators.
-- Zod schemas bound user-writable metadata (100 keys, 256-character keys, 4 KB strings, 16 KB serialised) and
-  every Frontend API text field; list `limit`/`offset` are capped (500 / 0) on every list endpoint.
-- The node server is started with `maxHeaderSize: 16 KB`, `requestTimeout: 30s`, `headersTimeout: 20s`,
-  `keepAliveTimeout: 5s` (`packages/server/src/index.ts`), so a slow or idle peer cannot pin a socket.
+- Typed `serde` structs bound user-writable metadata and every Frontend API text field; list `limit`/`offset`
+  are capped on every list endpoint.
+- Idle-client timeouts belong to the reverse proxy or load balancer; the Rust server does not expose Node's
+  `requestTimeout`/`headersTimeout` knobs.
 
 ### 4. Server-side request forgery
 
 Outbound requests to URLs a user or admin controls all go through one helper,
-`packages/server/src/lib/safe-fetch.ts`. It is used for webhook delivery, OIDC discovery/token/userinfo endpoints
+`crates/orbitid-core/src/safe_fetch.rs`. It is used for webhook delivery, OIDC discovery/token/userinfo endpoints
 (social custom providers and enterprise connections), JWKS retrieval, SAML/enterprise discovery, CAPTCHA
 verification, the SMS webhook and the breached-password check.
 
-`safeFetch`:
+`safe_fetch`:
 
 1. accepts only `http:`/`https:` and strips embedded credentials;
 2. resolves DNS itself and refuses private (10/8, 172.16/12, 192.168/16), loopback (127/8, `::1`), link-local and
@@ -119,21 +117,22 @@ immediately that an internal target is refused.
 
 ### 5. Uploads
 
-`packages/server/src/lib/images.ts` decides the format from the bytes: PNG, JPEG, GIF and WebP only. SVG is
-refused unconditionally, as is anything else, regardless of the declared `Content-Type` or file extension.
-Polyglots — a real image header followed by HTML, SVG or script — are refused too. Stored files get a random,
-server-generated name (the client's name is never used), and are served with `X-Content-Type-Options: nosniff`
-and `Content-Security-Policy: sandbox`. The existing path-traversal guard on the image and logo routes stays.
+The upload handlers decide the format from the bytes: PNG, JPEG, GIF and WebP only. SVG is refused
+unconditionally, as is anything else, regardless of the declared `Content-Type` or file extension. Polyglots —
+a real image header followed by HTML, SVG or script — are refused too. Stored images get a random,
+server-generated name (the client's name is never used) and are kept in the `uploads` table, so every replica
+serves them; responses carry `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox`. The
+path-traversal guard on the image and logo routes stays.
 
 ### 6. Injection and abuse
 
-- **Dynamic sorting** only ever maps a whitelisted column name to a Drizzle column (`parseOrderBy`, `sortRows`);
-  an unknown `order_by` falls back to the default order and is never interpolated.
-- **LIKE searches** escape `%`, `_` and `\` and use an explicit `ESCAPE` clause (`containsText`,
-  `startsWithText` in `lib/db.ts`).
-- **No `sql.raw` with input.** All queries are Drizzle-parameterised.
-- **Prototype pollution**: `deepMerge` (settings), both `mergeMetadata` helpers, request-body parsing and the JWT
-  shortcode lookup all drop `__proto__`, `constructor` and `prototype` at every level.
+- **Dynamic sorting** only ever maps a whitelisted column name to a fixed SQL fragment; an unknown `order_by`
+  falls back to the default order and is never interpolated.
+- **LIKE searches** escape `%`, `_` and `\` and use an explicit `ESCAPE` clause.
+- **No string-built SQL with input.** All queries use sqlx bind parameters; dynamic identifiers come from
+  fixed lists.
+- **Prototype pollution** is a JavaScript concern and no longer exists on the server; `OrbitJson` still strips
+  `__proto__`, `constructor` and `prototype` from incoming bodies, and settings/metadata merges ignore them.
 - **Mass assignment**: every Frontend API write is an explicit allowlist. A user cannot set `banned`, `locked`,
   `passwordHash`, `isAnonymous`, `privateMetadata`, `externalId` or any other privileged field — a PATCH to
   `/v1/client/me` only reads the fields its schema names.
@@ -177,7 +176,7 @@ and `Content-Security-Policy: sandbox`. The existing path-traversal guard on the
 - JWT verification pins algorithms: session tokens and machine tokens accept `RS256` only, so `none` and
   HS256-with-the-public-key ("algorithm confusion") are rejected. Enterprise `id_token`s are verified with an
   explicit asymmetric algorithm list.
-- SAML is handled by `@node-saml/node-saml`: assertion signatures are mandatory, responses must answer a request
+- SAML is handled by `samael` with libxmlsec: assertion signatures are mandatory, responses must answer a request
   we issued (unless IdP-initiated is explicitly enabled), replay is refused, and the XML parser does not expand
   external entities (XXE). Signature wrapping is the library's responsibility; we pass it a single, validated
   assertion and reject a response whose assertion is not the signed one.
@@ -262,7 +261,7 @@ stored value; an empty string clears it; anything else replaces it. This makes t
 editor safe.
 
 The same fields are **encrypted at rest** in the instance settings JSON with the instance encryption key
-(`lib/crypto.ts`, AES-256-GCM). Rows written by older versions hold plaintext: they are read as-is and sealed on
+(`crates/orbitid-core/src/crypto.rs`, AES-256-GCM). Rows written by older versions hold plaintext: they are read as-is and sealed on
 the next write, so the migration is transparent. An unreadable ciphertext (wrong key) degrades to an empty value
 instead of crashing the instance.
 
@@ -271,9 +270,10 @@ from the dedicated secret endpoint). They never appear in list or detail respons
 
 ### 10. Dependencies
 
-`bun audit` checks dependency advisories against the committed lockfile and currently reports no known
-vulnerabilities. `drizzle-orm` and `nodemailer` include fixes for the identifier-escaping and message-level
-raw-option issues. Keep the lockfile committed and run `bun audit` as part of maintenance.
+`cargo audit` checks the Rust dependencies against the advisory database, and `bun audit` does the same for
+the TypeScript workspaces. Keep `Cargo.lock` and `bun.lock` committed and run both as part of maintenance.
+The server uses rustls (not OpenSSL) for outbound TLS; libxmlsec/OpenSSL is linked only for SAML signature
+verification and is kept current by the base image.
 
 ## The self-hoster's responsibilities
 
@@ -282,9 +282,9 @@ The server hardens what it controls; these parts are yours.
 1. **TLS.** Terminate TLS in front of OrbitID and set `ORBITID_BASE_URL` to the `https://` URL users reach. That
    single setting turns on HSTS and `Secure` cookies. Never run a production instance over plain http: the
    browser-binding cookie for cross-site SSO callbacks needs https, and so does `Secure`.
-2. **Reverse proxy.** Put nginx, Caddy, or your load balancer in front. Forward to the node port, set
+2. **Reverse proxy.** Put nginx, Caddy, or your load balancer in front. Forward to the server port, set
    `X-Forwarded-For`, and set `ORBITID_TRUST_PROXY` to the number of proxies you run (1 for a single proxy) so
-   per-IP rate limits see the real client and not the proxy. Do not expose the node port directly to the
+   per-IP rate limits see the real client and not the proxy. Do not expose the server port directly to the
    internet. If your proxy adds security headers of its own, keep them consistent with this document rather than
    loosening them; the server's headers are set only when the route has not chosen them.
    The server caps request headers at 16 KB; keep your proxy's limit at or below that.
@@ -292,11 +292,12 @@ The server hardens what it controls; these parts are yours.
    - `ORBITID_ENCRYPTION_KEY` is required in production and must be at least 32 random characters
      (`openssl rand -base64 32`). It encrypts signing keys, TOTP secrets, OAuth tokens and settings credentials.
      Keep it stable and back it up separately from the database: changing it makes every stored secret unreadable.
-   - The secret key (`sk_live_…`) is generated on first boot (derived from the encryption key, or written to
-     `<dataDir>/keys.json` with mode 600). Treat it like a root password: it grants the entire Backend API.
-     Rotate it if it leaks, and do not put it in a browser. `orbitid start` does not print it — run
-     `orbitid keys` when you need the value, rather than reading it out of a captured startup log.
-   - Keep the data directory (`ORBITID_DATA_DIR`) on a private volume; it holds keys and uploaded images.
+   - The secret key (`sk_live_…`) is derived from the encryption key (an explicit `ORBITID_SECRET_KEY` wins).
+     Treat it like a root password: it grants the entire Backend API. Rotate it if it leaks, and do not put it
+     in a browser. `orbitid start` does not print it — run `orbitid keys` when you need the value, rather than
+     reading it out of a captured startup log.
+   - `ORBITID_DATA_DIR` only needs to be a writable directory at boot. Uploads live in Postgres, so a container
+     can run with a read-only root filesystem and no application volume.
 4. **Database.** Store the database credentials in the environment, not in the settings UI. Use a dedicated
    database user with access only to the OrbitID database, and keep Postgres patched.
 5. **Network.** Only the server needs to reach your database and the outbound services you configured (mail, SMS,
@@ -304,7 +305,7 @@ The server hardens what it controls; these parts are yours.
    well — `safeFetch` is the application-level guard, not a substitute for a firewall.
 6. **Upgrades.** Watch dependency advisories and upgrade. Run `bun audit` (or your registry's equivalent) as part
    of maintenance, and rebuild the image when a fix lands.
-7. **Backups and logs.** Back up the database and the data directory together. Scrub logs before sharing them:
+7. **Backups and logs.** Back up the database; it also holds uploaded images. Scrub logs before sharing them:
    trace ids and user ids are fine, tokens and codes are never logged by the server and never written to disk by it — there is no console or file mail transport at all — but may appear in your proxy's
    logs if a client puts them in a URL.
 
@@ -371,12 +372,11 @@ the session table and the audit events are shaped so that change does not touch 
 
 ## Dependency status
 
-`bun audit` reports no advisory for a production dependency. The validation layer runs on zod 4 across the
-server, the shared contract and the OpenAPI converter, so the zod 3 memory advisory (very large arrays carrying a
-length constraint) no longer applies. Regression tests confirm that overlong constrained arrays are refused
-before validating their elements. A separate 1 MB request-body cap remains in place. Development tooling
-(vitest, vite, esbuild, postcss) is
-kept on patched versions through `overrides` in the root `package.json`.
+`cargo audit` and `bun audit` report no advisory for a production dependency. The Rust server validates with
+typed `serde` structs, so the zod memory advisory (very large arrays carrying a length constraint) does not
+apply to request handling. The shared TypeScript contract and the OpenAPI tooling still use zod 4, where that
+advisory is fixed. A separate 1 MB request-body cap remains in place. Development tooling (vitest, vite,
+esbuild, postcss) is kept on patched versions through `overrides` in the root `package.json`.
 
 ## Reporting a vulnerability
 

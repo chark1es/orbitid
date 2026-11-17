@@ -6,24 +6,102 @@ on:
   pull_request:
 
 jobs:
+  # The Rust server: formatting, lints, workspace tests against a real Postgres, and the
+  # release binary the Node SDK integration tests use. The toolchain comes from
+  # rust-toolchain.toml, so CI and a local `cargo` agree on rustfmt/clippy.
+  rust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: orbit
+          POSTGRES_PASSWORD: orbit
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U orbit -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      ORBITID_TEST_PG_ADMIN_URL: postgres://orbit:orbit@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain from rust-toolchain.toml
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: true
+      - name: SAML build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang pkg-config libxml2-dev libxmlsec1-dev libssl-dev
+      - name: Formatting
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: Workspace tests
+        run: cargo test --workspace --all-features
+      # One connection per test pool: any handler that takes a second connection
+      # while holding one fails with a pool timeout instead of passing on a big
+      # pool. Set ORBITID_TEST_POOL_ACQUIRE_MS low so a leak fails fast.
+      - name: Workspace tests on a one-connection pool
+        env:
+          ORBITID_TEST_POOL_MAX: "1"
+          ORBITID_TEST_POOL_ACQUIRE_MS: "2000"
+        run: cargo test --workspace --all-features --no-fail-fast
+      - name: Release binary for the SDK integration tests
+        run: cargo build --release --locked -p orbitid-server
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orbitid-release
+          path: target/release/orbitid
+          if-no-files-found: error
+
   check:
     runs-on: ubuntu-latest
+    # The Node SDK tests spawn the real Rust binary; take it from the job above instead of
+    # compiling the workspace twice.
+    needs: rust
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: orbit
+          POSTGRES_PASSWORD: orbit
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U orbit -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      ORBITID_TEST_PG_ADMIN_URL: postgres://orbit:orbit@localhost:5432/postgres
+      ORBITID_BIN: ${{ github.workspace }}/target/release/orbitid
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
       - uses: oven-sh/setup-bun@v2
+      - name: Postgres client for the Node SDK test harness
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
+      - uses: actions/download-artifact@v4
+        with:
+          name: orbitid-release
+          path: target/release
+      - run: chmod +x target/release/orbitid
       - run: bun install --frozen-lockfile
-      - name: Native sqlite binding loads on Node
-        run: node -e "require('better-sqlite3')"
       - run: bun run test:maintenance
       - run: bun run check:files
       - run: bun run check:docs
       - run: bun run typecheck
       - run: bun run test
-      - name: Committed OpenAPI document is current
-        run: bun run --filter @orbitid/server openapi:export && git diff --exit-code docs/openapi.json
       - name: Dashboard build
         run: bun run --filter @orbitid/dashboard build
       - name: Example app build
@@ -32,11 +110,12 @@ jobs:
           NEXT_PUBLIC_ORBITID_PUBLISHABLE_KEY: pk_test_aHR0cDovL2xvY2FsaG9zdDo0MDAw
           ORBITID_SECRET_KEY: sk_test_ci
 
-  # Proves the documented deployment works: the image builds, runs unprivileged on SQLite, and the compose
-  # file brings up Postgres. scripts/smoke-container.sh is the same check an operator can run locally.
+  # Proves the documented deployment works: the image builds, runs unprivileged on Postgres,
+  # the compose file brings up a working instance, and two replicas share one session.
+  # scripts/smoke-container.sh is the same check an operator can run locally.
   container:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

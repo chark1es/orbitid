@@ -1,7 +1,7 @@
 import { type ConnectTarget, SECRET_KEY_PLACEHOLDER, type ConnectBlock } from "./model";
 
 const SECRET_KEY_NOTE =
-  "The instance secret key. Copy it from <data dir>/keys.json or the explicit keys command. The dashboard does not keep it after sign-in.";
+  "The instance secret key. Print it with `orbitid keys`, or set it with ORBITID_SECRET_KEY. The dashboard does not keep it after sign-in.";
 
 const WEBHOOK_NOTE =
   "The webhook secret is per endpoint: open Webhooks, choose the endpoint, and copy its signing secret (whsec_…). Rotating it invalidates the old one immediately.";

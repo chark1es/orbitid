@@ -22,7 +22,6 @@
   },
   "devDependencies": {
     "@hono/node-server": "^2",
-    "@orbitid/server": "*",
     "@types/node": "^20",
     "hono": "^4.6.0",
     "typescript": "^5.6.0",

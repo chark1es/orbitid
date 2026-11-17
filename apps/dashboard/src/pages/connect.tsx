@@ -163,8 +163,8 @@ export default function Page() {
   );
   const plan = useMemo(() => buildConnectPlan(framework, target), [framework, target]);
   const summary = useMemo(
-    () => serverSummary({ apiUrl, database: health?.database ?? null, settings }),
-    [apiUrl, health?.database, settings],
+    () => serverSummary({ apiUrl, database: health?.database ?? null, databaseDriver: health?.databaseDriver ?? null, settings }),
+    [apiUrl, health?.database, health?.databaseDriver, settings],
   );
   const checks = useMemo(
     () =>
@@ -364,8 +364,8 @@ export default function Page() {
         <p className="flex items-start gap-2 text-xs leading-relaxed text-muted-foreground">
           <ShieldAlert className="mt-0.5 size-3.5 shrink-0" strokeWidth={1.5} aria-hidden />
           The dashboard signs in with the secret key once and then holds only an httpOnly session cookie, so the backend
-          blocks keep a placeholder. Copy the real key from <code className="font-data">&lt;data dir&gt;/keys.json</code>{" "}
-          into your server's environment, and rotate it if it was ever pasted into a browser bundle or a public repository.
+          blocks keep a placeholder. Print the real key with <code className="font-data">orbitid keys</code> and put it in
+          your server's environment, and rotate it if it was ever pasted into a browser bundle or a public repository.
         </p>
       </SettingsSection>
     </PageLayout>

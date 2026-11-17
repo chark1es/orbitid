@@ -2,18 +2,21 @@
 node_modules
 **/node_modules
 
-# Build output is rebuilt inside the image.
+# Rust build output. Docker builds in its own layer cache; a local target would
+# copy gigabytes and poison the dependency cache.
+target
+target-*
+target-pkg
+
+# Frontend build output is rebuilt inside the image.
 **/dist
 **/.next
 **/.turbo
 **/tsconfig.tsbuildinfo
 
-# Local data and volumes.
+# Local data and database files. The Rust server is Postgres-only and keeps
+# uploads in the database, so nothing here belongs in an image layer.
 data
-*.db
-*.db-journal
-*.db-wal
-*.db-shm
 uploads
 
 # Secrets and local configuration never enter an image layer.

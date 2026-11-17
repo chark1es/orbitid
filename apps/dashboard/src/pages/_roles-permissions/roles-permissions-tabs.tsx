@@ -86,8 +86,7 @@ export function RolesPermissionsTabs({ ctl }: { ctl: RolesPermissionsController 
                           className="text-destructive"
                           disabled={system}
                           onClick={() => setDeleteRole(role)}
-                          title="Delete"
-                        >
+                          title="Delete">
                           <Trash2 className="size-4" aria-hidden />
                           <span className="sr-only">Delete {role.name}</span>
                         </Button>
@@ -147,8 +146,7 @@ export function RolesPermissionsTabs({ ctl }: { ctl: RolesPermissionsController 
                           className="text-destructive"
                           disabled={system}
                           onClick={() => setDeletePermission(permission)}
-                          title="Delete"
-                        >
+                          title="Delete">
                           <Trash2 className="size-4" aria-hidden />
                           <span className="sr-only">Delete {permission.name}</span>
                         </Button>

@@ -1,0 +1,104 @@
+[package]
+name = "orbitid-identity"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+orbitid-core = { path = "../orbitid-core" }
+orbitid-platform = { path = "../orbitid-platform" }
+orbitid-credentials = { path = "../orbitid-credentials" }
+orbitid-federation = { path = "../orbitid-federation" }
+axum = { workspace = true }
+tokio = { workspace = true }
+sqlx = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }
+regex = { workspace = true }
+percent-encoding = { workspace = true }
+unicode-normalization = { workspace = true }
+rand = { workspace = true }
+base64 = { workspace = true }
+async-trait = { workspace = true }
+
+[dev-dependencies]
+orbitid-core = { path = "../orbitid-core", features = ["test-util"] }
+orbitid-credentials = { path = "../orbitid-credentials", features = ["test-util"] }
+orbitid-federation = { path = "../orbitid-federation", features = ["test-util"] }
+tokio = { workspace = true, features = ["full"] }
+
+[features]
+default = []
+# Exposes the fully-installed test state and domain-level fixtures. Upper
+# crates enable this from `[dev-dependencies]` only.
+test-util = [
+    "orbitid-core/test-util",
+    "orbitid-credentials/test-util",
+    "orbitid-federation/test-util",
+]
+
+[[test]]
+name = "sessions"
+path = "tests/sessions.rs"
+required-features = ["test-util"]
+
+[[test]]
+name = "users"
+path = "tests/users.rs"
+required-features = ["test-util"]
+
+[[test]]
+name = "client_auth"
+path = "tests/client_auth.rs"
+required-features = ["test-util"]
+
+[[test]]
+name = "roles"
+path = "tests/roles.rs"
+required-features = ["test-util"]
+
+[[test]]
+name = "orgs"
+path = "tests/orgs.rs"
+required-features = ["test-util"]
+
+[[test]]
+name = "operator_and_devices"
+path = "tests/operator_and_devices.rs"
+required-features = ["test-util"]
+
+[[test]]
+name = "restrictions_and_cleanup"
+path = "tests/restrictions_and_cleanup.rs"
+required-features = ["test-util"]
+
+[[test]]
+name = "serializers"
+path = "tests/serializers.rs"
+required-features = ["test-util"]
+
+[[test]]
+name = "external_identity"
+path = "tests/external_identity.rs"
+required-features = ["test-util"]
+
+[[test]]
+name = "hardening"
+path = "tests/hardening.rs"
+required-features = ["test-util"]
+
+[[test]]
+name = "atomicity"
+path = "tests/atomicity.rs"
+required-features = ["test-util"]
+
+[[test]]
+name = "helpers"
+path = "tests/helpers.rs"
+required-features = ["test-util"]
+
+[lints]
+workspace = true

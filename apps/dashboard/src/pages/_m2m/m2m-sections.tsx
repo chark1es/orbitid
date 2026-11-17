@@ -144,8 +144,7 @@ export function TokensSection({ ctl }: { ctl: M2MController }) {
                     className="text-destructive"
                     disabled={token.revoked}
                     onClick={() => setRevoking(token)}
-                    title="Revoke"
-                  >
+                    title="Revoke">
                     <Trash2 className="size-4" aria-hidden />
                     <span className="sr-only">Revoke token</span>
                   </Button>

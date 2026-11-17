@@ -1,0 +1,15 @@
+-- Publish settings by a database-assigned revision instead of the writer host's clock.
+--
+-- `instance.updated_at` is informational metadata (epoch milliseconds from the
+-- writing replica's clock). Replicas used to treat it as the version of the
+-- settings snapshot, so a clock that ran fast -- or two commits within one
+-- millisecond -- could make a later commit look older than the snapshot a
+-- replica already served, and that replica then refused the new value forever,
+-- including on the periodic refresh.
+--
+-- Every settings write already runs inside a transaction that holds the row
+-- lock (`SELECT ... FOR UPDATE`); it now also increments this counter in the
+-- same `UPDATE` and reads it back with `RETURNING`. Publication is ordered by
+-- this strictly increasing, database-assigned value only. Existing rows start
+-- at 0, so the next write publishes revision 1.
+ALTER TABLE "instance" ADD COLUMN IF NOT EXISTS "revision" bigint NOT NULL DEFAULT 0;

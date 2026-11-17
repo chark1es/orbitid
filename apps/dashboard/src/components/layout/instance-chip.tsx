@@ -3,7 +3,7 @@ import { Check, Copy } from "lucide-react";
 import { Button } from "@orbitid/ui";
 import { toast } from "sonner";
 import { getApiUrl } from "../../lib/api";
-import { databaseLabel, fetchInstanceHealth, type InstanceHealth } from "../../lib/instance-health";
+import { databaseLabel, databaseSupportNote, fetchInstanceHealth, type InstanceHealth } from "../../lib/instance-health";
 import { useCopyToClipboard, useFlash } from "../../lib/hooks";
 
 function hostOf(url: string): string {
@@ -39,12 +39,13 @@ export function InstanceChip({ className }: { className?: string }) {
   }, [apiUrl]);
 
   const database = health ? databaseLabel(health.database) : unreachable ? "Unreachable" : "Checking";
+  const supportNote = health ? databaseSupportNote(health.database, health.databaseDriver) : null;
 
   return (
     <div className={className}>
       <span
         className="inline-flex h-7 min-w-0 max-w-[9rem] items-center gap-1.5 rounded-sm border border-border bg-card px-2 font-data text-xs text-foreground sm:max-w-[11rem] lg:max-w-[16rem]"
-        title={`${database} · ${apiUrl}`}
+        title={`${database} · ${apiUrl}${supportNote ? ` — ${supportNote}` : ""}`}
       >
         <span
           aria-hidden="true"

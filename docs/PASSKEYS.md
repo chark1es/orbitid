@@ -2,7 +2,7 @@
 
 Passkeys let a user sign in with a device unlock — Touch ID, Windows Hello, a phone's screen lock, or a
 hardware security key — instead of a password or an emailed code. OrbitID is a WebAuthn relying party: the
-server issues the challenges and verifies attestations and assertions with `@simplewebauthn/server`; the
+server issues the challenges and verifies attestations and assertions in Rust (`crates/orbitid-credentials`); the
 browser and the authenticator hold the private keys.
 
 Passkeys are **off by default**. Turn them on in the instance settings:
@@ -65,7 +65,7 @@ Two values define a passkey's scope, and both are derived from the **page** orig
 
 ### How OrbitID picks them
 
-`relyingParty()` in `packages/server/src/services/passkeys.ts`:
+`relying_party()` in `crates/orbitid-credentials/src/passkeys/mod.rs`:
 
 1. The request's `Origin` header — **if** `requestOriginAllowed()` trusts it (it must be the configured
    app URL, an entry in `application.allowedOrigins`, the instance base URL, or
@@ -164,10 +164,11 @@ Setting `application.developmentMode: false` is what stops localhost origins fro
 
 ## Tests
 
-`packages/server/test/support/virtual-authenticator.ts` is a software authenticator: it generates ES256
-(`-7`) and RS256 (`-257`) keys with `node:crypto`, and builds the `clientDataJSON`, the `authenticatorData`
-(RP ID hash, UP/UV/BE/BS flags, counter), a CBOR-encoded `attestationObject` with `fmt: "none"` and the
-assertion signature exactly as a browser returns them. `packages/server/test/passkeys-*.test.ts` drive the
-real HTTP API with it, including wrong origin, wrong RP ID hash, tampered challenges, replays, counter
-regression, forged keys, expired challenges, duplicate credentials, deleted credentials and banned or
-locked users — no mocking of the WebAuthn code path anywhere.
+The Rust fixtures build a software authenticator: ES256 (`-7`) and RS256 (`-257`) keys, the
+`clientDataJSON`, the `authenticatorData` (RP ID hash, UP/UV/BE/BS flags, counter), a CBOR-encoded
+`attestationObject` with `fmt: "none"` and the assertion signature exactly as a browser returns them.
+`crates/orbitid-credentials/tests/passkeys.rs`, `crates/orbitid-fapi-auth/tests/passkey_test.rs` and
+`crates/orbitid-fapi-account/tests/passkeys.rs` drive the real HTTP API with it, including wrong origin,
+wrong RP ID hash, tampered challenges, replays, counter regression, forged keys, expired challenges,
+duplicate credentials, deleted credentials and banned or locked users — no mocking of the WebAuthn code
+path anywhere.

@@ -87,7 +87,7 @@ describe("environment blocks", () => {
     const secret = backend.variables.find((variable) => variable.name === "ORBITID_SECRET_KEY")!;
 
     expect(secret.value).toBe(SECRET_KEY_PLACEHOLDER);
-    expect(secret.comment).toMatch(/keys command/);
+    expect(secret.comment).toMatch(/orbitid keys/);
     // No real key can be copied out of the page: the only value is the placeholder.
     expect(renderEnvBlock(backend)).toContain(`ORBITID_SECRET_KEY=${SECRET_KEY_PLACEHOLDER}`);
     expect(renderEnvBlock(backend)).not.toMatch(/sk_(live|test)_[A-Za-z0-9]{8,}/);
@@ -128,7 +128,7 @@ describe("server summary", () => {
     const rows = serverSummary({ apiUrl: "http://localhost:4000", database: "sqlite", settings });
     const labels = rows.map((row) => row.label);
     expect(labels).toEqual(["Database", "Base URL", "Email delivery", "Private networks"]);
-    expect(rows[0]!.value).toBe("SQLite");
+    expect(rows[0]!.value).toBe("SQLite (unsupported)");
     expect(rows[1]!.value).toBe("http://localhost:4000");
     expect(rows[2]!.value).toBe("Not configured");
     expect(rows[3]!.value).toBe("Blocked");
@@ -138,9 +138,10 @@ describe("server summary", () => {
   it("names the automatic provider by what it resolves to", () => {
     const settings = defaultInstanceSettings();
     settings.email.resendApiKey = "••••";
-    const rows = serverSummary({ apiUrl: "http://localhost:4000", database: "postgres", settings });
+    const rows = serverSummary({ apiUrl: "http://localhost:4000", database: "postgres", databaseDriver: "postgres", settings });
     expect(rows.find((row) => row.label === "Email delivery")?.value).toBe("Resend");
     expect(rows.find((row) => row.label === "Database")?.value).toBe("Postgres");
+    expect(rows.find((row) => row.label === "Database")?.detail).toContain("driver: postgres");
   });
 });
 

@@ -105,7 +105,11 @@ export function paywallFindings(root) {
 export function isMaintainedText(path) {
   const normalized = path.replaceAll("\\", "/");
   if (/(^|\/)(node_modules|dist|build|coverage|\.next)(\/|$)/.test(normalized)) return false;
-  if (normalized.startsWith("packages/server/drizzle/")) return false;
+  // sqlx migrations are canonical SQL: a baseline replay is long by design and splitting it would
+  // change the schema history. The fixtures below are a frozen copy of the pre-Rust drizzle
+  // migrations, kept only to prove that an old database is baselined correctly.
+  if (normalized.startsWith("crates/orbitid-core/migrations/")) return false;
+  if (normalized.startsWith("crates/orbitid-core/tests/fixtures/drizzle/")) return false;
   if (normalized === "docs/openapi.json" || /(^|\/)(package-lock|npm-shrinkwrap)\.json$/.test(normalized)) return false;
   return textExtensions.has(extname(normalized));
 }
@@ -116,6 +120,29 @@ export function sizeViolation(path, bytes) {
   const lines = text ? text.split(/\r\n|\r|\n/).length - (/[\r\n]$/.test(text) ? 1 : 0) : 0;
   if (lines <= MAX_LINES && bytes.length <= MAX_BYTES) return null;
   return `${path}: ${lines} lines, ${bytes.length} bytes (limits: ${MAX_LINES} lines, ${MAX_BYTES} bytes)`;
+}
+
+/**
+ * Every environment variable the server reads must be documented. The scanner covers
+ * `env_var("X")` (core config) and `std::env::var("X")`; test-only harness paths and
+ * `#[cfg(test)]` code are not server configuration.
+ */
+export function environmentFindings(root) {
+  const files = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }).split("\0").filter(Boolean);
+  const documented = existsSync(resolve(root, "docs/ENVIRONMENT.md")) ? readFileSync(resolve(root, "docs/ENVIRONMENT.md"), "utf8") : "";
+  const findings = [];
+  for (const path of files) {
+    if (!/^crates\/[^/]+\/src\//.test(path) || !path.endsWith(".rs")) continue;
+    if (/\/testing\//.test(path)) continue;
+    const fullPath = resolve(root, path);
+    if (!existsSync(fullPath)) continue;
+    const text = readFileSync(fullPath, "utf8");
+    for (const match of text.matchAll(/(?:env_var|std::env::var)\(\s*"([A-Z][A-Z0-9_]+)"/g)) {
+      const name = match[1];
+      if (!documented.includes(`\`${name}\``)) findings.push(`${path}: ${name} is read by the server but missing from docs/ENVIRONMENT.md`);
+    }
+  }
+  return [...new Set(findings)];
 }
 
 /** File links only; URL routes and heading anchors require different validation. */
@@ -154,6 +181,7 @@ export function checkRepository(root, mode = "all") {
     }
     if (mode !== "sizes" && extname(path) === ".md") findings.push(...brokenMarkdownLinks(fullPath, bytes.toString("utf8")));
   }
+  if (mode !== "sizes") findings.push(...environmentFindings(root));
   if (mode === "all") findings.push(...paywallFindings(root));
   return findings;
 }

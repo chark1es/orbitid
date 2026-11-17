@@ -9,7 +9,7 @@ All three paths end in the same place: a verified external identity is turned in
 `external_account` row and a session. What differs is how the identity is fetched and which settings decide
 whether a new account may be created.
 
-Everything below is also what `packages/server/test/federation/` exercises against real HTTP servers: a second
+Everything below is also what `crates/orbitid-federation/tests/` exercises against real HTTP servers: a second
 OrbitID instance acting as the OIDC provider (through discovery and through manual endpoints), a minimal OAuth
 2.0 provider with a nested userinfo document, and a minimal SAML identity provider written in the test (including
 metadata import).
