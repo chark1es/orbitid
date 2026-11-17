@@ -44,7 +44,7 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - name: Workspace tests
-        run: cargo test --workspace --all-features
+        run: cargo test --workspace --all-features --no-fail-fast
       # One connection per test pool: any handler that takes a second connection
       # while holding one fails with a pool timeout instead of passing on a big
       # pool. Set ORBITID_TEST_POOL_ACQUIRE_MS low so a leak fails fast.

@@ -241,15 +241,27 @@ async fn two_concurrent_clicks_on_one_link_advance_the_sign_in_once() {
         .unwrap();
     let path = format!("/v1/verify?token={token}");
     let (first, second) = tokio::join!(h.client.get(&path, &[]), h.client.get(&path, &[]));
+    // Both clicks carry the same OLD client cookie. The winner advances the
+    // sign-in and rotates the client token; a second click whose owner-client
+    // check runs after that commit no longer matches and correctly answers
+    // `different_browser`, while one that checks before it waits on the client
+    // lock and answers `verified`. Which of the two happens is timing, so only
+    // the winner (the response carrying the rotated cookie) must be `verified`.
+    let mut rotations = 0;
     for response in [&first, &second] {
         assert_eq!(response.status, StatusCode::FOUND);
         let location = response.headers.get("location").unwrap().to_str().unwrap();
-        assert!(location.contains("__orbit_status=verified"), "{location}");
+        if response.headers.get("set-cookie").is_some() {
+            rotations += 1;
+            assert!(location.contains("__orbit_status=verified"), "{location}");
+        } else {
+            assert!(
+                location.contains("__orbit_status=verified")
+                    || location.contains("__orbit_status=different_browser"),
+                "{location}"
+            );
+        }
     }
-    let rotations = [&first, &second]
-        .iter()
-        .filter(|response| response.headers.get("set-cookie").is_some())
-        .count();
     assert_eq!(rotations, 1, "exactly one click advances the attempt");
     let sessions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions")
         .fetch_one(&h.app.app_state().pool)
