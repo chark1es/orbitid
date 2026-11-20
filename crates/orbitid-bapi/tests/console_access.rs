@@ -7,7 +7,7 @@ use axum::http::StatusCode;
 use orbitid_core::testing::TestResponse;
 use serde_json::{json, Value};
 
-use common::{error_code, setup, Harness};
+use common::{error_code, setup, setup_with, Harness};
 
 const PASSWORD: &str = "correct horse battery staple";
 
@@ -700,7 +700,8 @@ async fn console_activity_is_refreshed_within_a_short_inactivity_timeout() {
 /// gives up once it commits, instead of minting an Owner beside it.
 #[tokio::test]
 async fn setup_loses_to_a_first_account_that_claims_while_it_runs() {
-    let harness = setup().await;
+    // Two transactions at once by design.
+    let harness = setup_with(orbitid_core::testing::test_pool_exemption(4)).await;
     // A sign-up's `users` trigger, caught between its claim and its commit.
     let mut signup = harness.state().pool.begin().await.unwrap();
     sqlx::query("INSERT INTO console_owner_setup (id, claimed_at) VALUES ('default', 1)")
@@ -777,7 +778,8 @@ async fn status_names_the_console_account_after_a_session_switch() {
 /// waits on it, so the two cannot deadlock (for example on the same email).
 #[tokio::test]
 async fn a_guest_upgrade_does_not_wait_on_owner_setup() {
-    let harness = setup().await;
+    // Two transactions at once by design.
+    let harness = setup_with(orbitid_core::testing::test_pool_exemption(4)).await;
     let guest = orbitid_identity::testing::create_test_guest(harness.state())
         .await
         .unwrap();

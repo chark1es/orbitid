@@ -143,6 +143,14 @@ pub async fn setup() -> Harness {
     Harness { app, client }
 }
 
+/// [`setup`] with explicit overrides, e.g. `test_pool_exemption(n)` for a test
+/// that holds several connections at once by design.
+pub async fn setup_with(overrides: orbitid_core::config::EnvOverrides) -> Harness {
+    let app = orbitid_identity::testing::test_app_state_with(overrides).await;
+    let client = TestClient::new(build_app(app.state()));
+    Harness { app, client }
+}
+
 /// The first error code in an error body.
 pub fn error_code(response: &TestResponse) -> Option<String> {
     response.value()["errors"][0]["code"]
