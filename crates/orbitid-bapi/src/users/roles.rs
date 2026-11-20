@@ -79,6 +79,12 @@ async fn update_roles(
         tx.commit().await?;
         roles
     };
+    // Losing console access ends the account's console sessions for good.
+    orbitid_identity::operator_session::revoke_console_sessions_without_access(
+        &state,
+        &existing.id,
+    )
+    .await?;
     audit(
         &state,
         AuditInput::new("user.roles.updated")

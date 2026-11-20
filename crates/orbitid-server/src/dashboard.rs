@@ -91,18 +91,24 @@ fn safe_relative(path: &str) -> Option<PathBuf> {
 
 /// Whether the request's `Accept-Encoding` allows `coding` (`q=0` refuses it).
 fn accepts(accept_encoding: &str, coding: &str) -> bool {
-    accept_encoding.split(',').any(|entry| {
+    // An entry naming the coding decides; `*` only covers codings not listed,
+    // so `br;q=0, *` still refuses brotli.
+    let mut wildcard = None;
+    for entry in accept_encoding.split(',') {
         let mut parts = entry.split(';');
         let name = parts.next().unwrap_or("").trim();
-        if !name.eq_ignore_ascii_case(coding) && name != "*" {
-            return false;
-        }
         let quality = parts
             .filter_map(|param| param.trim().strip_prefix("q="))
             .find_map(|value| value.trim().parse::<f32>().ok())
             .unwrap_or(1.0);
-        quality > 0.0
-    })
+        if name.eq_ignore_ascii_case(coding) {
+            return quality > 0.0;
+        }
+        if name == "*" {
+            wildcard = Some(quality > 0.0);
+        }
+    }
+    wildcard.unwrap_or(false)
 }
 
 /// The dashboard build ships `.br` and `.gz` siblings for its text assets. Serve
@@ -237,6 +243,11 @@ mod tests {
         assert!(!accepts("br;q=0.000", "br"));
         assert!(accepts("br;q=0.5", "br"));
         assert!(!accepts("", "gzip"));
+        // An explicit refusal wins over the wildcard, wherever it appears.
+        assert!(!accepts("br;q=0, *;q=1", "br"));
+        assert!(!accepts("*, br;q=0", "br"));
+        assert!(accepts("br;q=0, *", "gzip"));
+        assert!(!accepts("*;q=0", "gzip"));
     }
 
     #[tokio::test]

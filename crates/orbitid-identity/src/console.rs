@@ -5,9 +5,11 @@
 //! account gets the seeded [`OWNER_ROLE_KEY`] role, whose
 //! [`crate::rbac::DASHBOARD_ACCESS`] permission opens the admin console.
 //!
-//! Setup is offered only while the instance has no (non-guest) user at all. An
-//! instance that already has users, for example one upgraded from a version
-//! without owners, never offers it. Whoever runs the server grants the Owner
+//! Setup is offered only while the instance is unclaimed (no owner was ever
+//! created, see `console_owner_setup`) and has no (non-guest) user at all.
+//! Claiming is permanent: deleting every account later does not reopen setup.
+//! An instance that existed before owners is claimed by its migration and
+//! never offers it. Whoever runs the server grants the Owner
 //! role to an existing account instead (`orbitid owner <email>`, see
 //! [`grant_owner`]); shell access to the server is the proof of control. The
 //! secret key never opens the dashboard.
@@ -27,11 +29,16 @@ use crate::users::{
     get_user_by_id, CreateUserInput,
 };
 
-const NO_ACCOUNTS: &str = "SELECT NOT EXISTS (SELECT 1 FROM users WHERE NOT is_anonymous)";
+const SETUP_OPEN: &str = "SELECT NOT EXISTS (SELECT 1 FROM console_owner_setup) \
+     AND NOT EXISTS (SELECT 1 FROM users WHERE NOT is_anonymous)";
+
+/// Records that the instance has an owner. Never removed.
+const CLAIM: &str = "INSERT INTO console_owner_setup (id, claimed_at) VALUES ('default', $1) \
+     ON CONFLICT (id) DO NOTHING";
 
 /// True while the instance has no account yet, so the dashboard offers owner setup.
 pub async fn setup_required(state: &AppState) -> Result<bool> {
-    Ok(sqlx::query_scalar::<_, bool>(NO_ACCOUNTS)
+    Ok(sqlx::query_scalar::<_, bool>(SETUP_OPEN)
         .fetch_one(&state.pool)
         .await?)
 }
@@ -86,8 +93,11 @@ pub async fn create_owner(state: &AppState, input: &OwnerInput) -> Result<Option
     sqlx::query("SELECT pg_advisory_xact_lock(hashtext('orbitid_owner_setup')::bigint)")
         .execute(&mut *tx)
         .await?;
-    let available: bool = sqlx::query_scalar(NO_ACCOUNTS).fetch_one(&mut *tx).await?;
+    let available: bool = sqlx::query_scalar(SETUP_OPEN).fetch_one(&mut *tx).await?;
     if !available {
+        // Release the advisory lock now rather than when the connection is
+        // recycled (docs/LOCK_ORDER.md, explicit rollback).
+        tx.rollback().await?;
         return Ok(None);
     }
     let create = CreateUserInput {
@@ -105,6 +115,7 @@ pub async fn create_owner(state: &AppState, input: &OwnerInput) -> Result<Option
     emit_user_created_on(&mut tx, state, &user, &create).await?;
     lock_user_on(&mut tx, &user.id).await?;
     replace_user_roles(&mut tx, &user.id, &[OWNER_ROLE_KEY.to_string()], now()).await?;
+    sqlx::query(CLAIM).bind(now()).execute(&mut *tx).await?;
     tx.commit().await?;
     after_user_created(state, &user, &create).await?;
     Ok(Some(user))
@@ -138,7 +149,16 @@ pub async fn grant_owner(state: &AppState, account: &str) -> Result<OwnerGrant> 
             format!("No account has the user id or verified email address {account}."),
         ));
     };
-    if user.banned {
+    // Rank 3 (user row) before rank 10 (`user_roles`), like every role change.
+    let mut tx = state.pool.begin().await?;
+    lock_user_on(&mut tx, &user.id).await?;
+    // Read under the lock, so a ban that lands meanwhile is honoured.
+    let banned: bool = sqlx::query_scalar("SELECT banned FROM users WHERE id = $1")
+        .bind(&user.id)
+        .fetch_one(&mut *tx)
+        .await?;
+    if banned {
+        tx.rollback().await?;
         return Err(OrbitError::unprocessable(
             error_codes::USER_BANNED,
             format!(
@@ -147,19 +167,19 @@ pub async fn grant_owner(state: &AppState, account: &str) -> Result<OwnerGrant> 
             ),
         ));
     }
-    // Rank 3 (user row) before rank 10 (`user_roles`), like every role change.
-    let mut tx = state.pool.begin().await?;
-    lock_user_on(&mut tx, &user.id).await?;
     let mut roles: Vec<String> =
         sqlx::query_scalar("SELECT role_key FROM user_roles WHERE user_id = $1 ORDER BY role_key")
             .bind(&user.id)
             .fetch_all(&mut *tx)
             .await?;
     if roles.iter().any(|role| role == OWNER_ROLE_KEY) {
+        tx.rollback().await?;
         return Ok(OwnerGrant::AlreadyOwner(user));
     }
     roles.push(OWNER_ROLE_KEY.to_string());
     replace_user_roles(&mut tx, &user.id, &roles, now()).await?;
+    // Granting an owner claims the instance too, so setup can never reopen.
+    sqlx::query(CLAIM).bind(now()).execute(&mut *tx).await?;
     let json = serialize_user_on(
         &mut tx,
         state,

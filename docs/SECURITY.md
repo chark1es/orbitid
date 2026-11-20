@@ -342,11 +342,11 @@ The dashboard is opened by accounts, never by the secret key, which stays a serv
 An account opens the console when one of its instance roles grants `app:sys_dashboard:access` (the seeded Owner and
 Administrator roles do); the first account on a fresh instance is created as the owner from the sign-in screen.
 
-- **Opening the console.** `POST /v1/operator_sessions/from_user` checks the account signed in on this browser (ban
-  flag, permission) and issues a console session tied to its account session. `POST /v1/operator_sessions/setup`
+- **Opening the console.** `POST /v1/operator_sessions/from_user` checks the account signed in on this browser (its
+  `__client` cookie only, never a bearer token; ban flag, permission) and issues a console session tied to its account session. `POST /v1/operator_sessions/setup`
   does the same for the owner it creates, only while the instance has no account (exactly one concurrent setup wins).
 - **Every request re-checks** that the account session is active, the account unbanned and still permitted, so
-  removing the role, banning or signing out anywhere ends the console on the next request.
+  removing the role, banning or signing out anywhere ends the console for good.
 - **The cookie.** An opaque 256-bit token in `__orbit_operator`: `HttpOnly`, `SameSite=Strict`, `Path=/v1`,
   `Secure` over https, 8 hours. The server stores only its sha256 hash, so a database reader cannot mint a session.
   Rows are bound to an HMAC fingerprint of the secret key (rotating it ends every console session) and are left

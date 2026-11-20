@@ -123,16 +123,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // One initial answer per provider, shared across StrictMode's effect replay so it is never asked twice.
+  const initial = useRef<Promise<OperatorStatus> | null>(null);
+
   useEffect(() => {
     clearLegacyCredentials();
     if (boot.current.value) return;
     let active = true;
     const pending = boot.current.pending;
-    boot.current.pending = null;
-    const first = pending
-      ? pending.then((value) => (isOperatorStatus(value) ? value : readOperatorStatus())).catch(() => readOperatorStatus())
+    // The boot answer when it is usable; otherwise exactly one request of our own.
+    initial.current ??= pending
+      ? pending
+          .then((value) => (isOperatorStatus(value) ? value : Promise.reject(new Error("unexpected boot answer"))))
+          .catch(() => readOperatorStatus())
       : readOperatorStatus();
-    first
+    initial.current
       .then((next) => {
         if (active) setStatus(next);
       })

@@ -163,6 +163,17 @@ describe("boot status", () => {
   });
 });
 
+describe("boot status fallback", () => {
+  it("asks once when the boot answer is unusable, even if that request fails", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Failed to fetch"));
+    window.__ORBITID_BOOT__ = { status: Promise.resolve({ unexpected: true }) };
+    renderProvider();
+    await waitFor(() => expect(actions!.statusError).toBe("Failed to fetch"));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("account sign-in", () => {
   it("creates the owner on a fresh instance and lands in the console", async () => {
     const bodies: unknown[] = [];

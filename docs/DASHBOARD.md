@@ -16,16 +16,24 @@ sk_…`), nothing else.
 - **First run.** While the instance has no account at all, the sign-in screen offers **Create the owner account**
   instead. `POST /v1/operator_sessions/setup` creates that account with the seeded **Owner** role
   (`app:sys_owner`), signs it in on this browser and opens the console in one step. Concurrent setups serialize on
-  an advisory lock; exactly one wins. Once any account exists, setup is closed for good (`403`).
+  an advisory lock; exactly one wins. Setup closes once any account exists (`403`), and creating the owner claims
+  the instance for good (`console_owner_setup`): deleting every account later does not reopen it. An instance that
+  existed before this version is claimed by its migration and never offers setup. Create the owner before you
+  expose a new instance: until then, the first visitor can.
 - **Who may enter.** Any account whose instance roles grant `app:sys_dashboard:access`: the seeded **Owner** and
   **Administrator** (`app:sys_admin`) roles do, and a custom `app:` role can carry the permission too. Grant it
   from a user's page, under Roles.
 - **What visitors see.** `/login` shows who is signed in on this browser. An account with access gets
   **Open the admin console** (`POST /v1/operator_sessions/from_user`); one without access is told so and can sign
-  out. After signing in on that screen, an account with access goes straight into the console.
+  out. After signing in on that screen, an account with access goes straight into the console. Only this
+  browser's own `__client` cookie counts: a session token sent as a bearer (one an application received) or a
+  session-id hint cannot open the console.
 - **Request-time checks.** A console session is tied to the account session that opened it. Every Backend API
   request re-checks it: removing the role, banning the account or ending its session (signing out anywhere, or
-  **Sign out** in the console, which ends both) ends the console at once.
+  **Sign out** in the console, which ends both) ends the console at once. A console that fails the check is revoked
+  for good, and so are an account's console sessions when an operator removes its access, so giving the role back
+  does not revive an old cookie. Console requests count as activity on the account session, so an inactivity
+  timeout does not sign out an operator who is working.
 - **No owner yet, or owners locked out.** An instance whose accounts predate owners never offers setup. Whoever runs
   the server grants the Owner role to an existing account:
 
@@ -34,6 +42,7 @@ sk_…`), nothing else.
   ```
 
   It adds the role (keeping the account's other roles), emits `user.updated` and audits `instance.owner_granted`.
+  An instance with no account at all creates one first with the secret key (`POST /v1/users`), then runs it.
   Until some account can open the console, `/login` says so and shows the command
   (`console_unclaimed` in the status answer). Shell access to the server is the proof of control; there is no
   HTTP equivalent.
@@ -81,7 +90,10 @@ Each address gets its own budget per route:
 The account sign-in itself goes through the Frontend API, whose sign-in, sign-up and verification steps have their
 own limits. Over budget, a route answers `429 rate_limit_exceeded` with `Retry-After`, and the dashboard says how
 long to wait ("Too many attempts. Try again in 30 seconds."). The origin check runs before the counter, so another
-site cannot spend a visitor's budget for them. **Settings → User & authentication → Rate limiting** turns every
+site cannot spend a visitor's budget for them. A status check that carries a live console cookie is not charged,
+and a sign-out with no cookies at all is a free no-op, so traffic from a shared address cannot sign working
+operators out. Behind a reverse proxy, set `ORBITID_TRUST_PROXY`; otherwise every client shares the proxy's
+address and one budget. **Settings → User & authentication → Rate limiting** turns every
 limit off, these included.
 
 ### Developing the dashboard

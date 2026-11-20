@@ -392,3 +392,61 @@ async fn the_rate_limiting_setting_turns_the_budgets_off() {
         assert_eq!(response.status, StatusCode::UNAUTHORIZED);
     }
 }
+
+#[tokio::test]
+async fn a_live_console_is_not_charged_for_status_checks() {
+    let harness = setup().await;
+    let console = harness.console().await;
+    // Someone else on the same address spends the whole status budget.
+    for _ in 0..120 {
+        harness
+            .client
+            .get("/v1/operator_sessions/status", &[])
+            .await;
+    }
+    assert_rate_limited(
+        &harness
+            .client
+            .get("/v1/operator_sessions/status", &[])
+            .await,
+    );
+    // The operator with a live console keeps working.
+    for path in [
+        "/v1/operator_sessions/status",
+        "/v1/operator_sessions/current",
+    ] {
+        let response = harness.cookie(path, &console.cookie).await;
+        assert_eq!(
+            response.status,
+            StatusCode::OK,
+            "{path}: {}",
+            response.text()
+        );
+    }
+}
+
+#[tokio::test]
+async fn signing_out_without_credentials_spends_no_budget() {
+    let harness = setup().await;
+    for _ in 0..40 {
+        let out = harness
+            .client
+            .delete("/v1/operator_sessions/current", None, &[])
+            .await;
+        assert_eq!(out.status, StatusCode::NO_CONTENT);
+    }
+    let console = harness.console().await;
+    let out = harness
+        .client
+        .delete(
+            "/v1/operator_sessions/current",
+            None,
+            &[("cookie", &console.cookie)],
+        )
+        .await;
+    assert_eq!(out.status, StatusCode::NO_CONTENT, "{}", out.text());
+    assert_eq!(
+        harness.cookie("/v1/instance", &console.cookie).await.status,
+        StatusCode::UNAUTHORIZED
+    );
+}

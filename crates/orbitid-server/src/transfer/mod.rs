@@ -46,7 +46,7 @@ pub const SKIPPED_TABLES: [&str; 4] = [
 /// "occupied" and are cleared before a normal import.
 pub const BOOTSTRAP_TABLES: [&str; 4] = ["instance", "roles", "permissions", "role_permissions"];
 /// Tables this port adds that a TypeScript export cannot contain.
-pub const RUST_ONLY_TABLES: [&str; 1] = ["uploads"];
+pub const RUST_ONLY_TABLES: [&str; 2] = ["uploads", "console_owner_setup"];
 
 pub type TransferResult<T> = Result<T, String>;
 

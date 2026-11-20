@@ -132,16 +132,7 @@ pub async fn find_operator_session(
     state: &AppState,
     headers: &HeaderMap,
 ) -> Result<Option<OperatorSessionRow>> {
-    let Some(token) = operator_token(headers) else {
-        return Ok(None);
-    };
-    let row = sqlx::query_as::<_, OperatorSessionRow>(
-        "SELECT * FROM operator_sessions WHERE token_hash = $1",
-    )
-    .bind(orbitid_core::crypto::sha256(&token))
-    .fetch_optional(&state.pool)
-    .await?;
-    let Some(row) = row else {
+    let Some(row) = operator_session_for_token(state, headers).await? else {
         return Ok(None);
     };
     if row.revoked_at.is_some() || row.expires_at <= now() {
@@ -150,10 +141,88 @@ pub async fn find_operator_session(
     if row.key_fingerprint != key_fingerprint(&state.env.secret_key) {
         return Ok(None);
     }
-    if !console_user_still_allowed(state, &row.user_id, &row.session_id).await? {
+    let Some(session) = console_user_session(state, &row.user_id, &row.session_id).await? else {
+        // Revoked for good: restoring the role (or lifting a ban) later must not
+        // bring a cookie back that an operator meant to cut off.
+        revoke_operator_row(state, &row.id).await?;
         return Ok(None);
-    }
+    };
+    touch_console_account_session(state, &session).await?;
     Ok(Some(row))
+}
+
+/// The console session row behind the request's cookie, whatever its state
+/// (expired, revoked, access lost). Sign-out uses it to end the account session
+/// even after the console session itself stopped authenticating.
+pub async fn operator_session_for_token(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<Option<OperatorSessionRow>> {
+    let Some(token) = operator_token(headers) else {
+        return Ok(None);
+    };
+    Ok(sqlx::query_as::<_, OperatorSessionRow>(
+        "SELECT * FROM operator_sessions WHERE token_hash = $1",
+    )
+    .bind(orbitid_core::crypto::sha256(&token))
+    .fetch_optional(&state.pool)
+    .await?)
+}
+
+async fn revoke_operator_row(state: &AppState, id: &str) -> Result<()> {
+    let now_ms = now();
+    sqlx::query(
+        "UPDATE operator_sessions SET revoked_at = $1, updated_at = $1 \
+         WHERE id = $2 AND revoked_at IS NULL",
+    )
+    .bind(now_ms)
+    .bind(id)
+    .execute(&state.pool)
+    .await?;
+    Ok(())
+}
+
+/// Revokes every live console session of `user_id` once the account no longer
+/// holds console access, so restoring a role later does not revive old cookies.
+/// Called after an operator changes the account's roles.
+pub async fn revoke_console_sessions_without_access(state: &AppState, user_id: &str) -> Result<()> {
+    if has_console_access(state, user_id).await? {
+        return Ok(());
+    }
+    let now_ms = now();
+    sqlx::query(
+        "UPDATE operator_sessions SET revoked_at = $1, updated_at = $1 \
+         WHERE user_id = $2 AND revoked_at IS NULL",
+    )
+    .bind(now_ms)
+    .bind(user_id)
+    .execute(&state.pool)
+    .await?;
+    Ok(())
+}
+
+/// How often console traffic refreshes the account session's activity.
+const CONSOLE_TOUCH_INTERVAL_MS: i64 = 60_000;
+
+/// Console requests count as activity on the account session behind them, so
+/// an inactivity timeout does not sign out an operator who is working. One
+/// throttled, single-statement autocommit `UPDATE` of one session row: it holds
+/// no other lock and cannot join a lock cycle.
+async fn touch_console_account_session(state: &AppState, session: &SessionRow) -> Result<()> {
+    let now_ms = now();
+    if now_ms - session.last_active_at < CONSOLE_TOUCH_INTERVAL_MS {
+        return Ok(());
+    }
+    sqlx::query(
+        "UPDATE sessions SET last_active_at = $1, updated_at = $1 \
+         WHERE id = $2 AND status = 'active' AND last_active_at < $3",
+    )
+    .bind(now_ms)
+    .bind(&session.id)
+    .bind(now_ms - CONSOLE_TOUCH_INTERVAL_MS)
+    .execute(&state.pool)
+    .await?;
+    Ok(())
 }
 
 /// True when `user_id` holds an instance role that grants [`DASHBOARD_ACCESS`].
@@ -176,11 +245,12 @@ const CONSOLE_GRANT: &str = "SELECT 1 FROM user_roles ur \
 /// A console session stays valid only while the user's own session
 /// is active, the user is not banned and still holds console access. One query
 /// per Backend API request, so revoking any of the three takes effect at once.
-async fn console_user_still_allowed(
+/// Returns that account session when all three hold.
+async fn console_user_session(
     state: &AppState,
     user_id: &str,
     session_id: &str,
-) -> Result<bool> {
+) -> Result<Option<SessionRow>> {
     let session = sqlx::query_as::<_, SessionRow>(&format!(
         "SELECT s.* FROM sessions s JOIN users u ON u.id = s.user_id \
          WHERE s.id = $3 AND s.user_id = $1 AND s.status = 'active' AND NOT u.banned \
@@ -191,7 +261,7 @@ async fn console_user_still_allowed(
     .bind(session_id)
     .fetch_optional(&state.pool)
     .await?;
-    Ok(session.is_some_and(|row| !is_session_expired(state, &row)))
+    Ok(session.filter(|row| !is_session_expired(state, row)))
 }
 
 /// Revokes the session behind this request, if any. Idempotent.

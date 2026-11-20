@@ -444,9 +444,9 @@ const TS_DECLARATION_ORDER: [&str; 42] = [
     "audit_logs",
 ];
 
-/// Tables this port added after the TypeScript schema (migrations 0002 and
-/// 0004); a TypeScript export cannot contain them.
-const RUST_ONLY_EXPORTED_TABLES: [&str; 1] = ["uploads"];
+/// Tables this port added after the TypeScript schema (migrations 0002, 0004
+/// and 0016); a TypeScript export cannot contain them.
+const RUST_ONLY_EXPORTED_TABLES: [&str; 2] = ["uploads", "console_owner_setup"];
 
 /// Columns this port added after the TypeScript schema (migrations 0005-0009);
 /// a TypeScript export cannot contain them, and the import must apply today's

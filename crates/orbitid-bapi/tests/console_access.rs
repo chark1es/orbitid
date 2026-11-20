@@ -424,3 +424,170 @@ async fn status_refuses_cross_origin_reads() {
         .await;
     assert_eq!(response.status, StatusCode::FORBIDDEN);
 }
+
+/// Claiming is permanent: deleting every account later does not reopen setup.
+#[tokio::test]
+async fn setup_stays_closed_after_every_account_is_deleted() {
+    let harness = setup().await;
+    let created = setup_owner(&harness, "owner@example.com").await;
+    assert_eq!(created.status, StatusCode::CREATED);
+    let user_id = created.value()["user"]["id"].as_str().unwrap().to_string();
+    let deleted = harness.delete(&format!("/v1/users/{user_id}")).await;
+    assert_eq!(deleted.status, StatusCode::OK, "{}", deleted.text());
+
+    assert_eq!(status(&harness, "").await["setup_required"], false);
+    let again = setup_owner(&harness, "intruder@example.com").await;
+    assert_eq!(again.status, StatusCode::FORBIDDEN);
+    assert!(cookie_pair(&again, "__orbit_operator").is_none());
+}
+
+/// Only this browser's own `__client` cookie can open the console: a session
+/// JWT an application received, a client token as a bearer, or a session-id
+/// hint cannot be exchanged for Backend API access.
+#[tokio::test]
+async fn tokens_from_outside_this_browser_cannot_open_the_console() {
+    let harness = setup().await;
+    let user = harness
+        .create_user(json!({ "email_address": ["admin@example.com"], "password": PASSWORD }))
+        .await;
+    let user_id = user["id"].as_str().unwrap().to_string();
+    harness
+        .put(
+            &format!("/v1/users/{user_id}/roles"),
+            json!({ "roles": ["app:sys_admin"] }),
+        )
+        .await;
+    let fixture = harness.create_session(&user_id).await;
+    let jwt = orbitid_identity::tokens::sign_session_token(
+        harness.state(),
+        &fixture.session_id,
+        orbitid_identity::tokens::SignSessionTokenOptions {
+            template: None,
+            azp: None,
+        },
+    )
+    .await
+    .expect("jwt");
+
+    for headers in [
+        vec![("authorization".to_string(), format!("Bearer {jwt}"))],
+        vec![(
+            "authorization".to_string(),
+            format!("Bearer {}", fixture.token),
+        )],
+        vec![(
+            "x-orbitid-session-id".to_string(),
+            fixture.session_id.clone(),
+        )],
+    ] {
+        let pairs: Vec<(&str, &str)> = headers
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect();
+        let refused = harness
+            .client
+            .post("/v1/operator_sessions/from_user", None, &pairs)
+            .await;
+        assert_eq!(refused.status, StatusCode::UNAUTHORIZED, "{headers:?}");
+        assert!(cookie_pair(&refused, "__orbit_operator").is_none());
+    }
+    // The browser's own cookie still works.
+    let opened = harness
+        .client
+        .post(
+            "/v1/operator_sessions/from_user",
+            None,
+            &[("cookie", &format!("__client={}", fixture.token))],
+        )
+        .await;
+    assert_eq!(opened.status, StatusCode::CREATED, "{}", opened.text());
+}
+
+/// Cutting an account off ends its console sessions for good: giving the role
+/// back later does not revive the old cookie.
+#[tokio::test]
+async fn restoring_access_does_not_revive_a_cut_off_console() {
+    let harness = setup().await;
+    let created = setup_owner(&harness, "owner@example.com").await;
+    let operator = cookie_pair(&created, "__orbit_operator").unwrap();
+    let user_id = created.value()["user"]["id"].as_str().unwrap().to_string();
+
+    harness
+        .put(
+            &format!("/v1/users/{user_id}/roles"),
+            json!({ "roles": [] }),
+        )
+        .await;
+    harness
+        .put(
+            &format!("/v1/users/{user_id}/roles"),
+            json!({ "roles": ["app:sys_owner"] }),
+        )
+        .await;
+    assert_eq!(
+        harness.cookie("/v1/users", &operator).await.status,
+        StatusCode::UNAUTHORIZED
+    );
+}
+
+/// Working in the console counts as activity on the account session, so an
+/// inactivity timeout does not sign an active operator out.
+#[tokio::test]
+async fn console_requests_keep_the_account_session_active() {
+    let harness = setup().await;
+    let created = setup_owner(&harness, "owner@example.com").await;
+    let operator = cookie_pair(&created, "__orbit_operator").unwrap();
+    harness
+        .state()
+        .settings
+        .update(json!({ "session": { "inactivityTimeoutSeconds": 600 } }))
+        .await
+        .expect("settings");
+    let session_id: String = sqlx::query_scalar("SELECT session_id FROM operator_sessions")
+        .fetch_one(&harness.state().pool)
+        .await
+        .unwrap();
+    // Five minutes idle: still inside the timeout, but due for a refresh.
+    let stale = orbitid_core::http::now() - 5 * 60_000;
+    sqlx::query("UPDATE sessions SET last_active_at = $1 WHERE id = $2")
+        .bind(stale)
+        .bind(&session_id)
+        .execute(&harness.state().pool)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        harness.cookie("/v1/users", &operator).await.status,
+        StatusCode::OK
+    );
+    let touched: i64 = sqlx::query_scalar("SELECT last_active_at FROM sessions WHERE id = $1")
+        .bind(&session_id)
+        .fetch_one(&harness.state().pool)
+        .await
+        .unwrap();
+    assert!(touched > stale + 60_000, "{touched} vs {stale}");
+}
+
+/// Signing out of a console whose session already expired still signs the
+/// account out, instead of reporting success and leaving it signed in.
+#[tokio::test]
+async fn signing_out_after_the_console_expired_signs_the_account_out() {
+    let harness = setup().await;
+    let created = setup_owner(&harness, "owner@example.com").await;
+    let cookies = cookies_of(&created);
+    sqlx::query("UPDATE operator_sessions SET expires_at = $1")
+        .bind(orbitid_core::http::now() - 1)
+        .execute(&harness.state().pool)
+        .await
+        .unwrap();
+    let out = harness
+        .client
+        .delete(
+            "/v1/operator_sessions/current",
+            None,
+            &[("cookie", &cookies)],
+        )
+        .await;
+    assert_eq!(out.status, StatusCode::NO_CONTENT, "{}", out.text());
+    assert!(status(&harness, &cookies).await["user"].is_null());
+}

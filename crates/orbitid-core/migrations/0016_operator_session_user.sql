@@ -18,3 +18,20 @@ ALTER TABLE "operator_sessions" ADD COLUMN IF NOT EXISTS "session_id" text;
 DELETE FROM "operator_sessions" WHERE "user_id" IS NULL OR "session_id" IS NULL;
 ALTER TABLE "operator_sessions" ALTER COLUMN "user_id" SET NOT NULL;
 ALTER TABLE "operator_sessions" ALTER COLUMN "session_id" SET NOT NULL;
+
+-- First-run owner setup is offered once per instance. The row records that the
+-- instance has been claimed and is never removed, so deleting every account
+-- later does not reopen setup. An instance that existed before this migration
+-- (its settings row exists, or it has accounts) is claimed already: it never
+-- offers setup, and its operator grants the Owner role with `orbitid owner`.
+-- A fresh database has no settings row yet at this point (the server writes it
+-- after migrating), so it stays unclaimed until its owner is created.
+CREATE TABLE IF NOT EXISTS "console_owner_setup" (
+  "id" text PRIMARY KEY DEFAULT 'default' CHECK ("id" = 'default'),
+  "claimed_at" bigint NOT NULL
+);
+INSERT INTO "console_owner_setup" ("id", "claimed_at")
+SELECT 'default', (extract(epoch FROM clock_timestamp()) * 1000)::bigint
+WHERE EXISTS (SELECT 1 FROM "instance")
+   OR EXISTS (SELECT 1 FROM "users" WHERE NOT "is_anonymous")
+ON CONFLICT ("id") DO NOTHING;

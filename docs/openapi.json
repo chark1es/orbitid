@@ -113,7 +113,7 @@
         ],
         "summary": "Check the dashboard session",
         "operationId": "getCurrentOperatorSession",
-        "description": "Reports whether this browser still has a live console session. Used on dashboard load so an expired or revoked cookie sends the operator to the sign-in screen. Answers `401` and clears the cookie when there is none. Rate limited to 120 requests a minute per address, shared with the status check. (the instance's rate limiting setting turns it off); over budget it answers `429` with `Retry-After`.",
+        "description": "Reports whether this browser still has a live console session. Used on dashboard load so an expired or revoked cookie sends the operator to the sign-in screen. Answers `401` and clears the cookie when there is none. Requests with a live console cookie are not charged; others share the status check's budget of 120 requests a minute per address (the instance's rate limiting setting turns it off); over budget it answers `429` with `Retry-After`.",
         "security": [],
         "responses": {
           "200": {
@@ -146,7 +146,7 @@
         ],
         "summary": "Sign out of the dashboard",
         "operationId": "revokeOperatorSession",
-        "description": "Revokes this browser's operator session and clears the cookie. A console opened from an account also ends that account's session on this browser. Safe to call without a session. Rate limited to 30 requests a minute per address. (the instance's rate limiting setting turns it off); over budget it answers `429` with `Retry-After`.",
+        "description": "Revokes this browser's operator session and clears the cookie. A console opened from an account also ends that account's session on this browser. Safe to call without a session. A request with no cookies is a free no-op; others are rate limited to 30 requests a minute per address (the instance's rate limiting setting turns it off); over budget it answers `429` with `Retry-After`.",
         "security": [],
         "responses": {
           "204": {
@@ -182,7 +182,7 @@
         ],
         "summary": "Read the dashboard sign-in state",
         "operationId": "getOperatorStatus",
-        "description": "The dashboard's single boot request: the live console session, the account signed in on this browser and whether it may open the console, and whether the instance still needs its owner. Never answers `401`; signed out is a normal answer. Refused from any origin other than this instance's own. Rate limited to 120 requests a minute per address. (the instance's rate limiting setting turns it off); over budget it answers `429` with `Retry-After`.",
+        "description": "The dashboard's single boot request: the live console session, the account signed in on this browser and whether it may open the console, and whether the instance still needs its owner. Never answers `401`; signed out is a normal answer. Refused from any origin other than this instance's own. Requests with a live console cookie are not charged; others are rate limited to 120 requests a minute per address (the instance's rate limiting setting turns it off); over budget it answers `429` with `Retry-After`.",
         "security": [],
         "responses": {
           "200": {
@@ -214,7 +214,7 @@
         ],
         "summary": "Create the owner account",
         "operationId": "createInstanceOwner",
-        "description": "Only while the instance has no account. Creates the account with the `app:sys_owner` role, signs it in on this browser (the `__client` cookie) and opens the console (the `__orbit_operator` cookie), atomically: of two concurrent requests exactly one succeeds. Answers `403` once any account exists; an instance with users signs in with the secret key and assigns the Owner or Administrator role instead. The password must satisfy the instance's password policy. Rate limited to 10 attempts per 10 minutes per address. (the instance's rate limiting setting turns it off); over budget it answers `429` with `Retry-After`.",
+        "description": "Only while the instance has no account. Creates the account with the `app:sys_owner` role, signs it in on this browser (the `__client` cookie) and opens the console (the `__orbit_operator` cookie), atomically: of two concurrent requests exactly one succeeds. Answers `403` once any account exists or the instance has ever been claimed (an owner was created, or the instance predates owners); such an instance grants the Owner role with `orbitid owner <email>` instead. The password must satisfy the instance's password policy. Rate limited to 10 attempts per 10 minutes per address (the instance's rate limiting setting turns it off); over budget it answers `429` with `Retry-After`.",
         "security": [],
         "requestBody": {
           "required": true,
@@ -288,7 +288,7 @@
         ],
         "summary": "Open the console from a signed-in account",
         "operationId": "createOperatorSessionFromUser",
-        "description": "Opens the console for the account signed in on this browser, when one of its instance roles grants `app:sys_dashboard:access` (the seeded Owner and Administrator roles do). The console session is tied to that account session and is re-checked on every request: removing the role, banning the account or ending its session ends the console at once. Rate limited to 20 requests a minute per address. (the instance's rate limiting setting turns it off); over budget it answers `429` with `Retry-After`.",
+        "description": "Opens the console for the account signed in on this browser (its `__client` cookie only; a session token sent as a bearer is ignored), when one of its instance roles grants `app:sys_dashboard:access` (the seeded Owner and Administrator roles do). The console session is tied to that account session and is re-checked on every request: removing the role, banning the account or ending its session ends the console for good. Rate limited to 20 requests a minute per address (the instance's rate limiting setting turns it off); over budget it answers `429` with `Retry-After`.",
         "security": [],
         "responses": {
           "201": {

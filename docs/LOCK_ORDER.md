@@ -1,7 +1,7 @@
 # Global lock order, transaction audit and retry
 
 The reference for `orbitid_identity::locks`, which enforces the order: this
-explains it, audits every transaction and describes request-level retry.
+explains it, audits every transaction and covers request-level retry.
 
 ## Rank order (rank 1 is acquired first)
 
@@ -211,7 +211,7 @@ in this pass.
 | `users::lock_unverified_claim_owners_on` + `users::purge_unverified_claims_on` (add-email verification, `users::create_user_on`, `users::purge_unverified_claims`) | plain read of the other claimants → every involved user `FOR UPDATE` ascending (rank 3), **before** the verification row (rank 6) → revalidate rows under the locks → delete/clear primary of locked owners only | OK (fixed: was unordered, unlocked cross-user writes after the rank-6 row) |
 | `users::upgrade_anonymous_user_on` | one users statement | OK |
 | `anonymous::delete_candidate_once` | worker advisory→clients→user→(delete_user_on: orgs→memberships→sessions→grants→uploads), one transaction per candidate | OK (fixed) |
-| `console::{create,grant}_owner` | user→user_roles | OK |
+| `console::{create,grant}_owner` | user→user_roles→claim | OK |
 | `sessions::create_session_on` | client→user→sessions→clients (held)→events | OK |
 | `sessions::complete_mfa_enrollment_on` | client→user→sessions→grant families | OK |
 | `sessions::end_sessions_for_user_on` | user→sessions (ordered)→grant families | OK |

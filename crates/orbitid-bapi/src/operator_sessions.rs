@@ -23,11 +23,12 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use orbitid_core::error::{error_codes, OrbitError, Result};
-use orbitid_core::keys::cookies::OPERATOR;
+use orbitid_core::http::cookies::get_cookie;
+use orbitid_core::keys::cookies::{CLIENT, OPERATOR};
 use orbitid_core::AppState;
 use orbitid_identity::operator_session::{
     clear_operator_cookie, find_operator_session, operator_cookie_origin_allowed,
-    revoke_operator_session,
+    operator_session_for_token, revoke_operator_session,
 };
 use orbitid_platform::audit::{audit, AuditInput};
 
@@ -82,8 +83,12 @@ async fn current(
             "Cross-origin requests cannot use the dashboard session.",
         ));
     }
-    limit(&state, &headers, peer, STATUS_BUDGET).await?;
     let row = find_operator_session(&state, &headers).await?;
+    // A live console session is not charged: traffic from a shared address
+    // must not sign working operators out.
+    if row.is_none() {
+        limit(&state, &headers, peer, STATUS_BUDGET).await?;
+    }
     match row {
         Some(row) => Ok(Json(crate::console::operator_session_json(&row)).into_response()),
         None => {
@@ -122,8 +127,16 @@ async fn sign_out(
             "Cross-site request blocked.",
         ));
     }
+    // Nothing to sign out of: answer without spending anyone's budget.
+    if !has_cookie(&headers, OPERATOR) && !has_cookie(&headers, CLIENT) {
+        let mut response = StatusCode::NO_CONTENT.into_response();
+        clear_operator_cookie(response.headers_mut());
+        return Ok(response);
+    }
     let ip = limit(&state, &headers, peer, SIGN_OUT_BUDGET).await?;
-    let row = find_operator_session(&state, &headers).await?;
+    // The row behind the cookie even when it no longer authenticates (expired,
+    // access lost): the account session it was opened from still ends.
+    let row = operator_session_for_token(&state, &headers).await?;
     // Signing out of the console signs the account out of this browser too:
     // the dashboard shows the account state, so "Sign out" must end both.
     // The account session ends first, so a failure leaves both in place and a
@@ -134,7 +147,7 @@ async fn sign_out(
         .iter()
         .any(|(key, value)| key == "account" && value == "true");
     if account_session.is_none() && account {
-        account_session = orbitid_identity::caller::try_resolve_caller(&state, &headers, None)
+        account_session = orbitid_identity::caller::try_resolve_browser_caller(&state, &headers)
             .await?
             .map(|caller| caller.session_id);
     }
@@ -158,6 +171,10 @@ async fn sign_out(
         .await;
     }
     Ok(response)
+}
+
+fn has_cookie(headers: &HeaderMap, name: &str) -> bool {
+    get_cookie(headers, name).is_some_and(|value| !value.is_empty())
 }
 
 pub(crate) fn header_str(headers: &HeaderMap, name: &str) -> Option<String> {

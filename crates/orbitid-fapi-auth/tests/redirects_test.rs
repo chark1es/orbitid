@@ -52,6 +52,26 @@ async fn paths_and_allowed_origins_are_accepted() {
     }
 }
 
+/// The dashboard is served by the instance itself, so an operator signing in
+/// to the console (SSO, social) comes back to the instance's own origin even
+/// when it is not one of the application origins.
+#[tokio::test]
+async fn the_instances_own_origin_is_accepted() {
+    let h = configured().await;
+    for value in ["http://localhost:4000/login", "http://localhost:4000"] {
+        assert_eq!(
+            sign_in_with_redirect(&h, value).await,
+            StatusCode::OK,
+            "{value}"
+        );
+    }
+    // Another port on the same host is a different origin.
+    assert_eq!(
+        sign_in_with_redirect(&h, "http://localhost:4001/login").await,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+}
+
 #[tokio::test]
 async fn every_open_redirect_shape_is_refused() {
     let h = configured().await;

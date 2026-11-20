@@ -13,7 +13,7 @@ use orbitid_core::http::OrbitJson;
 use orbitid_core::models::{OperatorSessionRow, UserRow};
 use orbitid_core::AppState;
 use orbitid_credentials::passwords::{assert_password_policy, hash_password};
-use orbitid_identity::caller::try_resolve_caller;
+use orbitid_identity::caller::try_resolve_browser_caller;
 use orbitid_identity::client_auth::{client_cookie, create_client, find_client};
 use orbitid_identity::console::{console_unclaimed, create_owner, setup_required, OwnerInput};
 use orbitid_identity::operator_session::{
@@ -107,9 +107,12 @@ async fn account_json(state: &AppState, user: &UserRow) -> Result<Value> {
 }
 
 /// Everything the dashboard needs to decide its first screen, in one request.
-async fn status_json(state: &AppState, headers: &HeaderMap) -> Result<Value> {
-    let operator = find_operator_session(state, headers).await?;
-    let caller = try_resolve_caller(state, headers, None).await?;
+async fn status_json(
+    state: &AppState,
+    headers: &HeaderMap,
+    operator: Option<OperatorSessionRow>,
+) -> Result<Value> {
+    let caller = try_resolve_browser_caller(state, headers).await?;
     let user = match caller.as_ref() {
         Some(caller) if !caller.user.banned => Some(account_json(state, &caller.user).await?),
         _ => None,
@@ -138,8 +141,13 @@ pub async fn status(
             "Cross-origin requests cannot read the dashboard session.",
         ));
     }
-    limit(&state, &headers, peer, STATUS_BUDGET).await?;
-    let body = status_json(&state, &headers).await?;
+    let operator = find_operator_session(&state, &headers).await?;
+    // A live console session is not charged: traffic from a shared address
+    // must not sign working operators out.
+    if operator.is_none() {
+        limit(&state, &headers, peer, STATUS_BUDGET).await?;
+    }
+    let body = status_json(&state, &headers, operator).await?;
     let mut response = Json(body).into_response();
     response.headers_mut().insert(
         axum::http::header::CACHE_CONTROL,
@@ -282,7 +290,7 @@ pub async fn from_user(
 ) -> Result<Response> {
     assert_exchange_origin(&state, &headers)?;
     let ip = limit(&state, &headers, peer, OPEN_BUDGET).await?;
-    let Some(caller) = try_resolve_caller(&state, &headers, None).await? else {
+    let Some(caller) = try_resolve_browser_caller(&state, &headers).await? else {
         return Err(OrbitError::unauthorized(
             error_codes::AUTHENTICATION_INVALID,
             "Sign in with your account first.",

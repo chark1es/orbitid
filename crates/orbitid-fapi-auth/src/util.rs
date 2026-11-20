@@ -90,6 +90,12 @@ pub fn validate_redirect_url(
     if safe_origin(&app.home_url).as_deref() == Some(origin.as_str()) {
         return Ok(Some(url.to_string()));
     }
+    // The instance's own pages (the dashboard's sign-in) are first-party: an
+    // operator signing in to the console with SSO or a social provider must be
+    // able to come back to it, whatever the application origins are.
+    if safe_origin(&state.env.base_url).as_deref() == Some(origin.as_str()) {
+        return Ok(Some(url.to_string()));
+    }
     Err(OrbitError::unprocessable(
         error_codes::FORM_PARAM_FORMAT_INVALID,
         format!("{param} origin is not allowed"),
