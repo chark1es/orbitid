@@ -160,8 +160,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const session = await api<OperatorSession>("POST", "/operator_sessions/from_user");
     queryClient.clear();
     withSession(session);
+    // The browser may have switched accounts since this page loaded: settle on the account the server opened the
+    // console for, so the menu never names a different one.
+    await refresh().catch(() => undefined);
     return session;
-  }, [queryClient, withSession]);
+  }, [queryClient, withSession, refresh]);
 
   const setupOwner = useCallback(
     async (input: OwnerSetupInput) => {

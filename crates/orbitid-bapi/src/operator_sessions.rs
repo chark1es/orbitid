@@ -135,30 +135,36 @@ async fn sign_out(
         return Ok(response);
     }
     // The row behind the cookie even when it no longer authenticates (expired,
-    // access lost): the account session it was opened from still ends. A row
-    // already revoked by an earlier sign-out has nothing left to end.
-    let row = operator_session_for_token(&state, &headers)
-        .await?
-        .filter(|row| row.revoked_at.is_none());
-    // Signing out of the console signs the account out of this browser too:
-    // the dashboard shows the account state, so "Sign out" must end both.
-    let mut account_session = row.as_ref().map(|row| row.session_id.clone());
+    // access lost, revoked elsewhere): the account session it was opened from
+    // still ends.
+    let row = operator_session_for_token(&state, &headers).await?;
+    // Signing out of the console signs this browser's accounts out too: the
+    // one that opened the console and, with `account=true`, the one the browser
+    // shows now (they differ after a multi-session switch).
     let account = query
         .0
         .iter()
         .any(|(key, value)| key == "account" && value == "true");
-    if account_session.is_none() && account {
-        account_session = orbitid_identity::caller::try_resolve_browser_caller(&state, &headers)
-            .await?
-            .map(|caller| caller.session_id);
+    let mut session_ids: Vec<String> = row.iter().map(|row| row.session_id.clone()).collect();
+    if account {
+        if let Some(caller) =
+            orbitid_identity::caller::try_resolve_browser_caller(&state, &headers).await?
+        {
+            if !session_ids.contains(&caller.session_id) {
+                session_ids.push(caller.session_id);
+            }
+        }
     }
-    let session = match account_session.as_deref() {
-        Some(id) => orbitid_identity::sessions::get_session(&state, id)
-            .await?
-            .filter(|session| session.status == "active" || session.status == "pending"),
-        None => None,
-    };
-    if row.is_none() && session.is_none() {
+    let mut sessions = Vec::new();
+    for id in &session_ids {
+        if let Some(session) = orbitid_identity::sessions::get_session(&state, id).await? {
+            if session.status == "active" || session.status == "pending" {
+                sessions.push(session);
+            }
+        }
+    }
+    let live_row = row.as_ref().is_some_and(|row| row.revoked_at.is_none());
+    if !live_row && sessions.is_empty() {
         // Only a sign-out that ends something is free. Junk cookies, or a
         // cookie replayed after it was already signed out, are charged, so they
         // cannot use up the budget a real sign-out needs.
@@ -168,9 +174,9 @@ async fn sign_out(
         return Ok(response);
     }
     let ip = crate::shared::request_ip(&state, &headers, peer);
-    // The account session ends first, so a failure leaves both in place and a
-    // retry can finish the job.
-    if let Some(session) = session.as_ref() {
+    // The account sessions end first, so a failure leaves the console in place
+    // and a retry can finish the job.
+    for session in &sessions {
         orbitid_identity::sessions::end_session(&state, session, "ended").await?;
     }
     let revoked = revoke_operator_session(&state, &headers).await?;

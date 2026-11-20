@@ -188,9 +188,13 @@ async fn import_into(
         .map_err(db)?;
     // A restored instance is never a fresh one: claim it, so dashboard owner
     // setup cannot open on it (even when the export has no accounts).
+    // Only try the claim lock: when owner setup or a first account holds it,
+    // they are claiming the instance already, and waiting here (holding every
+    // imported table) could deadlock with them.
     sqlx::query(
         "INSERT INTO console_owner_setup (id, claimed_at) \
-         VALUES ('default', (extract(epoch FROM clock_timestamp()) * 1000)::bigint) \
+         SELECT 'default', (extract(epoch FROM clock_timestamp()) * 1000)::bigint \
+         WHERE pg_try_advisory_xact_lock(hashtext('orbitid_owner_setup')::bigint) \
          ON CONFLICT (id) DO NOTHING",
     )
     .execute(&mut *tx)

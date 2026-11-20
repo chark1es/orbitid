@@ -32,6 +32,12 @@ use crate::users::{
 const SETUP_OPEN: &str = "SELECT NOT EXISTS (SELECT 1 FROM console_owner_setup) \
      AND NOT EXISTS (SELECT 1 FROM users WHERE NOT is_anonymous)";
 
+/// Guards the claim row. Owner setup and grants take it as their first
+/// statement, holding nothing else; the `users` trigger only *try*-takes it and
+/// leaves the claim to them meanwhile, so nobody waits on the claim row while
+/// holding other locks (migration 0016).
+const CLAIM_LOCK: &str = "SELECT pg_advisory_xact_lock(hashtext('orbitid_owner_setup')::bigint)";
+
 /// Records that the instance is claimed. Never removed. Returns the row only
 /// when this statement claimed it; a claim another transaction holds makes it
 /// wait for that transaction, then return nothing if it committed.
@@ -86,15 +92,13 @@ impl std::fmt::Debug for OwnerInput {
 /// Returns `None` when the instance already has an account (somebody finished
 /// setup first), in which case nothing was written.
 ///
-/// Concurrent setups serialize on a dedicated advisory lock taken first in its
-/// own transaction. No other transaction takes it, so it cannot join a lock
-/// cycle; after it the transaction follows the global order (user rows, then
-/// `user_roles`).
+/// Concurrent setups serialize on the claim advisory lock, taken first in its
+/// own transaction. Elsewhere it is only *try*-taken (the `users` trigger), so
+/// it cannot join a lock cycle; after it the transaction follows the claim row,
+/// then the global order (user rows, then `user_roles`).
 pub async fn create_owner(state: &AppState, input: &OwnerInput) -> Result<Option<UserRow>> {
     let mut tx = state.pool.begin().await?;
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtext('orbitid_owner_setup')::bigint)")
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(CLAIM_LOCK).execute(&mut *tx).await?;
     let available: bool = sqlx::query_scalar(SETUP_OPEN).fetch_one(&mut *tx).await?;
     // Winning the claim is what makes this the owner: a sign-up that created the
     // first account meanwhile claimed it first (its `users` trigger), and the
@@ -161,9 +165,20 @@ pub async fn grant_owner(state: &AppState, account: &str) -> Result<OwnerGrant> 
             format!("No account has the user id or verified email address {account}."),
         ));
     };
-    // The claim first, like owner setup (claim, then user, then `user_roles`):
-    // granting an owner claims the instance, so setup can never reopen.
+    if user.is_anonymous {
+        return Err(OrbitError::unprocessable(
+            error_codes::FORM_PARAM_VALUE_INVALID,
+            format!(
+                "{} is a guest account. Give the Owner role to an account with an email address.",
+                user.id
+            ),
+        ));
+    }
+    // Like owner setup: the claim lock first, holding nothing else, then the
+    // claim, the user row and `user_roles`. Granting an owner claims the
+    // instance, so setup can never reopen.
     let mut tx = state.pool.begin().await?;
+    sqlx::query(CLAIM_LOCK).execute(&mut *tx).await?;
     sqlx::query(CLAIM)
         .bind(now())
         .fetch_optional(&mut *tx)

@@ -39,10 +39,16 @@ ON CONFLICT ("id") DO NOTHING;
 
 -- Claim on the first real account, whichever path creates it (sign-up, the
 -- Backend API, a guest upgrading, an import). It writes at most once: after the
--- row exists the trigger only reads it.
+-- row exists the trigger only reads it. It never waits: the claim row is
+-- guarded by the `orbitid_owner_setup` advisory lock, which owner setup and
+-- `orbitid owner` take first (holding nothing else); the trigger only
+-- *try*-takes it and leaves the claim to them while they hold it. A trigger
+-- that waited here, mid-transaction, could deadlock with setup (for example on
+-- the same email address).
 CREATE OR REPLACE FUNCTION "orbitid_claim_owner_setup"() RETURNS trigger AS $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM "console_owner_setup") THEN
+  IF NOT EXISTS (SELECT 1 FROM "console_owner_setup")
+     AND pg_try_advisory_xact_lock(hashtext('orbitid_owner_setup')::bigint) THEN
     INSERT INTO "console_owner_setup" ("id", "claimed_at")
     VALUES ('default', (extract(epoch FROM clock_timestamp()) * 1000)::bigint)
     ON CONFLICT ("id") DO NOTHING;

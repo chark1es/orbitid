@@ -766,3 +766,114 @@ async fn status_names_the_console_account_after_a_session_switch() {
     assert_eq!(body["operator_session"]["user_id"], owner_id.as_str());
     assert_eq!(body["user"]["id"], owner_id.as_str());
 }
+
+/// A guest becoming a real account while owner setup holds the claim never
+/// waits on it, so the two cannot deadlock (for example on the same email).
+#[tokio::test]
+async fn a_guest_upgrade_does_not_wait_on_owner_setup() {
+    let harness = setup().await;
+    let guest = orbitid_identity::testing::create_test_guest(harness.state())
+        .await
+        .unwrap();
+    // Owner setup, caught between its claim and its commit.
+    let mut setup_tx = harness.state().pool.begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtext('orbitid_owner_setup')::bigint)")
+        .execute(&mut *setup_tx)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO console_owner_setup (id, claimed_at) VALUES ('default', 1)")
+        .execute(&mut *setup_tx)
+        .await
+        .unwrap();
+
+    let mut upgrade = harness.state().pool.begin().await.unwrap();
+    sqlx::query("SET LOCAL statement_timeout = '3s'")
+        .execute(&mut *upgrade)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE users SET is_anonymous = false WHERE id = $1")
+        .bind(&guest.id)
+        .execute(&mut *upgrade)
+        .await
+        .expect("the upgrade must not wait for owner setup");
+    upgrade.commit().await.unwrap();
+    setup_tx.commit().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_guest_cannot_be_made_owner() {
+    let harness = setup().await;
+    let guest = orbitid_identity::testing::create_test_guest(harness.state())
+        .await
+        .unwrap();
+    assert!(
+        orbitid_identity::console::grant_owner(harness.state(), &guest.id)
+            .await
+            .is_err()
+    );
+}
+
+/// After a multi-session switch, signing out ends both accounts: the one that
+/// opened the console (even once its console row was revoked for losing
+/// access) and the one the browser shows now.
+#[tokio::test]
+async fn signing_out_after_a_switch_ends_both_accounts() {
+    let harness = setup().await;
+    let created = setup_owner(&harness, "owner@example.com").await;
+    let cookies = cookies_of(&created);
+    let owner_id = created.value()["user"]["id"].as_str().unwrap().to_string();
+    let (owner_session, client_id): (String, String) = sqlx::query_as(
+        "SELECT s.id, s.client_id FROM sessions s JOIN operator_sessions o ON o.session_id = s.id",
+    )
+    .fetch_one(&harness.state().pool)
+    .await
+    .unwrap();
+    let other = harness
+        .create_user(json!({ "email_address": ["other@example.com"], "password": PASSWORD }))
+        .await;
+    let now = orbitid_core::http::now();
+    let switched = orbitid_core::ids::new_id(orbitid_core::ids::id_prefix::SESSION);
+    sqlx::query(
+        "INSERT INTO sessions (id, client_id, user_id, status, last_active_at, expire_at, \
+         abandon_at, created_at, updated_at) VALUES ($1,$2,$3,'active',$4,$5,$5,$4,$4)",
+    )
+    .bind(&switched)
+    .bind(&client_id)
+    .bind(other["id"].as_str().unwrap())
+    .bind(now)
+    .bind(now + 3_600_000)
+    .execute(&harness.state().pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE clients SET last_active_session_id = $1 WHERE id = $2")
+        .bind(&switched)
+        .bind(&client_id)
+        .execute(&harness.state().pool)
+        .await
+        .unwrap();
+    // The owner loses console access: its console row is revoked.
+    harness
+        .put(
+            &format!("/v1/users/{owner_id}/roles"),
+            json!({ "roles": [] }),
+        )
+        .await;
+
+    let out = harness
+        .client
+        .delete(
+            "/v1/operator_sessions/current?account=true",
+            None,
+            &[("cookie", &cookies)],
+        )
+        .await;
+    assert_eq!(out.status, StatusCode::NO_CONTENT, "{}", out.text());
+    for id in [&owner_session, &switched] {
+        let status: String = sqlx::query_scalar("SELECT status FROM sessions WHERE id = $1")
+            .bind(id)
+            .fetch_one(&harness.state().pool)
+            .await
+            .unwrap();
+        assert_ne!(status, "active", "{id}");
+    }
+}

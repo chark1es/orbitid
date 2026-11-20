@@ -233,6 +233,24 @@ describe("account sign-in", () => {
     expect(calls).toContain("POST /v1/operator_sessions/from_user");
   });
 
+  it("names the account the console was opened for, not the one the page loaded with", async () => {
+    let opened = false;
+    const OTHER = { ...OWNER, id: "user_other", first_name: "Grace", last_name: "Hopper", email_address: "grace@example.com" };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/from_user")) {
+        opened = true;
+        return json({ ...SESSION, user_id: OTHER.id }, 201);
+      }
+      // Another tab switched the browser to OTHER after this page loaded with OWNER.
+      return json(status({ operator_session: opened ? { ...SESSION, user_id: OTHER.id } : null, user: opened ? OTHER : OWNER }));
+    });
+    renderProvider();
+    await waitFor(() => expect(actions!.status?.user?.id).toBe(OWNER.id));
+    await actions!.openConsole();
+    await waitFor(() => expect(actions!.status?.user?.id).toBe(OTHER.id));
+  });
+
   it("signs an account without console access out on request", async () => {
     const calls: string[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
