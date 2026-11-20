@@ -105,6 +105,7 @@ async fn fresh_database_has_the_full_drizzle_schema() {
         "device_codes",
         "audit_logs",
         "rate_limit_windows",
+        "console_owner_setup",
     ] {
         assert!(
             names.iter().any(|name| name == table),
@@ -279,7 +280,7 @@ async fn existing_drizzle_database_is_baselined() {
             .unwrap();
     assert_eq!(
         versions,
-        vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
     );
     assert!(tables(&pool)
         .await
@@ -292,6 +293,38 @@ async fn existing_drizzle_database_is_baselined() {
         .unwrap();
     assert_eq!(users, 0);
     pool.close().await;
+}
+
+/// Owner setup is for fresh instances only: a database that already ran a
+/// server (it has its settings row) comes out of migration 0016 claimed, while
+/// a fresh database stays unclaimed until its owner is created.
+#[tokio::test]
+async fn an_existing_instance_is_claimed_and_a_fresh_one_is_not() {
+    let db = EphemeralDb::create_empty().await;
+    apply_drizzle(&db.url, 10).await;
+    let existing = pool(&db.url).await;
+    sqlx::query(
+        "INSERT INTO instance (id, settings, created_at, updated_at) VALUES ('default', '{}', 1, 1)",
+    )
+    .execute(&existing)
+    .await
+    .unwrap();
+    db::run_migrations(&existing).await.unwrap();
+    let claimed: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM console_owner_setup")
+        .fetch_one(&existing)
+        .await
+        .unwrap();
+    assert_eq!(claimed, 1);
+    existing.close().await;
+
+    let fresh = EphemeralDb::create().await;
+    let fresh_pool = pool(&fresh.url).await;
+    let claimed: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM console_owner_setup")
+        .fetch_one(&fresh_pool)
+        .await
+        .unwrap();
+    assert_eq!(claimed, 0);
+    fresh_pool.close().await;
 }
 
 #[tokio::test]
@@ -375,7 +408,7 @@ async fn concurrent_starts_on_a_fresh_database_all_succeed() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(versions, 15);
+    assert_eq!(versions, 16);
     pool.close().await;
 }
 

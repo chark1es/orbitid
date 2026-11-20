@@ -61,6 +61,19 @@ pub fn assert_custom_key(key: &str, kind: &str) -> Result<()> {
 pub fn assert_permission_scopes(role_key: &str, permissions: &[PermissionRow]) -> Result<()> {
     let role_kind = role_scope(role_key);
     for permission in permissions {
+        // Console access belongs to the seeded Owner and Administrator roles
+        // only. They are system roles nobody can edit or delete, so a role
+        // edit can never grant or quietly restore it.
+        if permission.key == super::DASHBOARD_ACCESS {
+            return Err(OrbitError::unprocessable(
+                error_codes::FORM_PARAM_VALUE_INVALID,
+                format!(
+                    "{} is reserved for the Owner and Administrator roles; assign one of those to open the console",
+                    permission.key
+                ),
+            )
+            .with_meta(serde_json::json!({ "param_name": "permissions" })));
+        }
         if role_scope(&permission.key) != role_kind {
             return Err(OrbitError::unprocessable(
                 error_codes::FORM_PARAM_VALUE_INVALID,
@@ -329,6 +342,9 @@ pub async fn add_role_permission_on(
     role: &RoleRow,
     permission: &PermissionRow,
 ) -> Result<()> {
+    if permission.key == super::DASHBOARD_ACCESS {
+        assert_permission_scopes(&role.key, std::slice::from_ref(permission))?;
+    }
     sqlx::query("UPDATE roles SET updated_at = updated_at WHERE id = $1")
         .bind(&role.id)
         .execute(&mut *conn)

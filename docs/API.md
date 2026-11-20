@@ -40,7 +40,7 @@ round trip.
 
 ### Backend API: the secret key
 
-Every route under `/v1` outside `/v1/client` needs the instance secret key, except the browser-facing and discovery routes, which carry no secret key: `/v1/jwks`, `/v1/verify` (the magic-link landing page), `/v1/oauth_callback/{provider}`, `/v1/saml/{id}/metadata`, `/v1/saml/{id}/sso`, `/v1/saml/{id}/acs`, `/v1/openapi.json` and the three `/v1/operator_sessions` operations. The `/oauth/*` and `/.well-known/*` protocol endpoints authenticate with OAuth client credentials or not at all, as their standards define. The reference at `/docs` marks each operation with its security requirement.
+Every route under `/v1` outside `/v1/client` needs the instance secret key, except the browser-facing and discovery routes, which carry no secret key: `/v1/jwks`, `/v1/verify` (the magic-link landing page), `/v1/oauth_callback/{provider}`, `/v1/saml/{id}/metadata`, `/v1/saml/{id}/sso`, `/v1/saml/{id}/acs`, `/v1/openapi.json` and the `/v1/operator_sessions/*` dashboard sign-in operations. The `/oauth/*` and `/.well-known/*` protocol endpoints authenticate with OAuth client credentials or not at all, as their standards define. The reference at `/docs` marks each operation with its security requirement.
 
 ```
 Authorization: Bearer sk_live_...
@@ -48,12 +48,14 @@ Authorization: Bearer sk_live_...
 
 Requests without it, or with the wrong key, get `401` with `errors[0].code = "secret_key_invalid"`.
 
-The one other accepted credential is the dashboard's operator cookie, `__orbit_operator`. It exists so that a
-browser never holds the secret key: `POST /v1/operator_sessions` takes the key once and returns an httpOnly cookie
-(`Path=/v1`, `SameSite=Strict`, `Secure` over https, 8 hours). The server stores only the token's sha256 hash, and
-the cookie is honoured only from this instance's own origin. `GET /v1/operator_sessions/current` reports the live
-session; `DELETE` revokes it. Rotating the secret key ends every operator session. Servers and SDKs should keep
-using the bearer key; the cookie is not a substitute for it outside a same-origin browser.
+The one other accepted credential is the dashboard's console cookie, `__orbit_operator`. The secret key does not
+issue it: an account whose instance roles grant `app:sys_dashboard:access` opens the console
+(`POST /v1/operator_sessions/from_user`, or `POST /v1/operator_sessions/setup` for the first owner of a fresh
+instance) and receives an httpOnly cookie (`Path=/v1`, `SameSite=Strict`, `Secure` over https, 8 hours). The server
+stores only the token's sha256 hash, honours the cookie only from this instance's own origin, and re-checks the
+account on every request. `GET /v1/operator_sessions/status` and `…/current` report the live session; `DELETE
+…/current` ends it. Rotating the secret key ends every console session. These routes are rate limited per address
+(see [DASHBOARD.md](DASHBOARD.md#rate-limits)). Servers and SDKs keep using the bearer key.
 
 **Never put the secret key in a browser.** It grants full read and write access to every user, session,
 organization, webhook and setting on the instance. It belongs in the environment of a server you control. A browser

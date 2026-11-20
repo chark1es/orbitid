@@ -64,7 +64,7 @@ export ORBITID_ENCRYPTION_KEY="$(openssl rand -base64 32)"   # required; keep th
 cargo run -p orbitid-server -- start   # http://localhost:4000; startup prints no secret key
 # In another terminal, explicitly print the keys for this same instance/environment:
 cargo run -q -p orbitid-server -- keys
-bun run dev:dashboard       # http://localhost:5173, proxies the API; sign in with the secret key
+bun run dev:dashboard       # http://localhost:5173, proxies the API; create the owner account on first visit
 ```
 
 Check it with the playground, a separate test site that reads the instance and builds its own pages (sign-in, account, organizations, API keys, a session inspector, an API lab, webhooks, and seed data):
@@ -222,7 +222,7 @@ changes — it is the source of truth the Rust server embeds and serves.
 - Passkeys are tested with a software authenticator against the real API, not with a hardware security key or a platform authenticator in a real browser.
 - Tokens delivered by the handshake appear in the API host's access log for one request. See [docs/HANDSHAKE.md](docs/HANDSHAKE.md).
 - Cross-site POST callbacks (SAML ACS, Apple `form_post`) need an https base URL: the browser-binding cookie is `SameSite=None; Secure` only over https. This is a browser rule, not something the server can relax.
-- The dashboard uses a revocable httpOnly operator session, but has no named operator accounts or per-operator roles yet. Every operator uses the instance secret key to start a session ([docs/SECURITY.md](docs/SECURITY.md)).
+- The dashboard is opened by accounts with the Owner or Administrator role (the secret key does not open it), but Backend API changes made from the console are still audited with a generic operator actor rather than the account ([docs/SECURITY.md](docs/SECURITY.md)).
 - Uploaded images from the TypeScript server lived on disk and are not migrated into Postgres automatically; re-upload them after the switch ([docs/DATA_MOVE.md](docs/DATA_MOVE.md)).
 
 ## License

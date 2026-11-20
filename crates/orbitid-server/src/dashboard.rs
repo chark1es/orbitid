@@ -89,8 +89,51 @@ fn safe_relative(path: &str) -> Option<PathBuf> {
     Some(out)
 }
 
+/// Whether the request's `Accept-Encoding` allows `coding` (`q=0` refuses it).
+fn accepts(accept_encoding: &str, coding: &str) -> bool {
+    // An entry naming the coding decides; `*` only covers codings not listed,
+    // so `br;q=0, *` still refuses brotli.
+    let mut wildcard = None;
+    for entry in accept_encoding.split(',') {
+        let mut parts = entry.split(';');
+        let name = parts.next().unwrap_or("").trim();
+        let quality = parts
+            .filter_map(|param| param.trim().strip_prefix("q="))
+            .find_map(|value| value.trim().parse::<f32>().ok())
+            .unwrap_or(1.0);
+        if name.eq_ignore_ascii_case(coding) {
+            return quality > 0.0;
+        }
+        if name == "*" {
+            wildcard = Some(quality > 0.0);
+        }
+    }
+    wildcard.unwrap_or(false)
+}
+
+/// The dashboard build ships `.br` and `.gz` siblings for its text assets. Serve
+/// the smallest one the browser accepts; the original otherwise.
+async fn precompressed(file: &Path, accept_encoding: &str) -> (PathBuf, Option<&'static str>) {
+    for (coding, extension) in [("br", "br"), ("gzip", "gz")] {
+        if !accepts(accept_encoding, coding) {
+            continue;
+        }
+        let mut name = file.as_os_str().to_owned();
+        name.push(".");
+        name.push(extension);
+        let candidate = PathBuf::from(name);
+        if tokio::fs::metadata(&candidate)
+            .await
+            .is_ok_and(|meta| meta.is_file())
+        {
+            return (candidate, Some(coding));
+        }
+    }
+    (file.to_path_buf(), None)
+}
+
 /// Serves one dashboard request. Only called for non-API GET paths when a build exists.
-pub async fn serve(state: &AppState, path: &str) -> Response {
+pub async fn serve(state: &AppState, path: &str, accept_encoding: &str) -> Response {
     let root = &state.env.dashboard_dir;
     if let Some(relative) = safe_relative(path) {
         if !relative.as_os_str().is_empty() {
@@ -104,7 +147,8 @@ pub async fn serve(state: &AppState, path: &str) -> Response {
                     && canonical != index
                     && canonical.is_file()
                 {
-                    if let Ok(bytes) = tokio::fs::read(&canonical).await {
+                    let (file, encoding) = precompressed(&canonical, accept_encoding).await;
+                    if let Ok(bytes) = tokio::fs::read(&file).await {
                         let immutable = path.starts_with("/assets/");
                         let cache = if immutable {
                             "public, max-age=31536000, immutable"
@@ -118,6 +162,13 @@ pub async fn serve(state: &AppState, path: &str) -> Response {
                             HeaderValue::from_static(mime_for(&canonical)),
                         );
                         headers.insert(header::CACHE_CONTROL, HeaderValue::from_static(cache));
+                        headers.insert(header::VARY, HeaderValue::from_static("accept-encoding"));
+                        if let Some(encoding) = encoding {
+                            headers.insert(
+                                header::CONTENT_ENCODING,
+                                HeaderValue::from_static(encoding),
+                            );
+                        }
                         return response;
                     }
                 }
@@ -180,6 +231,44 @@ mod tests {
         assert!(html.contains("<script nonce=\"abc\">a</script>"));
         assert!(html.contains("<script src=\"/x.js\"></script>"));
         assert!(html.contains("<script nonce=\"n\">b</script>"));
+    }
+
+    #[test]
+    fn accept_encoding_is_parsed() {
+        assert!(accepts("gzip, deflate, br, zstd", "br"));
+        assert!(accepts("gzip;q=0.8, br;q=1", "gzip"));
+        assert!(accepts("*", "br"));
+        assert!(!accepts("gzip", "br"));
+        assert!(!accepts("br;q=0, gzip", "br"));
+        assert!(!accepts("br;q=0.000", "br"));
+        assert!(accepts("br;q=0.5", "br"));
+        assert!(!accepts("", "gzip"));
+        // An explicit refusal wins over the wildcard, wherever it appears.
+        assert!(!accepts("br;q=0, *;q=1", "br"));
+        assert!(!accepts("*, br;q=0", "br"));
+        assert!(accepts("br;q=0, *", "gzip"));
+        assert!(!accepts("*;q=0", "gzip"));
+    }
+
+    #[tokio::test]
+    async fn precompressed_siblings_are_preferred() {
+        let dir =
+            std::env::temp_dir().join(format!("orbitid-precompressed-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("app.js");
+        std::fs::write(&file, "plain").unwrap();
+        std::fs::write(dir.join("app.js.gz"), "gz").unwrap();
+        assert_eq!(
+            precompressed(&file, "gzip, br").await,
+            (dir.join("app.js.gz"), Some("gzip"))
+        );
+        std::fs::write(dir.join("app.js.br"), "br").unwrap();
+        assert_eq!(
+            precompressed(&file, "gzip, br").await,
+            (dir.join("app.js.br"), Some("br"))
+        );
+        assert_eq!(precompressed(&file, "identity").await, (file.clone(), None));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

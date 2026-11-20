@@ -192,26 +192,27 @@ smoke_instance() {
   assert_eq "$(curl -sS -m 5 -o /dev/null -w '%{http_code}' "$base/v1/openapi.json")" "200" "$label: the OpenAPI document is served"
   assert_eq "$(curl -sS -m 5 -o "$WORKDIR/$label.docs.html" -w '%{http_code}' "$base/docs")" "200" "$label: the embedded docs viewer is served"
 
-  say "$label: operator session (secret key exchange)"
-  status="$(curl -sS -m 5 -o /dev/null -w '%{http_code}' -X POST "$base/v1/operator_sessions" \
-    -H 'content-type: application/json' -H "origin: $base" -d '{"secret_key":"sk_live_wrong_key_000000000000000000000"}')"
-  assert_eq "$status" "401" "$label: a wrong secret key is refused"
-
-  status="$(curl -sS -m 5 -D "$WORKDIR/$label.exchange" -o "$WORKDIR/$label.exchange.json" -c "$operator_jar" -w '%{http_code}' \
-    -X POST "$base/v1/operator_sessions" -H 'content-type: application/json' -H "origin: $base" \
-    -d "{\"secret_key\":\"$secret\"}")"
-  assert_eq "$status" "201" "$label: the secret key is exchanged for a session"
-  grep -qi 'set-cookie:.*httponly' "$WORKDIR/$label.exchange" && ok "$label: cookie is HttpOnly" || bad "$label: cookie is not HttpOnly"
-  grep -qi 'set-cookie:.*samesite=strict' "$WORKDIR/$label.exchange" && ok "$label: cookie is SameSite=Strict" || bad "$label: cookie is not SameSite=Strict"
-  grep -qi 'set-cookie:.*path=/v1' "$WORKDIR/$label.exchange" && ok "$label: cookie is scoped to /v1" || bad "$label: cookie path is not /v1"
-  if grep -qF "$secret" "$WORKDIR/$label.exchange.json"; then bad "$label: exchange echoed the secret key"; else ok "$label: exchange does not echo the secret key"; fi
+  say "$label: dashboard console (owner setup; the secret key does not open it)"
+  status="$(curl -sS -m 5 -D "$WORKDIR/$label.keyexchange" -o /dev/null -w '%{http_code}' -X POST "$base/v1/operator_sessions" \
+    -H 'content-type: application/json' -H "origin: $base" -d "{\"secret_key\":\"$secret\"}")"
+  if [[ "$status" == 2* ]]; then bad "$label: the secret key opened a dashboard session (HTTP $status)"; else ok "$label: the secret key does not open the dashboard"; fi
+  grep -qi 'set-cookie: *__orbit_operator=' "$WORKDIR/$label.keyexchange" && bad "$label: the secret key received a console cookie" || ok "$label: no console cookie for the secret key"
+  local owner_password; owner_password="smoke-owner-$(node -e "process.stdout.write(require('crypto').randomBytes(8).toString('hex'))")"
+  status="$(curl -sS -m 15 -D "$WORKDIR/$label.setup" -o "$WORKDIR/$label.setup.json" -c "$operator_jar" -w '%{http_code}' \
+    -X POST "$base/v1/operator_sessions/setup" -H 'content-type: application/json' -H "origin: $base" \
+    -d "{\"email_address\":\"owner@smoke.example\",\"password\":\"$owner_password\"}")"
+  assert_eq "$status" "201" "$label: the first visitor creates the owner and opens the console"
+  for attr in httponly samesite=strict path=/v1; do grep -qi "set-cookie: *__orbit_operator=.*$attr" "$WORKDIR/$label.setup" && ok "$label: console cookie has $attr" || bad "$label: console cookie lacks $attr"; done
+  if grep -qF "$owner_password" "$WORKDIR/$label.setup.json"; then bad "$label: setup echoed the password"; else ok "$label: setup does not echo the password"; fi
+  status="$(curl -sS -m 5 -o /dev/null -w '%{http_code}' -X POST "$base/v1/operator_sessions/setup" -H 'content-type: application/json' -H "origin: $base" -d '{"email_address":"second@smoke.example","password":"another-long-passphrase"}')"
+  assert_eq "$status" "403" "$label: owner setup closes once an account exists"
 
   status="$(curl -sS -m 5 -o "$WORKDIR/$label.users" -w '%{http_code}' -b "$operator_jar" -H "origin: $base" "$base/v1/users?limit=1")"
   assert_eq "$status" "200" "$label: the cookie authenticates a Backend API call"
   status="$(curl -sS -m 5 -o /dev/null -w '%{http_code}' -b "$operator_jar" -H "origin: http://not-this-instance.example" "$base/v1/users?limit=1")"
   assert_eq "$status" "403" "$label: the cookie is refused from another origin"
   status="$(curl -sS -m 5 -o /dev/null -w '%{http_code}' -X DELETE -b "$operator_jar" -c "$operator_jar" -H "origin: $base" "$base/v1/operator_sessions/current")"
-  assert_eq "$status" "204" "$label: the operator session can be revoked"
+  assert_eq "$status" "204" "$label: the console session can be revoked"
   status="$(curl -sS -m 5 -o /dev/null -w '%{http_code}' -b "$operator_jar" -H "origin: $base" "$base/v1/operator_sessions/current")"
   assert_eq "$status" "401" "$label: a revoked cookie no longer authenticates"
 

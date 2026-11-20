@@ -26,6 +26,10 @@ pub struct OperatorSessionRow {
     pub revoked_at: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
+    /// The signed-in account behind the console session.
+    pub user_id: String,
+    /// That account's own session on this browser; ending it ends the console session.
+    pub session_id: String,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]

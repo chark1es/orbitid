@@ -1,9 +1,7 @@
 # Global lock order, transaction audit and retry
 
-This is the authoritative reference for `orbitid_identity::locks`. The code in
-that module is the enforcement; this document explains the order, records the
-audit of every transaction in the workspace, and describes the request-level
-retry.
+The reference for `orbitid_identity::locks`, which enforces the order: this
+explains it, audits every transaction and covers request-level retry.
 
 ## Rank order (rank 1 is acquired first)
 
@@ -26,15 +24,16 @@ retry.
 
 Insert-only outbox rows (`webhook_events`, `audit_logs`, `email_addresses`,
 `phone_numbers`, `rate_limit_windows`, `oauth_states`, `device_codes`) carry no
-ordering constraint when they are written after the row that owns them. A row
+ordering constraint after their owner row. A row
 that is also *locked* (`email_addresses`, `phone_numbers`,
 `external_accounts`, `trusted_devices`, `passkeys`, `api_keys`) follows the
 owner row at rank 3 as shown above. `oauth_grants` rows are written after their
 family's advisory lock (rank 11). The worker advisory locks
 (`orbitid_retention`, `orbitid_anonymous_cleanup`, and the per-domain
 `orbitid_enrollment:<domain id>` *try*-lock of the enrollment worker, which
-never waits) are taken at the start of their own transaction; no other
-transaction takes them, so they cannot be part of a cycle. The startup lock
+never waits) and `orbitid_owner_setup` are taken at the start of their own
+transaction; elsewhere only *try*-taken (the `users` claim trigger), so no
+cycle is possible. The startup lock
 `orbitid_startup_migrations` is a *session* advisory lock held on one dedicated
 connection across invalid-index cleanup, drizzle baseline and migrations; it is
 acquired by polling `pg_try_advisory_lock` (a statement blocked in
@@ -212,6 +211,7 @@ in this pass.
 | `users::lock_unverified_claim_owners_on` + `users::purge_unverified_claims_on` (add-email verification, `users::create_user_on`, `users::purge_unverified_claims`) | plain read of the other claimants → every involved user `FOR UPDATE` ascending (rank 3), **before** the verification row (rank 6) → revalidate rows under the locks → delete/clear primary of locked owners only | OK (fixed: was unordered, unlocked cross-user writes after the rank-6 row) |
 | `users::upgrade_anonymous_user_on` | one users statement | OK |
 | `anonymous::delete_candidate_once` | worker advisory→clients→user→(delete_user_on: orgs→memberships→sessions→grants→uploads), one transaction per candidate | OK (fixed) |
+| `console::{create,grant}_owner` | advisory→claim→user→user_roles | OK |
 | `sessions::create_session_on` | client→user→sessions→clients (held)→events | OK |
 | `sessions::complete_mfa_enrollment_on` | client→user→sessions→grant families | OK |
 | `sessions::end_sessions_for_user_on` | user→sessions (ordered)→grant families | OK |

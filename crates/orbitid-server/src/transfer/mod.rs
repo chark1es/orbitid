@@ -35,9 +35,11 @@ pub const SCHEMA_VERSION: &str = "postgres:10:0009_next_silver_sable";
 /// Ephemeral or environment-local tables that never move. `operator_sessions`
 /// are dashboard logins (copying them would revive cookies on the target);
 /// `rate_limits` (TS) and `rate_limit_windows` (this port) describe live traffic,
-/// not data.
-pub const SKIPPED_TABLES: [&str; 4] = [
+/// not data. `console_owner_setup` is the target's own claim: every import
+/// claims the target instead (a restore is never a fresh instance).
+pub const SKIPPED_TABLES: [&str; 5] = [
     "operator_sessions",
+    "console_owner_setup",
     "rate_limits",
     "rate_limit_windows",
     "worker_cursors",

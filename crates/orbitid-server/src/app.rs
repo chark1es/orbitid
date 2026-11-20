@@ -205,7 +205,12 @@ async fn fallback(State(state): State<AppState>, request: Request) -> Response {
     if crate::dashboard::is_api_path(&path) {
         return route_not_found().into_response();
     }
-    crate::dashboard::serve(&state, &path).await
+    let accept_encoding = request
+        .headers()
+        .get(axum::http::header::ACCEPT_ENCODING)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    crate::dashboard::serve(&state, &path, accept_encoding).await
 }
 
 /// Hono has no 405 response: a path whose method does not match falls through

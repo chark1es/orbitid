@@ -73,6 +73,22 @@ async fn belongs(
     Ok(row.filter(|row| row.client_id == client.id))
 }
 
+/// The account signed in on *this browser*: only the instance's own `__client`
+/// cookie counts. A session JWT or client token sent as a bearer, and the
+/// session-id hint, are ignored. The dashboard uses this before handing out a
+/// console session, so a token an application received (or an attacker lifted
+/// from one) cannot be exchanged for Backend API access.
+pub async fn try_resolve_browser_caller(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<Option<Caller>> {
+    let mut cookies = HeaderMap::new();
+    for value in headers.get_all(axum::http::header::COOKIE) {
+        cookies.append(axum::http::header::COOKIE, value.clone());
+    }
+    try_resolve_caller(state, &cookies, None).await
+}
+
 /// Resolves the calling user from (in order): the `x-orbitid-session-id`
 /// header / `_session_id` query hint, `Authorization: Bearer <session JWT>`, or
 /// the opaque `__client` cookie (+ that client's active session).

@@ -78,7 +78,7 @@ async fn seed(pool: &PgPool) -> R {
     exec!(pool, "INSERT INTO audit_logs (id, action, metadata, created_at) VALUES ('aud_1','user.created',$1,$2)", empty(), now);
 
     exec!(pool, "INSERT INTO trusted_devices (id, user_id, token_hash, expires_at, created_at, updated_at) VALUES ('tdev_1','user_1','hash_tdev',$1,$2,$2)", now + 1000, now);
-    exec!(pool, "INSERT INTO operator_sessions (id, token_hash, key_fingerprint, expires_at, created_at, updated_at) VALUES ('osess_1','hash_osess','fp',$1,$2,$2)", now + 1000, now);
+    exec!(pool, "INSERT INTO operator_sessions (id, token_hash, key_fingerprint, expires_at, created_at, updated_at, user_id, session_id) VALUES ('osess_1','hash_osess','fp',$1,$2,$2,'user_1','sess_1')", now + 1000, now);
     exec!(pool, "INSERT INTO device_codes (id, application_id, device_code_hash, user_code, scopes, expires_at, created_at) VALUES ('dc_1','oa_1','hash_dc','ABCD-EFGH','openid',$1,$2)", now + 1000, now);
     Ok(())
 }

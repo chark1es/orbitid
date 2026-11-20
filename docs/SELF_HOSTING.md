@@ -31,9 +31,9 @@ safest generator.
 The compose file passes only the variables it lists (the ones in `.env.example`) into the container, so a
 variable you add to `.env` has no effect until it is also listed under `environment:` in
 `docker-compose.yml`. It starts Postgres 17 and OrbitID, runs the migrations on boot, and keeps the database
-in a named volume. Open `http://localhost:4000` and sign in to the dashboard with the secret key; it is
-exchanged once for an httpOnly session cookie stored in your database. Startup never prints any part of the
-secret key. Retrieve it explicitly with:
+in a named volume. Open `http://localhost:4000`: on a fresh instance the dashboard asks you to create the owner
+account, and that account opens the console from then on. The secret key is for your servers' Backend API
+calls, not the dashboard. Startup never prints any part of it. Retrieve it explicitly with:
 
 ```bash
 docker compose exec orbitid orbitid keys
@@ -142,8 +142,10 @@ Until you configure a delivery provider, saves that leave an email/SMS-dependent
 are refused. Configure delivery first, or explicitly disable all delivery-dependent factors and sign-up
 verification in one settings update. The smoke script uses the latter only for its throwaway test instance.
 
-1. Open the dashboard and sign in with the secret key. The dashboard keeps only a revocable httpOnly session,
-   and signs out when you rotate the key.
+1. Open the dashboard and create the owner account (the first visitor of a fresh instance does this, so do it
+   before exposing the instance). The dashboard keeps only a revocable httpOnly session tied to that account. On
+   an instance whose accounts predate owners, grant one with `orbitid owner you@example.com` on the server; see
+   [DASHBOARD.md](DASHBOARD.md#accounts-owners-and-administrators).
 2. Under **Email & SMS**, configure Resend or SMTP and send a test email before enabling an email-dependent
    flow. Configure Twilio or an HTTPS webhook before enabling phone verification or sign-in. See
    [EMAIL.md](EMAIL.md).

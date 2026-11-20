@@ -1,8 +1,15 @@
+//! The dashboard console cookie: how it is issued, where it is honoured, and
+//! the per-address budgets on the console routes. The secret key never opens
+//! the dashboard; account-based access is covered in `console_access.rs`.
+
 mod common;
 
 use axum::http::StatusCode;
+use serde_json::json;
 
 use common::{setup, SECRET_KEY};
+
+const PASSWORD: &str = "correct horse battery staple";
 
 fn operator_cookie(response: &orbitid_core::testing::TestResponse) -> Option<String> {
     response
@@ -14,107 +21,54 @@ fn operator_cookie(response: &orbitid_core::testing::TestResponse) -> Option<Str
         .map(str::to_string)
 }
 
+async fn setup_owner(
+    client: &orbitid_core::testing::TestClient,
+) -> orbitid_core::testing::TestResponse {
+    client
+        .post(
+            "/v1/operator_sessions/setup",
+            Some(json!({ "email_address": "owner@example.com", "password": PASSWORD })),
+            &[],
+        )
+        .await
+}
+
 #[tokio::test]
-async fn exchanges_the_secret_key_for_an_http_only_cookie() {
+async fn the_secret_key_does_not_open_the_dashboard() {
     let harness = setup().await;
     let response = harness
         .client
         .post(
             "/v1/operator_sessions",
-            Some(serde_json::json!({ "secret_key": SECRET_KEY })),
+            Some(json!({ "secret_key": SECRET_KEY })),
             &[],
         )
         .await;
-    assert_eq!(response.status, StatusCode::CREATED);
-    let body = response.value();
-    assert_eq!(body["object"], "operator_session");
-    assert!(body["id"].as_str().unwrap_or("").starts_with("osess_"));
-    assert!(body["expires_at"].as_i64().unwrap_or(0) > orbitid_core::http::now());
+    assert!(!response.status.is_success(), "{}", response.status);
+    assert!(operator_cookie(&response).is_none());
+    // The key still authenticates the Backend API itself, as a bearer token.
+    assert_eq!(harness.get("/v1/instance").await.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn the_console_cookie_is_http_only_strict_and_scoped_to_the_api() {
+    let harness = setup().await;
+    let response = setup_owner(&harness.client).await;
+    assert_eq!(response.status, StatusCode::CREATED, "{}", response.text());
     let raw = operator_cookie(&response).expect("operator cookie");
     let lower = raw.to_ascii_lowercase();
     assert!(lower.contains("httponly"));
     assert!(lower.contains("samesite=strict"));
     assert!(lower.contains("path=/v1"));
     assert!(!lower.contains("secure"));
-    assert!(!raw.contains(SECRET_KEY));
-}
-
-#[tokio::test]
-async fn refuses_the_wrong_key_and_never_sets_a_cookie() {
-    let harness = setup().await;
-    let response = harness
-        .client
-        .post(
-            "/v1/operator_sessions",
-            Some(serde_json::json!({ "secret_key": "sk_test_not_the_key" })),
-            &[],
-        )
-        .await;
-    assert_eq!(response.status, StatusCode::UNAUTHORIZED);
-    assert_eq!(
-        common::error_code(&response).as_deref(),
-        Some("secret_key_invalid")
-    );
-    assert!(operator_cookie(&response).is_none());
-}
-
-#[tokio::test]
-async fn refuses_cross_origin_exchanges() {
-    let harness = setup().await;
-    for origin in ["https://evil.example", "null"] {
-        let response = harness
-            .client
-            .post(
-                "/v1/operator_sessions",
-                Some(serde_json::json!({ "secret_key": SECRET_KEY })),
-                &[("origin", origin)],
-            )
-            .await;
-        assert_eq!(response.status, StatusCode::FORBIDDEN, "{origin}");
-        assert!(operator_cookie(&response).is_none());
-    }
-}
-
-#[tokio::test]
-async fn accepts_this_instances_own_origin() {
-    let harness = setup().await;
-    let response = harness
-        .client
-        .post(
-            "/v1/operator_sessions",
-            Some(serde_json::json!({ "secret_key": SECRET_KEY })),
-            &[
-                ("origin", "http://localhost:4000"),
-                ("sec-fetch-site", "same-origin"),
-            ],
-        )
-        .await;
-    assert_eq!(response.status, StatusCode::CREATED);
 }
 
 #[tokio::test]
 async fn the_cookie_authenticates_backend_reads_and_writes() {
     let harness = setup().await;
-    let response = harness
-        .client
-        .post(
-            "/v1/operator_sessions",
-            Some(serde_json::json!({ "secret_key": SECRET_KEY })),
-            &[],
-        )
-        .await;
-    let cookie = response
-        .headers
-        .get_all(axum::http::header::SET_COOKIE)
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .find(|value| value.starts_with("__orbit_operator="))
-        .and_then(|value| value.split(';').next())
-        .map(str::to_string)
-        .expect("cookie pair");
-
-    let read = harness.cookie("/v1/instance", &cookie).await;
-    assert_eq!(read.status, StatusCode::OK);
+    let console = harness.console().await;
+    let read = harness.cookie("/v1/instance", &console.cookie).await;
+    assert_eq!(read.status, StatusCode::OK, "{}", read.text());
     assert!(read.value()["publishable_key"]
         .as_str()
         .unwrap_or("")
@@ -124,54 +78,46 @@ async fn the_cookie_authenticates_backend_reads_and_writes() {
         .client
         .post(
             "/v1/users",
-            Some(serde_json::json!({
+            Some(json!({
                 "email_address": ["cookie-user@example.com"],
                 "password": "Sup3r-secret!",
             })),
-            &[("cookie", &cookie)],
+            &[("cookie", &console.cookie)],
         )
         .await;
-    assert_eq!(write.status, StatusCode::OK);
+    assert_eq!(write.status, StatusCode::OK, "{}", write.text());
 }
 
 #[tokio::test]
 async fn current_reports_the_session_and_sign_out_revokes_it() {
     let harness = setup().await;
-    harness
-        .client
-        .post(
-            "/v1/operator_sessions",
-            Some(serde_json::json!({ "secret_key": SECRET_KEY })),
-            &[],
-        )
-        .await;
-    // The client jar stores the cookie from the exchange.
+    // The client jar keeps both cookies from setup.
+    assert_eq!(
+        setup_owner(&harness.client).await.status,
+        StatusCode::CREATED
+    );
     let current = harness
         .client
         .get("/v1/operator_sessions/current", &[])
         .await;
-    assert_eq!(current.status, StatusCode::OK);
+    assert_eq!(current.status, StatusCode::OK, "{}", current.text());
     assert_eq!(current.value()["object"], "operator_session");
+    assert!(current.value()["user_id"]
+        .as_str()
+        .unwrap_or("")
+        .starts_with("user_"));
 
     let out = harness
         .client
         .delete("/v1/operator_sessions/current", None, &[])
         .await;
     assert_eq!(out.status, StatusCode::NO_CONTENT);
-    let cleared = out
-        .headers
-        .get_all(axum::http::header::SET_COOKIE)
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .find(|value| value.starts_with("__orbit_operator="))
-        .map(str::to_string)
-        .expect("cleared cookie");
+    let cleared = operator_cookie(&out).expect("cleared cookie");
     assert!(
         cleared.to_ascii_lowercase().contains("max-age=0")
             || cleared.contains("Expires=Thu, 01 Jan 1970"),
         "{cleared}"
     );
-    // The jar dropped the cookie; the API is refused again.
     let denied = harness.client.get("/v1/instance", &[]).await;
     assert_eq!(denied.status, StatusCode::UNAUTHORIZED);
 }
@@ -179,24 +125,26 @@ async fn current_reports_the_session_and_sign_out_revokes_it() {
 #[tokio::test]
 async fn the_cookie_stays_on_this_origin() {
     let harness = setup().await;
-    harness
-        .client
-        .post(
-            "/v1/operator_sessions",
-            Some(serde_json::json!({ "secret_key": SECRET_KEY })),
-            &[],
-        )
-        .await;
+    let console = harness.console().await;
     for origin in ["https://evil.example", "null"] {
         let read = harness
             .client
-            .get("/v1/instance", &[("origin", origin)])
+            .get(
+                "/v1/instance",
+                &[("cookie", &console.cookie), ("origin", origin)],
+            )
             .await;
         assert_eq!(read.status, StatusCode::FORBIDDEN, "{origin}");
     }
     let cross_site = harness
         .client
-        .get("/v1/users", &[("sec-fetch-site", "cross-site")])
+        .get(
+            "/v1/users",
+            &[
+                ("cookie", &console.cookie),
+                ("sec-fetch-site", "cross-site"),
+            ],
+        )
         .await;
     assert_eq!(cross_site.status, StatusCode::FORBIDDEN);
 }
@@ -211,27 +159,6 @@ async fn the_query_string_key_is_refused() {
     assert_eq!(response.status, StatusCode::UNAUTHORIZED);
 }
 
-async fn cookie_from(harness: &common::Harness) -> String {
-    let response = harness
-        .client
-        .post(
-            "/v1/operator_sessions",
-            Some(serde_json::json!({ "secret_key": SECRET_KEY })),
-            &[],
-        )
-        .await;
-    assert_eq!(response.status, StatusCode::CREATED);
-    response
-        .headers
-        .get_all(axum::http::header::SET_COOKIE)
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .find(|value| value.starts_with("__orbit_operator="))
-        .and_then(|value| value.split(';').next())
-        .map(str::to_string)
-        .expect("cookie")
-}
-
 #[tokio::test]
 async fn adds_secure_when_the_instance_is_served_over_https() {
     let app = orbitid_identity::testing::test_app_state_with(orbitid_core::config::EnvOverrides {
@@ -240,14 +167,8 @@ async fn adds_secure_when_the_instance_is_served_over_https() {
     })
     .await;
     let client = orbitid_core::testing::TestClient::new(common::build_app(app.state()));
-    let response = client
-        .post(
-            "/v1/operator_sessions",
-            Some(serde_json::json!({ "secret_key": SECRET_KEY })),
-            &[],
-        )
-        .await;
-    assert_eq!(response.status, StatusCode::CREATED);
+    let response = setup_owner(&client).await;
+    assert_eq!(response.status, StatusCode::CREATED, "{}", response.text());
     let raw = operator_cookie(&response).expect("cookie");
     assert!(raw
         .to_ascii_lowercase()
@@ -256,43 +177,15 @@ async fn adds_secure_when_the_instance_is_served_over_https() {
 }
 
 #[tokio::test]
-async fn locks_out_the_key_after_the_failure_budget() {
-    let harness = setup().await;
-    let mut statuses = Vec::new();
-    for index in 0..14 {
-        let response = harness
-            .client
-            .post(
-                "/v1/operator_sessions",
-                Some(serde_json::json!({ "secret_key": format!("sk_test_wrong_{index}") })),
-                &[],
-            )
-            .await;
-        statuses.push(response.status);
-    }
-    assert!(statuses.contains(&StatusCode::UNAUTHORIZED));
-    assert!(statuses.contains(&StatusCode::TOO_MANY_REQUESTS));
-    let correct = harness
-        .client
-        .post(
-            "/v1/operator_sessions",
-            Some(serde_json::json!({ "secret_key": SECRET_KEY })),
-            &[],
-        )
-        .await;
-    assert_eq!(correct.status, StatusCode::TOO_MANY_REQUESTS);
-}
-
-#[tokio::test]
 async fn applies_the_origin_rule_to_current_and_sign_out() {
     let harness = setup().await;
-    let cookie = cookie_from(&harness).await;
+    let console = harness.console().await;
     for origin in ["https://evil.example", "null"] {
         let read = harness
             .client
             .get(
                 "/v1/operator_sessions/current",
-                &[("cookie", &cookie), ("origin", origin)],
+                &[("cookie", &console.cookie), ("origin", origin)],
             )
             .await;
         assert_eq!(read.status, StatusCode::FORBIDDEN, "{origin}");
@@ -301,13 +194,13 @@ async fn applies_the_origin_rule_to_current_and_sign_out() {
             .delete(
                 "/v1/operator_sessions/current",
                 None,
-                &[("cookie", &cookie), ("origin", origin)],
+                &[("cookie", &console.cookie), ("origin", origin)],
             )
             .await;
         assert_eq!(delete.status, StatusCode::FORBIDDEN, "{origin}");
     }
     assert_eq!(
-        harness.cookie("/v1/instance", &cookie).await.status,
+        harness.cookie("/v1/instance", &console.cookie).await.status,
         StatusCode::OK
     );
 }
@@ -321,14 +214,14 @@ async fn refuses_an_unknown_or_expired_session_cookie() {
             StatusCode::UNAUTHORIZED
         );
     }
-    let cookie = cookie_from(&harness).await;
+    let console = harness.console().await;
     sqlx::query("UPDATE operator_sessions SET expires_at = $1")
         .bind(orbitid_core::http::now() - 1)
         .execute(&harness.state().pool)
         .await
         .expect("expire");
     assert_eq!(
-        harness.cookie("/v1/instance", &cookie).await.status,
+        harness.cookie("/v1/instance", &console.cookie).await.status,
         StatusCode::UNAUTHORIZED
     );
 }
@@ -336,16 +229,15 @@ async fn refuses_an_unknown_or_expired_session_cookie() {
 #[tokio::test]
 async fn stores_only_a_hash_and_the_key_fingerprint() {
     let harness = setup().await;
-    let cookie = cookie_from(&harness).await;
-    let token = cookie.trim_start_matches("__orbit_operator=");
+    let console = harness.console().await;
     let rows: Vec<(String, String)> =
         sqlx::query_as("SELECT token_hash, key_fingerprint FROM operator_sessions")
             .fetch_all(&harness.state().pool)
             .await
             .expect("rows");
     assert_eq!(rows.len(), 1);
-    assert_ne!(rows[0].0, token);
-    assert!(!rows[0].0.contains(token));
+    assert_ne!(rows[0].0, console.token);
+    assert!(!rows[0].0.contains(&console.token));
     assert_eq!(
         rows[0].1,
         orbitid_identity::operator_session::key_fingerprint(SECRET_KEY)
@@ -355,17 +247,290 @@ async fn stores_only_a_hash_and_the_key_fingerprint() {
 #[tokio::test]
 async fn an_explicit_refused_origin_is_not_overridden_by_a_trusted_referer() {
     let harness = setup().await;
-    let cookie = cookie_from(&harness).await;
+    let console = harness.console().await;
     let response = harness
         .client
         .get(
             "/v1/instance",
             &[
-                ("cookie", &cookie),
+                ("cookie", &console.cookie),
                 ("origin", "https://evil.example"),
                 ("referer", "http://localhost:4000/users"),
             ],
         )
         .await;
     assert_eq!(response.status, StatusCode::FORBIDDEN);
+}
+
+// ---------------------------------------------------------------------------
+// Rate limits
+// ---------------------------------------------------------------------------
+
+fn assert_rate_limited(response: &orbitid_core::testing::TestResponse) {
+    assert_eq!(
+        response.status,
+        StatusCode::TOO_MANY_REQUESTS,
+        "{}",
+        response.text()
+    );
+    assert_eq!(
+        common::error_code(response).as_deref(),
+        Some("rate_limit_exceeded")
+    );
+    assert!(response.headers.contains_key("retry-after"));
+}
+
+#[tokio::test]
+async fn opening_the_console_is_rate_limited_per_address() {
+    let harness = setup().await;
+    // A signed-out browser: each attempt is refused, and each one counts.
+    for _ in 0..20 {
+        let response = harness
+            .client
+            .post("/v1/operator_sessions/from_user", None, &[])
+            .await;
+        assert_eq!(
+            response.status,
+            StatusCode::UNAUTHORIZED,
+            "{}",
+            response.text()
+        );
+    }
+    let blocked = harness
+        .client
+        .post("/v1/operator_sessions/from_user", None, &[])
+        .await;
+    assert_rate_limited(&blocked);
+}
+
+#[tokio::test]
+async fn owner_setup_is_rate_limited_per_address() {
+    let harness = setup().await;
+    for _ in 0..10 {
+        let weak = harness
+            .client
+            .post(
+                "/v1/operator_sessions/setup",
+                Some(json!({ "email_address": "a@example.com", "password": "short" })),
+                &[],
+            )
+            .await;
+        assert_eq!(
+            weak.status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{}",
+            weak.text()
+        );
+    }
+    // Even a valid attempt waits out the window.
+    assert_rate_limited(&setup_owner(&harness.client).await);
+    assert!(operator_cookie(&setup_owner(&harness.client).await).is_none());
+}
+
+#[tokio::test]
+async fn the_status_check_has_its_own_budget() {
+    let harness = setup().await;
+    for _ in 0..120 {
+        let response = harness
+            .client
+            .get("/v1/operator_sessions/status", &[])
+            .await;
+        assert_eq!(response.status, StatusCode::OK);
+    }
+    assert_rate_limited(
+        &harness
+            .client
+            .get("/v1/operator_sessions/status", &[])
+            .await,
+    );
+    // Other routes keep their own budgets.
+    assert_eq!(
+        harness
+            .client
+            .post("/v1/operator_sessions/from_user", None, &[])
+            .await
+            .status,
+        StatusCode::UNAUTHORIZED
+    );
+}
+
+#[tokio::test]
+async fn cross_origin_requests_do_not_spend_the_budget() {
+    let harness = setup().await;
+    for _ in 0..30 {
+        let forged = harness
+            .client
+            .post(
+                "/v1/operator_sessions/from_user",
+                None,
+                &[("origin", "https://evil.example")],
+            )
+            .await;
+        assert_eq!(forged.status, StatusCode::FORBIDDEN);
+    }
+    let own = harness
+        .client
+        .post("/v1/operator_sessions/from_user", None, &[])
+        .await;
+    assert_eq!(own.status, StatusCode::UNAUTHORIZED, "{}", own.text());
+}
+
+#[tokio::test]
+async fn the_rate_limiting_setting_turns_the_budgets_off() {
+    let harness = setup().await;
+    harness
+        .state()
+        .settings
+        .update(json!({ "security": { "rateLimitEnabled": false } }))
+        .await
+        .expect("settings");
+    for _ in 0..25 {
+        let response = harness
+            .client
+            .post("/v1/operator_sessions/from_user", None, &[])
+            .await;
+        assert_eq!(response.status, StatusCode::UNAUTHORIZED);
+    }
+}
+
+#[tokio::test]
+async fn a_live_console_is_not_charged_for_status_checks() {
+    let harness = setup().await;
+    let console = harness.console().await;
+    // Someone else on the same address spends the whole status budget.
+    for _ in 0..120 {
+        harness
+            .client
+            .get("/v1/operator_sessions/status", &[])
+            .await;
+    }
+    assert_rate_limited(
+        &harness
+            .client
+            .get("/v1/operator_sessions/status", &[])
+            .await,
+    );
+    // The operator with a live console keeps working.
+    for path in [
+        "/v1/operator_sessions/status",
+        "/v1/operator_sessions/current",
+    ] {
+        let response = harness.cookie(path, &console.cookie).await;
+        assert_eq!(
+            response.status,
+            StatusCode::OK,
+            "{path}: {}",
+            response.text()
+        );
+    }
+}
+
+#[tokio::test]
+async fn signing_out_without_credentials_spends_no_budget() {
+    let harness = setup().await;
+    for _ in 0..40 {
+        let out = harness
+            .client
+            .delete("/v1/operator_sessions/current", None, &[])
+            .await;
+        assert_eq!(out.status, StatusCode::NO_CONTENT);
+    }
+    let console = harness.console().await;
+    let out = harness
+        .client
+        .delete(
+            "/v1/operator_sessions/current",
+            None,
+            &[("cookie", &console.cookie)],
+        )
+        .await;
+    assert_eq!(out.status, StatusCode::NO_CONTENT, "{}", out.text());
+    assert_eq!(
+        harness.cookie("/v1/instance", &console.cookie).await.status,
+        StatusCode::UNAUTHORIZED
+    );
+}
+
+#[tokio::test]
+async fn junk_cookies_cannot_use_up_a_real_sign_out() {
+    let harness = setup().await;
+    for _ in 0..30 {
+        let junk = harness
+            .client
+            .delete(
+                "/v1/operator_sessions/current",
+                None,
+                &[("cookie", "__client=junk; __orbit_operator=junk")],
+            )
+            .await;
+        assert_eq!(junk.status, StatusCode::NO_CONTENT);
+    }
+    assert_rate_limited(
+        &harness
+            .client
+            .delete(
+                "/v1/operator_sessions/current",
+                None,
+                &[("cookie", "__client=junk")],
+            )
+            .await,
+    );
+    // A sign-out that ends something is never charged.
+    let console = harness.console().await;
+    let out = harness
+        .client
+        .delete(
+            "/v1/operator_sessions/current",
+            None,
+            &[("cookie", &console.cookie)],
+        )
+        .await;
+    assert_eq!(out.status, StatusCode::NO_CONTENT, "{}", out.text());
+    assert_eq!(
+        harness.cookie("/v1/instance", &console.cookie).await.status,
+        StatusCode::UNAUTHORIZED
+    );
+}
+
+#[tokio::test]
+async fn replaying_a_signed_out_cookie_is_charged_and_audited_once() {
+    let harness = setup().await;
+    let console = harness.console().await;
+    let out = harness
+        .client
+        .delete(
+            "/v1/operator_sessions/current",
+            None,
+            &[("cookie", &console.cookie)],
+        )
+        .await;
+    assert_eq!(out.status, StatusCode::NO_CONTENT);
+    for _ in 0..30 {
+        let replay = harness
+            .client
+            .delete(
+                "/v1/operator_sessions/current",
+                None,
+                &[("cookie", &console.cookie)],
+            )
+            .await;
+        assert_eq!(replay.status, StatusCode::NO_CONTENT);
+    }
+    assert_rate_limited(
+        &harness
+            .client
+            .delete(
+                "/v1/operator_sessions/current",
+                None,
+                &[("cookie", &console.cookie)],
+            )
+            .await,
+    );
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_logs WHERE action = 'operator_session.revoked'",
+    )
+    .fetch_one(&harness.state().pool)
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
 }

@@ -345,7 +345,14 @@ pub async fn set_primary_phone(
 /// Deletes a user (cascading sessions/identifications), writes `user.deleted`
 /// and handles memberships and admin-less organizations in one transaction.
 pub async fn delete_user(state: &AppState, user_id: &str) -> Result<()> {
+    let real = get_user_by_id(state, user_id)
+        .await?
+        .is_some_and(|user| !user.is_anonymous);
     let mut tx = state.pool.begin().await?;
+    if real {
+        // First, before any row lock (see `console::claim_on`).
+        crate::console::claim_on(&mut tx).await?;
+    }
     delete_user_on(&mut tx, state, user_id).await?;
     tx.commit().await?;
     Ok(())

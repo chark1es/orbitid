@@ -1,14 +1,17 @@
-//! Dashboard operator sessions: exchange the instance secret key once for an
-//! opaque, revocable cookie. Ported from `services/operator-session.ts`.
+//! Dashboard console sessions: an opaque, revocable cookie for an account that
+//! holds [`DASHBOARD_ACCESS`] and is signed in on this browser.
 //!
-//! The browser posts the key once and does not retain it. The server stores
-//! only the sha256 of the cookie token and a fingerprint of the key, so a
-//! rotated secret invalidates every operator session.
+//! The secret key never opens the dashboard. A console session is issued only
+//! for a signed-in account (owner setup or "Open the admin console") and is
+//! re-checked on every request against that account's own session, its ban
+//! state and its roles. The server stores only the sha256 of the cookie token
+//! and a fingerprint of the secret key, so rotating the key still ends every
+//! console session at once.
 
 use std::sync::Arc;
 
 use axum::http::HeaderMap;
-use orbitid_core::error::{error_codes, OrbitError, Result};
+use orbitid_core::error::Result;
 use orbitid_core::http::cookies::{
     append_cookie, clear_cookie, get_cookie, set_cookie, CookieOptions, SameSite,
 };
@@ -16,15 +19,15 @@ use orbitid_core::http::now;
 use orbitid_core::http::OperatorSessionChecker;
 use orbitid_core::ids::{id_prefix, new_id};
 use orbitid_core::keys::cookies::OPERATOR;
-use orbitid_core::models::OperatorSessionRow;
+use orbitid_core::models::{OperatorSessionRow, SessionRow};
 use orbitid_core::state::AppState;
+
+use crate::rbac::DASHBOARD_ACCESS;
+use crate::sessions::is_session_expired;
 
 /// 8 hours: long enough for a working day, short enough that a stolen cookie
 /// ages out.
 pub const OPERATOR_SESSION_TTL_MS: i64 = 8 * 60 * 60 * 1000;
-/// Failed key exchanges per address before the caller is locked out briefly.
-pub const OPERATOR_KEY_MAX_FAILURES: i64 = 10;
-pub const OPERATOR_KEY_WINDOW_MS: i64 = 5 * 60_000;
 const COOKIE_PATH: &str = "/v1";
 
 fn base64_url(bytes: &[u8]) -> String {
@@ -32,8 +35,8 @@ fn base64_url(bytes: &[u8]) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
-/// Stable, non-reversible tag of the secret key; rotating the key invalidates
-/// every operator session.
+/// Stable, non-reversible tag of the secret key; rotating the key ends every
+/// console session.
 pub fn key_fingerprint(secret_key: &str) -> String {
     base64_url(&orbitid_core::crypto::hmac_sha256(
         secret_key.as_bytes(),
@@ -56,10 +59,21 @@ fn cookie_options(state: &AppState) -> CookieOptions {
     }
 }
 
-/// Creates a session row and returns its plaintext token (for the httpOnly
-/// cookie only).
-pub async fn issue_operator_session(
+/// The signed-in account behind a console session.
+#[derive(Debug, Clone, Copy)]
+pub struct ConsoleUser<'a> {
+    pub user_id: &'a str,
+    /// The user's own session on this browser; ending it ends the console session.
+    pub session_id: &'a str,
+}
+
+/// Creates a console session for a signed-in user who holds
+/// [`DASHBOARD_ACCESS`] and returns its plaintext token (for the httpOnly
+/// cookie only). The caller has already checked the permission; every later
+/// request checks it again (see [`find_operator_session`]).
+pub async fn issue_user_operator_session(
     state: &AppState,
+    user: ConsoleUser<'_>,
     user_agent: Option<&str>,
     ip: Option<&str>,
 ) -> Result<(OperatorSessionRow, String)> {
@@ -68,7 +82,8 @@ pub async fn issue_operator_session(
     let id = new_id(id_prefix::OPERATOR_SESSION);
     sqlx::query(
         "INSERT INTO operator_sessions (id, token_hash, key_fingerprint, user_agent, ip_address, \
-         expires_at, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$7)",
+         expires_at, created_at, updated_at, user_id, session_id) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8,$9)",
     )
     .bind(&id)
     .bind(orbitid_core::crypto::sha256(&token))
@@ -77,6 +92,8 @@ pub async fn issue_operator_session(
     .bind(ip)
     .bind(now_ms + OPERATOR_SESSION_TTL_MS)
     .bind(now_ms)
+    .bind(user.user_id)
+    .bind(user.session_id)
     .execute(&state.pool)
     .await?;
     // Expired and revoked rows are dead weight; sweep them now and then.
@@ -108,22 +125,14 @@ fn operator_token(headers: &HeaderMap) -> Option<String> {
         .map(str::to_string)
 }
 
-/// Resolves the operator session behind the request, or `None` when there is
-/// none. An expired, revoked or key-mismatched session is rejected.
+/// Resolves the console session behind the request, or `None` when there is
+/// none. An expired, revoked or key-mismatched session is rejected, and so is
+/// one whose account signed out, was banned or lost console access.
 pub async fn find_operator_session(
     state: &AppState,
     headers: &HeaderMap,
 ) -> Result<Option<OperatorSessionRow>> {
-    let Some(token) = operator_token(headers) else {
-        return Ok(None);
-    };
-    let row = sqlx::query_as::<_, OperatorSessionRow>(
-        "SELECT * FROM operator_sessions WHERE token_hash = $1",
-    )
-    .bind(orbitid_core::crypto::sha256(&token))
-    .fetch_optional(&state.pool)
-    .await?;
-    let Some(row) = row else {
+    let Some(row) = operator_session_for_token(state, headers).await? else {
         return Ok(None);
     };
     if row.revoked_at.is_some() || row.expires_at <= now() {
@@ -132,7 +141,136 @@ pub async fn find_operator_session(
     if row.key_fingerprint != key_fingerprint(&state.env.secret_key) {
         return Ok(None);
     }
+    let Some(session) = console_user_session(state, &row.user_id, &row.session_id).await? else {
+        // Revoked for good: restoring the role (or lifting a ban) later must not
+        // bring a cookie back that an operator meant to cut off.
+        revoke_operator_row(state, &row.id).await?;
+        return Ok(None);
+    };
+    touch_console_account_session(state, &session).await?;
     Ok(Some(row))
+}
+
+/// The console session row behind the request's cookie, whatever its state
+/// (expired, revoked, access lost). Sign-out uses it to end the account session
+/// even after the console session itself stopped authenticating.
+pub async fn operator_session_for_token(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<Option<OperatorSessionRow>> {
+    let Some(token) = operator_token(headers) else {
+        return Ok(None);
+    };
+    Ok(sqlx::query_as::<_, OperatorSessionRow>(
+        "SELECT * FROM operator_sessions WHERE token_hash = $1",
+    )
+    .bind(orbitid_core::crypto::sha256(&token))
+    .fetch_optional(&state.pool)
+    .await?)
+}
+
+async fn revoke_operator_row(state: &AppState, id: &str) -> Result<()> {
+    let now_ms = now();
+    sqlx::query(
+        "UPDATE operator_sessions SET revoked_at = $1, updated_at = $1 \
+         WHERE id = $2 AND revoked_at IS NULL",
+    )
+    .bind(now_ms)
+    .bind(id)
+    .execute(&state.pool)
+    .await?;
+    Ok(())
+}
+
+/// Revokes every live console session of `user_id` once the account no longer
+/// holds console access, so restoring a role later does not revive old cookies.
+/// Called after an operator changes the account's roles.
+pub async fn revoke_console_sessions_without_access(state: &AppState, user_id: &str) -> Result<()> {
+    if has_console_access(state, user_id).await? {
+        return Ok(());
+    }
+    let now_ms = now();
+    sqlx::query(
+        "UPDATE operator_sessions SET revoked_at = $1, updated_at = $1 \
+         WHERE user_id = $2 AND revoked_at IS NULL",
+    )
+    .bind(now_ms)
+    .bind(user_id)
+    .execute(&state.pool)
+    .await?;
+    Ok(())
+}
+
+/// How often console traffic refreshes the account session's activity.
+const CONSOLE_TOUCH_INTERVAL_MS: i64 = 60_000;
+
+/// Console requests count as activity on the account session behind them, so
+/// an inactivity timeout does not sign out an operator who is working. One
+/// throttled, single-statement autocommit `UPDATE` of one session row: it holds
+/// no other lock and cannot join a lock cycle.
+async fn touch_console_account_session(state: &AppState, session: &SessionRow) -> Result<()> {
+    let now_ms = now();
+    // Refresh well inside a short inactivity timeout, too.
+    let timeout_ms = state.settings.get().session.inactivity_timeout_seconds * 1000;
+    let interval = if timeout_ms > 0 {
+        CONSOLE_TOUCH_INTERVAL_MS.min(timeout_ms / 2)
+    } else {
+        CONSOLE_TOUCH_INTERVAL_MS
+    };
+    if now_ms - session.last_active_at < interval {
+        return Ok(());
+    }
+    sqlx::query(
+        "UPDATE sessions SET last_active_at = $1, updated_at = $1 \
+         WHERE id = $2 AND status = 'active' AND last_active_at < $3",
+    )
+    .bind(now_ms)
+    .bind(&session.id)
+    .bind(now_ms - interval)
+    .execute(&state.pool)
+    .await?;
+    Ok(())
+}
+
+/// True when `user_id` holds an instance role that grants [`DASHBOARD_ACCESS`].
+pub async fn has_console_access(state: &AppState, user_id: &str) -> Result<bool> {
+    Ok(sqlx::query_scalar::<_, bool>(&format!(
+        "SELECT EXISTS ({CONSOLE_GRANT} WHERE ur.user_id = $1)"
+    ))
+    .bind(user_id)
+    .bind(DASHBOARD_ACCESS)
+    .fetch_one(&state.pool)
+    .await?)
+}
+
+/// `user_roles ur` rows whose role carries the permission bound as `$2`. Only
+/// the seeded Owner and Administrator system roles can (custom roles are
+/// refused the permission), and those cannot be edited or deleted.
+const CONSOLE_GRANT: &str = "SELECT 1 FROM user_roles ur \
+     JOIN roles r ON r.key = ur.role_key AND r.key IN ('app:sys_owner', 'app:sys_admin') \
+     JOIN role_permissions rp ON rp.role_id = r.id \
+     JOIN permissions p ON p.id = rp.permission_id AND p.key = $2";
+
+/// A console session stays valid only while the user's own session
+/// is active, the user is not banned and still holds console access. One query
+/// per Backend API request, so revoking any of the three takes effect at once.
+/// Returns that account session when all three hold.
+async fn console_user_session(
+    state: &AppState,
+    user_id: &str,
+    session_id: &str,
+) -> Result<Option<SessionRow>> {
+    let session = sqlx::query_as::<_, SessionRow>(&format!(
+        "SELECT s.* FROM sessions s JOIN users u ON u.id = s.user_id \
+         WHERE s.id = $3 AND s.user_id = $1 AND s.status = 'active' AND NOT u.banned \
+         AND EXISTS ({CONSOLE_GRANT} WHERE ur.user_id = u.id)"
+    ))
+    .bind(user_id)
+    .bind(DASHBOARD_ACCESS)
+    .bind(session_id)
+    .fetch_optional(&state.pool)
+    .await?;
+    Ok(session.filter(|row| !is_session_expired(state, row)))
 }
 
 /// Revokes the session behind this request, if any. Idempotent.
@@ -152,7 +290,7 @@ pub async fn revoke_operator_session(state: &AppState, headers: &HeaderMap) -> R
     Ok(revoked.is_some())
 }
 
-/// Revokes every operator session for the current secret key.
+/// Revokes every console session for the current secret key.
 pub async fn revoke_all_operator_sessions(state: &AppState) -> Result<()> {
     let now_ms = now();
     sqlx::query(
@@ -228,9 +366,4 @@ impl OperatorSessionChecker for OperatorSessionHook {
 /// Installs the operator-session hook (called by [`crate::install`]).
 pub fn install_operator_session_checker(state: &AppState) {
     state.set_operator_session_checker(Arc::new(OperatorSessionHook));
-}
-
-/// The HTTP status/error for a refused key exchange (the route layer uses it).
-pub fn operator_key_refused() -> OrbitError {
-    OrbitError::unauthorized(error_codes::SECRET_KEY_INVALID, "Invalid secret key")
 }

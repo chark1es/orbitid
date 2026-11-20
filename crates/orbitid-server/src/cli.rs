@@ -1,5 +1,5 @@
-//! CLI: start/migrate, key printing, logical export/import/copy and the
-//! container readiness probe.
+//! CLI: start/migrate, key printing, owner grants, logical export/import/copy
+//! and the container readiness probe.
 
 use std::net::SocketAddr;
 
@@ -13,6 +13,8 @@ const USAGE: &str = "Usage: orbitid [command]
   start              Run migrations and start the server (default)
   migrate            Run migrations and exit
   keys               Print the publishable and secret keys and exit
+  owner <account>    Give an existing account the Owner role, so it can open
+                     the dashboard (a user id or a verified email address)
   export [--out f]   Write every table to JSON Lines (default: stdout)
   import [--in f]    Load JSON Lines into the configured database
                      [--truncate --yes]
@@ -46,6 +48,8 @@ enum Command {
     Migrate,
     /// Print the publishable and secret keys and exit
     Keys,
+    /// Give an existing account the Owner role (user id or verified email)
+    Owner { account: String },
     /// Write every table to JSON Lines (default: stdout)
     Export {
         #[arg(long, default_value = "-")]
@@ -116,6 +120,7 @@ pub async fn run() -> i32 {
         "start"
             | "migrate"
             | "keys"
+            | "owner"
             | "export"
             | "import"
             | "copy"
@@ -140,6 +145,14 @@ pub async fn run() -> i32 {
             println!("Publishable key : {}", state.publishable_key);
             println!("Secret key      : {}", state.env.secret_key);
             0
+        }
+        Command::Owner { account } => {
+            init_tracing();
+            let state = match create_context(EnvOverrides::default()).await {
+                Ok(state) => state,
+                Err(error) => return startup_error(error),
+            };
+            owner(&state, &account).await
         }
         Command::Export { out } => {
             init_tracing();
@@ -283,6 +296,38 @@ pub async fn run() -> i32 {
             }
             0
         }
+    }
+}
+
+/// `orbitid owner <account>`: the server-side way into the dashboard. The
+/// secret key does not open it, so an instance whose accounts predate owners
+/// (or whose owners lost access) gets its first owner here.
+async fn owner(state: &orbitid_core::AppState, account: &str) -> i32 {
+    // Seeds the Owner role on a database this version has not started against yet.
+    if let Err(error) = orbitid_identity::install_without_workers(state).await {
+        return startup_error(error);
+    }
+    match orbitid_identity::console::grant_owner(state, account).await {
+        Ok(orbitid_identity::console::OwnerGrant::Granted(user)) => {
+            orbitid_platform::audit::audit(
+                state,
+                orbitid_platform::audit::AuditInput::new("instance.owner_granted")
+                    .actor("cli")
+                    .target_type("user")
+                    .target_id(user.id.clone()),
+            )
+            .await;
+            println!(
+                "{} is now an owner. Sign in to the dashboard at {} with that account.",
+                user.id, state.env.base_url
+            );
+            0
+        }
+        Ok(orbitid_identity::console::OwnerGrant::AlreadyOwner(user)) => {
+            println!("{} is already an owner; nothing changed.", user.id);
+            0
+        }
+        Err(error) => startup_error(error),
     }
 }
 

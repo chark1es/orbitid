@@ -26,6 +26,23 @@
         }
       })();
     </script>
+    <script>
+      // Ask who is signed in while the app's code is still downloading, so the first screen is the right one.
+      (() => {
+        try {
+          const boot = (window.__ORBITID_BOOT__ = {});
+          boot.status = fetch("/v1/operator_sessions/status", { credentials: "same-origin", headers: { Accept: "application/json" } })
+            .then((response) => {
+              if (!response.ok) throw new Error(`status ${response.status}`);
+              return response.json();
+            })
+            .then((value) => (boot.value = value));
+          boot.status.catch(() => {});
+        } catch {
+          /* The app asks again on its own. */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

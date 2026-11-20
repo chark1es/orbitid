@@ -1,6 +1,5 @@
 import type { InstanceSettings } from "@orbitid/shared";
 import { api } from "../../lib/api";
-import { normalizeInstanceSettings } from "./settings";
 
 export const SETTINGS_QUERY_KEY = ["instance"];
 
@@ -25,8 +24,13 @@ export function unwrapTotal(response: unknown, fallback: number): number {
   return fallback;
 }
 
+/**
+ * The normalizer validates with zod, which the shell does not otherwise need. Importing it on demand keeps zod out
+ * of the first bundle; it downloads in parallel with the request.
+ */
 export async function fetchInstanceSettings(): Promise<InstanceSettings> {
-  return normalizeInstanceSettings(await api("GET", "/instance"));
+  const [response, { normalizeInstanceSettings }] = await Promise.all([api("GET", "/instance"), import("./settings/patch")]);
+  return normalizeInstanceSettings(response);
 }
 
 /** Extract a one-time secret from create/rotate responses. */

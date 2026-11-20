@@ -1,5 +1,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
+import { preloadRoute } from "../../pages";
+import { PageFallback } from "../../lib/lazy-page";
 import {
   OrbitMark,
   Sidebar,
@@ -97,7 +99,7 @@ export function AppSidebar() {
                 {group.items.map((item) => (
                   <SidebarMenuItem key={`${group.label ?? "main"}-${item.href}`}>
                     <SidebarMenuButton asChild isActive={isActivePath(pathname, item.href)} tooltip={item.title}>
-                      <NavLink to={item.href} end={item.href === "/"}>
+                      <NavLink to={item.href} end={item.href === "/"} onPointerEnter={() => preloadRoute(item.href)} onFocus={() => preloadRoute(item.href)}>
                         <item.icon aria-hidden />
                         <span className="truncate">{item.title}</span>
                       </NavLink>
@@ -146,9 +148,11 @@ export function AppShell() {
             </div>
           </header>
           <div id="main-content" className="mx-auto flex w-full max-w-[1280px] flex-1 flex-col gap-6 px-6 py-6">
-            <Suspense fallback={<PageLoader />}>
-              <Outlet />
-            </Suspense>
+            <PageFallback.Provider value={<PageLoader />}>
+              <Suspense fallback={<PageLoader />}>
+                <Outlet />
+              </Suspense>
+            </PageFallback.Provider>
           </div>
         </BreadcrumbLabelProvider>
       </SidebarInset>

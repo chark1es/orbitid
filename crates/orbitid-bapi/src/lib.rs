@@ -8,6 +8,7 @@
 use axum::Router;
 use orbitid_core::AppState;
 
+pub mod console;
 pub mod enterprise;
 pub mod identifiers;
 pub mod instance;

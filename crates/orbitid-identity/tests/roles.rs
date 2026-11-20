@@ -37,8 +37,22 @@ async fn system_rbac_seed_is_idempotent() {
             .await
             .unwrap()
     );
-    assert_eq!(SYSTEM_PERMISSIONS.len(), 6);
-    assert_eq!(SYSTEM_ROLES.len(), 2);
+    assert_eq!(SYSTEM_PERMISSIONS.len(), 7);
+    assert_eq!(SYSTEM_ROLES.len(), 4);
+    for key in ["app:sys_owner", "app:sys_admin"] {
+        assert_eq!(
+            orbitid_identity::rbac::permissions_for_role(state, key)
+                .await
+                .unwrap(),
+            vec!["app:sys_dashboard:access"],
+            "{key}"
+        );
+        let role = role_by_key(state, key).await.unwrap().unwrap();
+        assert!(role.is_system, "{key}");
+        assert_eq!(role_scope(key), "instance");
+        // Instance system roles are assignable to users, unlike `org:admin`/`org:member`.
+        assert!(!system_role_key(key), "{key}");
+    }
     assert_eq!(
         orbitid_identity::rbac::permissions_for_role(state, "org:admin")
             .await

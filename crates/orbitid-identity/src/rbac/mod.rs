@@ -17,6 +17,14 @@ pub const MEMBERSHIPS_READ: &str = "org:sys_memberships:read";
 pub const MEMBERSHIPS_MANAGE: &str = "org:sys_memberships:manage";
 pub const DOMAINS_READ: &str = "org:sys_domains:read";
 pub const DOMAINS_MANAGE: &str = "org:sys_domains:manage";
+/// Instance permission that opens the admin console for a signed-in user.
+/// Any instance role may carry it; the seeded Owner and Admin roles do.
+pub const DASHBOARD_ACCESS: &str = "app:sys_dashboard:access";
+
+/// The instance role the first account on a fresh instance receives.
+pub const OWNER_ROLE_KEY: &str = "app:sys_owner";
+/// Seeded instance role for anyone else who should run the admin console.
+pub const INSTANCE_ADMIN_ROLE_KEY: &str = "app:sys_admin";
 
 /// The system permission keys under the TypeScript `PERMISSIONS` object shape.
 pub mod permissions {
@@ -85,6 +93,11 @@ pub const SYSTEM_PERMISSIONS: &[SystemPermission] = &[
         name: "Manage organization domains",
         description: "Add, verify, update and remove organization domains.",
     },
+    SystemPermission {
+        key: DASHBOARD_ACCESS,
+        name: "Open the admin console",
+        description: "Sign in to this instance's dashboard and manage it with full access.",
+    },
 ];
 
 const ADMIN_PERMISSIONS: &[&str] = &[
@@ -96,6 +109,7 @@ const ADMIN_PERMISSIONS: &[&str] = &[
     DOMAINS_MANAGE,
 ];
 const MEMBER_PERMISSIONS: &[&str] = &[MEMBERSHIPS_READ, DOMAINS_READ];
+const CONSOLE_PERMISSIONS: &[&str] = &[DASHBOARD_ACCESS];
 
 pub const SYSTEM_ROLES: &[SystemRole] = &[
     SystemRole {
@@ -111,6 +125,20 @@ pub const SYSTEM_ROLES: &[SystemRole] = &[
         description: "Basic access to the organization.",
         is_creator_eligible: false,
         permissions: MEMBER_PERMISSIONS,
+    },
+    SystemRole {
+        key: OWNER_ROLE_KEY,
+        name: "Owner",
+        description: "Set up this instance. Full access to the admin console.",
+        is_creator_eligible: false,
+        permissions: CONSOLE_PERMISSIONS,
+    },
+    SystemRole {
+        key: INSTANCE_ADMIN_ROLE_KEY,
+        name: "Administrator",
+        description: "Full access to the admin console.",
+        is_creator_eligible: false,
+        permissions: CONSOLE_PERMISSIONS,
     },
 ];
 

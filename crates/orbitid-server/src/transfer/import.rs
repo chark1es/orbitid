@@ -91,6 +91,11 @@ async fn import_into(
     // the TypeScript server) predate columns that now have a default.
     let mut columns: HashMap<String, Vec<ColumnInfo>> = HashMap::new();
 
+    // An import target is never a fresh instance: claim it first, in its own
+    // committed transaction (claim lock first, holding nothing else), so owner
+    // setup cannot open on a restore without accounts, and a failed import
+    // cannot leave the instance unclaimed either.
+    claim_target(pool).await?;
     let mut tx = pool.begin().await.map_err(db)?;
     loop {
         let Some(line) = reader.next().await? else {
@@ -233,6 +238,26 @@ async fn import_into(
     super::COMMITTING.store(true, std::sync::atomic::Ordering::SeqCst);
     tx.commit().await.map_err(db)?;
     Ok(ImportResult { counts, ok })
+}
+
+/// Marks the target claimed (dashboard owner setup closed) before any import
+/// work starts, in its own transaction. Mirrors `orbitid_identity::console::claim_on`.
+async fn claim_target(pool: &PgPool) -> TransferResult<()> {
+    let mut tx = pool.begin().await.map_err(db)?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtext('orbitid_owner_setup')::bigint)")
+        .execute(&mut *tx)
+        .await
+        .map_err(db)?;
+    sqlx::query(
+        "INSERT INTO console_owner_setup (id, claimed_at) \
+         VALUES ('default', (extract(epoch FROM clock_timestamp()) * 1000)::bigint) \
+         ON CONFLICT (id) DO NOTHING",
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(db)?;
+    tx.commit().await.map_err(db)?;
+    Ok(())
 }
 
 async fn validate_header(

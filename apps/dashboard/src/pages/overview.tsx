@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Link } from "react-router-dom";
 import { Page as PageLayout } from "../components/shared/page";
 import { ActivityBoard, Button, Skeleton } from "@orbitid/ui";
@@ -15,8 +16,28 @@ import { UserAvatar } from "../components/shared/user-avatar";
 import { EmptyState } from "../components/shared/empty-state";
 import { TimeAgo } from "../components/shared/time-ago";
 import { InstanceSheet } from "../components/overview/instance-sheet";
-import { TrendChart } from "../components/overview/trend-chart";
+import type { DailyCount } from "../lib/types";
 import { InstanceKeys } from "../components/overview/instance-keys";
+
+// Recharts is most of this page's weight. It starts downloading as soon as this page's code runs, in parallel
+// with the stats request, and never holds back the numbers and lists.
+// Once loaded it renders directly: a lazy component would suspend (and be held back ~300 ms) on every mount.
+let LoadedTrendChart: (typeof import("../components/overview/trend-chart"))["TrendChart"] | null = null;
+const trendChartModule = import("../components/overview/trend-chart").then((module) => {
+  LoadedTrendChart = module.TrendChart;
+  return module;
+});
+const LazyTrendChart = lazy(() => trendChartModule.then((module) => ({ default: module.TrendChart })));
+
+/** Reserves the chart's height while recharts loads, so nothing below it moves. */
+function TrendChart(props: { data: DailyCount[]; tone: "ink" | "signal"; label: string }) {
+  if (LoadedTrendChart) return <LoadedTrendChart {...props} />;
+  return (
+    <Suspense fallback={<Skeleton className="h-[170px] w-full" />}>
+      <LazyTrendChart {...props} />
+    </Suspense>
+  );
+}
 
 const sumCounts = (series: { count: number }[] | undefined) => (series ?? []).reduce((total, point) => total + point.count, 0);
 

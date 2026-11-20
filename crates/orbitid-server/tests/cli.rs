@@ -25,6 +25,7 @@ fn help_prints_the_usage_message() {
         assert!(
             stdout.contains("keys               Print the publishable and secret keys and exit")
         );
+        assert!(stdout.contains("owner <account>    Give an existing account the Owner role"));
         assert!(
             stdout.contains("Only Postgres is supported"),
             "the help documents that SQLite/PGlite transfer sources are dropped"
@@ -85,6 +86,59 @@ async fn keys_and_migrate_use_the_configured_database() {
         !stdout.contains("orbit:orbit@"),
         "database label must be password-free"
     );
+}
+
+/// `orbitid owner` is the server-side way into the dashboard: it gives an
+/// existing account the Owner role, by verified email or user id.
+#[tokio::test]
+async fn owner_grants_the_owner_role_to_an_existing_account() {
+    let app = orbitid_identity::testing::test_app_state().await;
+    let user = orbitid_identity::testing::create_test_user(
+        app.state(),
+        "existing@example.com",
+        "correct horse battery staple",
+    )
+    .await
+    .unwrap();
+    let data_dir = app.data_dir();
+    let owner = |account: &str| {
+        Command::new(binary())
+            .args(["owner", account])
+            .env_clear()
+            .env("ORBITID_DATABASE_URL", &app.context.db.url)
+            .env(
+                "ORBITID_ENCRYPTION_KEY",
+                "test-encryption-key-for-orbitid-0123456789",
+            )
+            .env("ORBITID_BASE_URL", "http://localhost:4000")
+            .env("ORBITID_DATA_DIR", &data_dir)
+            .env("NODE_ENV", "test")
+            .output()
+            .unwrap()
+    };
+
+    let missing = owner("nobody@example.com");
+    assert!(!missing.status.success());
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("No account"));
+
+    let granted = owner("Existing@Example.com");
+    assert!(
+        granted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&granted.stderr)
+    );
+    assert!(String::from_utf8_lossy(&granted.stdout).contains("is now an owner"));
+    let roles: Vec<String> =
+        sqlx::query_scalar("SELECT role_key FROM user_roles WHERE user_id = $1")
+            .bind(user.id())
+            .fetch_all(&app.state().pool)
+            .await
+            .unwrap();
+    assert_eq!(roles, vec!["app:sys_owner".to_string()]);
+
+    let again = owner(user.id());
+    assert!(again.status.success());
+    assert!(String::from_utf8_lossy(&again.stdout).contains("already an owner"));
 }
 
 #[tokio::test]

@@ -32,7 +32,7 @@ export interface MockApiOptions {
   health?: unknown;
   /** Status and body for `POST /v1/instance/email_test`; defaults to success. */
   emailTest?: { status: number; body: unknown };
-  /** Whether `GET /v1/operator_sessions/current` reports a live session. Defaults to true. */
+  /** Whether `GET /v1/operator_sessions/status` (and `/current`) report a live session. Defaults to true. */
   sessionActive?: boolean;
   /** Extra handler for paths the page calls outside the settings API. */
   handle?: (call: ApiCall) => Response | undefined;
@@ -56,6 +56,15 @@ export function mockApi(options: MockApiOptions = {}): ApiCall[] {
 
     if (url.endsWith("/health")) {
       return json(options.health ?? { status: "ok", publishable_key: "pk_test_demo", database: "postgres" });
+    }
+    if (url.includes("/v1/operator_sessions/status")) {
+      const session = { object: "operator_session", id: "osess_test", expires_at: Date.now() + 3_600_000, user_id: "user_owner" };
+      return json({
+        object: "operator_status",
+        operator_session: options.sessionActive === false ? null : session,
+        user: null,
+        setup_required: false,
+      });
     }
     if (url.includes("/v1/operator_sessions/current")) {
       return options.sessionActive === false
