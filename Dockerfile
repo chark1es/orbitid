@@ -25,6 +25,9 @@ COPY apps/dashboard/package.json apps/dashboard/
 RUN bun install --frozen-lockfile
 COPY packages/shared packages/shared
 COPY packages/ui packages/ui
+# The SDK packages the dashboard's account sign-in renders (consumed from source).
+COPY packages/js packages/js
+COPY packages/react packages/react
 COPY apps/dashboard apps/dashboard
 COPY tsconfig.base.json ./
 RUN bun run --filter @orbitid/dashboard build
