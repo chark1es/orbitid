@@ -195,21 +195,12 @@ async fn operator_session_search_ban_and_session_death() {
         .unwrap()
         .to_string();
 
-    let exchanged = e2e
-        .client
-        .post(
-            "/v1/operator_sessions",
-            Some(json!({ "secret_key": SECRET_KEY })),
-            &[],
-        )
-        .await;
-    assert_eq!(
-        exchanged.status,
-        StatusCode::CREATED,
-        "{}",
-        exchanged.text()
-    );
-    let operator = cookie_pair(&exchanged, "__orbit_operator").expect("operator cookie");
+    // The dashboard is opened by an owner account, never by the secret key.
+    let console =
+        orbitid_identity::testing::create_test_console(e2e.state(), "operator@example.com")
+            .await
+            .expect("console");
+    let operator = format!("__orbit_operator={}", console.token);
 
     let listed = e2e
         .client

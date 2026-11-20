@@ -4,33 +4,85 @@ The dashboard is `apps/dashboard`: Vite + React + react-router + TanStack Query 
 from the `@orbitid/ui` primitives and the Timetable design system in [`DESIGN.md`](../DESIGN.md). The
 server serves the built files at `/` when `apps/dashboard/dist` exists.
 
-## Sign-in and the operator session
+## Sign-in and the console session
 
-The dashboard signs in with the instance secret key exactly once. `POST /v1/operator_sessions` compares the
-key in constant time (rate limited per address, like the Backend API itself) and answers with an httpOnly
-cookie, `__orbit_operator`, scoped to `Path=/v1`, `SameSite=Strict` and `Secure` whenever the instance is
-served over https. The cookie holds an opaque 256-bit token; the server stores only its sha256 hash. The key
-is never written to `sessionStorage`, `localStorage` or `document.cookie`, and no response ever returns it.
+### Accounts, owners and administrators
 
-Every Backend API call from the dashboard then authenticates with that cookie. `Authorization: Bearer sk_…`
-still works unchanged for servers, SDKs and scripts; the cookie is only accepted from the instance's own
-origin, so a Backend API on another host or another browser origin cannot read it.
+People sign in to the console with their own account on the instance, through the instance's own sign-in form
+(the React SDK's `<SignIn/>`, so every enabled method, second factor and passkey works). The secret key does not
+open the dashboard: it authenticates servers, SDKs and scripts calling the Backend API (`Authorization: Bearer
+sk_…`), nothing else.
 
-- The session lasts 8 hours (`OPERATOR_SESSION_TTL_MS`). `GET /v1/operator_sessions/current` confirms it on
-  load, so an expired or revoked cookie lands on `/login` without a flash of the shell.
-- **Sign out** (`DELETE /v1/operator_sessions/current`) revokes the row and clears the cookie; replaying the
-  old token is refused. Signing in again in the same tab revokes the previous session.
-- Rotating the secret key ends every operator session, because each row is bound to a fingerprint of the key
-  it was approved with.
-- Operator sessions are audit-logged (`operator_session.created`, `operator_session.revoked`).
+- **First run.** While the instance has no account at all, the sign-in screen offers **Create the owner account**
+  instead. `POST /v1/operator_sessions/setup` creates that account with the seeded **Owner** role
+  (`app:sys_owner`), signs it in on this browser and opens the console in one step. Concurrent setups serialize on
+  an advisory lock; exactly one wins. Once any account exists, setup is closed for good (`403`).
+- **Who may enter.** Any account whose instance roles grant `app:sys_dashboard:access`: the seeded **Owner** and
+  **Administrator** (`app:sys_admin`) roles do, and a custom `app:` role can carry the permission too. Grant it
+  from a user's page, under Roles.
+- **What visitors see.** `/login` shows who is signed in on this browser. An account with access gets
+  **Open the admin console** (`POST /v1/operator_sessions/from_user`); one without access is told so and can sign
+  out. After signing in on that screen, an account with access goes straight into the console.
+- **Request-time checks.** A console session is tied to the account session that opened it. Every Backend API
+  request re-checks it: removing the role, banning the account or ending its session (signing out anywhere, or
+  **Sign out** in the console, which ends both) ends the console at once.
+- **No owner yet, or owners locked out.** An instance whose accounts predate owners never offers setup. Whoever runs
+  the server grants the Owner role to an existing account:
+
+  ```sh
+  orbitid owner you@example.com   # a verified email address, or a user id (user_…)
+  ```
+
+  It adds the role (keeping the account's other roles), emits `user.updated` and audits `instance.owner_granted`.
+  Until some account can open the console, `/login` says so and shows the command
+  (`console_unclaimed` in the status answer). Shell access to the server is the proof of control; there is no
+  HTTP equivalent.
+
+`GET /v1/operator_sessions/status` answers all of this in one request (console session, signed-in account and its
+access, whether setup is required, whether no account can enter). `index.html` starts it inline, before the app's
+code has downloaded, so the first screen is usually the right one with no "checking" frame. If it fails (the server
+is unreachable, or the address is rate limited) `/login` says why, with **Try again**.
+
+### The console cookie
+
+Opening the console answers with an httpOnly cookie, `__orbit_operator`, scoped to `Path=/v1`, `SameSite=Strict`
+and `Secure` whenever the instance is served over https. The cookie holds an opaque 256-bit token; the server stores
+only its sha256 hash. Every Backend API call from the dashboard authenticates with it, and it is only accepted from
+the instance's own origin, so another site or another browser origin cannot use it.
+
+- The session lasts 8 hours (`OPERATOR_SESSION_TTL_MS`). The status check confirms it on load, so an expired or
+  revoked cookie lands on `/login` without a flash of the shell.
+- **Sign out** (`DELETE /v1/operator_sessions/current`) ends the account session and revokes the console row, then
+  clears the cookie; replaying the old token is refused. Opening the console again in the same tab revokes the
+  previous session.
+- Rotating the secret key still ends every console session: each row is bound to a fingerprint of the key.
+- Console sessions are audit-logged (`operator_session.created`, `operator_session.revoked`, actor: the account).
 
 The API origin is the server that served the page (`window.__ORBITID__.apiUrl`), falling back to the page's
-own origin. A dashboard on a different origin from its API cannot use the cookie and refuses to sign in;
-serve the built dashboard from the server, as a container deployment does.
+own origin. A dashboard on a different origin from its API cannot use the cookie; serve the built dashboard from
+the server, as a container deployment does.
 
 Sign-out revokes the session on the server before the shell reports success. If revocation fails (the server is
 unreachable, or answers `5xx`) the dashboard keeps the session and shows the error, because the cookie is still
-live; only a `401` — the session was already gone — counts as a completed sign-out.
+live; only a `401` (the session was already gone) counts as a completed sign-out.
+
+### Rate limits
+
+The console routes share the Postgres-backed limiter the rest of the API uses, so a budget holds across replicas.
+Each address gets its own budget per route:
+
+| Route | Budget |
+| --- | --- |
+| `GET /v1/operator_sessions/status`, `GET …/current` | 120 a minute (shared) |
+| `POST /v1/operator_sessions/setup` | 10 per 10 minutes (each attempt hashes a password) |
+| `POST /v1/operator_sessions/from_user` | 20 a minute |
+| `DELETE /v1/operator_sessions/current` | 30 a minute |
+
+The account sign-in itself goes through the Frontend API, whose sign-in, sign-up and verification steps have their
+own limits. Over budget, a route answers `429 rate_limit_exceeded` with `Retry-After`, and the dashboard says how
+long to wait ("Too many attempts. Try again in 30 seconds."). The origin check runs before the counter, so another
+site cannot spend a visitor's budget for them. **Settings → User & authentication → Rate limiting** turns every
+limit off, these included.
 
 ### Developing the dashboard
 
@@ -134,7 +186,7 @@ The Appearance preview follows the selected theme and allows a temporary Light/D
 
 - the publishable key, from the public `GET /health`;
 - the API URL the dashboard is pointed at;
-- the live operator session (the secret key is a placeholder: the dashboard no longer holds it);
+- the live console session (the secret key is a placeholder: the dashboard never holds it);
 - the database dialect reported by `/health`.
 
 It then renders, per framework tab (Next.js, React + backend, Node with Express, plain Node script), one
@@ -177,6 +229,28 @@ never returned by the API at all, so the Enterprise SSO page offers an explicit 
 `/v1/client/environment` and records every call so assertions can check the exact PATCH body.
 `pages/_config/__tests__/connect.test.ts` covers the snippet builder (variable names per framework, masking,
 copy-all) and the setup checks without rendering.
+
+## Load performance
+
+The first screen must not wait on anything it does not show.
+
+- The session check starts inline in `index.html`, in parallel with the bundle download (see above).
+- The build writes `.br` and `.gz` next to every text asset; the server sends the smallest one the browser accepts
+  (`Vary: Accept-Encoding`). Hashed `/assets/*` are cached for a year.
+- React, the router and TanStack Query ship as a separate `framework` chunk that stays cached across upgrades.
+- Heavy code loads beside the page instead of before it: recharts (the overview charts, with a fixed-height
+  skeleton), zod (the settings normalizer, fetched with `/v1/instance`) and the SDK sign-in form (only for a
+  signed-out visitor).
+- `@orbitid/ui`, `@orbitid/shared`, `@orbitid/react` and `@orbitid/js` declare `sideEffects`, so unused components
+  (drawers, OTP inputs, organization widgets) are dropped from every chunk.
+- Pages never suspend. `lazy()` plus `<Suspense>` would hold a page back until its fallback had been visible for
+  ~300 ms (React's anti-flash throttle), even with the chunk in cache, and the page's requests waited behind it.
+  `lazyPage` (`src/lib/lazy-page.ts`) renders the layout's fallback while a page downloads and the page as soon as
+  it arrives. The page for the current URL (or the sign-in page, when the boot check says signed out) starts
+  downloading while the app's code evaluates, sidebar links preload on hover or focus, and the SDK sign-in starts
+  its `/v1/client` requests as soon as its chunk arrives.
+- Build-time `<link rel="preload">` hints were measured and left out: on a slow link they compete with the entry
+  bundle, and only one of the two possible first screens is ever used.
 
 ## Design notes
 

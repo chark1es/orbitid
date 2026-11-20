@@ -10,11 +10,14 @@ import {
 } from "@orbitid/ui";
 import { ChevronsUpDown, LogOut, ShieldCheck, UserRound } from "lucide-react";
 import { toast } from "sonner";
-import { useAuth } from "../../lib/auth";
+import { accountLabel, useAuth } from "../../lib/auth";
 import { ApiError, getApiUrl } from "../../lib/api";
 
 export function UserMenu() {
-  const { signOut } = useAuth();
+  const { signOut, status } = useAuth();
+  // The console is always opened by an account; show who.
+  const account = status?.user ?? null;
+  const name = account ? accountLabel(account) : "Your account";
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -27,7 +30,7 @@ export function UserMenu() {
           aria-label="Instance menu"
         >
           <UserRound className="size-4 text-muted-foreground sm:hidden" aria-hidden />
-          <span className="hidden text-[0.8125rem] font-medium sm:inline">Admin</span>
+          <span className="hidden max-w-40 truncate text-[0.8125rem] font-medium sm:inline">{name}</span>
           <ChevronsUpDown className="hidden size-3.5 text-muted-foreground sm:inline" aria-hidden />
         </button>
       </DropdownMenuTrigger>
@@ -35,8 +38,10 @@ export function UserMenu() {
         <DropdownMenuLabel className="flex items-start gap-2 font-normal">
           <ShieldCheck className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
           <span className="flex min-w-0 flex-col">
-            <span className="text-sm font-medium">Instance admin</span>
-            <span className="text-xs text-muted-foreground">Operator session</span>
+            <span className="truncate text-sm font-medium">{name}</span>
+            <span className="truncate text-xs text-muted-foreground">
+              {account?.email_address ?? "Signed in with your account"}
+            </span>
           </span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />

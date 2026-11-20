@@ -5,7 +5,17 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { AuthProvider, RequireAuth, useAuth } from "../../lib/auth";
 import { UserMenu } from "./user-menu";
 
-const SESSION = { object: "operator_session", id: "osess_1", expires_at: Date.now() + 3_600_000 };
+const SESSION = { object: "operator_session", id: "osess_1", expires_at: Date.now() + 3_600_000, user_id: "user_ada" };
+const ACCOUNT = {
+  id: "user_ada",
+  first_name: "Ada",
+  last_name: "Lovelace",
+  username: null,
+  email_address: "ada@example.com",
+  image_url: null,
+  console_access: true,
+};
+const STATUS = { object: "operator_status", operator_session: SESSION, user: ACCOUNT, setup_required: false };
 const notifications = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
 vi.mock("sonner", () => ({ toast: notifications }));
 
@@ -54,13 +64,13 @@ describe("sign out menu", () => {
         // The session is NOT revoked: the row is still live and the cookie still works.
         return json({ errors: [{ code: "internal_server_error", message: "Server error" }] }, 500);
       }
-      return json(SESSION);
+      return json(STATUS);
     });
 
     renderMenu();
     expect(await screen.findByText("Authenticated")).toBeTruthy();
     await openMenu();
-    expect(await screen.findByText("Operator session")).toBeTruthy();
+    expect(await screen.findByText("ada@example.com")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("menuitem", { name: /Sign out/ }));
 
@@ -75,12 +85,21 @@ describe("sign out menu", () => {
 });
 
 describe("account trigger", () => {
-  it("shows the operator word, not invented initials", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(json(SESSION));
+  it("names the account, not invented initials", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(json(STATUS));
     renderMenu();
     const trigger = await screen.findByRole("button", { name: "Instance menu" });
-    expect(trigger.textContent).toContain("Admin");
-    expect(trigger.textContent).not.toContain("IA");
+    await waitFor(() => expect(trigger.textContent).toContain("Ada Lovelace"));
+    expect(trigger.textContent).not.toContain("AL");
     expect(trigger.querySelector('[data-slot="avatar"]')).toBeNull();
+  });
+
+  it("shows the account's email in the menu", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(json(STATUS));
+    renderMenu();
+    const trigger = await screen.findByRole("button", { name: "Instance menu" });
+    await waitFor(() => expect(trigger.textContent).toContain("Ada Lovelace"));
+    await openMenu();
+    expect(await screen.findByText("ada@example.com")).toBeTruthy();
   });
 });

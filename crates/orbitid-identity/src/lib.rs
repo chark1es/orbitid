@@ -17,6 +17,7 @@ pub mod authorization;
 pub mod caller;
 pub mod client_auth;
 pub mod code_check;
+pub mod console;
 pub mod enterprise_access;
 pub mod external_identity;
 pub mod grants;

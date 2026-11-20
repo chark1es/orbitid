@@ -2,6 +2,8 @@
 
 /* Tailwind does not scan node_modules by default; the workspace symlink must be declared explicitly. */
 @source "../../../packages/ui/src";
+/* The sign-in screen renders the instance's own sign-in form from the React SDK. */
+@source "../../../packages/react/src";
 
 html,
 body,

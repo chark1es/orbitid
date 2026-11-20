@@ -48,7 +48,25 @@ export const isSameOrigin = (url: string = getApiUrl()): boolean => {
 };
 
 export class ApiError extends Error {
-  constructor(public status: number, public code: string, message: string) { super(message); }
+  constructor(
+    public status: number,
+    public code: string,
+    message: string,
+    /** Seconds to wait before trying again, from a `429` answer's `Retry-After`. */
+    public retryAfter?: number,
+  ) {
+    super(message);
+  }
+}
+
+/** `Retry-After` in seconds (the server sends whole seconds), else the error's `meta.retry_after`. */
+function retryAfterSeconds(res: Response, error: { meta?: { retry_after?: unknown } } | undefined): number | undefined {
+  const seconds = (raw: unknown) => {
+    if (raw === null || raw === undefined || raw === "") return undefined;
+    const value = Number(raw);
+    return Number.isFinite(value) && value >= 0 ? value : undefined;
+  };
+  return seconds(res.headers?.get?.("retry-after")) ?? seconds(error?.meta?.retry_after);
 }
 
 /** `fetch` options every Backend API call needs: the httpOnly operator cookie travels automatically. */
@@ -78,7 +96,9 @@ export async function api<T = any>(method: string, path: string, body?: unknown,
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
     const e = json?.errors?.[0];
-    if (res.status === 401 && path !== "/operator_sessions/current") {
+    // The session endpoints answer for themselves: a 401 there is the answer (nobody signed in), not a console
+    // session that just ended. Treating it as one would re-check the session in a loop.
+    if (res.status === 401 && path !== "/operator_sessions" && !path.startsWith("/operator_sessions/")) {
       // A 401 is not proof that the operator session ended: a proxy or a captive portal can answer with
       // its own HTML 401. The server's own session answer is the structured `authentication_invalid`
       // error; anything else has to be confirmed against the session endpoint before the shell signs out.
@@ -86,7 +106,12 @@ export async function api<T = any>(method: string, path: string, body?: unknown,
       if (structured) notifyUnauthorized();
       else await confirmOperatorSessionEnded();
     }
-    throw new ApiError(res.status, e?.code ?? "unknown", e?.long_message ?? e?.message ?? res.statusText);
+    throw new ApiError(
+      res.status,
+      e?.code ?? "unknown",
+      e?.long_message ?? e?.message ?? res.statusText,
+      res.status === 429 ? retryAfterSeconds(res, e) : undefined,
+    );
   }
   return json as T;
 }

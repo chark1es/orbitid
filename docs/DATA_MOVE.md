@@ -25,9 +25,9 @@ Tables whose contents describe a running process or a single deployment are not 
 and `operator_sessions` (dashboard logins). Everything else is, including webhook endpoints, deliveries,
 audit logs, user sessions and one-time tokens; the target behaves like the source immediately.
 
-Dashboard logins are deliberately left behind. An operator session is bound to the browser that exchanged the
-key, and copying it would make an old cookie live against the target instance. Sign in to the target with its
-secret key instead. User sessions are unaffected.
+Dashboard logins are deliberately left behind. A console session is bound to the browser that opened it, and
+copying it would make an old cookie live against the target instance. Owners and administrators open the console
+on the target with their accounts, which do move. User sessions are unaffected.
 
 ## Commands
 

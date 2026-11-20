@@ -3,12 +3,13 @@ use orbitid_core::config::EnvOverrides;
 use orbitid_core::http::now;
 use orbitid_core::state::AppState;
 use orbitid_identity::operator_session::{
-    clear_operator_cookie, find_operator_session, issue_operator_session, key_fingerprint,
+    clear_operator_cookie, find_operator_session, issue_user_operator_session, key_fingerprint,
     operator_cookie_origin_allowed, revoke_all_operator_sessions, revoke_operator_session,
-    set_operator_cookie, sweep_operator_sessions, OPERATOR_SESSION_TTL_MS,
+    set_operator_cookie, sweep_operator_sessions, ConsoleUser, OPERATOR_SESSION_TTL_MS,
 };
 use orbitid_identity::testing::{
-    create_test_user, enable_trusted_devices, test_app_state, test_app_state_with,
+    create_test_client_session, create_test_console, create_test_user, enable_trusted_devices,
+    test_app_state, test_app_state_with,
 };
 use orbitid_identity::trusted_devices::{
     clear_trusted_device_cookie, issue_trusted_device, list_trusted_devices,
@@ -54,13 +55,23 @@ async fn key_fingerprint_is_stable_and_key_specific() {
 async fn operator_session_lifecycle() {
     let app = test_app_state().await;
     let state = app.state();
-    let (row, token) = issue_operator_session(
+    let console = create_test_console(state, "owner@example.com")
+        .await
+        .unwrap();
+    // A second console session for the same account, with request details.
+    let (row, token) = issue_user_operator_session(
         state,
+        ConsoleUser {
+            user_id: console.user.id(),
+            session_id: &console.auth.session.id,
+        },
         Some("Mozilla/5.0 (Windows NT 10.0) Chrome/126.0"),
         Some("127.0.0.1"),
     )
     .await
     .unwrap();
+    assert_eq!(row.user_id, console.user.id());
+    assert_eq!(row.session_id, console.auth.session.id);
     assert!(row.id.starts_with("osess_"));
     assert_eq!(row.token_hash, orbitid_core::crypto::sha256(&token));
     assert!(!row.token_hash.contains(&token));
@@ -96,6 +107,32 @@ async fn operator_session_lifecycle() {
 }
 
 #[tokio::test]
+async fn a_console_session_needs_an_account_with_console_access() {
+    let app = test_app_state().await;
+    let state = app.state();
+    let member = create_test_user(state, "member@example.com", "correct horse battery staple")
+        .await
+        .unwrap();
+    let auth = create_test_client_session(state, member.id())
+        .await
+        .unwrap();
+    // Issued without the role (callers check first): every request re-checks.
+    let (_, token) = issue_user_operator_session(
+        state,
+        ConsoleUser {
+            user_id: member.id(),
+            session_id: &auth.session.id,
+        },
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    let jar = headers(&[("cookie", &format!("__orbit_operator={token}"))]);
+    assert!(find_operator_session(state, &jar).await.unwrap().is_none());
+}
+
+#[tokio::test]
 async fn operator_cookie_is_secure_over_https() {
     let app = test_app_state_with(EnvOverrides {
         base_url: Some("https://auth.example.com".into()),
@@ -103,7 +140,10 @@ async fn operator_cookie_is_secure_over_https() {
     })
     .await;
     let state = app.state();
-    let (_, token) = issue_operator_session(state, None, None).await.unwrap();
+    let token = create_test_console(state, "owner@example.com")
+        .await
+        .unwrap()
+        .token;
     let mut set = HeaderMap::new();
     set_operator_cookie(&mut set, state, &token);
     assert!(set
@@ -118,7 +158,10 @@ async fn operator_cookie_is_secure_over_https() {
 async fn expired_or_revoked_sessions_are_rejected_and_swept() {
     let app = test_app_state().await;
     let state = app.state();
-    let (row, token) = issue_operator_session(state, None, None).await.unwrap();
+    let console = create_test_console(state, "owner@example.com")
+        .await
+        .unwrap();
+    let (row, token) = (console.operator, console.token);
     let jar = headers(&[("cookie", &format!("__orbit_operator={token}"))]);
     assert!(find_operator_session(state, &jar).await.unwrap().is_some());
     sqlx::query("UPDATE operator_sessions SET expires_at = $1 WHERE id = $2")
@@ -140,7 +183,10 @@ async fn expired_or_revoked_sessions_are_rejected_and_swept() {
 async fn rotated_secret_invalidates_sessions() {
     let app = test_app_state().await;
     let state = app.state();
-    let (row, token) = issue_operator_session(state, None, None).await.unwrap();
+    let console = create_test_console(state, "owner@example.com")
+        .await
+        .unwrap();
+    let (row, token) = (console.operator, console.token);
     let jar = headers(&[("cookie", &format!("__orbit_operator={token}"))]);
     sqlx::query("UPDATE operator_sessions SET key_fingerprint = 'other' WHERE id = $1")
         .bind(&row.id)

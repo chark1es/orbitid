@@ -1,4 +1,7 @@
-import { defineConfig } from "vitest/config";
+import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { brotliCompressSync, constants as zlib, gzipSync } from "node:zlib";
+import { defineConfig, type Plugin } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
@@ -28,8 +31,36 @@ function sameOriginProxy() {
   };
 }
 
+/**
+ * Writes `.br` and `.gz` next to every text asset in the build. The OrbitID server serves the smallest one the
+ * browser accepts, so the dashboard ships about a third of its raw size without compressing per request.
+ * `index.html` is skipped: the server rewrites it on every request (CSP nonce, instance bootstrap).
+ */
+function precompress(): Plugin {
+  const compressible = /\.(js|mjs|css|svg|json|txt|html)$/;
+  return {
+    name: "orbitid-precompress",
+    apply: "build",
+    closeBundle() {
+      const root = join(import.meta.dirname, "dist");
+      const walk = (dir: string): string[] =>
+        readdirSync(dir).flatMap((name) => {
+          const path = join(dir, name);
+          return statSync(path).isDirectory() ? walk(path) : [path];
+        });
+      for (const file of walk(root)) {
+        if (!compressible.test(file) || file === join(root, "index.html")) continue;
+        const source = readFileSync(file);
+        if (source.length < 1024) continue;
+        writeFileSync(`${file}.br`, brotliCompressSync(source, { params: { [zlib.BROTLI_PARAM_QUALITY]: 11 } }));
+        writeFileSync(`${file}.gz`, gzipSync(source, { level: 9 }));
+      }
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), precompress()],
   server: {
     port: 5173,
     strictPort: true,
@@ -42,7 +73,19 @@ export default defineConfig({
       "/docs": sameOriginProxy(),
     },
   },
-  build: { outDir: "dist", sourcemap: true },
+  build: {
+    outDir: "dist",
+    sourcemap: true,
+    rollupOptions: {
+      output: {
+        // The framework changes far less often than the dashboard. A separate chunk stays cached across upgrades.
+        manualChunks(id) {
+          if (/node_modules\/(react|react-dom|scheduler|react-router|@tanstack)\//.test(id)) return "framework";
+          return undefined;
+        },
+      },
+    },
+  },
   test: {
     environment: "jsdom",
     globals: true,

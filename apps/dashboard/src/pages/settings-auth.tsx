@@ -413,7 +413,7 @@ export default function Page() {
         />
         <SwitchRow
           label="Rate limiting"
-          description="Throttle sign-in, sign-up, and verification attempts."
+          description="Throttle sign-in, sign-up, verification, and dashboard sign-in attempts per address."
           checked={settings.security.rateLimitEnabled}
           onCheckedChange={(rateLimitEnabled) => editor.patch({ security: { rateLimitEnabled } })}
         />

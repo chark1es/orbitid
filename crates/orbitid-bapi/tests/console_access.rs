@@ -1,0 +1,426 @@
+//! Account-based console access: first-run owner setup, opening the console
+//! from a signed-in account, and the request-time checks that end it.
+
+mod common;
+
+use axum::http::StatusCode;
+use orbitid_core::testing::TestResponse;
+use serde_json::{json, Value};
+
+use common::{error_code, setup, Harness};
+
+const PASSWORD: &str = "correct horse battery staple";
+
+/// `name=value` from the response's `Set-Cookie` for `name`, when it sets one.
+fn cookie_pair(response: &TestResponse, name: &str) -> Option<String> {
+    response
+        .headers
+        .get_all(axum::http::header::SET_COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .find(|value| value.starts_with(&format!("{name}=")))
+        .and_then(|value| value.split(';').next())
+        .map(str::to_string)
+}
+
+async fn status(harness: &Harness, cookies: &str) -> Value {
+    let response = harness
+        .client
+        .get("/v1/operator_sessions/status", &[("cookie", cookies)])
+        .await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    response.value()
+}
+
+async fn setup_owner(harness: &Harness, email: &str) -> TestResponse {
+    harness
+        .client
+        .post(
+            "/v1/operator_sessions/setup",
+            Some(json!({ "email_address": email, "password": PASSWORD, "first_name": "Ada" })),
+            &[],
+        )
+        .await
+}
+
+/// Both cookies the setup response sets, joined for a `Cookie` header.
+fn cookies_of(response: &TestResponse) -> String {
+    let client = cookie_pair(response, "__client").expect("client cookie");
+    let operator = cookie_pair(response, "__orbit_operator").expect("operator cookie");
+    format!("{client}; {operator}")
+}
+
+#[tokio::test]
+async fn a_fresh_instance_asks_for_its_owner() {
+    let harness = setup().await;
+    let body = status(&harness, "").await;
+    assert_eq!(body["setup_required"], true);
+    assert_eq!(body["console_unclaimed"], false);
+    assert!(body["user"].is_null());
+    assert!(body["operator_session"].is_null());
+}
+
+/// Accounts from before owners: no setup, and nobody can open the console
+/// until the server grants the Owner role (`orbitid owner <email>`).
+#[tokio::test]
+async fn an_instance_without_owners_is_claimed_from_the_server() {
+    use orbitid_identity::console::{grant_owner, OwnerGrant};
+
+    let harness = setup().await;
+    let user = harness
+        .create_user(json!({ "email_address": ["existing@example.com"], "password": PASSWORD }))
+        .await;
+    let user_id = user["id"].as_str().unwrap().to_string();
+    harness
+        .put(
+            &format!("/v1/users/{user_id}/roles"),
+            json!({ "roles": [] }),
+        )
+        .await;
+    let body = status(&harness, "").await;
+    assert_eq!(body["setup_required"], false);
+    assert_eq!(body["console_unclaimed"], true);
+
+    // Unknown and unverified addresses are refused.
+    assert!(grant_owner(harness.state(), "nobody@example.com")
+        .await
+        .is_err());
+    let unverified = harness
+        .create_user(json!({ "email_address": ["unverified@example.com"], "skip_password_requirement": true }))
+        .await;
+    let unverified_id = unverified["id"].as_str().unwrap();
+    sqlx::query("UPDATE email_addresses SET verified = false WHERE user_id = $1")
+        .bind(unverified_id)
+        .execute(&harness.state().pool)
+        .await
+        .unwrap();
+    assert!(grant_owner(harness.state(), "unverified@example.com")
+        .await
+        .is_err());
+
+    // A custom role the account already holds is kept.
+    harness
+        .post(
+            "/v1/roles",
+            json!({ "key": "app:support", "name": "Support", "permissions": [] }),
+        )
+        .await;
+    harness
+        .put(
+            &format!("/v1/users/{user_id}/roles"),
+            json!({ "roles": ["app:support"] }),
+        )
+        .await;
+    let granted = grant_owner(harness.state(), "Existing@Example.com")
+        .await
+        .unwrap();
+    assert!(matches!(granted, OwnerGrant::Granted(ref row) if row.id == user_id));
+    let roles = harness.get(&format!("/v1/users/{user_id}/roles")).await;
+    assert!(roles.text().contains("app:sys_owner"), "{}", roles.text());
+    assert!(roles.text().contains("app:support"), "{}", roles.text());
+    assert!(matches!(
+        grant_owner(harness.state(), &user_id).await.unwrap(),
+        OwnerGrant::AlreadyOwner(_)
+    ));
+    assert_eq!(status(&harness, "").await["console_unclaimed"], false);
+
+    // The new owner opens the console from its own sign-in.
+    let fixture = harness.create_session(&user_id).await;
+    let opened = harness
+        .client
+        .post(
+            "/v1/operator_sessions/from_user",
+            None,
+            &[("cookie", &format!("__client={}", fixture.token))],
+        )
+        .await;
+    assert_eq!(opened.status, StatusCode::CREATED, "{}", opened.text());
+}
+
+#[tokio::test]
+async fn setup_creates_the_owner_signs_it_in_and_opens_the_console() {
+    let harness = setup().await;
+    let response = setup_owner(&harness, "Owner@Example.com").await;
+    assert_eq!(response.status, StatusCode::CREATED, "{}", response.text());
+    let body = response.value();
+    assert_eq!(body["setup_required"], false);
+    assert_eq!(body["user"]["email_address"], "owner@example.com");
+    assert_eq!(body["user"]["console_access"], true);
+    assert_eq!(body["operator_session"]["user_id"], body["user"]["id"]);
+    assert!(!response.text().contains(PASSWORD));
+
+    let cookies = cookies_of(&response);
+    // The console cookie authenticates the Backend API like a key exchange does.
+    let read = harness.cookie("/v1/instance", &cookies).await;
+    assert_eq!(read.status, StatusCode::OK, "{}", read.text());
+
+    // The owner holds the seeded Owner role, so the console survives a reload.
+    let user_id = body["user"]["id"].as_str().unwrap().to_string();
+    let roles = harness.get(&format!("/v1/users/{user_id}/roles")).await;
+    assert!(roles.text().contains("app:sys_owner"), "{}", roles.text());
+    let again = status(&harness, &cookies).await;
+    assert_eq!(again["setup_required"], false);
+    assert_eq!(again["user"]["id"], user_id.as_str());
+    assert_eq!(again["operator_session"]["user_id"], user_id.as_str());
+}
+
+#[tokio::test]
+async fn setup_is_closed_once_an_account_exists() {
+    let harness = setup().await;
+    assert_eq!(
+        setup_owner(&harness, "first@example.com").await.status,
+        StatusCode::CREATED
+    );
+    let second = setup_owner(&harness, "second@example.com").await;
+    assert_eq!(second.status, StatusCode::FORBIDDEN);
+    assert!(cookie_pair(&second, "__orbit_operator").is_none());
+
+    // An instance that already has users (an upgrade) never offers setup.
+    let upgraded = setup().await;
+    upgraded
+        .create_user(json!({ "email_address": ["existing@example.com"], "password": PASSWORD }))
+        .await;
+    assert_eq!(status(&upgraded, "").await["setup_required"], false);
+    assert_eq!(
+        setup_owner(&upgraded, "intruder@example.com").await.status,
+        StatusCode::FORBIDDEN
+    );
+}
+
+#[tokio::test]
+async fn concurrent_setups_make_exactly_one_owner() {
+    let harness = setup().await;
+    let (a, b) = tokio::join!(
+        setup_owner(&harness, "a@example.com"),
+        setup_owner(&harness, "b@example.com")
+    );
+    let created = [a.status, b.status]
+        .iter()
+        .filter(|status| **status == StatusCode::CREATED)
+        .count();
+    assert_eq!(created, 1, "{} / {}", a.text(), b.text());
+    let owners: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM user_roles WHERE role_key = 'app:sys_owner'")
+            .fetch_one(&harness.state().pool)
+            .await
+            .unwrap();
+    assert_eq!(owners, 1);
+}
+
+#[tokio::test]
+async fn setup_checks_origin_email_and_password_policy() {
+    let harness = setup().await;
+    let cross = harness
+        .client
+        .post(
+            "/v1/operator_sessions/setup",
+            Some(json!({ "email_address": "a@example.com", "password": PASSWORD })),
+            &[("origin", "https://evil.example")],
+        )
+        .await;
+    assert_eq!(cross.status, StatusCode::FORBIDDEN);
+
+    let bad_email = harness
+        .client
+        .post(
+            "/v1/operator_sessions/setup",
+            Some(json!({ "email_address": "not-an-email", "password": PASSWORD })),
+            &[],
+        )
+        .await;
+    assert_eq!(bad_email.status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    let weak = harness
+        .client
+        .post(
+            "/v1/operator_sessions/setup",
+            Some(json!({ "email_address": "a@example.com", "password": "short" })),
+            &[],
+        )
+        .await;
+    assert_eq!(
+        weak.status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{}",
+        weak.text()
+    );
+    // Nothing was created, so setup is still open.
+    assert_eq!(status(&harness, "").await["setup_required"], true);
+}
+
+#[tokio::test]
+async fn an_account_opens_the_console_only_while_a_role_grants_it() {
+    let harness = setup().await;
+    let user = harness
+        .create_user(json!({ "email_address": ["member@example.com"], "password": PASSWORD }))
+        .await;
+    let user_id = user["id"].as_str().unwrap().to_string();
+    let fixture = harness.create_session(&user_id).await;
+    let client = format!("__client={}", fixture.token);
+
+    let signed_in = status(&harness, &client).await;
+    assert_eq!(signed_in["user"]["id"], user_id.as_str());
+    assert_eq!(signed_in["user"]["console_access"], false);
+    assert!(signed_in["operator_session"].is_null());
+
+    let refused = harness
+        .client
+        .post(
+            "/v1/operator_sessions/from_user",
+            None,
+            &[("cookie", &client)],
+        )
+        .await;
+    assert_eq!(refused.status, StatusCode::FORBIDDEN);
+    assert!(cookie_pair(&refused, "__orbit_operator").is_none());
+
+    let granted = harness
+        .put(
+            &format!("/v1/users/{user_id}/roles"),
+            json!({ "roles": ["app:sys_admin"] }),
+        )
+        .await;
+    assert_eq!(granted.status, StatusCode::OK, "{}", granted.text());
+    assert_eq!(
+        status(&harness, &client).await["user"]["console_access"],
+        true
+    );
+
+    let opened = harness
+        .client
+        .post(
+            "/v1/operator_sessions/from_user",
+            None,
+            &[("cookie", &client)],
+        )
+        .await;
+    assert_eq!(opened.status, StatusCode::CREATED, "{}", opened.text());
+    let operator = cookie_pair(&opened, "__orbit_operator").expect("operator cookie");
+    assert_eq!(
+        harness.cookie("/v1/users", &operator).await.status,
+        StatusCode::OK
+    );
+
+    // Taking the role away ends the console on the next request.
+    harness
+        .put(
+            &format!("/v1/users/{user_id}/roles"),
+            json!({ "roles": [] }),
+        )
+        .await;
+    let after = harness.cookie("/v1/users", &operator).await;
+    assert_eq!(after.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        error_code(&after).as_deref(),
+        Some("authentication_invalid")
+    );
+}
+
+#[tokio::test]
+async fn the_console_ends_with_the_account_session_and_a_ban() {
+    let harness = setup().await;
+    let created = setup_owner(&harness, "owner@example.com").await;
+    let cookies = cookies_of(&created);
+    let operator = cookie_pair(&created, "__orbit_operator").unwrap();
+    let user_id = created.value()["user"]["id"].as_str().unwrap().to_string();
+
+    // A ban ends it.
+    let banned = harness
+        .post_empty(&format!("/v1/users/{user_id}/ban"))
+        .await;
+    assert_eq!(banned.status, StatusCode::OK, "{}", banned.text());
+    assert_eq!(
+        harness.cookie("/v1/users", &operator).await.status,
+        StatusCode::UNAUTHORIZED
+    );
+    harness
+        .post_empty(&format!("/v1/users/{user_id}/unban"))
+        .await;
+
+    // Ending the account's own session ends it too, even after the ban is lifted.
+    let session_id: String =
+        sqlx::query_scalar("SELECT session_id FROM operator_sessions WHERE user_id = $1")
+            .bind(&user_id)
+            .fetch_one(&harness.state().pool)
+            .await
+            .unwrap();
+    sqlx::query("UPDATE sessions SET status = 'ended' WHERE id = $1")
+        .bind(&session_id)
+        .execute(&harness.state().pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        harness.cookie("/v1/users", &operator).await.status,
+        StatusCode::UNAUTHORIZED
+    );
+    let body = status(&harness, &cookies).await;
+    assert!(body["operator_session"].is_null());
+    assert!(body["user"].is_null());
+}
+
+#[tokio::test]
+async fn signing_out_of_an_account_console_signs_the_account_out_too() {
+    let harness = setup().await;
+    let created = setup_owner(&harness, "owner@example.com").await;
+    let cookies = cookies_of(&created);
+    let out = harness
+        .client
+        .delete(
+            "/v1/operator_sessions/current",
+            None,
+            &[("cookie", &cookies)],
+        )
+        .await;
+    assert_eq!(out.status, StatusCode::NO_CONTENT, "{}", out.text());
+    let body = status(&harness, &cookies).await;
+    assert!(body["operator_session"].is_null());
+    assert!(body["user"].is_null(), "{body}");
+}
+
+#[tokio::test]
+async fn signing_out_without_a_console_leaves_the_account_alone_unless_asked() {
+    let harness = setup().await;
+    let user = harness
+        .create_user(json!({ "email_address": ["member@example.com"], "password": PASSWORD }))
+        .await;
+    let fixture = harness.create_session(user["id"].as_str().unwrap()).await;
+    let client = format!("__client={}", fixture.token);
+
+    let out = harness
+        .client
+        .delete(
+            "/v1/operator_sessions/current",
+            None,
+            &[("cookie", &client)],
+        )
+        .await;
+    assert_eq!(out.status, StatusCode::NO_CONTENT);
+    assert!(!status(&harness, &client).await["user"].is_null());
+
+    let out = harness
+        .client
+        .delete(
+            "/v1/operator_sessions/current?account=true",
+            None,
+            &[("cookie", &client)],
+        )
+        .await;
+    assert_eq!(out.status, StatusCode::NO_CONTENT);
+    assert!(status(&harness, &client).await["user"].is_null());
+}
+
+#[tokio::test]
+async fn status_refuses_cross_origin_reads() {
+    let harness = setup().await;
+    let response = harness
+        .client
+        .get(
+            "/v1/operator_sessions/status",
+            &[
+                ("origin", "https://evil.example"),
+                ("sec-fetch-site", "cross-site"),
+            ],
+        )
+        .await;
+    assert_eq!(response.status, StatusCode::FORBIDDEN);
+}

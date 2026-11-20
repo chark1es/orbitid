@@ -9,6 +9,8 @@
       "name": "@orbitid/dashboard",
       "version": "0.1.0",
       "dependencies": {
+        "@orbitid/js": "*",
+        "@orbitid/react": "*",
         "@orbitid/shared": "*",
         "@orbitid/ui": "*",
         "@tanstack/react-query": "^5.59.0",

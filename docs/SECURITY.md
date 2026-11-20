@@ -164,13 +164,12 @@ path-traversal guard on the image and logo routes stays.
 
 - The Backend API secret key is compared with `safeEqual` (constant time); failed attempts are rate limited per
   IP (10 failures / 5 minutes → 429), and a key offered in the query string is refused outright because query
-  strings end up in proxy logs and browser history. The dashboard's key exchange
-  (`POST /v1/operator_sessions`) shares that per-address failure budget and uses the same constant-time
-  comparison, so presenting the key in two places does not double the guessing budget.
+  strings end up in proxy logs and browser history. The dashboard does not accept the key at all, so the bearer
+  gate is the only place it can be guessed.
 - The Backend API accepts two credentials: the bearer secret key (unchanged, for servers and SDKs) and the
-  dashboard's httpOnly operator cookie. The cookie is only honoured on this instance's own origin, only over a
-  session row whose token hash matches, and only while the row is unexpired, unrevoked and bound to the current
-  key. A browser request that carries it with `Sec-Fetch-Site: cross-site` is refused.
+  dashboard's httpOnly console cookie. The cookie is only honoured on this instance's own origin, only over a
+  session row whose token hash matches, only while the row is unexpired, unrevoked and bound to the current key, and
+  only while the account behind it is signed in, unbanned and still holds `app:sys_dashboard:access`. A browser request that carries it with `Sec-Fetch-Site: cross-site` is refused.
 - OIDC: `redirect_uri` must match a registered value **verbatim**, PKCE is required for public clients and
   anything marked `pkce_required`, and only `S256` is accepted.
 - JWT verification pins algorithms: session tokens and machine tokens accept `RS256` only, so `none` and
@@ -227,7 +226,7 @@ controls the database, the encryption key, the mail and SMS credentials and the 
 recover an account out of band. The point is that the *product's own API and console* offer no shortcut to signing in
 as a user; an operator who needs to help uses a password reset or an invitation to the address the user controls.
 
-**The server does not narrate authentication.** A rejected secret key, a failed dashboard key exchange, a failed
+**The server does not narrate authentication.** A rejected secret key, a refused console session, a failed
 sign-in, an undeliverable code and an unexpected error on an auth route all produce no console output. Delivery
 failures are returned to the caller as typed results and recorded as audit entries carrying the template and reason
 only — never a code, link, recipient or provider secret. Startup prints no secret key: `orbitid start` reports that
@@ -339,36 +338,36 @@ A proxy that sends only `X-Real-IP` leaves the server seeing the proxy's address
 
 ## Dashboard sign-in
 
-The dashboard has no accounts of its own: the operator pastes the instance secret key once, and the page trades it
-for an httpOnly session in the same request. The secret key is never written to `sessionStorage`, `localStorage` or
-`document.cookie`, and no response returns the key, so a script that runs in the dashboard's origin can act as the
-operator while the session is live but cannot exfiltrate the secret key.
+The dashboard is opened by accounts, never by the secret key, which stays a server credential for the Backend API.
+An account opens the console when one of its instance roles grants `app:sys_dashboard:access` (the seeded Owner and
+Administrator roles do); the first account on a fresh instance is created as the owner from the sign-in screen.
 
-- `POST /v1/operator_sessions` compares the key with `safeEqual` and rate limits failures per address (10 / 5
-  minutes → 429), sharing the budget with the bearer gate. The key is accepted only from this instance's own
-  origin, so a malicious site cannot use the endpoint as an oracle against another instance.
-- The response is an opaque 256-bit token in `__orbit_operator`: `HttpOnly`, `SameSite=Strict`, `Path=/v1`,
+- **Opening the console.** `POST /v1/operator_sessions/from_user` checks the account signed in on this browser (ban
+  flag, permission) and issues a console session tied to its account session. `POST /v1/operator_sessions/setup`
+  does the same for the owner it creates, only while the instance has no account (exactly one concurrent setup wins).
+- **Every request re-checks** that the account session is active, the account unbanned and still permitted, so
+  removing the role, banning or signing out anywhere ends the console on the next request.
+- **The cookie.** An opaque 256-bit token in `__orbit_operator`: `HttpOnly`, `SameSite=Strict`, `Path=/v1`,
   `Secure` over https, 8 hours. The server stores only its sha256 hash, so a database reader cannot mint a session.
-- Each row is bound to an HMAC fingerprint of the secret key. Rotating the key ends every session, and sign-out
-  revokes the row immediately (`DELETE /v1/operator_sessions/current`), so a copied cookie stops working. A
-  database transfer deliberately leaves these rows behind (`docs/DATA_MOVE.md`), so an export can never restore a
-  live operator login on another instance.
-- The cookie is accepted by the Backend API only from this origin, on reads as well as writes. `Sec-Fetch-Site` must
+  Rows are bound to an HMAC fingerprint of the secret key (rotating it ends every console session) and are left
+  behind by a database transfer (`docs/DATA_MOVE.md`).
+- **Origin.** The cookie is accepted only from this origin, on reads as well as writes. `Sec-Fetch-Site` must
   be `same-origin`, `none` or absent; an explicit `Origin` is authoritative, so `null`, a malformed value or another
   host is refused and `Referer` is never consulted in its place; `Referer` is used only when no `Origin` was sent.
   Another application origin in `allowedOrigins` does not qualify, and `SameSite=Strict` means a cross-site request
   never carries the cookie anyway. The Frontend API's separate CSRF guard checks its own client cookie.
+- **Rate limits.** Each console route has a per-address budget in the shared limiter (`docs/DASHBOARD.md`), counted
+  after the origin check so a cross-site page cannot spend a visitor's budget.
+- **Recovery is on the server.** `orbitid owner <verified email | user id>` grants the Owner role with the server's
+  own configuration; no HTTP path promotes an account without an existing owner.
 - The dashboard's CSP allows scripts only from its own origin plus one nonce-tagged bootstrap script, with no
   inline handlers and no `eval`; the app renders every server string through React text nodes (there is no
   `dangerouslySetInnerHTML` anywhere in it); and the page is served with `frame-ancestors 'none'` and `no-store`.
-- External dashboards are not supported by a weaker fallback. A dashboard that is not served by the instance it
-  manages cannot receive the same-origin cookie, so the page refuses to send the key to another origin rather than
-  falling back to a bearer token in browser storage. Serve the built dashboard from the server (the container image
-  does this) or place it behind the same origin with a reverse proxy; keep it behind your TLS and, if you can, a VPN
-  or an allowlist.
+- External dashboards are not supported: serve the built dashboard from the instance (the container image does) or
+  behind its origin with a reverse proxy, behind your TLS and, if you can, a VPN or an allowlist.
 
-Operator accounts (a named user per operator, roles, and per-operator audit) are the next step for this surface;
-the session table and the audit events are shaped so that change does not touch the API contract.
+Backend API changes made from the console are still audited with the generic operator actor; recording the account
+behind each console request is the next step for this surface.
 
 ## Dependency status
 

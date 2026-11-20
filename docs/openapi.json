@@ -75,7 +75,7 @@
     },
     {
       "name": "Dashboard",
-      "description": "Operator sign-in for the dashboard: trade the instance secret key for a revocable httpOnly session."
+      "description": "Dashboard sign-in: accounts with the Owner or Administrator role open a revocable httpOnly console session. The secret key does not open the dashboard."
     }
   ],
   "security": [],
@@ -106,31 +106,141 @@
         }
       }
     },
-    "/v1/operator_sessions": {
+    "/v1/operator_sessions/current": {
+      "get": {
+        "tags": [
+          "Dashboard"
+        ],
+        "summary": "Check the dashboard session",
+        "operationId": "getCurrentOperatorSession",
+        "description": "Reports whether this browser still has a live console session. Used on dashboard load so an expired or revoked cookie sends the operator to the sign-in screen. Answers `401` and clears the cookie when there is none. Rate limited to 120 requests a minute per address, shared with the status check. (the instance's rate limiting setting turns it off); over budget it answers `429` with `Retry-After`.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorSession"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Dashboard"
+        ],
+        "summary": "Sign out of the dashboard",
+        "operationId": "revokeOperatorSession",
+        "description": "Revokes this browser's operator session and clears the cookie. A console opened from an account also ends that account's session on this browser. Safe to call without a session. Rate limited to 30 requests a minute per address. (the instance's rate limiting setting turns it off); over budget it answers `429` with `Retry-After`.",
+        "security": [],
+        "responses": {
+          "204": {
+            "description": "The session is revoked and the cookie cleared."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        },
+        "parameters": [
+          {
+            "name": "account",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "`true` also signs this browser's account out when no console session is linked to it. A console opened from an account always signs that account out."
+          }
+        ]
+      }
+    },
+    "/v1/operator_sessions/status": {
+      "get": {
+        "tags": [
+          "Dashboard"
+        ],
+        "summary": "Read the dashboard sign-in state",
+        "operationId": "getOperatorStatus",
+        "description": "The dashboard's single boot request: the live console session, the account signed in on this browser and whether it may open the console, and whether the instance still needs its owner. Never answers `401`; signed out is a normal answer. Refused from any origin other than this instance's own. Rate limited to 120 requests a minute per address. (the instance's rate limiting setting turns it off); over budget it answers `429` with `Retry-After`.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/v1/operator_sessions/setup": {
       "post": {
         "tags": [
           "Dashboard"
         ],
-        "summary": "Sign in to the dashboard with the secret key",
-        "operationId": "createOperatorSession",
-        "description": "The one place a browser may present the instance secret key. The key is compared in constant time and rate limited per address, then replaced by an opaque session token in an httpOnly cookie; the key is neither stored nor returned. Requires the request to come from this instance's own origin, and answers `429` with `Retry-After` after too many failed attempts.",
+        "summary": "Create the owner account",
+        "operationId": "createInstanceOwner",
+        "description": "Only while the instance has no account. Creates the account with the `app:sys_owner` role, signs it in on this browser (the `__client` cookie) and opens the console (the `__orbit_operator` cookie), atomically: of two concurrent requests exactly one succeeds. Answers `403` once any account exists; an instance with users signs in with the secret key and assigns the Owner or Administrator role instead. The password must satisfy the instance's password policy. Rate limited to 10 attempts per 10 minutes per address. (the instance's rate limiting setting turns it off); over budget it answers `429` with `Retry-After`.",
         "security": [],
         "requestBody": {
           "required": true,
-          "description": "The secret key. It travels once and is never echoed in the response.",
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "additionalProperties": false,
                 "required": [
-                  "secret_key"
+                  "email_address",
+                  "password"
                 ],
                 "properties": {
-                  "secret_key": {
+                  "email_address": {
                     "type": "string",
-                    "description": "The instance secret key (`sk_live_…` / `sk_test_…`).",
+                    "format": "email"
+                  },
+                  "password": {
+                    "type": "string",
                     "writeOnly": true
+                  },
+                  "first_name": {
+                    "type": "string"
+                  },
+                  "last_name": {
+                    "type": "string"
                   }
                 }
               }
@@ -139,7 +249,50 @@
         },
         "responses": {
           "201": {
-            "description": "Sets the `__orbit_operator` cookie and returns the session's id and expiry.",
+            "description": "The owner is created, signed in and in the console.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorStatus"
+                }
+              }
+            },
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string",
+                  "description": "`__orbit_operator=<opaque>; Path=/v1; HttpOnly; SameSite=Strict` (plus `Secure` over https)."
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/v1/operator_sessions/from_user": {
+      "post": {
+        "tags": [
+          "Dashboard"
+        ],
+        "summary": "Open the console from a signed-in account",
+        "operationId": "createOperatorSessionFromUser",
+        "description": "Opens the console for the account signed in on this browser, when one of its instance roles grants `app:sys_dashboard:access` (the seeded Owner and Administrator roles do). The console session is tied to that account session and is re-checked on every request: removing the role, banning the account or ending its session ends the console at once. Rate limited to 20 requests a minute per address. (the instance's rate limiting setting turns it off); over budget it answers `429` with `Retry-After`.",
+        "security": [],
+        "responses": {
+          "201": {
+            "description": "Sets the `__orbit_operator` cookie.",
             "content": {
               "application/json": {
                 "schema": {
@@ -165,63 +318,8 @@
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
-          "422": {
-            "$ref": "#/components/responses/UnprocessableEntity"
-          },
           "429": {
             "$ref": "#/components/responses/TooManyRequests"
-          }
-        }
-      }
-    },
-    "/v1/operator_sessions/current": {
-      "get": {
-        "tags": [
-          "Dashboard"
-        ],
-        "summary": "Check the dashboard session",
-        "operationId": "getCurrentOperatorSession",
-        "description": "Reports whether this browser still has a live operator session. Used on dashboard load so an expired or revoked cookie sends the operator to the sign-in screen. Answers `401` and clears the cookie when there is none.",
-        "security": [],
-        "responses": {
-          "200": {
-            "description": "Success.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OperatorSession"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "Dashboard"
-        ],
-        "summary": "Sign out of the dashboard",
-        "operationId": "revokeOperatorSession",
-        "description": "Revokes this browser's operator session and clears the cookie. Safe to call without a session.",
-        "security": [],
-        "responses": {
-          "204": {
-            "description": "The session is revoked and the cookie cleared."
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
           }
         }
       }
@@ -21367,15 +21465,20 @@
           },
           "expires_at": {
             "type": "integer",
-            "description": "Epoch milliseconds. After this the cookie is refused and must be exchanged again."
+            "description": "Epoch milliseconds. After this the cookie is refused and the account opens the console again."
+          },
+          "user_id": {
+            "type": "string",
+            "description": "The account that opened the console. The secret key never opens it."
           }
         },
         "required": [
           "object",
           "id",
-          "expires_at"
+          "expires_at",
+          "user_id"
         ],
-        "description": "A dashboard operator session. The secret key is never part of this object or any response."
+        "description": "A dashboard console session, opened by an account that holds `app:sys_dashboard:access`. The session token is only ever in the httpOnly cookie."
       },
       "User": {
         "type": "object",
@@ -25676,6 +25779,100 @@
         "required": [
           "errors"
         ]
+      },
+      "OperatorStatus": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "const": "operator_status"
+          },
+          "operator_session": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OperatorSession"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The live console session on this browser, if any."
+          },
+          "user": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "first_name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "last_name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "username": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "email_address": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "image_url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "console_access": {
+                    "type": "boolean",
+                    "description": "One of the account's instance roles grants `app:sys_dashboard:access`."
+                  }
+                },
+                "required": [
+                  "id",
+                  "first_name",
+                  "last_name",
+                  "username",
+                  "email_address",
+                  "image_url",
+                  "console_access"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The account signed in to this instance on this browser (its own `__client` session), if any."
+          },
+          "setup_required": {
+            "type": "boolean",
+            "description": "The instance has no account yet. The first person to finish `POST /v1/operator_sessions/setup` becomes its owner."
+          },
+          "console_unclaimed": {
+            "type": "boolean",
+            "description": "Accounts exist but none can open the console (an instance from before owners). Whoever runs the server grants the Owner role with `orbitid owner <email>`."
+          }
+        },
+        "required": [
+          "object",
+          "operator_session",
+          "user",
+          "setup_required",
+          "console_unclaimed"
+        ],
+        "description": "Everything the dashboard needs to choose its first screen, in one answer."
       }
     },
     "responses": {

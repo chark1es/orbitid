@@ -62,6 +62,14 @@ impl Harness {
         self.client.delete(path, None, bearer()).await
     }
 
+    /// An owner signed in on this browser with the console open; its `cookie`
+    /// carries both the account and the console cookie.
+    pub async fn console(&self) -> orbitid_identity::testing::TestConsole {
+        orbitid_identity::testing::create_test_console(self.state(), "console-owner@example.com")
+            .await
+            .expect("console session")
+    }
+
     /// A request with the operator cookie instead of the bearer key.
     pub async fn cookie(&self, path: &str, cookie: &str) -> TestResponse {
         self.client.get(path, &[("cookie", cookie)]).await

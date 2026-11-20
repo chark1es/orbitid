@@ -168,24 +168,7 @@ async fn operator_cookie_does_not_authenticate_application_origin_writes() {
         }))
         .await
         .expect("settings");
-    let exchange = harness
-        .client
-        .post(
-            "/v1/operator_sessions",
-            Some(json!({ "secret_key": common::SECRET_KEY })),
-            &[("origin", "http://localhost:4000")],
-        )
-        .await;
-    assert_eq!(exchange.status, StatusCode::CREATED, "{}", exchange.text());
-    let cookie = exchange
-        .headers
-        .get_all(axum::http::header::SET_COOKIE)
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .find(|value| value.starts_with("__orbit_operator="))
-        .and_then(|value| value.split(';').next())
-        .map(str::to_string)
-        .expect("cookie");
+    let cookie = harness.console().await.cookie;
 
     let write = harness
         .client

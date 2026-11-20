@@ -12,7 +12,7 @@ use orbitid_core::config::EnvOverrides;
 use orbitid_core::error::{OrbitError, Result};
 use orbitid_core::http::now;
 use orbitid_core::ids::{id_prefix, new_id};
-use orbitid_core::models::{ClientRow, OrganizationRow, SessionRow, UserRow};
+use orbitid_core::models::{ClientRow, OperatorSessionRow, OrganizationRow, SessionRow, UserRow};
 use orbitid_core::state::AppState;
 use orbitid_core::testing::{test_state_with, TestContext};
 
@@ -165,6 +165,52 @@ pub async fn create_test_client_session(state: &AppState, user_id: &str) -> Resu
         token,
         session,
         jwt,
+    })
+}
+
+/// An owner signed in on a browser with the dashboard console open.
+#[derive(Debug, Clone)]
+pub struct TestConsole {
+    pub user: TestUser,
+    pub auth: TestSession,
+    pub operator: OperatorSessionRow,
+    /// The plaintext console cookie token.
+    pub token: String,
+    /// `__client=…; __orbit_operator=…`, ready for a `Cookie` header.
+    pub cookie: String,
+}
+
+/// Creates a user with the Owner role, signs it in and opens its console
+/// session: the only way into the dashboard now that the secret key is not one.
+pub async fn create_test_console(state: &AppState, email: &str) -> Result<TestConsole> {
+    let user = create_test_user(state, email, "correct horse battery staple").await?;
+    let mut tx = state.pool.begin().await?;
+    crate::locks::lock_user_on(&mut tx, user.id()).await?;
+    crate::authorization::replace_user_roles(
+        &mut tx,
+        user.id(),
+        &[crate::rbac::OWNER_ROLE_KEY.to_string()],
+        now(),
+    )
+    .await?;
+    tx.commit().await?;
+    let auth = create_test_client_session(state, user.id()).await?;
+    let (operator, token) = crate::operator_session::issue_user_operator_session(
+        state,
+        crate::operator_session::ConsoleUser {
+            user_id: user.id(),
+            session_id: &auth.session.id,
+        },
+        None,
+        None,
+    )
+    .await?;
+    Ok(TestConsole {
+        cookie: format!("{}; __orbit_operator={token}", auth.cookie),
+        user,
+        auth,
+        operator,
+        token,
     })
 }
 

@@ -33,9 +33,10 @@
 //! order above, or their statement is the only one in its transaction.
 //!
 //! Two worker advisory locks (`orbitid_retention`, `orbitid_anonymous_cleanup`)
-//! are taken at the start of their own transaction. They are never taken by any
-//! other transaction, so they cannot participate in a cycle; a worker still
-//! follows the row ranks after acquiring its lock.
+//! and the first-run `orbitid_owner_setup` lock are taken at the start of their
+//! own transaction. They are never taken by any other transaction, so they
+//! cannot participate in a cycle; the holder still follows the row ranks after
+//! acquiring its lock.
 //!
 //! A transaction that does not know the user or the client up front must first
 //! resolve it with a plain read and then acquire the locks in rank order, e.g.
