@@ -152,19 +152,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const withSession = useCallback((session: OperatorSession) => {
-    setStatus((current) => ({ ...(current ?? SIGNED_OUT), operator_session: session, setup_required: false }));
-  }, []);
-
   const openConsole = useCallback(async () => {
-    const session = await api<OperatorSession>("POST", "/operator_sessions/from_user");
+    // The answer carries the console session and the account it belongs to, set together: the browser may have
+    // switched accounts since this page loaded, and the menu must never name a different one.
+    const next = await api<OperatorStatus>("POST", "/operator_sessions/from_user");
+    if (!isOperatorStatus(next) || !next.operator_session) {
+      throw new ApiError(502, "unexpected_response", "The instance answered with an unexpected status.");
+    }
     queryClient.clear();
-    withSession(session);
-    // The browser may have switched accounts since this page loaded: settle on the account the server opened the
-    // console for, so the menu never names a different one.
-    await refresh().catch(() => undefined);
-    return session;
-  }, [queryClient, withSession, refresh]);
+    setStatus(next);
+    setStatusError(null);
+    return next.operator_session;
+  }, [queryClient]);
 
   const setupOwner = useCallback(
     async (input: OwnerSetupInput) => {

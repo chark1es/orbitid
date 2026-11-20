@@ -61,7 +61,7 @@ describe("operator session lifecycle", () => {
       calls.push(`${method} ${url}`);
       if (method === "POST") {
         signedIn = true;
-        return json(SESSION, 201);
+        return json(status({ operator_session: SESSION, user: OWNER }), 201);
       }
       if (method === "DELETE") {
         signedIn = false;
@@ -204,7 +204,7 @@ describe("account sign-in", () => {
       calls.push(`${method} ${url.replace(window.location.origin, "")}`);
       if (url.endsWith("/from_user")) {
         console_ = true;
-        return json(SESSION, 201);
+        return json(status({ operator_session: SESSION, user: OWNER }), 201);
       }
       if (method === "DELETE") {
         console_ = false;
@@ -240,7 +240,7 @@ describe("account sign-in", () => {
       const url = String(input);
       if (url.endsWith("/from_user")) {
         opened = true;
-        return json({ ...SESSION, user_id: OTHER.id }, 201);
+        return json(status({ operator_session: { ...SESSION, user_id: OTHER.id }, user: OTHER }), 201);
       }
       // Another tab switched the browser to OTHER after this page loaded with OWNER.
       return json(status({ operator_session: opened ? { ...SESSION, user_id: OTHER.id } : null, user: opened ? OTHER : OWNER }));
@@ -279,7 +279,7 @@ describe("operator sign-out failures", () => {
       const method = init?.method ?? "GET";
       if (method === "POST") {
         signedIn = true;
-        return json(SESSION, 201);
+        return json(status({ operator_session: SESSION, user: OWNER }), 201);
       }
       if (method === "DELETE") return json({ errors: [{ code: "internal_server_error", message: "Server error" }] }, 500);
       return json(status({ operator_session: signedIn ? SESSION : null }));
@@ -301,7 +301,7 @@ describe("operator sign-out failures", () => {
       const method = init?.method ?? "GET";
       if (method === "POST") {
         live = true;
-        return json(SESSION, 201);
+        return json(status({ operator_session: SESSION, user: OWNER }), 201);
       }
       if (method === "DELETE") {
         live = false;

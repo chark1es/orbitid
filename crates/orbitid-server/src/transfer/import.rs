@@ -92,6 +92,15 @@ async fn import_into(
     let mut columns: HashMap<String, Vec<ColumnInfo>> = HashMap::new();
 
     let mut tx = pool.begin().await.map_err(db)?;
+    // The owner-setup claim lock first, holding nothing else: a restore is never
+    // a fresh instance, so dashboard owner setup must not run alongside it and
+    // win on a restore without accounts. Setup and `orbitid owner` wait for the
+    // import (they hold nothing while they wait); the `users` trigger only
+    // try-takes the lock and leaves the claim to the import.
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtext('orbitid_owner_setup')::bigint)")
+        .execute(&mut *tx)
+        .await
+        .map_err(db)?;
     loop {
         let Some(line) = reader.next().await? else {
             break;
@@ -188,13 +197,11 @@ async fn import_into(
         .map_err(db)?;
     // A restored instance is never a fresh one: claim it, so dashboard owner
     // setup cannot open on it (even when the export has no accounts).
-    // Only try the claim lock: when owner setup or a first account holds it,
-    // they are claiming the instance already, and waiting here (holding every
-    // imported table) could deadlock with them.
+    // Claimed under the lock taken at the start, even when the export has no
+    // accounts.
     sqlx::query(
         "INSERT INTO console_owner_setup (id, claimed_at) \
-         SELECT 'default', (extract(epoch FROM clock_timestamp()) * 1000)::bigint \
-         WHERE pg_try_advisory_xact_lock(hashtext('orbitid_owner_setup')::bigint) \
+         VALUES ('default', (extract(epoch FROM clock_timestamp()) * 1000)::bigint) \
          ON CONFLICT (id) DO NOTHING",
     )
     .execute(&mut *tx)

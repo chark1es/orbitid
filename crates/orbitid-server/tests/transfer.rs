@@ -273,6 +273,56 @@ async fn a_missing_not_null_column_without_a_default_fails_with_a_clear_message(
     let _ = tokio::fs::remove_file(&stripped).await;
 }
 
+/// A restore without any account still claims the target, so dashboard owner
+/// setup cannot open on it, and an owner setup that runs alongside the import
+/// waits for it and then finds the instance claimed.
+#[tokio::test]
+async fn a_restore_without_accounts_claims_the_target_and_setup_waits_for_it() {
+    let source_db = EphemeralDb::create().await.expect("source db");
+    let target_db = EphemeralDb::create().await.expect("target db");
+    let source = state(&source_db.url).await;
+    let target = state(&target_db.url).await;
+    assert!(orbitid_identity::console::setup_required(&target)
+        .await
+        .unwrap());
+
+    let path = temp_file();
+    let path_text = path.to_string_lossy().to_string();
+    export_database(&source, &path_text, &|_| {})
+        .await
+        .expect("export");
+    let owner = orbitid_identity::console::OwnerInput {
+        email: "owner@transfer.test".into(),
+        password_hash: orbitid_credentials::passwords::hash_password(
+            "correct horse battery staple",
+        )
+        .await
+        .unwrap(),
+        first_name: None,
+        last_name: None,
+    };
+    let (imported, setup) = tokio::join!(
+        import_database(&target, &path_text, false, false, &|_| {}),
+        async {
+            // Let the import take the claim lock first, as it does at its start.
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+            orbitid_identity::console::create_owner(&target, &owner).await
+        }
+    );
+    assert!(imported.expect("import").ok);
+    assert!(!orbitid_identity::console::setup_required(&target)
+        .await
+        .unwrap());
+    let owners: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM user_roles WHERE role_key = 'app:sys_owner'")
+            .fetch_one(&target.pool)
+            .await
+            .unwrap();
+    assert!(setup.expect("setup").is_none());
+    assert_eq!(owners, 0);
+    let _ = tokio::fs::remove_file(&path).await;
+}
+
 #[tokio::test]
 async fn refuses_a_populated_target_without_truncate_yes() {
     let source_db = EphemeralDb::create().await.expect("source db");

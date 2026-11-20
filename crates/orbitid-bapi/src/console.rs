@@ -290,7 +290,7 @@ pub async fn setup(
 }
 
 /// `POST /v1/operator_sessions/from_user`: open the console for the account
-/// signed in on this browser.
+/// signed in on this browser. Answers with the whole status.
 pub async fn from_user(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -338,7 +338,17 @@ pub async fn from_user(
             .ip(ip),
     )
     .await;
-    let mut response = json_status(StatusCode::CREATED, operator_session_json(&row));
+    // The whole status, like setup: the dashboard updates the console session
+    // and the account it belongs to together, so the menu never shows another
+    // account (the browser may have switched since the page loaded).
+    let body = json!({
+        "object": "operator_status",
+        "operator_session": operator_session_json(&row),
+        "user": account_json(&state, &caller.user).await?,
+        "setup_required": false,
+        "console_unclaimed": false,
+    });
+    let mut response = json_status(StatusCode::CREATED, body);
     set_operator_cookie(response.headers_mut(), &state, &token);
     Ok(response)
 }

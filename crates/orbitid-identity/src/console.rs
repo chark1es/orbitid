@@ -97,6 +97,34 @@ impl std::fmt::Debug for OwnerInput {
 /// it cannot join a lock cycle; after it the transaction follows the claim row,
 /// then the global order (user rows, then `user_roles`).
 pub async fn create_owner(state: &AppState, input: &OwnerInput) -> Result<Option<UserRow>> {
+    let result = try_create_owner(state, input).await;
+    if result.is_err() {
+        // A first account created while setup held the claim lock skipped its
+        // own claim, and this failed setup just rolled the claim back. Restore
+        // it, so the instance stays claimed if that account is deleted later.
+        let _ = claim_if_accounts_exist(state).await;
+    }
+    result
+}
+
+/// Claims the instance when it has any real account. Takes the claim lock
+/// first, holding nothing else.
+async fn claim_if_accounts_exist(state: &AppState) -> Result<()> {
+    let mut tx = state.pool.begin().await?;
+    sqlx::query(CLAIM_LOCK).execute(&mut *tx).await?;
+    sqlx::query(
+        "INSERT INTO console_owner_setup (id, claimed_at) \
+         SELECT 'default', $1 WHERE EXISTS (SELECT 1 FROM users WHERE NOT is_anonymous) \
+         ON CONFLICT (id) DO NOTHING",
+    )
+    .bind(now())
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+async fn try_create_owner(state: &AppState, input: &OwnerInput) -> Result<Option<UserRow>> {
     let mut tx = state.pool.begin().await?;
     sqlx::query(CLAIM_LOCK).execute(&mut *tx).await?;
     let available: bool = sqlx::query_scalar(SETUP_OPEN).fetch_one(&mut *tx).await?;

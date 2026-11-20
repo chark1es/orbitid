@@ -95,7 +95,7 @@ function mockApi(options: MockOptions = {}) {
     if (url.includes("/v1/operator_sessions/from_user")) {
       if (!account?.console_access) return json({ errors: [{ code: "not_allowed_access", message: "No console access" }] }, 403);
       live = true;
-      return json(session(), 201);
+      return json({ object: "operator_status", operator_session: session(), user: account, setup_required: false, console_unclaimed: false }, 201);
     }
     if (url.endsWith("/health")) return json(options.health ?? { status: "ok", publishable_key: "pk_test_demo" });
     if (url.includes("/v1/stats")) return json(STATS);

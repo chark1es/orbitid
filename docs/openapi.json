@@ -292,11 +292,11 @@
         "security": [],
         "responses": {
           "201": {
-            "description": "Sets the `__orbit_operator` cookie.",
+            "description": "Sets the `__orbit_operator` cookie and answers with the status: the new console session and the account it belongs to.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OperatorSession"
+                  "$ref": "#/components/schemas/OperatorStatus"
                 }
               }
             },

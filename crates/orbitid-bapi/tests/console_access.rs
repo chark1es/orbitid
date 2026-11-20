@@ -295,6 +295,12 @@ async fn an_account_opens_the_console_only_while_a_role_grants_it() {
         )
         .await;
     assert_eq!(opened.status, StatusCode::CREATED, "{}", opened.text());
+    // The answer names the account the console belongs to.
+    assert_eq!(opened.value()["user"]["id"], user_id.as_str());
+    assert_eq!(
+        opened.value()["operator_session"]["user_id"],
+        user_id.as_str()
+    );
     let operator = cookie_pair(&opened, "__orbit_operator").expect("operator cookie");
     assert_eq!(
         harness.cookie("/v1/users", &operator).await.status,
