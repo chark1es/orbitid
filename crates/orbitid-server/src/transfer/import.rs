@@ -191,8 +191,6 @@ async fn import_into(
         .execute(&mut *tx)
         .await
         .map_err(db)?;
-    // A restored instance is never a fresh one: claim it, so dashboard owner
-    // setup cannot open on it (even when the export has no accounts).
 
     let header = header.ok_or_else(|| {
         "The input is empty: expected a JSON Lines export header on the first line".to_string()

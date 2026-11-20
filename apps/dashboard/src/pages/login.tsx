@@ -93,7 +93,8 @@ export default function LoginPage() {
 
   // Start downloading the sign-in form the moment we know it will be needed.
   useEffect(() => {
-    if (view === "sign-in") void loadAccountSignIn();
+    // A failed download is reported by the mounted form; the preload only starts it early.
+    if (view === "sign-in") loadAccountSignIn().catch(() => undefined);
   }, [view]);
 
   /** After signing in here, go straight into the console when the account may open it. */

@@ -115,6 +115,14 @@ pub async fn create_owner(state: &AppState, input: &OwnerInput) -> Result<Option
 /// found the lock held by a setup or import that later rolled back) cannot
 /// reopen setup by being deleted.
 pub async fn claim_on(conn: &mut sqlx::PgConnection) -> Result<()> {
+    // The row is never removed: once it exists there is nothing to guard, and
+    // deletions must not queue on the claim lock for the life of the instance.
+    let claimed: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM console_owner_setup)")
+        .fetch_one(&mut *conn)
+        .await?;
+    if claimed {
+        return Ok(());
+    }
     sqlx::query(CLAIM_LOCK).execute(&mut *conn).await?;
     sqlx::query(CLAIM)
         .bind(now())
