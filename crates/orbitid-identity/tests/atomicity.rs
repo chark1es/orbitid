@@ -12,7 +12,9 @@ use orbitid_core::http::now;
 use orbitid_core::ids::{id_prefix, new_id};
 use orbitid_core::models::VerificationRow;
 use orbitid_identity::external_identity::{link_external_account, ExternalProfile};
-use orbitid_identity::testing::{create_test_client_session, create_test_user, test_app_state};
+use orbitid_identity::testing::{
+    create_test_client_session, create_test_user, test_app_state, test_app_state_with,
+};
 use orbitid_identity::users::guards::record_failed_attempt;
 use orbitid_identity::verifications::{issue_verification, IssueVerificationInput};
 
@@ -214,7 +216,10 @@ async fn issuing_a_verification_rolls_back_the_invalidation_on_failure() {
 
 #[tokio::test]
 async fn concurrent_issues_leave_exactly_one_live_verification() {
-    let app = test_app_state().await;
+    // Two issues run at once, each in its own transaction, so the pool needs a
+    // connection for each. On one connection the second waits out the first and
+    // can hit the acquire timeout on a slow runner.
+    let app = test_app_state_with(orbitid_core::testing::test_pool_exemption(2)).await;
     let state = Arc::new(app.state().clone());
     let user = create_test_user(state.as_ref(), "race-issue@example.com", "Sup3r-secret!")
         .await
