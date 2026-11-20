@@ -153,12 +153,14 @@ export default function LoginPage() {
               <div className="mt-8">
                 <AccountSignInSlot onSignedIn={() => void afterAccountSignIn()} />
               </div>
-              {openError ? (
-                <div className="mt-5">
-                  <FormError id="open-error" title="Could not open the console" message={openError} />
-                </div>
-              ) : null}
             </>
+          ) : null}
+          {/* After signing in, the screen switches to the signed-in account before the console opens: show a failure
+              there too, next to its manual "Open the admin console". */}
+          {openError && (view === "sign-in" || view === "account") ? (
+            <div className="mt-5">
+              <FormError id="open-error" title="Could not open the console" message={openError} />
+            </div>
           ) : null}
         </section>
 

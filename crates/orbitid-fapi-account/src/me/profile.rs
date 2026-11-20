@@ -225,6 +225,7 @@ pub async fn delete_account(
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
+    orbitid_identity::console::claim_after_account_deleted(&state, &me.user).await;
     let secure =
         orbitid_core::http::request_is_secure(&headers, &state.env.base_url, state.env.trust_proxy);
     let mut cookies = cookies;

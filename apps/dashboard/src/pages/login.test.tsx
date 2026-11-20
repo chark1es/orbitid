@@ -56,6 +56,8 @@ interface MockOptions {
   account?: typeof ACCOUNT | null;
   /** Answer the status check with `429` and this `Retry-After` until `lift()` is called. */
   statusRetryAfter?: number;
+  /** Answer `POST /from_user` with `429` and this `Retry-After`. */
+  openRetryAfter?: number;
   health?: Record<string, unknown>;
 }
 
@@ -91,6 +93,12 @@ function mockApi(options: MockOptions = {}) {
       setupRequired = false;
       account = ACCOUNT;
       return json({ object: "operator_status", operator_session: session(), user: ACCOUNT, setup_required: false, console_unclaimed: false }, 201);
+    }
+    if (url.includes("/v1/operator_sessions/from_user") && options.openRetryAfter !== undefined) {
+      return new Response(JSON.stringify({ errors: [{ code: "rate_limit_exceeded", message: "Too many requests. Please try again later." }] }), {
+        status: 429,
+        headers: { "Content-Type": "application/json", "Retry-After": String(options.openRetryAfter) },
+      });
     }
     if (url.includes("/v1/operator_sessions/from_user")) {
       if (!account?.console_access) return json({ errors: [{ code: "not_allowed_access", message: "No console access" }] }, 403);
@@ -265,5 +273,16 @@ describe("account console access", () => {
     renderApp("/");
     expect(await screen.findByText("No access to the console")).toBeTruthy();
     expect(screen.getByText("orbitid owner ada@example.com")).toBeTruthy();
+  });
+
+  it("shows why the console did not open after signing in", async () => {
+    const { signInAccount } = mockApi({ openRetryAfter: 20 });
+    renderApp("/");
+    const form = await screen.findByRole("button", { name: "Account sign-in form" });
+    signInAccount(ACCOUNT);
+    fireEvent.click(form);
+    expect(await screen.findByText("You are signed in")).toBeTruthy();
+    expect(await screen.findByText("Too many attempts. Try again in 20 seconds.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Open the admin console/ })).toBeTruthy();
   });
 });

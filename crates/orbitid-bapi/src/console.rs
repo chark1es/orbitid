@@ -316,6 +316,9 @@ pub async fn from_user(
             "This account has no access to the admin console. Ask an owner to give it the Administrator role.",
         ));
     }
+    // Read before anything changes: a failure here must not leave the browser
+    // with its old console revoked and no new cookie.
+    let account = account_json(&state, &caller.user).await?;
     let user_agent = header_str(&headers, "user-agent");
     // One console session per browser: opening it again replaces the cookie.
     let _ = revoke_operator_session(&state, &headers).await;
@@ -344,7 +347,7 @@ pub async fn from_user(
     let body = json!({
         "object": "operator_status",
         "operator_session": operator_session_json(&row),
-        "user": account_json(&state, &caller.user).await?,
+        "user": account,
         "setup_required": false,
         "console_unclaimed": false,
     });

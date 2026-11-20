@@ -883,3 +883,25 @@ async fn signing_out_after_a_switch_ends_both_accounts() {
         assert_ne!(status, "active", "{id}");
     }
 }
+
+/// Deleting a real account claims the instance, so an account whose own claim
+/// was skipped (its trigger found the lock held by a setup or import that then
+/// rolled back) cannot reopen owner setup by being deleted.
+#[tokio::test]
+async fn deleting_an_unclaimed_real_account_claims_the_instance() {
+    let harness = setup().await;
+    let user = harness
+        .create_user(json!({ "email_address": ["first@example.com"], "password": PASSWORD }))
+        .await;
+    // The skipped-claim state.
+    sqlx::query("DELETE FROM console_owner_setup")
+        .execute(&harness.state().pool)
+        .await
+        .unwrap();
+    let user_id = user["id"].as_str().unwrap();
+    assert_eq!(
+        harness.delete(&format!("/v1/users/{user_id}")).await.status,
+        StatusCode::OK
+    );
+    assert_eq!(status(&harness, "").await["setup_required"], false);
+}

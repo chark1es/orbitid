@@ -107,6 +107,30 @@ pub async fn create_owner(state: &AppState, input: &OwnerInput) -> Result<Option
     result
 }
 
+/// Marks the instance claimed for good. Takes the claim lock first, holding
+/// nothing else, so it never joins a lock cycle.
+pub async fn claim_instance(state: &AppState) -> Result<()> {
+    let mut tx = state.pool.begin().await?;
+    sqlx::query(CLAIM_LOCK).execute(&mut *tx).await?;
+    sqlx::query(CLAIM)
+        .bind(now())
+        .fetch_optional(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Call after deleting a real (non-guest) account, once that transaction has
+/// committed. Owner setup can only reopen once every account is gone, so this
+/// closes it for good even when a first account's own claim was skipped (its
+/// trigger found the claim lock held by a setup or import that later rolled
+/// back). Best effort: the deletion already happened.
+pub async fn claim_after_account_deleted(state: &AppState, user: &UserRow) {
+    if !user.is_anonymous {
+        let _ = claim_instance(state).await;
+    }
+}
+
 /// Claims the instance when it has any real account. Takes the claim lock
 /// first, holding nothing else.
 async fn claim_if_accounts_exist(state: &AppState) -> Result<()> {

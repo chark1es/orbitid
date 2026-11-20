@@ -47,6 +47,7 @@ async fn remove(State(state): State<AppState>, Path(id): Path<String>) -> Result
             "User not found",
         ));
     };
+    orbitid_identity::console::claim_after_account_deleted(&state, &user).await;
     audit(
         &state,
         AuditInput::new("user.deleted")

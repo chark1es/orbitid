@@ -346,8 +346,11 @@ pub async fn set_primary_phone(
 /// and handles memberships and admin-less organizations in one transaction.
 pub async fn delete_user(state: &AppState, user_id: &str) -> Result<()> {
     let mut tx = state.pool.begin().await?;
-    delete_user_on(&mut tx, state, user_id).await?;
+    let deleted = delete_user_on(&mut tx, state, user_id).await?;
     tx.commit().await?;
+    if let Some(user) = deleted.as_ref() {
+        crate::console::claim_after_account_deleted(state, user).await;
+    }
     Ok(())
 }
 
