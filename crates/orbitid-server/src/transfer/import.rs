@@ -243,7 +243,7 @@ async fn import_into(
 }
 
 /// Marks the target claimed (dashboard owner setup closed) before any import
-/// work starts. Mirrors `orbitid_identity::console::claim_instance`.
+/// work starts, in its own transaction. Mirrors `orbitid_identity::console::claim_on`.
 async fn claim_target(pool: &PgPool) -> TransferResult<()> {
     let mut tx = pool.begin().await.map_err(db)?;
     sqlx::query("SELECT pg_advisory_xact_lock(hashtext('orbitid_owner_setup')::bigint)")
