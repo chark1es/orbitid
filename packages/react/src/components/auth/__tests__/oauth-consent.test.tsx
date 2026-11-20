@@ -12,6 +12,16 @@ function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
 }
 
+/**
+ * The decision buttons stay disabled until `/oauth/consent_info` resolves, and a click on a disabled
+ * button is dropped. Wait until the button is enabled so a slow runner cannot lose the click.
+ */
+async function clickDecision(name: "Allow" | "Deny") {
+  const button = await screen.findByRole("button", { name });
+  await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false), { timeout: 5000 });
+  fireEvent.click(button);
+}
+
 /** Minimal snake_case `/v1/client/environment` payload for a real `@orbitid/js` instance. */
 function environmentWire() {
   const environment = authEnvironment();
@@ -194,7 +204,7 @@ describe("OAuthConsent", () => {
       <OAuthConsent clientId="oa_1" scope="openid" redirectUri="https://app.example.com/callback" />,
       harness,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Deny" }));
+    await clickDecision("Deny");
     await waitFor(() => expect(harness.instance.navigations.at(-1)?.to).toBe("/denied"));
     expect(requested.some((url) => url.startsWith("https://api.example.com/oauth/consent"))).toBe(true);
     expect(requested.every((url) => !url.startsWith("/"))).toBe(true);
@@ -226,7 +236,7 @@ describe("OAuthConsent", () => {
       <OAuthConsent clientId="oa_1" scope="openid" redirectUri="https://app.example.com/callback" frontendApiUrl="https://auth.example.com" />,
       setupAuth(),
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Allow" }));
+    await clickDecision("Allow");
     expect(await screen.findByText(/not found/i, {}, { timeout: 5000 })).toBeTruthy();
   });
 
@@ -245,7 +255,7 @@ describe("OAuthConsent", () => {
       vi.stubGlobal("fetch", fetchMock);
       const harness = setupAuth();
       renderAuth(<OAuthConsent frontendApiUrl="https://auth.example.com" />, harness);
-      fireEvent.click(await screen.findByRole("button", { name: "Allow" }));
+      await clickDecision("Allow");
       await waitFor(() => expect(posted).toHaveLength(1));
       expect(posted[0]).toMatchObject({
         client_id: "oa_1", approve: true, redirect_uri: "https://app.example.com/callback", state: "xyz",
