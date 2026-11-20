@@ -32,9 +32,11 @@ use crate::users::{
 const SETUP_OPEN: &str = "SELECT NOT EXISTS (SELECT 1 FROM console_owner_setup) \
      AND NOT EXISTS (SELECT 1 FROM users WHERE NOT is_anonymous)";
 
-/// Records that the instance has an owner. Never removed.
+/// Records that the instance is claimed. Never removed. Returns the row only
+/// when this statement claimed it; a claim another transaction holds makes it
+/// wait for that transaction, then return nothing if it committed.
 const CLAIM: &str = "INSERT INTO console_owner_setup (id, claimed_at) VALUES ('default', $1) \
-     ON CONFLICT (id) DO NOTHING";
+     ON CONFLICT (id) DO NOTHING RETURNING id";
 
 /// True while the instance has no account yet, so the dashboard offers owner setup.
 pub async fn setup_required(state: &AppState) -> Result<bool> {
@@ -94,7 +96,18 @@ pub async fn create_owner(state: &AppState, input: &OwnerInput) -> Result<Option
         .execute(&mut *tx)
         .await?;
     let available: bool = sqlx::query_scalar(SETUP_OPEN).fetch_one(&mut *tx).await?;
-    if !available {
+    // Winning the claim is what makes this the owner: a sign-up that created the
+    // first account meanwhile claimed it first (its `users` trigger), and the
+    // insert then finds the row and returns nothing.
+    let claimed: Option<String> = if available {
+        sqlx::query_scalar(CLAIM)
+            .bind(now())
+            .fetch_optional(&mut *tx)
+            .await?
+    } else {
+        None
+    };
+    if claimed.is_none() {
         // Release the advisory lock now rather than when the connection is
         // recycled (docs/LOCK_ORDER.md, explicit rollback).
         tx.rollback().await?;
@@ -115,7 +128,6 @@ pub async fn create_owner(state: &AppState, input: &OwnerInput) -> Result<Option
     emit_user_created_on(&mut tx, state, &user, &create).await?;
     lock_user_on(&mut tx, &user.id).await?;
     replace_user_roles(&mut tx, &user.id, &[OWNER_ROLE_KEY.to_string()], now()).await?;
-    sqlx::query(CLAIM).bind(now()).execute(&mut *tx).await?;
     tx.commit().await?;
     after_user_created(state, &user, &create).await?;
     Ok(Some(user))
@@ -149,8 +161,14 @@ pub async fn grant_owner(state: &AppState, account: &str) -> Result<OwnerGrant> 
             format!("No account has the user id or verified email address {account}."),
         ));
     };
-    // Rank 3 (user row) before rank 10 (`user_roles`), like every role change.
+    // The claim first, like owner setup (claim, then user, then `user_roles`):
+    // granting an owner claims the instance, so setup can never reopen.
     let mut tx = state.pool.begin().await?;
+    sqlx::query(CLAIM)
+        .bind(now())
+        .fetch_optional(&mut *tx)
+        .await?;
+    // Rank 3 (user row) before rank 10 (`user_roles`), like every role change.
     lock_user_on(&mut tx, &user.id).await?;
     // Read under the lock, so a ban that lands meanwhile is honoured.
     let banned: bool = sqlx::query_scalar("SELECT banned FROM users WHERE id = $1")
@@ -178,8 +196,6 @@ pub async fn grant_owner(state: &AppState, account: &str) -> Result<OwnerGrant> 
     }
     roles.push(OWNER_ROLE_KEY.to_string());
     replace_user_roles(&mut tx, &user.id, &roles, now()).await?;
-    // Granting an owner claims the instance too, so setup can never reopen.
-    sqlx::query(CLAIM).bind(now()).execute(&mut *tx).await?;
     let json = serialize_user_on(
         &mut tx,
         state,

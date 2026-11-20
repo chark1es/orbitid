@@ -688,3 +688,81 @@ async fn console_activity_is_refreshed_within_a_short_inactivity_timeout() {
         .unwrap();
     assert!(touched > stale + 10_000, "{touched} vs {stale}");
 }
+
+/// Winning the claim is what makes setup create the owner: if the first
+/// account's claim is in flight (a concurrent sign-up), setup waits for it and
+/// gives up once it commits, instead of minting an Owner beside it.
+#[tokio::test]
+async fn setup_loses_to_a_first_account_that_claims_while_it_runs() {
+    let harness = setup().await;
+    // A sign-up's `users` trigger, caught between its claim and its commit.
+    let mut signup = harness.state().pool.begin().await.unwrap();
+    sqlx::query("INSERT INTO console_owner_setup (id, claimed_at) VALUES ('default', 1)")
+        .execute(&mut *signup)
+        .await
+        .unwrap();
+
+    let request = setup_owner(&harness, "late-owner@example.com");
+    let commit = async {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        signup.commit().await.unwrap();
+    };
+    let (response, ()) = tokio::join!(request, commit);
+    assert_eq!(
+        response.status,
+        StatusCode::FORBIDDEN,
+        "{}",
+        response.text()
+    );
+    assert!(cookie_pair(&response, "__orbit_operator").is_none());
+    let owners: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM user_roles WHERE role_key = 'app:sys_owner'")
+            .fetch_one(&harness.state().pool)
+            .await
+            .unwrap();
+    assert_eq!(owners, 0);
+}
+
+/// With a console open, status reports the account that opened it, even after
+/// the browser switched its active account (multi-session).
+#[tokio::test]
+async fn status_names_the_console_account_after_a_session_switch() {
+    let harness = setup().await;
+    let created = setup_owner(&harness, "owner@example.com").await;
+    let cookies = cookies_of(&created);
+    let owner_id = created.value()["user"]["id"].as_str().unwrap().to_string();
+    let other = harness
+        .create_user(json!({ "email_address": ["other@example.com"], "password": PASSWORD }))
+        .await;
+    let other_id = other["id"].as_str().unwrap().to_string();
+    let client_id: String = sqlx::query_scalar(
+        "SELECT s.client_id FROM sessions s JOIN operator_sessions o ON o.session_id = s.id",
+    )
+    .fetch_one(&harness.state().pool)
+    .await
+    .unwrap();
+    let now = orbitid_core::http::now();
+    let switched = orbitid_core::ids::new_id(orbitid_core::ids::id_prefix::SESSION);
+    sqlx::query(
+        "INSERT INTO sessions (id, client_id, user_id, status, last_active_at, expire_at, \
+         abandon_at, created_at, updated_at) VALUES ($1,$2,$3,'active',$4,$5,$5,$4,$4)",
+    )
+    .bind(&switched)
+    .bind(&client_id)
+    .bind(&other_id)
+    .bind(now)
+    .bind(now + 3_600_000)
+    .execute(&harness.state().pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE clients SET last_active_session_id = $1 WHERE id = $2")
+        .bind(&switched)
+        .bind(&client_id)
+        .execute(&harness.state().pool)
+        .await
+        .unwrap();
+
+    let body = status(&harness, &cookies).await;
+    assert_eq!(body["operator_session"]["user_id"], owner_id.as_str());
+    assert_eq!(body["user"]["id"], owner_id.as_str());
+}

@@ -491,3 +491,46 @@ async fn junk_cookies_cannot_use_up_a_real_sign_out() {
         StatusCode::UNAUTHORIZED
     );
 }
+
+#[tokio::test]
+async fn replaying_a_signed_out_cookie_is_charged_and_audited_once() {
+    let harness = setup().await;
+    let console = harness.console().await;
+    let out = harness
+        .client
+        .delete(
+            "/v1/operator_sessions/current",
+            None,
+            &[("cookie", &console.cookie)],
+        )
+        .await;
+    assert_eq!(out.status, StatusCode::NO_CONTENT);
+    for _ in 0..30 {
+        let replay = harness
+            .client
+            .delete(
+                "/v1/operator_sessions/current",
+                None,
+                &[("cookie", &console.cookie)],
+            )
+            .await;
+        assert_eq!(replay.status, StatusCode::NO_CONTENT);
+    }
+    assert_rate_limited(
+        &harness
+            .client
+            .delete(
+                "/v1/operator_sessions/current",
+                None,
+                &[("cookie", &console.cookie)],
+            )
+            .await,
+    );
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_logs WHERE action = 'operator_session.revoked'",
+    )
+    .fetch_one(&harness.state().pool)
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+}

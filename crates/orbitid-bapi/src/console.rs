@@ -21,7 +21,7 @@ use orbitid_identity::operator_session::{
     operator_cookie_origin_allowed, revoke_operator_session, set_operator_cookie, ConsoleUser,
 };
 use orbitid_identity::sessions::{create_session, CreateSessionInput};
-use orbitid_identity::users::{is_valid_email, normalize_email, primary_email};
+use orbitid_identity::users::{get_user_by_id, is_valid_email, normalize_email, primary_email};
 use orbitid_platform::audit::{audit, AuditInput};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -112,9 +112,17 @@ async fn status_json(
     headers: &HeaderMap,
     operator: Option<OperatorSessionRow>,
 ) -> Result<Value> {
-    let caller = try_resolve_browser_caller(state, headers).await?;
-    let user = match caller.as_ref() {
-        Some(caller) if !caller.user.banned => Some(account_json(state, &caller.user).await?),
+    // With a console open, the account is the one that opened it, even if this
+    // browser has since switched its active account (multi-session): the
+    // console acts, and signs out, as that account.
+    let account = match operator.as_ref() {
+        Some(row) => get_user_by_id(state, &row.user_id).await?,
+        None => try_resolve_browser_caller(state, headers)
+            .await?
+            .map(|caller| caller.user),
+    };
+    let user = match account.as_ref() {
+        Some(user) if !user.banned => Some(account_json(state, user).await?),
         _ => None,
     };
     let setup = setup_required(state).await?;

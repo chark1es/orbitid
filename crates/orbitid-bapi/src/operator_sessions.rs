@@ -135,12 +135,13 @@ async fn sign_out(
         return Ok(response);
     }
     // The row behind the cookie even when it no longer authenticates (expired,
-    // access lost): the account session it was opened from still ends.
-    let row = operator_session_for_token(&state, &headers).await?;
+    // access lost): the account session it was opened from still ends. A row
+    // already revoked by an earlier sign-out has nothing left to end.
+    let row = operator_session_for_token(&state, &headers)
+        .await?
+        .filter(|row| row.revoked_at.is_none());
     // Signing out of the console signs the account out of this browser too:
     // the dashboard shows the account state, so "Sign out" must end both.
-    // The account session ends first, so a failure leaves both in place and a
-    // retry can finish the job.
     let mut account_session = row.as_ref().map(|row| row.session_id.clone());
     let account = query
         .0
@@ -151,25 +152,31 @@ async fn sign_out(
             .await?
             .map(|caller| caller.session_id);
     }
-    if row.is_none() && account_session.is_none() {
-        // Cookies that sign nothing out are the only ones charged, so junk
-        // traffic from a shared address cannot use up the budget a real
-        // sign-out needs.
+    let session = match account_session.as_deref() {
+        Some(id) => orbitid_identity::sessions::get_session(&state, id)
+            .await?
+            .filter(|session| session.status == "active" || session.status == "pending"),
+        None => None,
+    };
+    if row.is_none() && session.is_none() {
+        // Only a sign-out that ends something is free. Junk cookies, or a
+        // cookie replayed after it was already signed out, are charged, so they
+        // cannot use up the budget a real sign-out needs.
         limit(&state, &headers, peer, SIGN_OUT_BUDGET).await?;
         let mut response = StatusCode::NO_CONTENT.into_response();
         clear_operator_cookie(response.headers_mut());
         return Ok(response);
     }
     let ip = crate::shared::request_ip(&state, &headers, peer);
-    if let Some(session_id) = account_session.as_deref() {
-        if let Some(session) = orbitid_identity::sessions::get_session(&state, session_id).await? {
-            orbitid_identity::sessions::end_session(&state, &session, "ended").await?;
-        }
+    // The account session ends first, so a failure leaves both in place and a
+    // retry can finish the job.
+    if let Some(session) = session.as_ref() {
+        orbitid_identity::sessions::end_session(&state, session, "ended").await?;
     }
-    revoke_operator_session(&state, &headers).await?;
+    let revoked = revoke_operator_session(&state, &headers).await?;
     let mut response = StatusCode::NO_CONTENT.into_response();
     clear_operator_cookie(response.headers_mut());
-    if let Some(row) = row {
+    if let (Some(row), true) = (row, revoked) {
         audit(
             &state,
             AuditInput::new("operator_session.revoked")
