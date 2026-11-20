@@ -112,7 +112,8 @@ async fn current(
 }
 
 /// `DELETE /v1/operator_sessions/current[?account=true]`. Ends the console
-/// session and the account session behind it. `account=true` also signs this
+/// session and the account session behind it. A sign-out that finds something
+/// to end is never rate limited; one that finds nothing is charged. `account=true` also signs this
 /// browser's account out when no console session is open (the sign-in
 /// screen's "Sign out" for an account without console access).
 async fn sign_out(
@@ -133,7 +134,6 @@ async fn sign_out(
         clear_operator_cookie(response.headers_mut());
         return Ok(response);
     }
-    let ip = limit(&state, &headers, peer, SIGN_OUT_BUDGET).await?;
     // The row behind the cookie even when it no longer authenticates (expired,
     // access lost): the account session it was opened from still ends.
     let row = operator_session_for_token(&state, &headers).await?;
@@ -151,6 +151,16 @@ async fn sign_out(
             .await?
             .map(|caller| caller.session_id);
     }
+    if row.is_none() && account_session.is_none() {
+        // Cookies that sign nothing out are the only ones charged, so junk
+        // traffic from a shared address cannot use up the budget a real
+        // sign-out needs.
+        limit(&state, &headers, peer, SIGN_OUT_BUDGET).await?;
+        let mut response = StatusCode::NO_CONTENT.into_response();
+        clear_operator_cookie(response.headers_mut());
+        return Ok(response);
+    }
+    let ip = crate::shared::request_ip(&state, &headers, peer);
     if let Some(session_id) = account_session.as_deref() {
         if let Some(session) = orbitid_identity::sessions::get_session(&state, session_id).await? {
             orbitid_identity::sessions::end_session(&state, &session, "ended").await?;

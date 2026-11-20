@@ -450,3 +450,44 @@ async fn signing_out_without_credentials_spends_no_budget() {
         StatusCode::UNAUTHORIZED
     );
 }
+
+#[tokio::test]
+async fn junk_cookies_cannot_use_up_a_real_sign_out() {
+    let harness = setup().await;
+    for _ in 0..30 {
+        let junk = harness
+            .client
+            .delete(
+                "/v1/operator_sessions/current",
+                None,
+                &[("cookie", "__client=junk; __orbit_operator=junk")],
+            )
+            .await;
+        assert_eq!(junk.status, StatusCode::NO_CONTENT);
+    }
+    assert_rate_limited(
+        &harness
+            .client
+            .delete(
+                "/v1/operator_sessions/current",
+                None,
+                &[("cookie", "__client=junk")],
+            )
+            .await,
+    );
+    // A sign-out that ends something is never charged.
+    let console = harness.console().await;
+    let out = harness
+        .client
+        .delete(
+            "/v1/operator_sessions/current",
+            None,
+            &[("cookie", &console.cookie)],
+        )
+        .await;
+    assert_eq!(out.status, StatusCode::NO_CONTENT, "{}", out.text());
+    assert_eq!(
+        harness.cookie("/v1/instance", &console.cookie).await.status,
+        StatusCode::UNAUTHORIZED
+    );
+}

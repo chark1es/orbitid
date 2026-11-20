@@ -21,7 +21,8 @@ ALTER TABLE "operator_sessions" ALTER COLUMN "session_id" SET NOT NULL;
 
 -- First-run owner setup is offered once per instance. The row records that the
 -- instance has been claimed and is never removed, so deleting every account
--- later does not reopen setup. An instance that existed before this migration
+-- later does not reopen setup. The first real (non-guest) account claims the
+-- instance too (trigger below): setup is for an instance that never had one. An instance that existed before this migration
 -- (its settings row exists, or it has accounts) is claimed already: it never
 -- offers setup, and its operator grants the Owner role with `orbitid owner`.
 -- A fresh database has no settings row yet at this point (the server writes it
@@ -35,3 +36,22 @@ SELECT 'default', (extract(epoch FROM clock_timestamp()) * 1000)::bigint
 WHERE EXISTS (SELECT 1 FROM "instance")
    OR EXISTS (SELECT 1 FROM "users" WHERE NOT "is_anonymous")
 ON CONFLICT ("id") DO NOTHING;
+
+-- Claim on the first real account, whichever path creates it (sign-up, the
+-- Backend API, a guest upgrading, an import). It writes at most once: after the
+-- row exists the trigger only reads it.
+CREATE OR REPLACE FUNCTION "orbitid_claim_owner_setup"() RETURNS trigger AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM "console_owner_setup") THEN
+    INSERT INTO "console_owner_setup" ("id", "claimed_at")
+    VALUES ('default', (extract(epoch FROM clock_timestamp()) * 1000)::bigint)
+    ON CONFLICT ("id") DO NOTHING;
+  END IF;
+  RETURN NULL;
+END
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS "users_claim_owner_setup" ON "users";
+CREATE TRIGGER "users_claim_owner_setup"
+  AFTER INSERT OR UPDATE OF "is_anonymous" ON "users"
+  FOR EACH ROW WHEN (NOT NEW."is_anonymous")
+  EXECUTE FUNCTION "orbitid_claim_owner_setup"();

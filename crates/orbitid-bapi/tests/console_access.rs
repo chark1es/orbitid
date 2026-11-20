@@ -591,3 +591,100 @@ async fn signing_out_after_the_console_expired_signs_the_account_out() {
     assert_eq!(out.status, StatusCode::NO_CONTENT, "{}", out.text());
     assert!(status(&harness, &cookies).await["user"].is_null());
 }
+
+/// The first real account claims the instance, however it is created: an
+/// instance that ever had users never offers setup again, even once they are
+/// all deleted. Guests do not count.
+#[tokio::test]
+async fn the_first_real_account_claims_the_instance_and_guests_do_not() {
+    let harness = setup().await;
+    orbitid_identity::testing::create_test_guest(harness.state())
+        .await
+        .unwrap();
+    assert_eq!(status(&harness, "").await["setup_required"], true);
+
+    let user = harness
+        .create_user(json!({ "email_address": ["first@example.com"], "password": PASSWORD }))
+        .await;
+    let user_id = user["id"].as_str().unwrap();
+    assert_eq!(
+        harness.delete(&format!("/v1/users/{user_id}")).await.status,
+        StatusCode::OK
+    );
+    assert_eq!(status(&harness, "").await["setup_required"], false);
+    assert_eq!(
+        setup_owner(&harness, "late@example.com").await.status,
+        StatusCode::FORBIDDEN
+    );
+}
+
+/// Console access belongs to the Owner and Administrator system roles only, so
+/// editing a custom role can never grant it (or quietly restore it).
+#[tokio::test]
+async fn a_custom_role_cannot_carry_console_access() {
+    let harness = setup().await;
+    let created = harness
+        .post(
+            "/v1/roles",
+            json!({ "key": "app:ops", "name": "Ops", "permissions": ["app:sys_dashboard:access"] }),
+        )
+        .await;
+    assert_eq!(
+        created.status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{}",
+        created.text()
+    );
+    let role = harness
+        .post("/v1/roles", json!({ "key": "app:ops", "name": "Ops" }))
+        .await;
+    assert_eq!(role.status, StatusCode::OK, "{}", role.text());
+    let role_id = role.value()["id"].as_str().unwrap().to_string();
+    let updated = harness
+        .post(
+            &format!("/v1/roles/{role_id}/permissions"),
+            json!({ "permissions": ["app:sys_dashboard:access"] }),
+        )
+        .await;
+    assert_eq!(
+        updated.status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{}",
+        updated.text()
+    );
+}
+
+/// A sub-minute inactivity timeout still keeps an active operator signed in.
+#[tokio::test]
+async fn console_activity_is_refreshed_within_a_short_inactivity_timeout() {
+    let harness = setup().await;
+    let created = setup_owner(&harness, "owner@example.com").await;
+    let operator = cookie_pair(&created, "__orbit_operator").unwrap();
+    harness
+        .state()
+        .settings
+        .update(json!({ "session": { "inactivityTimeoutSeconds": 30 } }))
+        .await
+        .expect("settings");
+    let session_id: String = sqlx::query_scalar("SELECT session_id FROM operator_sessions")
+        .fetch_one(&harness.state().pool)
+        .await
+        .unwrap();
+    let stale = orbitid_core::http::now() - 20_000;
+    sqlx::query("UPDATE sessions SET last_active_at = $1 WHERE id = $2")
+        .bind(stale)
+        .bind(&session_id)
+        .execute(&harness.state().pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        harness.cookie("/v1/users", &operator).await.status,
+        StatusCode::OK
+    );
+    let touched: i64 = sqlx::query_scalar("SELECT last_active_at FROM sessions WHERE id = $1")
+        .bind(&session_id)
+        .fetch_one(&harness.state().pool)
+        .await
+        .unwrap();
+    assert!(touched > stale + 10_000, "{touched} vs {stale}");
+}

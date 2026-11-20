@@ -50,7 +50,7 @@ pub async fn console_unclaimed(state: &AppState) -> Result<bool> {
     Ok(sqlx::query_scalar::<_, bool>(
         "SELECT NOT EXISTS (SELECT 1 FROM user_roles ur \
          JOIN users u ON u.id = ur.user_id AND NOT u.banned \
-         JOIN roles r ON r.key = ur.role_key AND r.key LIKE 'app:%' \
+         JOIN roles r ON r.key = ur.role_key AND r.key IN ('app:sys_owner', 'app:sys_admin') \
          JOIN role_permissions rp ON rp.role_id = r.id \
          JOIN permissions p ON p.id = rp.permission_id AND p.key = $1)",
     )

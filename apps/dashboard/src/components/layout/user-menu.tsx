@@ -51,7 +51,8 @@ export function UserMenu() {
         <DropdownMenuSeparator />
         <DropdownMenuItem
           onClick={() => {
-            void signOut().then(
+            // `account: true`: even if the console cookie already expired, this browser's account signs out too.
+            void signOut({ account: true }).then(
               () => {
                 toast.success("Signed out");
                 navigate("/login", { replace: true, state: { from: location.pathname } });

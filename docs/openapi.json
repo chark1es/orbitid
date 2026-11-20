@@ -146,7 +146,7 @@
         ],
         "summary": "Sign out of the dashboard",
         "operationId": "revokeOperatorSession",
-        "description": "Revokes this browser's operator session and clears the cookie. A console opened from an account also ends that account's session on this browser. Safe to call without a session. A request with no cookies is a free no-op; others are rate limited to 30 requests a minute per address (the instance's rate limiting setting turns it off); over budget it answers `429` with `Retry-After`.",
+        "description": "Revokes this browser's operator session and clears the cookie. A console opened from an account also ends that account's session on this browser. Safe to call without a session. A sign-out that ends a session is never charged; one that finds nothing to end (no cookies, or cookies that match nothing) is rate limited to 30 requests a minute per address (the instance's rate limiting setting turns it off); over budget it answers `429` with `Retry-After`.",
         "security": [],
         "responses": {
           "204": {

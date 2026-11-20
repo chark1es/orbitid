@@ -17,12 +17,14 @@ sk_…`), nothing else.
   instead. `POST /v1/operator_sessions/setup` creates that account with the seeded **Owner** role
   (`app:sys_owner`), signs it in on this browser and opens the console in one step. Concurrent setups serialize on
   an advisory lock; exactly one wins. Setup closes once any account exists (`403`), and creating the owner claims
-  the instance for good (`console_owner_setup`): deleting every account later does not reopen it. An instance that
+  the instance for good (`console_owner_setup`), and so does the first real account created any other way (a
+  sign-up, the Backend API, a restore): deleting every account later does not reopen setup. An instance that
   existed before this version is claimed by its migration and never offers setup. Create the owner before you
   expose a new instance: until then, the first visitor can.
-- **Who may enter.** Any account whose instance roles grant `app:sys_dashboard:access`: the seeded **Owner** and
-  **Administrator** (`app:sys_admin`) roles do, and a custom `app:` role can carry the permission too. Grant it
-  from a user's page, under Roles.
+- **Who may enter.** Accounts with the seeded **Owner** (`app:sys_owner`) or **Administrator** (`app:sys_admin`)
+  role. Their `app:sys_dashboard:access` permission is reserved: a custom role cannot carry it, and system roles
+  cannot be edited or deleted, so only a change to an account's roles changes who may enter. Assign the roles from
+  a user's page, under Roles.
 - **What visitors see.** `/login` shows who is signed in on this browser. An account with access gets
   **Open the admin console** (`POST /v1/operator_sessions/from_user`); one without access is told so and can sign
   out. After signing in on that screen, an account with access goes straight into the console. Only this
@@ -85,14 +87,15 @@ Each address gets its own budget per route:
 | `GET /v1/operator_sessions/status`, `GET …/current` | 120 a minute (shared) |
 | `POST /v1/operator_sessions/setup` | 10 per 10 minutes (each attempt hashes a password) |
 | `POST /v1/operator_sessions/from_user` | 20 a minute |
-| `DELETE /v1/operator_sessions/current` | 30 a minute |
+| `DELETE /v1/operator_sessions/current` | 30 a minute (only sign-outs with nothing to end) |
 
 The account sign-in itself goes through the Frontend API, whose sign-in, sign-up and verification steps have their
 own limits. Over budget, a route answers `429 rate_limit_exceeded` with `Retry-After`, and the dashboard says how
 long to wait ("Too many attempts. Try again in 30 seconds."). The origin check runs before the counter, so another
 site cannot spend a visitor's budget for them. A status check that carries a live console cookie is not charged,
 and a sign-out with no cookies at all is a free no-op, so traffic from a shared address cannot sign working
-operators out. Behind a reverse proxy, set `ORBITID_TRUST_PROXY`; otherwise every client shares the proxy's
+operators out. A sign-out that ends something is never charged; only one that finds nothing to end is. Behind a
+reverse proxy, set `ORBITID_TRUST_PROXY`; otherwise every client shares the proxy's
 address and one budget. **Settings → User & authentication → Rate limiting** turns every
 limit off, these included.
 

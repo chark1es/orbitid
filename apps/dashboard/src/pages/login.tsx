@@ -216,8 +216,7 @@ function AccountHelp() {
           <dt className="font-medium">Owners and administrators</dt>
           <dd className="mt-0.5 text-muted-foreground">
             Accounts with the <span className="text-foreground">Owner</span> or{" "}
-            <span className="text-foreground">Administrator</span> role, or any instance role with the{" "}
-            <code className="font-data text-foreground">app:sys_dashboard:access</code> permission.
+            <span className="text-foreground">Administrator</span> role. An owner assigns them from a user&apos;s page.
           </dd>
         </div>
         <div>

@@ -210,7 +210,14 @@ const CONSOLE_TOUCH_INTERVAL_MS: i64 = 60_000;
 /// no other lock and cannot join a lock cycle.
 async fn touch_console_account_session(state: &AppState, session: &SessionRow) -> Result<()> {
     let now_ms = now();
-    if now_ms - session.last_active_at < CONSOLE_TOUCH_INTERVAL_MS {
+    // Refresh well inside a short inactivity timeout, too.
+    let timeout_ms = state.settings.get().session.inactivity_timeout_seconds * 1000;
+    let interval = if timeout_ms > 0 {
+        CONSOLE_TOUCH_INTERVAL_MS.min(timeout_ms / 2)
+    } else {
+        CONSOLE_TOUCH_INTERVAL_MS
+    };
+    if now_ms - session.last_active_at < interval {
         return Ok(());
     }
     sqlx::query(
@@ -219,7 +226,7 @@ async fn touch_console_account_session(state: &AppState, session: &SessionRow) -
     )
     .bind(now_ms)
     .bind(&session.id)
-    .bind(now_ms - CONSOLE_TOUCH_INTERVAL_MS)
+    .bind(now_ms - interval)
     .execute(&state.pool)
     .await?;
     Ok(())
@@ -236,9 +243,11 @@ pub async fn has_console_access(state: &AppState, user_id: &str) -> Result<bool>
     .await?)
 }
 
-/// `user_roles ur` rows whose instance role carries the permission bound as `$2`.
+/// `user_roles ur` rows whose role carries the permission bound as `$2`. Only
+/// the seeded Owner and Administrator system roles can (custom roles are
+/// refused the permission), and those cannot be edited or deleted.
 const CONSOLE_GRANT: &str = "SELECT 1 FROM user_roles ur \
-     JOIN roles r ON r.key = ur.role_key AND r.key LIKE 'app:%' \
+     JOIN roles r ON r.key = ur.role_key AND r.key IN ('app:sys_owner', 'app:sys_admin') \
      JOIN role_permissions rp ON rp.role_id = r.id \
      JOIN permissions p ON p.id = rp.permission_id AND p.key = $2";
 

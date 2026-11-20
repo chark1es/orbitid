@@ -22,7 +22,8 @@ encrypted with `ORBITID_ENCRYPTION_KEY`). Nothing is re-hashed or re-encrypted, 
 target must share the same encryption key.
 
 Tables whose contents describe a running process or a single deployment are not copied: rate-limit windows,
-and `operator_sessions` (dashboard logins). Everything else is, including webhook endpoints, deliveries,
+`operator_sessions` (dashboard logins) and `console_owner_setup` (an import always marks the target claimed, so
+dashboard owner setup never opens on a restored instance). Everything else is, including webhook endpoints, deliveries,
 audit logs, user sessions and one-time tokens; the target behaves like the source immediately.
 
 Dashboard logins are deliberately left behind. A console session is bound to the browser that opened it, and

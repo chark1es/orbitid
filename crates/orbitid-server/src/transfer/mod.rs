@@ -35,9 +35,11 @@ pub const SCHEMA_VERSION: &str = "postgres:10:0009_next_silver_sable";
 /// Ephemeral or environment-local tables that never move. `operator_sessions`
 /// are dashboard logins (copying them would revive cookies on the target);
 /// `rate_limits` (TS) and `rate_limit_windows` (this port) describe live traffic,
-/// not data.
-pub const SKIPPED_TABLES: [&str; 4] = [
+/// not data. `console_owner_setup` is the target's own claim: every import
+/// claims the target instead (a restore is never a fresh instance).
+pub const SKIPPED_TABLES: [&str; 5] = [
     "operator_sessions",
+    "console_owner_setup",
     "rate_limits",
     "rate_limit_windows",
     "worker_cursors",
@@ -46,7 +48,7 @@ pub const SKIPPED_TABLES: [&str; 4] = [
 /// "occupied" and are cleared before a normal import.
 pub const BOOTSTRAP_TABLES: [&str; 4] = ["instance", "roles", "permissions", "role_permissions"];
 /// Tables this port adds that a TypeScript export cannot contain.
-pub const RUST_ONLY_TABLES: [&str; 2] = ["uploads", "console_owner_setup"];
+pub const RUST_ONLY_TABLES: [&str; 1] = ["uploads"];
 
 pub type TransferResult<T> = Result<T, String>;
 

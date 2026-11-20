@@ -116,6 +116,17 @@ async fn export_and_import_round_trip_every_table() {
         .expect("import");
     assert!(imported.ok);
     assert!(imported.counts.iter().all(|count| count.ok));
+    // The claim is the target's own state: never exported, always set by an
+    // import, so dashboard owner setup cannot open on a restored instance.
+    assert!(!imported
+        .counts
+        .iter()
+        .any(|count| count.table == "console_owner_setup"));
+    let claimed: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM console_owner_setup")
+        .fetch_one(&target.pool)
+        .await
+        .expect("claim");
+    assert_eq!(claimed, 1);
 
     let target_hash: Option<String> = sqlx::query_scalar(
         "SELECT password_hash FROM users WHERE id = (SELECT user_id FROM email_addresses LIMIT 1)",
@@ -444,9 +455,9 @@ const TS_DECLARATION_ORDER: [&str; 42] = [
     "audit_logs",
 ];
 
-/// Tables this port added after the TypeScript schema (migrations 0002, 0004
-/// and 0016); a TypeScript export cannot contain them.
-const RUST_ONLY_EXPORTED_TABLES: [&str; 2] = ["uploads", "console_owner_setup"];
+/// Tables this port added after the TypeScript schema (migrations 0002 and
+/// 0004); a TypeScript export cannot contain them.
+const RUST_ONLY_EXPORTED_TABLES: [&str; 1] = ["uploads"];
 
 /// Columns this port added after the TypeScript schema (migrations 0005-0009);
 /// a TypeScript export cannot contain them, and the import must apply today's
