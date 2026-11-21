@@ -31,9 +31,8 @@ owner row at rank 3 as shown above. `oauth_grants` rows are written after their
 family's advisory lock (rank 11). The worker advisory locks
 (`orbitid_retention`, `orbitid_anonymous_cleanup`, and the per-domain
 `orbitid_enrollment:<domain id>` *try*-lock of the enrollment worker, which
-never waits) and `orbitid_owner_setup` are taken at the start of their own
-transaction; elsewhere only *try*-taken (the `users` claim trigger), so no
-cycle is possible. The startup lock
+never waits) and `orbitid_owner_setup` (owner setup, imports) are taken at the
+start of their own transaction, holding nothing else, so no cycle is possible. The startup lock
 `orbitid_startup_migrations` is a *session* advisory lock held on one dedicated
 connection across invalid-index cleanup, drizzle baseline and migrations; it is
 acquired by polling `pg_try_advisory_lock` (a statement blocked in

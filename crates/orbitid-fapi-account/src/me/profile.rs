@@ -218,11 +218,6 @@ pub async fn delete_account(
     // browser's client pointer leave together: a failure can never delete an
     // account while its client still points at one of its sessions.
     let mut tx = state.pool.begin().await?;
-    if !me.user.is_anonymous {
-        // First, before any row lock: deleting a real account claims the
-        // instance in the same transaction, so owner setup can never reopen.
-        orbitid_identity::console::claim_on(&mut tx).await?;
-    }
     delete_user_on(&mut tx, &state, &user_id).await?;
     sqlx::query("UPDATE clients SET last_active_session_id = NULL, updated_at = $1 WHERE id = $2")
         .bind(now())

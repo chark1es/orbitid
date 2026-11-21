@@ -38,15 +38,7 @@ async fn remove(State(state): State<AppState>, Path(id): Path<String>) -> Result
     // Deletion, the organization lifecycle it triggers, every event row and the
     // avatar/logo upload rows are one transaction. Only the audit entry
     // (best-effort) runs outside it.
-    let real = orbitid_identity::users::get_user_by_id(&state, &id)
-        .await?
-        .is_some_and(|user| !user.is_anonymous);
     let mut tx = state.pool.begin().await?;
-    if real {
-        // First, before any row lock: deleting a real account claims the
-        // instance in the same transaction, so owner setup can never reopen.
-        orbitid_identity::console::claim_on(&mut tx).await?;
-    }
     let deleted = delete_user_on(&mut tx, &state, &id).await?;
     tx.commit().await?;
     let Some(user) = deleted else {

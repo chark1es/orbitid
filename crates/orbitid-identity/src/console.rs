@@ -1,18 +1,18 @@
 //! First-run ownership of an instance.
 //!
-//! A fresh instance has no accounts. The first person to open the dashboard
-//! creates the owner account there instead of pasting the secret key: the
-//! account gets the seeded [`OWNER_ROLE_KEY`] role, whose
-//! [`crate::rbac::DASHBOARD_ACCESS`] permission opens the admin console.
+//! An instance without accounts has nobody who can open the admin console. The
+//! first person to open the dashboard then creates the owner account there
+//! instead of pasting the secret key: the account gets the seeded
+//! [`OWNER_ROLE_KEY`] role, whose [`crate::rbac::DASHBOARD_ACCESS`] permission
+//! opens the admin console.
 //!
-//! Setup is offered only while the instance is unclaimed (no owner was ever
-//! created, see `console_owner_setup`) and has no (non-guest) user at all.
-//! Claiming is permanent: deleting every account later does not reopen setup.
-//! An instance that existed before owners is claimed by its migration and
-//! never offers it. Whoever runs the server grants the Owner
-//! role to an existing account instead (`orbitid owner <email>`, see
-//! [`grant_owner`]); shell access to the server is the proof of control. The
-//! secret key never opens the dashboard.
+//! Setup is offered while the instance has no real (non-guest) account, so no
+//! owner either. It follows the current state: an instance whose accounts were
+//! all deleted offers it again. An instance that has accounts but no owner never
+//! offers it, so a visitor cannot promote themselves over existing users;
+//! whoever runs the server grants the Owner role to an existing account instead
+//! (`orbitid owner <email>`, see [`grant_owner`]); shell access to the server is
+//! the proof of control. The secret key never opens the dashboard.
 
 use orbitid_core::error::{error_codes, OrbitError, Result};
 use orbitid_core::http::now;
@@ -29,20 +29,13 @@ use crate::users::{
     get_user_by_id, CreateUserInput,
 };
 
-const SETUP_OPEN: &str = "SELECT NOT EXISTS (SELECT 1 FROM console_owner_setup) \
-     AND NOT EXISTS (SELECT 1 FROM users WHERE NOT is_anonymous)";
+const SETUP_OPEN: &str = "SELECT NOT EXISTS (SELECT 1 FROM users WHERE NOT is_anonymous)";
 
-/// Guards the claim row. Owner setup and grants take it as their first
-/// statement, holding nothing else; the `users` trigger only *try*-takes it and
-/// leaves the claim to them meanwhile, so nobody waits on the claim row while
-/// holding other locks (migration 0016).
-const CLAIM_LOCK: &str = "SELECT pg_advisory_xact_lock(hashtext('orbitid_owner_setup')::bigint)";
-
-/// Records that the instance is claimed. Never removed. Returns the row only
-/// when this statement claimed it; a claim another transaction holds makes it
-/// wait for that transaction, then return nothing if it committed.
-const CLAIM: &str = "INSERT INTO console_owner_setup (id, claimed_at) VALUES ('default', $1) \
-     ON CONFLICT (id) DO NOTHING RETURNING id";
+/// Serializes owner setups (and imports, which fill an empty instance). Taken
+/// as the first statement of its own transaction, holding nothing else, so it
+/// cannot join a lock cycle.
+pub const SETUP_LOCK: &str =
+    "SELECT pg_advisory_xact_lock(hashtext('orbitid_owner_setup')::bigint)";
 
 /// True while the instance has no account yet, so the dashboard offers owner setup.
 pub async fn setup_required(state: &AppState) -> Result<bool> {
@@ -92,78 +85,14 @@ impl std::fmt::Debug for OwnerInput {
 /// Returns `None` when the instance already has an account (somebody finished
 /// setup first), in which case nothing was written.
 ///
-/// Concurrent setups serialize on the claim advisory lock, taken first in its
-/// own transaction. Elsewhere it is only *try*-taken (the `users` trigger), so
-/// it cannot join a lock cycle; after it the transaction follows the claim row,
-/// then the global order (user rows, then `user_roles`).
+/// Concurrent setups serialize on [`SETUP_LOCK`], taken first in its own
+/// transaction; after it the transaction follows the global order (user rows,
+/// then `user_roles`).
 pub async fn create_owner(state: &AppState, input: &OwnerInput) -> Result<Option<UserRow>> {
-    let result = try_create_owner(state, input).await;
-    if result.is_err() {
-        // A first account created while setup held the claim lock skipped its
-        // own claim, and this failed setup just rolled the claim back. Restore
-        // it, so the instance stays claimed if that account is deleted later.
-        let _ = claim_if_accounts_exist(state).await;
-    }
-    result
-}
-
-/// Claims the instance inside a transaction that deletes a real (non-guest)
-/// account. Call it as the transaction's **first** statement, before any row
-/// lock: it waits for the claim lock holding nothing. Owner setup can only
-/// reopen once every account is gone, and this commits the claim atomically
-/// with the deletion, so an account whose own claim was skipped (its trigger
-/// found the lock held by a setup or import that later rolled back) cannot
-/// reopen setup by being deleted.
-pub async fn claim_on(conn: &mut sqlx::PgConnection) -> Result<()> {
-    // The row is never removed: once it exists there is nothing to guard, and
-    // deletions must not queue on the claim lock for the life of the instance.
-    let claimed: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM console_owner_setup)")
-        .fetch_one(&mut *conn)
-        .await?;
-    if claimed {
-        return Ok(());
-    }
-    sqlx::query(CLAIM_LOCK).execute(&mut *conn).await?;
-    sqlx::query(CLAIM)
-        .bind(now())
-        .fetch_optional(&mut *conn)
-        .await?;
-    Ok(())
-}
-
-/// Claims the instance when it has any real account. Takes the claim lock
-/// first, holding nothing else.
-async fn claim_if_accounts_exist(state: &AppState) -> Result<()> {
     let mut tx = state.pool.begin().await?;
-    sqlx::query(CLAIM_LOCK).execute(&mut *tx).await?;
-    sqlx::query(
-        "INSERT INTO console_owner_setup (id, claimed_at) \
-         SELECT 'default', $1 WHERE EXISTS (SELECT 1 FROM users WHERE NOT is_anonymous) \
-         ON CONFLICT (id) DO NOTHING",
-    )
-    .bind(now())
-    .execute(&mut *tx)
-    .await?;
-    tx.commit().await?;
-    Ok(())
-}
-
-async fn try_create_owner(state: &AppState, input: &OwnerInput) -> Result<Option<UserRow>> {
-    let mut tx = state.pool.begin().await?;
-    sqlx::query(CLAIM_LOCK).execute(&mut *tx).await?;
+    sqlx::query(SETUP_LOCK).execute(&mut *tx).await?;
     let available: bool = sqlx::query_scalar(SETUP_OPEN).fetch_one(&mut *tx).await?;
-    // Winning the claim is what makes this the owner: a sign-up that created the
-    // first account meanwhile claimed it first (its `users` trigger), and the
-    // insert then finds the row and returns nothing.
-    let claimed: Option<String> = if available {
-        sqlx::query_scalar(CLAIM)
-            .bind(now())
-            .fetch_optional(&mut *tx)
-            .await?
-    } else {
-        None
-    };
-    if claimed.is_none() {
+    if !available {
         // Release the advisory lock now rather than when the connection is
         // recycled (docs/LOCK_ORDER.md, explicit rollback).
         tx.rollback().await?;
@@ -226,15 +155,7 @@ pub async fn grant_owner(state: &AppState, account: &str) -> Result<OwnerGrant> 
             ),
         ));
     }
-    // Like owner setup: the claim lock first, holding nothing else, then the
-    // claim, the user row and `user_roles`. Granting an owner claims the
-    // instance, so setup can never reopen.
     let mut tx = state.pool.begin().await?;
-    sqlx::query(CLAIM_LOCK).execute(&mut *tx).await?;
-    sqlx::query(CLAIM)
-        .bind(now())
-        .fetch_optional(&mut *tx)
-        .await?;
     // Rank 3 (user row) before rank 10 (`user_roles`), like every role change.
     lock_user_on(&mut tx, &user.id).await?;
     // Read under the lock, so a ban that lands meanwhile is honoured.
