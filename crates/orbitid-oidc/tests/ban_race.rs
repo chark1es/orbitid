@@ -31,7 +31,14 @@ use orbitid_oidc::services::oidc::tokens::{
 const REDIRECT_URI: &str = "https://app.test/cb";
 
 async fn app() -> TestApp {
-    test_app_state_with(orbitid_core::testing::test_pool_exemption(6)).await
+    let app = test_app_state_with(orbitid_core::testing::test_pool_exemption(6)).await;
+    // Every test database starts without a signing key, and generating the RSA
+    // key in a debug build can take longer than `wait_for_lock_waiter` waits.
+    // Create it up front so the request under test reaches the user lock quickly.
+    orbitid_credentials::get_active_signing_key(app.state())
+        .await
+        .expect("signing key");
+    app
 }
 
 async fn wait_for_lock_waiter(state: &AppState) {
