@@ -131,8 +131,9 @@ async fn status_json(
         "operator_session": operator.as_ref().map(operator_session_json),
         "user": user,
         "setup_required": setup,
-        // Accounts exist but none can open the console: an instance from
-        // before owners. The sign-in screen explains `orbitid owner <email>`.
+        // Accounts exist but none can open the console (setup is only for an
+        // instance without accounts). The sign-in screen explains
+        // `orbitid owner <email>`.
         "console_unclaimed": !setup && console_unclaimed(state).await?,
     }))
 }

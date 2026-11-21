@@ -105,7 +105,6 @@ async fn fresh_database_has_the_full_drizzle_schema() {
         "device_codes",
         "audit_logs",
         "rate_limit_windows",
-        "console_owner_setup",
     ] {
         assert!(
             names.iter().any(|name| name == table),
@@ -280,7 +279,7 @@ async fn existing_drizzle_database_is_baselined() {
             .unwrap();
     assert_eq!(
         versions,
-        vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+        vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
     );
     assert!(tables(&pool)
         .await
@@ -295,11 +294,11 @@ async fn existing_drizzle_database_is_baselined() {
     pool.close().await;
 }
 
-/// Owner setup is for fresh instances only: a database that already ran a
-/// server (it has its settings row) comes out of migration 0016 claimed, while
-/// a fresh database stays unclaimed until its owner is created.
+/// Owner setup follows the instance's state (migration 0017): the permanent
+/// claim from 0016, and the trigger that wrote it, are gone after migrating an
+/// existing instance, so one without accounts offers setup again.
 #[tokio::test]
-async fn an_existing_instance_is_claimed_and_a_fresh_one_is_not() {
+async fn an_existing_instance_loses_the_permanent_owner_claim() {
     let db = EphemeralDb::create_empty().await;
     apply_drizzle(&db.url, 10).await;
     let existing = pool(&db.url).await;
@@ -310,21 +309,19 @@ async fn an_existing_instance_is_claimed_and_a_fresh_one_is_not() {
     .await
     .unwrap();
     db::run_migrations(&existing).await.unwrap();
-    let claimed: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM console_owner_setup")
+    let table: bool = sqlx::query_scalar("SELECT to_regclass('console_owner_setup') IS NOT NULL")
         .fetch_one(&existing)
         .await
         .unwrap();
-    assert_eq!(claimed, 1);
+    assert!(!table);
+    let trigger: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'users_claim_owner_setup')",
+    )
+    .fetch_one(&existing)
+    .await
+    .unwrap();
+    assert!(!trigger);
     existing.close().await;
-
-    let fresh = EphemeralDb::create().await;
-    let fresh_pool = pool(&fresh.url).await;
-    let claimed: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM console_owner_setup")
-        .fetch_one(&fresh_pool)
-        .await
-        .unwrap();
-    assert_eq!(claimed, 0);
-    fresh_pool.close().await;
 }
 
 #[tokio::test]
@@ -408,7 +405,7 @@ async fn concurrent_starts_on_a_fresh_database_all_succeed() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(versions, 16);
+    assert_eq!(versions, 17);
     pool.close().await;
 }
 

@@ -22,9 +22,9 @@ encrypted with `ORBITID_ENCRYPTION_KEY`). Nothing is re-hashed or re-encrypted, 
 target must share the same encryption key.
 
 Tables whose contents describe a running process or a single deployment are not copied: rate-limit windows,
-`operator_sessions` (dashboard logins) and `console_owner_setup`. An import marks the target claimed before it
-starts, even if it then fails, so dashboard owner setup never opens on it: give an account the Owner role with
-`orbitid owner <email>` instead. Everything else is, including webhook endpoints, deliveries,
+and `operator_sessions` (dashboard logins). An import holds the owner setup lock while it runs, so dashboard
+owner setup cannot create an account on the target meanwhile. A restored instance with accounts but no owner
+does not offer setup: give an account the Owner role with `orbitid owner <email>`. Everything else is, including webhook endpoints, deliveries,
 audit logs, user sessions and one-time tokens; the target behaves like the source immediately.
 
 Dashboard logins are deliberately left behind. A console session is bound to the browser that opened it, and

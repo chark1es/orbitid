@@ -116,18 +116,6 @@ async fn export_and_import_round_trip_every_table() {
         .expect("import");
     assert!(imported.ok);
     assert!(imported.counts.iter().all(|count| count.ok));
-    // The claim is the target's own state: never exported, always set by an
-    // import, so dashboard owner setup cannot open on a restored instance.
-    assert!(!imported
-        .counts
-        .iter()
-        .any(|count| count.table == "console_owner_setup"));
-    let claimed: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM console_owner_setup")
-        .fetch_one(&target.pool)
-        .await
-        .expect("claim");
-    assert_eq!(claimed, 1);
-
     let target_hash: Option<String> = sqlx::query_scalar(
         "SELECT password_hash FROM users WHERE id = (SELECT user_id FROM email_addresses LIMIT 1)",
     )
@@ -273,20 +261,24 @@ async fn a_missing_not_null_column_without_a_default_fails_with_a_clear_message(
     let _ = tokio::fs::remove_file(&stripped).await;
 }
 
-/// An import target is never a fresh instance: the import claims it in its own
-/// committed transaction before any work, so owner setup cannot open on a
-/// restore without accounts, nor after an import that failed.
+/// Owner setup follows the target's accounts: a restore with accounts closes
+/// it, while a restore without accounts, or an import that failed, leaves the
+/// instance open for its owner to be created from the dashboard.
 #[tokio::test]
-async fn an_import_claims_its_target_first_even_without_accounts_or_success() {
+async fn owner_setup_follows_the_accounts_an_import_brings() {
     let source_db = EphemeralDb::create().await.expect("source db");
+    let empty_db = EphemeralDb::create().await.expect("empty source db");
     let target_db = EphemeralDb::create().await.expect("target db");
+    let bare_db = EphemeralDb::create().await.expect("bare target db");
     let failed_db = EphemeralDb::create().await.expect("failed target db");
     let source = state(&source_db.url).await;
+    let empty = state(&empty_db.url).await;
     let target = state(&target_db.url).await;
+    let bare = state(&bare_db.url).await;
     let failed = state(&failed_db.url).await;
-    assert!(orbitid_identity::console::setup_required(&target)
+    orbitid_identity::testing::create_test_user(&source, "a@transfer.test", "Sup3rSecret!")
         .await
-        .unwrap());
+        .expect("source user");
 
     let path = temp_file();
     let path_text = path.to_string_lossy().to_string();
@@ -303,6 +295,21 @@ async fn an_import_claims_its_target_first_even_without_accounts_or_success() {
         .await
         .unwrap());
 
+    let empty_path = temp_file();
+    let empty_text = empty_path.to_string_lossy().to_string();
+    export_database(&empty, &empty_text, &|_| {})
+        .await
+        .expect("empty export");
+    assert!(
+        import_database(&bare, &empty_text, false, false, &|_| {})
+            .await
+            .expect("empty import")
+            .ok
+    );
+    assert!(orbitid_identity::console::setup_required(&bare)
+        .await
+        .unwrap());
+
     let garbage = temp_file();
     tokio::fs::write(&garbage, "not an export\n").await.unwrap();
     assert!(
@@ -310,11 +317,12 @@ async fn an_import_claims_its_target_first_even_without_accounts_or_success() {
             .await
             .is_err()
     );
-    assert!(!orbitid_identity::console::setup_required(&failed)
+    assert!(orbitid_identity::console::setup_required(&failed)
         .await
         .unwrap());
 
     let _ = tokio::fs::remove_file(&path).await;
+    let _ = tokio::fs::remove_file(&empty_path).await;
     let _ = tokio::fs::remove_file(&garbage).await;
 }
 

@@ -431,9 +431,10 @@ async fn status_refuses_cross_origin_reads() {
     assert_eq!(response.status, StatusCode::FORBIDDEN);
 }
 
-/// Claiming is permanent: deleting every account later does not reopen setup.
+/// Setup follows the instance's state: once every account is deleted, the
+/// instance has nobody who can open the console and offers setup again.
 #[tokio::test]
-async fn setup_stays_closed_after_every_account_is_deleted() {
+async fn setup_reopens_once_every_account_is_deleted() {
     let harness = setup().await;
     let created = setup_owner(&harness, "owner@example.com").await;
     assert_eq!(created.status, StatusCode::CREATED);
@@ -441,10 +442,9 @@ async fn setup_stays_closed_after_every_account_is_deleted() {
     let deleted = harness.delete(&format!("/v1/users/{user_id}")).await;
     assert_eq!(deleted.status, StatusCode::OK, "{}", deleted.text());
 
-    assert_eq!(status(&harness, "").await["setup_required"], false);
-    let again = setup_owner(&harness, "intruder@example.com").await;
-    assert_eq!(again.status, StatusCode::FORBIDDEN);
-    assert!(cookie_pair(&again, "__orbit_operator").is_none());
+    assert_eq!(status(&harness, "").await["setup_required"], true);
+    let again = setup_owner(&harness, "new-owner@example.com").await;
+    assert_eq!(again.status, StatusCode::CREATED, "{}", again.text());
 }
 
 /// Only this browser's own `__client` cookie can open the console: a session
@@ -598,11 +598,10 @@ async fn signing_out_after_the_console_expired_signs_the_account_out() {
     assert!(status(&harness, &cookies).await["user"].is_null());
 }
 
-/// The first real account claims the instance, however it is created: an
-/// instance that ever had users never offers setup again, even once they are
-/// all deleted. Guests do not count.
+/// Any real account closes setup, however it is created, and deleting it
+/// reopens setup. Guests do not count.
 #[tokio::test]
-async fn the_first_real_account_claims_the_instance_and_guests_do_not() {
+async fn a_real_account_closes_setup_and_guests_do_not() {
     let harness = setup().await;
     orbitid_identity::testing::create_test_guest(harness.state())
         .await
@@ -612,16 +611,17 @@ async fn the_first_real_account_claims_the_instance_and_guests_do_not() {
     let user = harness
         .create_user(json!({ "email_address": ["first@example.com"], "password": PASSWORD }))
         .await;
-    let user_id = user["id"].as_str().unwrap();
-    assert_eq!(
-        harness.delete(&format!("/v1/users/{user_id}")).await.status,
-        StatusCode::OK
-    );
     assert_eq!(status(&harness, "").await["setup_required"], false);
     assert_eq!(
         setup_owner(&harness, "late@example.com").await.status,
         StatusCode::FORBIDDEN
     );
+    let user_id = user["id"].as_str().unwrap();
+    assert_eq!(
+        harness.delete(&format!("/v1/users/{user_id}")).await.status,
+        StatusCode::OK
+    );
+    assert_eq!(status(&harness, "").await["setup_required"], true);
 }
 
 /// Console access belongs to the Owner and Administrator system roles only, so
@@ -695,24 +695,30 @@ async fn console_activity_is_refreshed_within_a_short_inactivity_timeout() {
     assert!(touched > stale + 10_000, "{touched} vs {stale}");
 }
 
-/// Winning the claim is what makes setup create the owner: if the first
-/// account's claim is in flight (a concurrent sign-up), setup waits for it and
-/// gives up once it commits, instead of minting an Owner beside it.
+/// Setup waits for whoever holds the setup lock (an import filling the
+/// instance) and gives up once that commits accounts, instead of minting an
+/// Owner beside them.
 #[tokio::test]
-async fn setup_loses_to_a_first_account_that_claims_while_it_runs() {
+async fn setup_loses_to_an_import_that_fills_the_instance_while_it_runs() {
     // Two transactions at once by design.
     let harness = setup_with(orbitid_core::testing::test_pool_exemption(4)).await;
-    // A sign-up's `users` trigger, caught between its claim and its commit.
-    let mut signup = harness.state().pool.begin().await.unwrap();
-    sqlx::query("INSERT INTO console_owner_setup (id, claimed_at) VALUES ('default', 1)")
-        .execute(&mut *signup)
+    let mut import = harness.state().pool.begin().await.unwrap();
+    sqlx::query(orbitid_identity::console::SETUP_LOCK)
+        .execute(&mut *import)
+        .await
+        .unwrap();
+    let now = orbitid_core::http::now();
+    sqlx::query("INSERT INTO users (id, public_metadata, private_metadata, unsafe_metadata, created_at, updated_at) \
+         VALUES ('user_imported', '{}', '{}', '{}', $1, $1)")
+        .bind(now)
+        .execute(&mut *import)
         .await
         .unwrap();
 
     let request = setup_owner(&harness, "late-owner@example.com");
     let commit = async {
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-        signup.commit().await.unwrap();
+        import.commit().await.unwrap();
     };
     let (response, ()) = tokio::join!(request, commit);
     assert_eq!(
@@ -774,7 +780,7 @@ async fn status_names_the_console_account_after_a_session_switch() {
     assert_eq!(body["user"]["id"], owner_id.as_str());
 }
 
-/// A guest becoming a real account while owner setup holds the claim never
+/// A guest becoming a real account while owner setup holds its lock never
 /// waits on it, so the two cannot deadlock (for example on the same email).
 #[tokio::test]
 async fn a_guest_upgrade_does_not_wait_on_owner_setup() {
@@ -783,13 +789,9 @@ async fn a_guest_upgrade_does_not_wait_on_owner_setup() {
     let guest = orbitid_identity::testing::create_test_guest(harness.state())
         .await
         .unwrap();
-    // Owner setup, caught between its claim and its commit.
+    // Owner setup, caught holding its lock.
     let mut setup_tx = harness.state().pool.begin().await.unwrap();
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtext('orbitid_owner_setup')::bigint)")
-        .execute(&mut *setup_tx)
-        .await
-        .unwrap();
-    sqlx::query("INSERT INTO console_owner_setup (id, claimed_at) VALUES ('default', 1)")
+    sqlx::query(orbitid_identity::console::SETUP_LOCK)
         .execute(&mut *setup_tx)
         .await
         .unwrap();
@@ -884,26 +886,4 @@ async fn signing_out_after_a_switch_ends_both_accounts() {
             .unwrap();
         assert_ne!(status, "active", "{id}");
     }
-}
-
-/// Deleting a real account claims the instance, so an account whose own claim
-/// was skipped (its trigger found the lock held by a setup or import that then
-/// rolled back) cannot reopen owner setup by being deleted.
-#[tokio::test]
-async fn deleting_an_unclaimed_real_account_claims_the_instance() {
-    let harness = setup().await;
-    let user = harness
-        .create_user(json!({ "email_address": ["first@example.com"], "password": PASSWORD }))
-        .await;
-    // The skipped-claim state.
-    sqlx::query("DELETE FROM console_owner_setup")
-        .execute(&harness.state().pool)
-        .await
-        .unwrap();
-    let user_id = user["id"].as_str().unwrap();
-    assert_eq!(
-        harness.delete(&format!("/v1/users/{user_id}")).await.status,
-        StatusCode::OK
-    );
-    assert_eq!(status(&harness, "").await["setup_required"], false);
 }

@@ -13,14 +13,14 @@ People sign in to the console with their own account on the instance, through th
 open the dashboard: it authenticates servers, SDKs and scripts calling the Backend API (`Authorization: Bearer
 sk_…`), nothing else.
 
-- **First run.** While the instance has no account at all, the sign-in screen offers **Create the owner account**
-  instead. `POST /v1/operator_sessions/setup` creates that account with the seeded **Owner** role
-  (`app:sys_owner`), signs it in on this browser and opens the console in one step. Concurrent setups serialize on
-  an advisory lock; exactly one wins. Setup closes once any account exists (`403`), and creating the owner claims
-  the instance for good (`console_owner_setup`), and so does the first real account created any other way (a
-  sign-up, the Backend API, a restore): deleting every account later does not reopen setup. An instance that
-  existed before this version is claimed by its migration and never offers setup. Create the owner before you
-  expose a new instance: until then, the first visitor can.
+- **First run.** While the instance has no real (non-guest) account, so nobody who could open the console, the
+  sign-in screen offers **Create the owner account** instead. `POST /v1/operator_sessions/setup` creates that
+  account with the seeded **Owner** role (`app:sys_owner`), signs it in on this browser and opens the console in
+  one step. Concurrent setups serialize on an advisory lock; exactly one wins. Setup closes once any account exists
+  (`403`) and reopens if every account is deleted, including on an instance from before owners. An instance that
+  has accounts but no Owner or Administrator never offers setup, so a visitor cannot promote themselves over
+  existing users: grant the role from the server with `orbitid owner <email>`. Create the owner before you expose a
+  new instance: until then, the first visitor can.
 - **Who may enter.** Accounts with the seeded **Owner** (`app:sys_owner`) or **Administrator** (`app:sys_admin`)
   role. Their `app:sys_dashboard:access` permission is reserved: a custom role cannot carry it, and system roles
   cannot be edited or deleted, so only a change to an account's roles changes who may enter. Assign the roles from
@@ -36,7 +36,8 @@ sk_…`), nothing else.
   for good, and so are an account's console sessions when an operator removes its access, so giving the role back
   does not revive an old cookie. Console requests count as activity on the account session, so an inactivity
   timeout does not sign out an operator who is working.
-- **No owner yet, or owners locked out.** An instance whose accounts predate owners never offers setup. Whoever runs
+- **No owner yet, or owners locked out.** An instance that has accounts but none that can open the console (for
+  example accounts from before owners) does not offer setup. Whoever runs
   the server grants the Owner role to an existing account:
 
   ```sh
@@ -44,7 +45,7 @@ sk_…`), nothing else.
   ```
 
   It adds the role (keeping the account's other roles), emits `user.updated` and audits `instance.owner_granted`.
-  An instance with no account at all creates one first with the secret key (`POST /v1/users`), then runs it.
+  An instance with no account at all offers **Create the owner account** on `/login` instead.
   Until some account can open the console, `/login` says so and shows the command
   (`console_unclaimed` in the status answer). Shell access to the server is the proof of control; there is no
   HTTP equivalent.
