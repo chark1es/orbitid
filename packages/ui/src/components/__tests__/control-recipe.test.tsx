@@ -94,3 +94,13 @@ describe("shared control recipe", () => {
     expect(css).toContain("--font-weight-heading: 650");
   });
 });
+
+describe("text inputs", () => {
+  it("keep a full line box so descenders in typed text are not clipped", async () => {
+    const { Input } = await import("../ui/input");
+    render(<Input aria-label="Email" defaultValue="someone@gmail.com" />);
+    const className = screen.getByLabelText("Email").className;
+    expect(className).not.toContain("control-optical");
+    expect(className).not.toContain("leading-none");
+  });
+});
