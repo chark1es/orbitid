@@ -19,7 +19,7 @@
     "check:files": "node scripts/check-repository.mjs sizes",
     "check:docs": "node scripts/check-repository.mjs docs",
     "check:paywall": "node scripts/check-repository.mjs paywall",
-    "test:maintenance": "node --test scripts/check-repository.test.mjs"
+    "test:maintenance": "node --test scripts/check-repository.test.mjs scripts/ci-plan.test.mjs"
   },
   "engines": {
     "node": ">=20"
