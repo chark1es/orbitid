@@ -4,138 +4,161 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+# A new push to a pull request cancels its previous run; runs on main always finish.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
-  # The Rust server: formatting, lints, workspace tests against a real Postgres, and the
-  # release binary the Node SDK integration tests use. The toolchain comes from
-  # rust-toolchain.toml, so CI and a local `cargo` agree on rustfmt/clippy.
-  rust:
+  # Decides which jobs this change needs (scripts/ci-plan.mjs). Pull requests run only what their
+  # changed files can affect; pushes to main and manual runs run everything, which also keeps the
+  # caches that pull requests restore from warm.
+  changes:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
-    env:
-      ORBITID_TEST_PG_ADMIN_URL: postgres://orbit:orbit@localhost:5432/postgres
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      rust: ${{ steps.plan.outputs.rust }}
+      rust_shards: ${{ steps.plan.outputs.rust_shards }}
+      js: ${{ steps.plan.outputs.js }}
+      node_sdk: ${{ steps.plan.outputs.node_sdk }}
+      container: ${{ steps.plan.outputs.container }}
     steps:
       - uses: actions/checkout@v4
-      - name: Rust toolchain from rust-toolchain.toml
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          cache: true
-      - name: SAML build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            clang pkg-config libxml2-dev libxmlsec1-dev libssl-dev
-      # GitHub `services:` cannot pass server flags, so start Postgres by hand: durability is
-      # off and connections are plentiful because every test makes its own database.
-      - name: Start Postgres
-        run: |
-          docker run -d --name pg -p 5432:5432 \
-            -e POSTGRES_USER=orbit -e POSTGRES_PASSWORD=orbit -e POSTGRES_DB=postgres \
-            postgres:17-alpine \
-            -c fsync=off -c synchronous_commit=off -c full_page_writes=off \
-            -c max_connections=1000 -c shared_buffers=256MB
-          for i in $(seq 1 30); do
-            if docker exec pg pg_isready -U orbit -d postgres; then exit 0; fi
-            sleep 2
-          done
-          echo "Postgres did not become ready within 60 seconds" >&2
-          docker logs pg || true
-          exit 1
-      - name: Formatting
-        run: cargo fmt --all --check
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-      - name: Workspace tests
-        run: cargo test --workspace --all-features --no-fail-fast
-      - name: Release binary for the SDK integration tests
-        run: cargo build --release --locked -p orbitid-server
-      - uses: actions/upload-artifact@v4
-        with:
-          name: orbitid-release
-          path: target/release/orbitid
-          if-no-files-found: error
-
-  # One connection per test pool: any handler that takes a second connection while holding
-  # one fails with a pool timeout instead of passing on a big pool. ORBITID_TEST_POOL_ACQUIRE_MS
-  # is low so a leak fails fast. Runs in parallel with `rust` for its own time budget.
-  rust-pool1:
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    env:
-      ORBITID_TEST_PG_ADMIN_URL: postgres://orbit:orbit@localhost:5432/postgres
-      ORBITID_TEST_POOL_MAX: "1"
-      ORBITID_TEST_POOL_ACQUIRE_MS: "2000"
-    steps:
-      - uses: actions/checkout@v4
-      - name: Rust toolchain from rust-toolchain.toml
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          cache: true
-      - name: SAML build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            clang pkg-config libxml2-dev libxmlsec1-dev libssl-dev
-      # GitHub `services:` cannot pass server flags, so start Postgres by hand: durability is
-      # off and connections are plentiful because every test makes its own database.
-      - name: Start Postgres
-        run: |
-          docker run -d --name pg -p 5432:5432 \
-            -e POSTGRES_USER=orbit -e POSTGRES_PASSWORD=orbit -e POSTGRES_DB=postgres \
-            postgres:17-alpine \
-            -c fsync=off -c synchronous_commit=off -c full_page_writes=off \
-            -c max_connections=1000 -c shared_buffers=256MB
-          for i in $(seq 1 30); do
-            if docker exec pg pg_isready -U orbit -d postgres; then exit 0; fi
-            sleep 2
-          done
-          echo "Postgres did not become ready within 60 seconds" >&2
-          docker logs pg || true
-          exit 1
-      - name: Workspace tests on a one-connection pool
-        run: cargo test --workspace --all-features --no-fail-fast
-
-  check:
-    runs-on: ubuntu-latest
-    # The Node SDK tests spawn the real Rust binary; take it from the job above instead of
-    # compiling the workspace twice.
-    needs: [rust, rust-pool1]
-    services:
-      postgres:
-        image: postgres:17-alpine
+      - name: Changed files
+        if: github.event_name == 'pull_request'
         env:
-          POSTGRES_USER: orbit
-          POSTGRES_PASSWORD: orbit
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U orbit -d postgres"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
-    env:
-      ORBITID_TEST_PG_ADMIN_URL: postgres://orbit:orbit@localhost:5432/postgres
-      ORBITID_BIN: ${{ github.workspace }}/target/release/orbitid
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          # Both sides of a rename count: moving a file out of a crate changes that crate too.
+          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" \
+            --jq '.[] | .filename, (.previous_filename // empty)' > "$RUNNER_TEMP/changed.txt"
+          count=$(wc -l < "$RUNNER_TEMP/changed.txt")
+          echo "$count changed paths"
+          # The API lists at most 3000 files; past that, plan as if everything changed.
+          if [ "$count" -ge 3000 ]; then echo "RUN_ALL=true" >> "$GITHUB_ENV"; exit 0; fi
+          {
+            echo "CHANGED_FILES<<EOF"
+            jq -Rnc '[inputs | select(length > 0)]' < "$RUNNER_TEMP/changed.txt"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
+      - name: Plan
+        id: plan
+        env:
+          RUN_ALL: ${{ github.event_name != 'pull_request' || env.RUN_ALL == 'true' }}
+        run: node scripts/ci-plan.mjs
+
+  # Repository rules (file sizes, documented environment variables) and the CI planner's own
+  # tests. Node built-ins only, so it needs no install and always runs.
+  repo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - uses: oven-sh/setup-bun@v2
-      - name: Postgres client for the Node SDK test harness
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
-      - uses: actions/download-artifact@v4
+      - run: npm run test:maintenance
+      - run: npm run check:files
+      - run: npm run check:docs
+
+  # Formatting and lints for the whole workspace. No database, so it finishes well before the tests.
+  rust-lint:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          cache-key: lint
+      - name: Formatting
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+  # Workspace tests against a real Postgres, one job per group of crates (SHARDS in
+  # scripts/ci-plan.mjs) and only for crates the change can affect. Each shard runs its tests
+  # twice: on the default pool, then on a one-connection pool, where any handler that takes a
+  # second connection while holding one fails with a pool timeout instead of passing on a big pool
+  # (ORBITID_TEST_POOL_ACQUIRE_MS is low so a leak fails fast). The second run reuses the first
+  # run's build.
+  rust-test:
+    name: rust-test (${{ matrix.shard.name }})
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.changes.outputs.rust_shards) }}
+    env:
+      ORBITID_TEST_PG_ADMIN_URL: postgres://orbit:orbit@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/postgres
+      - uses: ./.github/actions/rust-setup
+        with:
+          cache-key: test-${{ matrix.shard.name }}
+      - name: Build tests
+        id: build
+        run: cargo test --all-features --no-run --locked ${{ matrix.shard.packages }}
+      - name: Tests
+        run: cargo test --all-features --no-fail-fast --locked ${{ matrix.shard.packages }}
+      # Runs even when the default-pool tests failed, so one run reports both kinds of failure.
+      - name: Tests on a one-connection pool
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        env:
+          ORBITID_TEST_POOL_MAX: "1"
+          ORBITID_TEST_POOL_ACQUIRE_MS: "2000"
+        run: cargo test --all-features --no-fail-fast --locked ${{ matrix.shard.packages }}
+
+  # The release binary the Node SDK integration tests run, built alongside the tests rather than
+  # after them.
+  rust-release:
+    needs: changes
+    if: needs.changes.outputs.node_sdk == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          cache-key: release
+      - run: cargo build --release --locked -p orbitid-server
+      - uses: actions/upload-artifact@v4
         with:
           name: orbitid-release
-          path: target/release
-      - run: chmod +x target/release/orbitid
-      - run: bun install --frozen-lockfile
-      - run: bun run test:maintenance
-      - run: bun run check:files
-      - run: bun run check:docs
+          path: target/release/orbitid
+          if-no-files-found: error
+          retention-days: 3
+
+  # Type checks, unit tests and production builds for every JavaScript package. The Node SDK's
+  # tests need the server binary and run in `node-sdk`; nothing here needs Rust or a database.
+  js:
+    needs: changes
+    if: needs.changes.outputs.js == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/bun-setup
       - run: bun run typecheck
-      - run: bun run test
+      - name: Tests (except the Node SDK integration tests)
+        run: bun run --filter '*' --filter '!@orbitid/node' test
       - name: Dashboard build
         run: bun run --filter @orbitid/dashboard build
       - name: Example app build
@@ -144,10 +167,35 @@ jobs:
           NEXT_PUBLIC_ORBITID_PUBLISHABLE_KEY: pk_test_aHR0cDovL2xvY2FsaG9zdDo0MDAw
           ORBITID_SECRET_KEY: sk_test_ci
 
+  # The Node SDK tests spawn the real Rust binary against Postgres; the binary comes from
+  # `rust-release` instead of compiling the workspace again.
+  node-sdk:
+    needs: [changes, rust-release]
+    if: needs.changes.outputs.node_sdk == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ORBITID_TEST_PG_ADMIN_URL: postgres://orbit:orbit@localhost:5432/postgres
+      ORBITID_BIN: ${{ github.workspace }}/target/release/orbitid
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/postgres
+      - name: Postgres client for the test harness
+        run: command -v psql || (sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client)
+      - uses: ./.github/actions/bun-setup
+      - uses: actions/download-artifact@v4
+        with:
+          name: orbitid-release
+          path: target/release
+      - run: chmod +x target/release/orbitid
+      - run: bun run --filter @orbitid/node test
+
   # Proves the documented deployment works: the image builds, runs unprivileged on Postgres,
   # the compose file brings up a working instance, and two replicas share one session.
   # scripts/smoke-container.sh is the same check an operator can run locally.
   container:
+    needs: changes
+    if: needs.changes.outputs.container == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -165,3 +213,20 @@ jobs:
           docker ps -a
           docker compose ls -a || true
           for id in $(docker ps -aq); do echo "=== $id ==="; docker logs --tail 200 "$id" || true; done
+
+  # One stable check for branch protection: it passes when every job either passed or was not
+  # needed for this change, and fails when any job failed or was cancelled.
+  ci-ok:
+    if: always()
+    needs: [changes, repo, rust-lint, rust-test, rust-release, js, node-sdk, container]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: All required jobs passed or were skipped
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          echo "$RESULTS"
+          if echo "$RESULTS" | jq -e 'any(.[]; . == "failure" or . == "cancelled")' > /dev/null; then
+            exit 1
+          fi

@@ -1,0 +1,26 @@
+name: Rust setup
+description: >
+  The toolchain from rust-toolchain.toml, a dependency cache, and the native libraries SAML links.
+  Caches are written only on main so pull requests restore main's warm cache instead of each
+  saving their own copy into the repository's cache quota.
+
+inputs:
+  cache-key:
+    description: Distinguishes caches of jobs that build different targets or profiles.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Rust toolchain from rust-toolchain.toml
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        cache: true
+        cache-key: ${{ inputs.cache-key }}
+        cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+    - name: SAML build dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          clang pkg-config libxml2-dev libxmlsec1-dev libssl-dev
