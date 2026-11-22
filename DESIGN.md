@@ -124,6 +124,8 @@ Fixed rem scale at a 1.125 ratio: 0.6875 (captions inside chips and rail labels)
 
 Depth is declared once: a 1px rule. Cards, tables and inputs have a border and no shadow. Overlays (popover, dialog, sheet, command palette) get one soft shadow with a real offset and blur, and sit on the same border. There are no glows, no gradients, no blur as decoration.
 
+In dark mode overlays sit on `popover`, one step lighter than `card`, and the shadow ink deepens, so a dialog still lifts off a dark page. The scrim is warm ink (`--scrim`), not pure black. Centered overlays are capped to the visible viewport, including safe-area insets, and scroll inside; the command palette is anchored near the top so its input does not move while results change.
+
 ## Shapes
 
 Near-square. Controls and tables use 4px, small chips and line codes 3px, cards and dialogs 6px. Pills are used only for the smallest status chips. No colored side-borders on cards or alerts.
@@ -138,6 +140,8 @@ All stock shadcn/ui primitives from `packages/ui`, restyled through tokens only.
 - Empty states say what the screen will contain and give the next action, in a sentence.
 - Skeletons for loading, never a centered spinner over content.
 - Icons: lucide, 1.5px stroke, 16px, one style everywhere.
+- Motion: overlays enter in 200ms on `ease-out-expo` (fade, 97% scale, 8px lift) and leave in 150ms on `ease-in-quick`; sheets slide in 300ms. Nothing loops, and `prefers-reduced-motion` turns it all into an instant swap.
+- The mark: an orbit ring broken where a satellite passes, around a solid core (`OrbitMark`, `assets/icon.svg`). Ring and satellite take `currentColor`; only the core may carry signal red.
 
 ### Signature move: the activity board
 

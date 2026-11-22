@@ -38,6 +38,7 @@ import { StatusBadge } from "../components/shared/status-badge";
 import { CopyButton } from "../components/shared/copy-button";
 import { ConfirmDialog } from "../components/shared/confirm-dialog";
 import { SecretReveal } from "../components/shared/secret-reveal";
+import { EmailSetupNotice } from "../components/shared/email-setup-notice";
 
 const STATUSES = ["all", "pending", "accepted", "revoked", "expired"];
 
@@ -101,6 +102,7 @@ function CreateInvitationsDialog({ open, onOpenChange }: { open: boolean; onOpen
               Invitations are required when sign-up mode is restricted, or when the allowlist is on.
             </DialogDescription>
           </DialogHeader>
+          <EmailSetupNotice action="email this invitation" onNavigate={() => onOpenChange(false)} />
           <div className="space-y-4">
             <div className="space-y-1.5">
               <Label>Mode</Label>

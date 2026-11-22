@@ -12,14 +12,18 @@ pub async fn user_where(state: &AppState, query: &QueryPairs) -> Result<Where> {
     let mut filter = Where::new();
     if let Some(search) = query.raw("query").map(str::trim).filter(|q| !q.is_empty()) {
         let slot = filter.bind_text(contains_pattern(search));
+        // One `IN (… UNION …)` instead of per-row `EXISTS` probes: each branch is a
+        // plain `LIKE '%term%'` the planner can answer from its trigram index
+        // (migration 0018), so a search no longer scans every user and email.
         filter.clauses.push(format!(
-            "(lower(u.id) LIKE {slot} ESCAPE '\\' \
-             OR lower(u.username) LIKE {slot} ESCAPE '\\' \
-             OR lower(u.first_name) LIKE {slot} ESCAPE '\\' \
-             OR lower(u.last_name) LIKE {slot} ESCAPE '\\' \
-             OR lower(coalesce(u.first_name, '') || ' ' || coalesce(u.last_name, '')) LIKE {slot} ESCAPE '\\' \
-             OR EXISTS (SELECT 1 FROM email_addresses e WHERE e.user_id = u.id AND lower(e.email) LIKE {slot} ESCAPE '\\') \
-             OR EXISTS (SELECT 1 FROM phone_numbers p WHERE p.user_id = u.id AND lower(p.phone) LIKE {slot} ESCAPE '\\'))"
+            "u.id IN (\
+             SELECT s.id FROM users s WHERE lower(s.id) LIKE {slot} ESCAPE '\\' \
+             OR lower(s.username) LIKE {slot} ESCAPE '\\' \
+             OR lower(s.first_name) LIKE {slot} ESCAPE '\\' \
+             OR lower(s.last_name) LIKE {slot} ESCAPE '\\' \
+             OR lower(coalesce(s.first_name, '') || ' ' || coalesce(s.last_name, '')) LIKE {slot} ESCAPE '\\' \
+             UNION SELECT e.user_id FROM email_addresses e WHERE lower(e.email) LIKE {slot} ESCAPE '\\' \
+             UNION SELECT p.user_id FROM phone_numbers p WHERE lower(p.phone) LIKE {slot} ESCAPE '\\')"
         ));
     }
 

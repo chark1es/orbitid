@@ -28,6 +28,7 @@ import { EmptyState } from "../components/shared/empty-state";
 import { StatusBadge } from "../components/shared/status-badge";
 import { ConfirmDialog } from "../components/shared/confirm-dialog";
 import { SecretReveal } from "../components/shared/secret-reveal";
+import { EmailSetupNotice } from "../components/shared/email-setup-notice";
 
 const STATUSES = ["all", "pending", "invited", "completed", "rejected"];
 
@@ -241,6 +242,7 @@ export default function WaitlistPage() {
         title="Waitlist"
         description="Approve or reject people waiting for access to your application."
       />
+      <EmailSetupNotice action="email invitations to people on the waitlist" />
 
       <div className="flex flex-wrap items-end gap-x-2 gap-y-3">
         <SearchInput

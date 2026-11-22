@@ -117,8 +117,8 @@ export default function LoginPage() {
     <div className="min-h-svh bg-background">
       <header className="flex h-12 items-center justify-between border-b border-border px-6">
         <div className="flex items-center gap-2.5">
-          <span className="flex size-6 items-center justify-center rounded-sm bg-primary text-primary-foreground">
-            <OrbitMark />
+          <span className="flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
+            <OrbitMark className="size-[18px]" accent="var(--signal)" />
           </span>
           <span className="text-sm font-semibold">OrbitID</span>
         </div>

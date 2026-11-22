@@ -160,6 +160,13 @@ impl SettingsStore {
         self.cache.load_full()
     }
 
+    /// The mail transport the resolver would pick right now, counting the
+    /// `ORBITID_RESEND_API_KEY` / `ORBITID_SMTP_URL` fallbacks the dashboard
+    /// cannot see. `Console` means mail is not delivered.
+    pub fn effective_email_provider(&self) -> crate::settings::types::EmailProvider {
+        crate::settings::policy::effective_email_provider(&self.get(), &self.env)
+    }
+
     /// Reads the row and returns its database-assigned revision plus the stored
     /// tree in its validated, opened form.
     async fn read_snapshot(&self) -> Result<Option<(i64, InstanceSettings)>> {

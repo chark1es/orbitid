@@ -1012,3 +1012,36 @@ async fn user_creation_is_atomic_when_an_identifier_insert_fails() {
             .expect("events");
     assert_eq!(events, 0, "no event may announce a rolled-back user");
 }
+
+#[tokio::test]
+async fn search_matches_names_emails_and_full_names_once_each() {
+    let harness = setup().await;
+    let grace = create_user(
+        &harness,
+        json!({ "first_name": "Grace", "last_name": "Hopper", "email_address": ["admiral@navy.example"] }),
+    )
+    .await;
+    let alan = create_user(
+        &harness,
+        json!({ "first_name": "Alan", "last_name": "Turing", "email_address": ["alan@bletchley.example", "enigma@bletchley.example"] }),
+    )
+    .await;
+
+    // Email substring, including a user with two matching addresses (returned once).
+    assert_eq!(
+        ids(&harness.get("/v1/users?query=bletchley").await.value()),
+        vec![b_id(&alan)]
+    );
+    // Full-name substring that spans the first/last boundary.
+    assert_eq!(
+        ids(&harness.get("/v1/users?query=ce%20hop").await.value()),
+        vec![b_id(&grace)]
+    );
+    // Case-insensitive, and the count agrees with the page.
+    assert_eq!(
+        ids(&harness.get("/v1/users?query=NAVY").await.value()),
+        vec![b_id(&grace)]
+    );
+    let count = harness.get("/v1/users/count?query=example").await.value();
+    assert_eq!(count["total_count"], json!(2));
+}
