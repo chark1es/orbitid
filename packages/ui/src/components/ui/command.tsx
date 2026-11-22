@@ -34,7 +34,7 @@ function CommandDialog({
   description = "Search for a command to run...",
   children,
   className,
-  showCloseButton = true,
+  showCloseButton = false,
   ...props
 }: React.ComponentProps<typeof Dialog> & {
   title?: string
@@ -48,11 +48,19 @@ function CommandDialog({
         <DialogTitle>{title}</DialogTitle>
         <DialogDescription>{description}</DialogDescription>
       </DialogHeader>
+      {/*
+        Anchored near the top instead of centred, so the input stays put while results grow and shrink
+        under it, and the whole panel stays inside the visible viewport (notches and on-screen keyboards
+        included). Esc closes it; the input row shows the hint instead of a close button over the field.
+      */}
       <DialogContent
-        className={cn("overflow-hidden p-0", className)}
+        className={cn(
+          "top-[max(1rem,calc(env(safe-area-inset-top)+1rem),12dvh)] max-h-[calc(100dvh-max(1rem,calc(env(safe-area-inset-top)+1rem),12dvh)-1rem-env(safe-area-inset-bottom))] translate-y-0 gap-0 overflow-hidden p-0",
+          className
+        )}
         showCloseButton={showCloseButton}
       >
-        <Command className="**:data-[slot=command-input-wrapper]:h-12 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]]:px-2 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5">
+        <Command className="min-h-0 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]]:px-2 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-2.5 [&_[cmdk-item]_svg]:size-4.5">
           {children}
         </Command>
       </DialogContent>
@@ -62,22 +70,27 @@ function CommandDialog({
 
 function CommandInput({
   className,
+  trailing,
   ...props
-}: React.ComponentProps<typeof CommandPrimitive.Input>) {
+}: React.ComponentProps<typeof CommandPrimitive.Input> & {
+  /** Rendered at the end of the input row, e.g. a progress indicator or a key hint. */
+  trailing?: React.ReactNode
+}) {
   return (
     <div
       data-slot="command-input-wrapper"
-      className="flex h-9 items-center gap-2 border-b px-3"
+      className="flex h-12 shrink-0 items-center gap-2.5 border-b px-4"
     >
-      <SearchIcon className="size-4 shrink-0 opacity-50" />
+      <SearchIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
       <CommandPrimitive.Input
         data-slot="command-input"
         className={cn(
-          "flex h-10 w-full rounded-md bg-transparent py-3 text-sm outline-hidden placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50",
+          "flex h-full min-w-0 flex-1 bg-transparent text-[0.9375rem] outline-hidden placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50",
           className
         )}
         {...props}
       />
+      {trailing}
     </div>
   )
 }
@@ -90,7 +103,8 @@ function CommandList({
     <CommandPrimitive.List
       data-slot="command-list"
       className={cn(
-        "max-h-[300px] scroll-py-1 overflow-x-hidden overflow-y-auto",
+        // cmdk measures its content into --cmdk-list-height; animating to it keeps results from jumping.
+        "h-(--cmdk-list-height) max-h-[min(26rem,60dvh)] scroll-py-2 overflow-x-hidden overflow-y-auto overscroll-contain py-1 transition-[height] duration-150 ease-out-expo motion-reduce:transition-none",
         className
       )}
       {...props}
@@ -104,7 +118,7 @@ function CommandEmpty({
   return (
     <CommandPrimitive.Empty
       data-slot="command-empty"
-      className="py-6 text-center text-sm"
+      className="px-4 py-8 text-center text-sm text-muted-foreground"
       {...props}
     />
   )
@@ -147,7 +161,7 @@ function CommandItem({
     <CommandPrimitive.Item
       data-slot="command-item"
       className={cn(
-        "relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
+        "relative flex cursor-default items-center gap-2.5 rounded-md px-2 py-1.5 text-sm outline-hidden transition-colors duration-100 select-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
         className
       )}
       {...props}

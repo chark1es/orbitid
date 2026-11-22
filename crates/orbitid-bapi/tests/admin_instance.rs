@@ -523,3 +523,27 @@ async fn keeps_replaces_and_clears_secrets() {
     );
     assert_eq!(harness.state().settings.get().security.captcha_secret, "");
 }
+
+#[tokio::test]
+async fn reports_the_email_transport_the_server_resolves() {
+    let harness = setup().await;
+    let initial = harness.get("/v1/instance").await.value();
+    assert!(
+        matches!(
+            initial["email_delivery"]["provider"].as_str(),
+            Some("console" | "smtp" | "resend")
+        ),
+        "{initial}"
+    );
+
+    harness
+        .state()
+        .settings
+        .update(json!({
+            "email": { "provider": "smtp", "smtpUrl": "smtp://mailer:hunter2@smtp.example.com:587" },
+        }))
+        .await
+        .expect("settings update");
+    let configured = harness.get("/v1/instance").await.value();
+    assert_eq!(configured["email_delivery"], json!({ "provider": "smtp" }));
+}

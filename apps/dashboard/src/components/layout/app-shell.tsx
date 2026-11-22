@@ -29,6 +29,7 @@ import { visibleNavGroups } from "./nav";
 import { ThemeToggle } from "./theme-toggle";
 import { UserMenu } from "./user-menu";
 import { PageSkeleton } from "../shared/page-skeleton";
+import { EmailSetupBanner } from "../shared/email-setup-notice";
 
 function isActivePath(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";
@@ -76,8 +77,8 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild tooltip={instanceName}>
               <Link to="/" className="gap-2.5">
-                <span className="flex size-7 shrink-0 items-center justify-center rounded-sm bg-rail-foreground/12 text-rail-foreground">
-                  <OrbitMark />
+                <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-rail-foreground/10 text-rail-foreground ring-1 ring-rail-foreground/10 ring-inset">
+                  <OrbitMark className="size-[18px]" accent="var(--sidebar-primary)" />
                 </span>
                 <span className="grid min-w-0 flex-1 text-left leading-tight">
                   <span className="truncate text-sm font-semibold text-rail-foreground">{instanceName}</span>
@@ -147,6 +148,7 @@ export function AppShell() {
               <UserMenu />
             </div>
           </header>
+          <EmailSetupBanner />
           <div id="main-content" className="mx-auto flex w-full max-w-[1280px] flex-1 flex-col gap-6 px-6 py-6">
             <PageFallback.Provider value={<PageLoader />}>
               <Suspense fallback={<PageLoader />}>

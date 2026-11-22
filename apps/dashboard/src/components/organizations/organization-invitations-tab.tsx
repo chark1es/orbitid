@@ -34,6 +34,7 @@ import { CopyButton } from "../shared/copy-button";
 import { ConfirmDialog } from "../shared/confirm-dialog";
 import { SecretReveal } from "../shared/secret-reveal";
 import { Section } from "../shared/section";
+import { EmailSetupNotice } from "../shared/email-setup-notice";
 
 const STATUSES = ["all", "pending", "accepted", "revoked", "expired"];
 
@@ -81,6 +82,7 @@ function InviteDialog({
           <DialogTitle>Invite to {org.name}</DialogTitle>
           <DialogDescription>The invitee receives an email with an acceptance link.</DialogDescription>
         </DialogHeader>
+        <EmailSetupNotice action="email this invitation" onNavigate={() => onOpenChange(false)} />
         <div className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="invite-email">Email address</Label>

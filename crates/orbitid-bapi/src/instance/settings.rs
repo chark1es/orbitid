@@ -27,6 +27,10 @@ pub(super) fn instance_json(state: &AppState) -> Result<Value> {
             "driver": "postgres",
             "label": state.env.database.label(),
         },
+        // Resolved server-side so environment-variable transports count too.
+        "email_delivery": {
+            "provider": state.settings.effective_email_provider(),
+        },
     });
     if let (Some(target), Some(source)) = (out.as_object_mut(), masked.as_object()) {
         for (key, value) in source {

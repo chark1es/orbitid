@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { InstanceSettings } from "@orbitid/shared";
 import { toast } from "sonner";
 import { api } from "../../lib/api";
+import { EMAIL_DELIVERY_QUERY_KEY } from "../../lib/email-delivery";
 import { SETTINGS_QUERY_KEY, fetchInstanceSettings } from "./data";
 import {
   buildSettingsPatch,
@@ -107,6 +108,8 @@ export function useSettingsEditor(): SettingsEditor {
       const fallback = deepMerge(cloneJson(baseline), body);
       const next = mergeSettingsResponse(response, fallback);
       queryClient.setQueryData(SETTINGS_QUERY_KEY, next);
+      // The email setup prompt reads the server's resolved transport; a save may have changed it.
+      void queryClient.invalidateQueries({ queryKey: EMAIL_DELIVERY_QUERY_KEY });
       setBaseline(cloneJson(next));
       setDraft(cloneJson(next));
       setRevision((value) => value + 1);
