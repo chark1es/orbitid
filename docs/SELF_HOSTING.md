@@ -2,8 +2,10 @@
 
 OrbitID is one Rust server process plus a Postgres database. The server exposes the API your apps call,
 signs session tokens, and serves the admin dashboard at its root URL. Nothing else runs, and there is no
-hosted service behind it. The only outbound calls are to integrations you turn on: email and SMS providers,
-social sign-in, CAPTCHA and the optional breached-password check.
+hosted service behind it. Outbound calls go to integrations you turn on (email and SMS providers, social
+sign-in, CAPTCHA and the optional breached-password check) plus one release check to GitHub every 6 hours,
+which carries no instance data and which `ORBITID_UPDATE_CHECK=false` turns off
+([Version and update check](UPDATES.md#version-and-update-check)).
 
 ## What you need
 
@@ -274,19 +276,20 @@ Pull the new image or code and restart. The server applies pending migrations be
 Back up the database first. With a [prebuilt image](#prebuilt-images), change `ORBITID_IMAGE` to the new
 `X.Y.Z` tag, then `docker compose pull orbitid && docker compose up -d`.
 
-Migration `0010` builds the verified-domain index with `CREATE INDEX CONCURRENTLY` (a non-transactional
-migration), so a large `email_addresses` table keeps accepting writes while it is indexed; the build can take a
-while on a big table. If a build was interrupted, the invalid leftover index is dropped automatically on the next
-boot and rebuilt. Migration `0011` is metadata only (two columns on `organization_domains`, a small
-`worker_cursors` table) and is instant. Domains verified before the upgrade are not re-enrolled automatically;
-switch the mode off and on again to run an enrollment pass. Migration `0012` adds three nullable columns on
-`organization_domains` (instant).
+What happens on boot, which is what makes an unattended image update safe:
 
-**A stuck enrollment domain.** If an enrollment chunk keeps failing, the worker backs off (30 s, doubling, at most
-1 h between attempts), logs each failure at `error` with the domain id and never discards a membership. To see
-stuck domains: `SELECT id, enrollment_failures, enrollment_last_error, enrollment_next_attempt_at FROM
-organization_domains WHERE enrollment_failures > 0;`. Fix the cause (usually the webhook outbox or a database
-constraint); the next attempt after `enrollment_next_attempt_at` completes the pass and resets the counters.
+- Migrations run before the port opens, so `/ready` and `orbitid healthcheck` only pass once the schema is
+  current. Each migration runs in its own transaction (the few `CREATE INDEX CONCURRENTLY` ones cannot, and an
+  interrupted build of those is dropped and rebuilt on the next boot), so a failed migration leaves the
+  database as it was and the server exits instead of serving a half-migrated schema.
+- The whole startup sequence holds one Postgres advisory lock. Several replicas restarting onto a new image at
+  once are serialised: one migrates, the others wait and find nothing to do.
+- Migrations only move forward. An older image refuses to start against a database a newer image has already
+  migrated (sqlx reports the applied migration it does not know), rather than run against a schema it does not
+  understand. Rolling back across a migration therefore means restoring the backup taken before the update.
+
+Checking for new releases, pinning image tags and opt-in automatic updates are covered in
+[UPDATES.md](UPDATES.md).
 
 ### Upgrading from the TypeScript server
 

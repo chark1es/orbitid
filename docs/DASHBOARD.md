@@ -143,6 +143,11 @@ serves both). Set `ORBITID_DEV_API_URL` to a non-default port only together with
 
 The API reference is served by the server at `{apiUrl}/docs`, outside the dashboard.
 
+When the server's release check finds a newer OrbitID release, the top bar shows **Update available** (with
+`vX → vY` on wide screens) linking to that release's notes on GitHub. It reads `version` from
+`GET /v1/instance`, which the server answers from memory, and shows nothing while the instance is current or
+when `ORBITID_UPDATE_CHECK=false`. See [UPDATES.md](UPDATES.md#version-and-update-check).
+
 ## Feature availability and user security
 
 Organization management links, user tabs and creation controls stay hidden until organizations are confirmed

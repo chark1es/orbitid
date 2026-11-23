@@ -69,6 +69,7 @@ qrcode = { version = "0.14", default-features = false }
 image = { version = "0.24", default-features = false, features = ["png"] }
 base32 = "0.5"
 # misc
+semver = "1"
 url = "2"
 regex = "1"
 percent-encoding = "2"

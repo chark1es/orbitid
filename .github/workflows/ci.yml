@@ -177,6 +177,8 @@ jobs:
     env:
       ORBITID_TEST_PG_ADMIN_URL: postgres://orbit:orbit@localhost:5432/postgres
       ORBITID_BIN: ${{ github.workspace }}/target/release/orbitid
+      # The spawned server must not call GitHub's release API from CI.
+      ORBITID_UPDATE_CHECK: "false"
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/postgres

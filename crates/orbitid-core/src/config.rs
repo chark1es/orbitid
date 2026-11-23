@@ -65,6 +65,9 @@ pub struct Env {
     /// domain-enrollment reconciliation worker (it is also woken immediately
     /// when a domain change commits); each tick uses the retention budget.
     pub enrollment_interval_ms: u64,
+    /// `ORBITID_UPDATE_CHECK`, default true. Asks GitHub every few hours whether
+    /// a newer OrbitID release exists; `false` turns the request off.
+    pub update_check: bool,
 }
 
 /// Explicit overrides, mirroring the `Partial<Env>` argument of `loadEnv`.
@@ -93,6 +96,7 @@ pub struct EnvOverrides {
     pub retention_interval_ms: Option<u64>,
     pub retention_budget_ms: Option<u64>,
     pub enrollment_interval_ms: Option<u64>,
+    pub update_check: Option<bool>,
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -111,6 +115,21 @@ fn env_var(name: &str) -> Option<String> {
 
 fn non_empty(value: Option<String>) -> Option<String> {
     value.filter(|v| !v.is_empty())
+}
+
+/// `ORBITID_UPDATE_CHECK`: unset means on. Anything other than a clear yes or
+/// no is refused, so a typo can never leave the check on by accident.
+pub fn parse_update_check(raw: Option<&str>) -> Result<bool, ConfigError> {
+    let Some(raw) = raw.map(str::trim).filter(|raw| !raw.is_empty()) else {
+        return Ok(true);
+    };
+    match raw.to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" | "on" => Ok(true),
+        "false" | "0" | "no" | "off" => Ok(false),
+        _ => Err(ConfigError::new(
+            "ORBITID_UPDATE_CHECK must be true or false.",
+        )),
+    }
 }
 
 /// `path.resolve`-like: absolute paths pass through, relative ones are joined
@@ -387,6 +406,11 @@ pub fn load_env(overrides: EnvOverrides) -> Result<Env, ConfigError> {
         ));
     }
 
+    let update_check = match overrides.update_check {
+        Some(value) => value,
+        None => parse_update_check(env_var("ORBITID_UPDATE_CHECK").as_deref())?,
+    };
+
     let request_timeout_ms = match overrides.request_timeout_ms {
         Some(value) => value,
         None => env_var("ORBITID_REQUEST_TIMEOUT_MS")
@@ -446,6 +470,7 @@ pub fn load_env(overrides: EnvOverrides) -> Result<Env, ConfigError> {
         retention_interval_ms,
         retention_budget_ms,
         enrollment_interval_ms,
+        update_check,
     })
 }
 

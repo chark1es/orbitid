@@ -58,7 +58,8 @@ compose() {
   (
     unset POSTGRES_PASSWORD ORBITID_ENCRYPTION_KEY ORBITID_SECRET_KEY ORBITID_BASE_URL ORBITID_PORT \
       ORBITID_BIND ORBITID_VERSION ORBITID_TRUST_PROXY ORBITID_DB_MAX_CONNECTIONS \
-      ORBITID_DB_ACQUIRE_TIMEOUT_MS ORBITID_RESEND_API_KEY ORBITID_SMTP_URL ORBITID_EMAIL_FROM
+      ORBITID_DB_ACQUIRE_TIMEOUT_MS ORBITID_RESEND_API_KEY ORBITID_SMTP_URL ORBITID_EMAIL_FROM \
+      ORBITID_UPDATE_CHECK
     if [ "$COMPOSE" = plugin ]; then docker compose "$@"; else docker-compose "$@"; fi
   )
 }
@@ -100,6 +101,9 @@ ORBITID_VERSION=$ORBITID_VERSION
 # ORBITID_RESEND_API_KEY=
 # ORBITID_SMTP_URL=
 # ORBITID_EMAIL_FROM=
+
+# Release check against GitHub every 6 hours, for the dashboard's "Update available"; false turns it off.
+# ORBITID_UPDATE_CHECK=true
 EOF
   ) || die "could not create $PWD/.env."
   say "Created .env with new secrets. Back it up: the encryption key cannot be recovered."

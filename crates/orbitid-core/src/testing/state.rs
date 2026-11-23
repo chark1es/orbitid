@@ -121,6 +121,7 @@ pub async fn try_test_state_with(overrides: EnvOverrides) -> Result<TestContext>
     take!(retention_interval_ms);
     take!(retention_budget_ms);
     take!(enrollment_interval_ms);
+    take!(update_check);
     let state = create_context(options).await?;
     // Keep the database alive as long as any clone of this state (e.g. the one
     // held by a built router) is alive, not just as long as the TestContext is.

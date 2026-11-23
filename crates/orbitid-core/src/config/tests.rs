@@ -106,6 +106,29 @@ fn retention_settings_default_and_accept_overrides() {
 }
 
 #[test]
+fn update_check_defaults_on_and_refuses_unclear_values() {
+    assert!(parse_update_check(None).unwrap());
+    assert!(parse_update_check(Some("")).unwrap());
+    for on in ["true", "TRUE", "1", "yes", "on", " true "] {
+        assert!(parse_update_check(Some(on)).unwrap(), "{on}");
+    }
+    for off in ["false", "False", "0", "no", "off"] {
+        assert!(!parse_update_check(Some(off)).unwrap(), "{off}");
+    }
+    let err = parse_update_check(Some("flase")).unwrap_err();
+    assert!(err.to_string().contains("ORBITID_UPDATE_CHECK"));
+
+    let disabled = base(EnvOverrides {
+        database_url: Some("postgres://u:p@localhost:5432/orbit".into()),
+        encryption_key: Some("k".repeat(40)),
+        update_check: Some(false),
+        ..Default::default()
+    })
+    .unwrap();
+    assert!(!disabled.update_check);
+}
+
+#[test]
 fn database_path_is_refused_instead_of_ignored() {
     assert!(refuse_database_path(None).is_ok());
     assert!(refuse_database_path(Some(String::new())).is_ok());

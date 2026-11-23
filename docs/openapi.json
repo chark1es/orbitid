@@ -24252,6 +24252,53 @@
               "label"
             ]
           },
+          "version": {
+            "description": "The running server version and the last release check. The check asks GitHub every 6 hours unless ORBITID_UPDATE_CHECK=false; this response only reads the cached answer.",
+            "type": "object",
+            "properties": {
+              "current": {
+                "description": "The running version (semver).",
+                "type": "string"
+              },
+              "update_check": {
+                "description": "Whether this server checks for new releases.",
+                "type": "boolean"
+              },
+              "latest": {
+                "description": "The newest published release, once a check has succeeded.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "update_available": {
+                "description": "True when `latest` is newer than `current` by semver precedence.",
+                "type": "boolean"
+              },
+              "release_url": {
+                "description": "Release notes for `latest`.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "checked_at": {
+                "description": "When `latest` was last confirmed, in milliseconds since the epoch.",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "current",
+              "update_check",
+              "latest",
+              "update_available",
+              "release_url",
+              "checked_at"
+            ]
+          },
           "application": {
             "default": {},
             "type": "object",
@@ -25219,6 +25266,7 @@
           "environment_type",
           "publishable_key",
           "database",
+          "version",
           "application",
           "attributes",
           "password",

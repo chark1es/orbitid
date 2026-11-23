@@ -403,6 +403,8 @@ pub async fn start(state: orbitid_core::AppState) -> Result<(), OrbitError> {
     }
     let install = orbitid_identity::install(&state).await?;
     let webhook_worker = orbitid_platform::webhooks::WebhookWorker::start(state.clone());
+    // Aborted when dropped, on every return path below.
+    let _release_worker = orbitid_platform::ReleaseWorker::start(state.clone());
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", state.env.port))
         .await
         .map_err(|error| {
@@ -427,6 +429,10 @@ pub async fn start(state: orbitid_core::AppState) -> Result<(), OrbitError> {
         state.env.base_url
     );
     println!("  Database        : {}", state.env.database.label());
+    println!(
+        "  Version         : {}",
+        orbitid_platform::current_version()
+    );
     for line in orbitid_platform::mail::email_startup_warnings(&state) {
         println!("{line}");
     }

@@ -21,6 +21,7 @@ url = { workspace = true }
 percent-encoding = { workspace = true }
 reqwest = { workspace = true }
 lettre = { workspace = true }
+semver = { workspace = true }
 
 [dev-dependencies]
 orbitid-core = { path = "../orbitid-core", features = ["test-util"] }

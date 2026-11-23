@@ -2,7 +2,7 @@
 
 # OrbitID
 
-Open-source authentication and user management that runs on your own Postgres. One server, an admin dashboard, and SDKs for the browser, React, Next.js and backends. Sign-in, sessions, organizations, roles, API keys and webhooks are included. There is no hosted service and nothing is billed. User data stays in your database; the only outbound calls are to integrations you turn on, such as email, social sign-in or the breached-password check.
+Open-source authentication and user management that runs on your own Postgres. One server, an admin dashboard, and SDKs for the browser, React, Next.js and backends. Sign-in, sessions, organizations, roles, API keys and webhooks are included. There is no hosted service and nothing is billed. User data stays in your database. Outbound calls go to integrations you turn on, such as email, social sign-in or the breached-password check, plus a release check to GitHub every 6 hours that sends no instance data and is off with `ORBITID_UPDATE_CHECK=false`.
 
 You write `useUser`, `useAuth`, `<SignIn />`, `<UserButton />`, `auth()` and `has({ permission })` in your app, and the data lands in a database you control.
 
@@ -185,6 +185,11 @@ instance must first run the **last TypeScript release's** `orbitid copy --from s
 switch `ORBITID_DATABASE_URL`. See [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md#upgrading) and
 [docs/DATA_MOVE.md](docs/DATA_MOVE.md).
 
+Migrations run on boot under an advisory lock, before the server listens, so pulling a new image and
+restarting is the whole upgrade. The dashboard shows **Update available** when a newer release is out.
+Unattended updates are opt-in: pin an image tag and let a timer or Watchtower pull it
+([docs/UPDATES.md](docs/UPDATES.md#automatic-updates-opt-in)).
+
 ## Development
 
 ```bash
@@ -209,7 +214,7 @@ changes — it is the source of truth the Rust server embeds and serves.
 
 | Topic | Where |
 |---|---|
-| Run it yourself | [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md), [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md), [docs/DATA_MOVE.md](docs/DATA_MOVE.md) |
+| Run it yourself | [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md), [docs/UPDATES.md](docs/UPDATES.md), [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md), [docs/DATA_MOVE.md](docs/DATA_MOVE.md) |
 | HTTP API | [docs/API.md](docs/API.md), `/v1/openapi.json` on your instance, and [docs/openapi.json](docs/openapi.json) |
 | Security | [docs/SECURITY.md](docs/SECURITY.md) |
 | Sessions and persistence | [docs/SESSIONS.md](docs/SESSIONS.md) |

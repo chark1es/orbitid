@@ -1,0 +1,39 @@
+# Opt-in unattended updates, layered on docker-compose.yml:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.autoupdate.yml up -d
+#
+# OrbitID runs the published image on a pinned tag instead of building this checkout, and Watchtower
+# pulls that tag once a day and recreates the container when it moved. On boot the server migrates the
+# database under an advisory lock before it listens (docs/SELF_HOSTING.md#upgrading), so an update needs
+# no manual step. Migrations only move forward: schedule database backups before turning this on.
+#
+# ORBITID_AUTOUPDATE_TAG picks the line to follow. `1` takes every 1.x release; `1.4` takes only patch
+# releases of 1.4. Below 1.0, use `0.Y`: a 0.x minor release may break things. Never `latest`.
+#
+# Watchtower reads the Docker socket, which is root-equivalent on the host. A cron job running
+# `docker compose pull orbitid && docker compose up -d orbitid` does the same without it.
+# Watchtower recreates the container from its running configuration, so after editing this file or .env run
+# `docker compose ... up -d` once to apply it. Requires Docker Compose 2.24.4+ (for `!reset`).
+services:
+  orbitid:
+    build: !reset null
+    image: ghcr.io/chark1es/orbitid:${ORBITID_AUTOUPDATE_TAG:?Set ORBITID_AUTOUPDATE_TAG in .env (for example 0.1 or 1)}
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+
+  watchtower:
+    # The original Watchtower project is no longer actively maintained; check that the image you run
+    # supports your Docker Engine version.
+    image: containrrr/watchtower:1.7.1
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      # Only containers labelled above (not Postgres, not unrelated containers on the host).
+      WATCHTOWER_LABEL_ENABLE: "true"
+      # Daily at 04:00 in the container's time zone (UTC unless TZ is set). Six fields: seconds first.
+      WATCHTOWER_SCHEDULE: ${WATCHTOWER_SCHEDULE:-0 0 4 * * *}
+      # Remove the replaced image so old releases do not pile up on disk.
+      WATCHTOWER_CLEANUP: "true"
+      # Same drain time as docker-compose.yml's stop_grace_period before the old container is killed.
+      WATCHTOWER_TIMEOUT: 30s
