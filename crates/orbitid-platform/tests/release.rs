@@ -101,7 +101,10 @@ fn caches_the_last_answer_and_keeps_it_through_failures() {
     assert!(!empty.update_available);
     assert_eq!(empty.checked_at, None);
 
-    assert_eq!(check.record(Ok(release("v0.2.0")), 1_000), CHECK_INTERVAL);
+    assert_eq!(
+        check.record(Ok(Some(release("v0.2.0"))), 1_000),
+        CHECK_INTERVAL
+    );
     let found = check.status();
     assert_eq!(found.latest.as_deref(), Some("0.2.0"));
     assert!(found.update_available);
@@ -118,15 +121,25 @@ fn caches_the_last_answer_and_keeps_it_through_failures() {
 }
 
 #[test]
+fn no_published_release_is_an_answer_not_a_failure() {
+    let check = ReleaseCheck::new(true, "0.1.0");
+    // A repository without releases waits the normal interval, not the retry one.
+    assert_eq!(check.record(Ok(None), 1_000), CHECK_INTERVAL);
+    let status = check.status();
+    assert_eq!(status.latest, None);
+    assert!(!status.update_available);
+}
+
+#[test]
 fn reports_nothing_when_current_or_disabled() {
     let current = ReleaseCheck::new(true, "0.2.0");
-    current.record(Ok(release("v0.2.0")), 1);
+    current.record(Ok(Some(release("v0.2.0"))), 1);
     let status = current.status();
     assert!(!status.update_available);
     assert_eq!(status.latest.as_deref(), Some("0.2.0"));
 
     let disabled = ReleaseCheck::new(false, "0.1.0");
-    disabled.record(Ok(release("v0.2.0")), 1);
+    disabled.record(Ok(Some(release("v0.2.0"))), 1);
     let status = disabled.status();
     assert!(!status.update_check);
     assert!(!status.update_available);
@@ -152,10 +165,17 @@ async fn fetches_the_latest_release_and_fails_quietly() {
     let body = json!({ "tag_name": "v3.1.0", "draft": false, "prerelease": false });
     let router = Router::new().route("/latest", get(move || async move { Json(body) }));
     let ok = serve(router).await;
-    assert_eq!(fetch_latest(&client, &ok).await, Ok(release("v3.1.0")));
+    assert_eq!(
+        fetch_latest(&client, &ok).await,
+        Ok(Some(release("v3.1.0")))
+    );
 
-    // A repository without releases answers 404; GitHub's rate limit answers 403.
-    for status in [StatusCode::NOT_FOUND, StatusCode::FORBIDDEN] {
+    // A repository without releases answers 404: no release, not a failure.
+    let none = serve(Router::new().route("/latest", get(|| async { StatusCode::NOT_FOUND }))).await;
+    assert_eq!(fetch_latest(&client, &none).await, Ok(None));
+
+    // GitHub's rate limit answers 403; a server error is a failure too.
+    for status in [StatusCode::FORBIDDEN, StatusCode::BAD_GATEWAY] {
         let url = serve(Router::new().route("/latest", get(move || async move { status }))).await;
         let error = fetch_latest(&client, &url).await.unwrap_err();
         assert!(error.contains(status.as_str()), "{error}");

@@ -300,7 +300,7 @@ The server hardens what it controls; these parts are yours.
 4. **Database.** Store the database credentials in the environment, not in the settings UI. Use a dedicated
    database user with access only to the OrbitID database, and keep Postgres patched.
 5. **Network.** Only the server needs to reach your database and the outbound services you configured (mail, SMS,
-   CAPTCHA, IdP). Block egress to your internal network and to the cloud metadata address at the network layer as
+   CAPTCHA, IdP), plus `api.github.com` for the release check unless `ORBITID_UPDATE_CHECK=false`. Block egress to your internal network and to the cloud metadata address at the network layer as
    well — `safeFetch` is the application-level guard, not a substitute for a firewall.
 6. **Upgrades.** Watch dependency advisories and upgrade. Run `bun audit` (or your registry's equivalent) as part
    of maintenance, and rebuild the image when a fix lands.

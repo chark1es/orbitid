@@ -12,7 +12,8 @@
 #
 # Watchtower reads the Docker socket, which is root-equivalent on the host. A cron job running
 # `docker compose pull orbitid && docker compose up -d orbitid` does the same without it.
-# Requires Docker Compose 2.24+ (for `!reset`).
+# Watchtower recreates the container from its running configuration, so after editing this file or .env run
+# `docker compose ... up -d` once to apply it. Requires Docker Compose 2.24.4+ (for `!reset`).
 services:
   orbitid:
     build: !reset null

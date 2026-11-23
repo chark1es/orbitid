@@ -10,7 +10,7 @@ use orbitid_platform::mail::{
 };
 use serde_json::{json, Value};
 
-use common::{error_code, setup, Harness};
+use common::{error_code, setup, setup_with, Harness};
 
 const TOTP_SECRET: &str = "JBSWY3DPEHPK3PXP";
 
@@ -550,7 +550,12 @@ async fn reports_the_email_transport_the_server_resolves() {
 
 #[tokio::test]
 async fn reports_the_running_version_and_the_cached_release_check() {
-    let harness = setup().await;
+    // Pinned on, so an operator's ORBITID_UPDATE_CHECK cannot skip the assertions below.
+    let harness = setup_with(orbitid_core::config::EnvOverrides {
+        update_check: Some(true),
+        ..Default::default()
+    })
+    .await;
     let initial = harness.get("/v1/instance").await.value();
     let version = &initial["version"];
     assert_eq!(
@@ -565,22 +570,15 @@ async fn reports_the_running_version_and_the_cached_release_check() {
     // An answer recorded by the worker is read from memory, without a request.
     let newer = orbitid_platform::release::parse_release(&json!({ "tag_name": "v999.0.0" }))
         .expect("release");
-    orbitid_platform::release_check(harness.state()).record(Ok(newer), 42);
+    orbitid_platform::release_check(harness.state()).record(Ok(Some(newer)), 42);
     let after = harness.get("/v1/instance").await.value();
     let after = &after["version"];
-    if harness.state().env.update_check {
-        assert_eq!(after["update_check"], json!(true));
-        assert_eq!(after["latest"], json!("999.0.0"));
-        assert_eq!(after["update_available"], json!(true));
-        assert_eq!(
-            after["release_url"],
-            json!("https://github.com/chark1es/orbitid/releases/tag/v999.0.0")
-        );
-        assert_eq!(after["checked_at"], json!(42));
-    } else {
-        // ORBITID_UPDATE_CHECK=false in this environment: nothing is reported.
-        assert_eq!(after["update_check"], json!(false));
-        assert_eq!(after["latest"], Value::Null);
-        assert_eq!(after["update_available"], json!(false));
-    }
+    assert_eq!(after["update_check"], json!(true));
+    assert_eq!(after["latest"], json!("999.0.0"));
+    assert_eq!(after["update_available"], json!(true));
+    assert_eq!(
+        after["release_url"],
+        json!("https://github.com/chark1es/orbitid/releases/tag/v999.0.0")
+    );
+    assert_eq!(after["checked_at"], json!(42));
 }

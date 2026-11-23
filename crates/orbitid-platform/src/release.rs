@@ -2,11 +2,12 @@
 //!
 //! One unauthenticated `GET` to GitHub's "latest release" endpoint, made by a
 //! background task every [`CHECK_INTERVAL`] (sooner after a failure). The
-//! request carries no instance data: only the `orbitid/<version>` user agent
-//! that every outbound call already sends. The answer is kept in memory per
+//! request carries no instance data: only the `orbitid/<crate version>` user
+//! agent that every outbound call already sends. The answer is kept in memory per
 //! replica and read by `GET /v1/instance`, so a dashboard request never waits on
-//! GitHub. A failure (offline, rate limited, no releases yet) is logged at debug
-//! level and keeps the last good answer. `ORBITID_UPDATE_CHECK=false` turns the
+//! GitHub. A repository with no published release yet (404) is an answer, not a
+//! failure, and is asked again on the normal interval. A failure (offline, rate
+//! limited) is logged at debug level and keeps the last good answer. `ORBITID_UPDATE_CHECK=false` turns the
 //! request off entirely; the running version is still reported.
 
 use std::cmp::Ordering;
@@ -100,9 +101,13 @@ pub fn parse_release(body: &Value) -> Option<LatestRelease> {
     })
 }
 
-/// Asks `url` for the latest release. Errors are short descriptions for a
-/// debug log; none is ever shown to a user.
-pub async fn fetch_latest(client: &reqwest::Client, url: &str) -> Result<LatestRelease, String> {
+/// Asks `url` for the latest release. `Ok(None)` means the repository has no
+/// published release yet (GitHub answers 404). Errors are short descriptions
+/// for a debug log; none is ever shown to a user.
+pub async fn fetch_latest(
+    client: &reqwest::Client,
+    url: &str,
+) -> Result<Option<LatestRelease>, String> {
     let response = client
         .get(url)
         .header("accept", "application/vnd.github+json")
@@ -112,6 +117,9 @@ pub async fn fetch_latest(client: &reqwest::Client, url: &str) -> Result<LatestR
         .await
         .map_err(|error| format!("request failed: {error}"))?;
     let status = response.status();
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
     if !status.is_success() {
         return Err(format!("status {status}"));
     }
@@ -121,7 +129,9 @@ pub async fn fetch_latest(client: &reqwest::Client, url: &str) -> Result<LatestR
         .map_err(|error| format!("unreadable body: {error}"))?;
     let body: Value =
         serde_json::from_slice(&bytes).map_err(|error| format!("unreadable body: {error}"))?;
-    parse_release(&body).ok_or_else(|| "no usable release in the response".to_string())
+    parse_release(&body)
+        .map(Some)
+        .ok_or_else(|| "no usable release in the response".to_string())
 }
 
 #[derive(Debug, Clone, Default)]
@@ -169,15 +179,16 @@ impl ReleaseCheck {
     }
 
     /// Stores the outcome of one check and returns how long to wait before the
-    /// next one. A failure keeps the last good answer.
-    pub fn record(&self, outcome: Result<LatestRelease, String>, now_ms: i64) -> Duration {
+    /// next one. `Ok(None)` (no release published yet) is an answer; a failure
+    /// keeps the last good answer and retries sooner.
+    pub fn record(&self, outcome: Result<Option<LatestRelease>, String>, now_ms: i64) -> Duration {
         match outcome {
             Ok(latest) => {
                 let mut snapshot = self
                     .snapshot
                     .write()
                     .unwrap_or_else(|poison| poison.into_inner());
-                snapshot.latest = Some(latest);
+                snapshot.latest = latest;
                 snapshot.checked_at = Some(now_ms);
                 CHECK_INTERVAL
             }

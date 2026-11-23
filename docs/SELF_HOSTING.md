@@ -185,7 +185,8 @@ The running version is printed at startup (`Version : …`) and returned by `GET
 the answer in memory; when it is newer by semver, the dashboard's top bar shows **Update available** with a
 link to the release notes, and the log says so. Nothing is shown while the instance is current.
 
-The request is an unauthenticated `GET` with the `orbitid/<version>` user agent. It sends no keys, URLs,
+The request is an unauthenticated `GET` with the `orbitid/<crate version>` user agent (the `Cargo.toml`
+version). It sends no keys, URLs,
 counts or other instance data. If GitHub cannot be reached (offline, firewalled, rate limited) the check
 retries an hour later, keeps the last answer and logs only at `debug`. It is on by default because an
 authentication server that falls behind on security fixes is the larger risk; set `ORBITID_UPDATE_CHECK=false`
@@ -238,7 +239,7 @@ echo 'ORBITID_AUTOUPDATE_TAG=0.1' >> .env   # or 1, 1.4, … — never latest
 docker compose -f docker-compose.yml -f docker-compose.autoupdate.yml up -d
 ```
 
-It needs Docker Compose 2.24 or newer (it removes the base file's `build:` with `!reset`). Watchtower reads
+It needs Docker Compose 2.24.4 or newer (it removes the base file's `build:` with `!reset`). Watchtower reads
 the Docker socket, which is equivalent to root on the host; prefer the timer when that matters. Neither form
 rolls back on its own: if a new release fails to boot, the old container is already gone, so pin the previous
 `X.Y.Z` tag, and restore the backup if the failed release had migrated the database.

@@ -25266,6 +25266,7 @@
           "environment_type",
           "publishable_key",
           "database",
+          "version",
           "application",
           "attributes",
           "password",
