@@ -27,6 +27,7 @@ import { DocumentTitle } from "./document-title";
 import { InstanceChip } from "./instance-chip";
 import { visibleNavGroups } from "./nav";
 import { ThemeToggle } from "./theme-toggle";
+import { UpdateIndicator } from "./update-indicator";
 import { UserMenu } from "./user-menu";
 import { PageSkeleton } from "../shared/page-skeleton";
 import { EmailSetupBanner } from "../shared/email-setup-notice";
@@ -142,6 +143,7 @@ export function AppShell() {
               <Breadcrumbs />
             </div>
             <div className="flex min-w-0 items-center justify-self-end gap-1.5">
+              <UpdateIndicator />
               <InstanceChip className="flex min-w-0 items-center" />
               <CommandPalette />
               <ThemeToggle />
