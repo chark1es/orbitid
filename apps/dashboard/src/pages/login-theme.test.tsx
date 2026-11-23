@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import indexHtml from "../../index.html?raw";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 import { ThemeProvider, initTheme, useTheme } from "@orbitid/ui";
 import type { Appearance, BaseTheme } from "@orbitid/react";
@@ -124,6 +124,12 @@ describe("the pre-paint script in index.html", () => {
 });
 
 describe("sign-in screen in light and dark mode", () => {
+  // The login page lazy-loads the real account form. Load it once up front so a busy test run does not outlast
+  // `findBy`'s one-second wait on the first render.
+  beforeAll(async () => {
+    await import("./_login/account-sign-in");
+  }, 30_000);
+
   it("renders dark when the operator chose dark, and hands the console's scheme to the account form", async () => {
     osScheme("light");
     localStorage.setItem("orbitid-theme", "dark");
