@@ -46,7 +46,8 @@ override it with `ORBITID_SECRET_KEY`, production requires at least 32 random ch
 `http://localhost:<ORBITID_PORT>`, so the two stay in step; set it explicitly when a proxy or public hostname
 reaches the instance. `ORBITID_IMAGE` only sets the tag compose gives the image it builds. Because the
 service has a `build:` section, compose builds this checkout; to run an image from a registry instead,
-delete `build: .` from the `orbitid` service and set `ORBITID_IMAGE` to that image's tag.
+delete `build: .` from the `orbitid` service and set `ORBITID_IMAGE` to that image's tag, for example a
+[prebuilt image](#prebuilt-images).
 
 The image is a minimal Debian bookworm-slim with the Rust binary, the built dashboard and only the shared
 libraries SAML needs. It has no Node, no compiler and no curl. The container runs as the
@@ -67,6 +68,36 @@ afterwards:
 ```bash
 bash scripts/smoke-container.sh
 ```
+
+### Prebuilt images
+
+Every push to `main` and every release tag publishes the image to the GitHub Container Registry as
+`ghcr.io/chark1es/orbitid`, for `linux/amd64` and `linux/arm64`
+([`.github/workflows/docker.yml`](../.github/workflows/docker.yml)):
+
+| Tag | Points at |
+| --- | --- |
+| `X.Y.Z` | That release. Never moves; pin this in production. |
+| `X.Y`, `X` | The newest release in that minor or major line. Not published for prereleases (`X.Y.Z-rc.1`). |
+| `latest` | The newest release. Never a prerelease or an unreleased `main` build. |
+| `edge` | The newest commit on `main`. Unreleased; for trying changes before a release. |
+| `sha-<short>` | One exact commit (`main` or a release tag), by its 7-character short SHA. |
+
+GitHub creates a container package as private on its first publish, and the workflow token cannot change that.
+Until a maintainer makes it public once (the package's settings on GitHub → Change visibility → Public, with
+access inherited from the repository), pulls need `docker login ghcr.io` with a token that has `read:packages`.
+
+To run one with the bundled compose file, delete `build: .` from the `orbitid` service in
+`docker-compose.yml` and set the tag in `.env`, using a version from the repository's release tags:
+
+```bash
+ORBITID_IMAGE=ghcr.io/chark1es/orbitid:X.Y.Z
+```
+
+A release tag `vX.Y.Z` publishes only when it matches the `[workspace.package]` version in `Cargo.toml`, so
+the image tag and the version the binary reports always agree. Images carry the standard OCI labels
+(`org.opencontainers.image.source`, `.version`, `.revision`, `.licenses`, `.description`), so
+`docker inspect` shows the exact commit an image was built from.
 
 ## Without Docker
 
@@ -161,7 +192,8 @@ verification in one settings update. The smoke script uses the latter only for i
 ## Upgrading
 
 Pull the new image or code and restart. The server applies pending migrations before it starts listening.
-Back up the database first.
+Back up the database first. With a [prebuilt image](#prebuilt-images), change `ORBITID_IMAGE` to the new
+`X.Y.Z` tag, then `docker compose pull orbitid && docker compose up -d`.
 
 Migration `0010` builds the verified-domain index with `CREATE INDEX CONCURRENTLY` (a non-transactional
 migration), so a large `email_addresses` table keeps accepting writes while it is indexed; the build can take a

@@ -138,25 +138,38 @@ describe("login guard", () => {
   it("redirects unauthenticated visitors to the account sign-in", async () => {
     mockApi();
     renderApp("/");
-    expect(await screen.findByText("Sign in to the console")).toBeTruthy();
     expect(await screen.findByRole("button", { name: "Account sign-in form" })).toBeTruthy();
     expect(document.title).toBe("Sign in \u00b7 OrbitID");
+  });
+
+  it("shows only the sign-in form to a signed-out visitor", async () => {
+    mockApi();
+    renderApp("/");
+    const form = await screen.findByRole("button", { name: "Account sign-in form" });
+    const main = screen.getByRole("main", { name: "Sign in" });
+    // The form is the page: no visible heading, instructions or help around it. The only addition is a heading that
+    // only assistive technology announces.
+    const heading = screen.getByRole("heading", { level: 1, name: "Sign in" });
+    expect(heading.className).toContain("sr-only");
+    expect(main.textContent).toBe(`${heading.textContent}${form.textContent}`);
+    expect(screen.queryByRole("complementary")).toBeNull();
+    expect(screen.queryByRole("banner")).toBeNull();
+    expect(screen.queryByText(/console/i)).toBeNull();
   });
 
   it("never offers the secret key as a way in", async () => {
     mockApi();
     renderApp("/login");
-    await screen.findByText("Sign in to the console");
+    await screen.findByRole("button", { name: "Account sign-in form" });
     expect(screen.queryByRole("button", { name: /secret key/i })).toBeNull();
     expect(screen.queryByLabelText("Secret key")).toBeNull();
-    // The help says what the key is for instead.
-    expect(screen.getByText("Not the secret key")).toBeTruthy();
+    expect(screen.queryByText(/secret key/i)).toBeNull();
   });
 
   it("guards nested routes as well", async () => {
     mockApi();
     renderApp("/users");
-    expect(await screen.findByText("Sign in to the console")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Account sign-in form" })).toBeTruthy();
   });
 
   it("names the problem when the instance does not answer, and checks again on request", async () => {
@@ -203,7 +216,7 @@ describe("login guard", () => {
     });
     renderApp("/");
     expect(await screen.findAllByText("Overview")).not.toHaveLength(0);
-    expect(screen.queryByText("Sign in to the console")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Account sign-in form" })).toBeNull();
     expect(await screen.findByText("Postgres")).toBeTruthy();
     expect(document.title).toBe("Overview \u00b7 OrbitID");
     expect(JSON.stringify(sessionStorage)).not.toContain("sk_");
@@ -261,11 +274,11 @@ describe("account console access", () => {
     expect(calls.some((call) => call.method === "POST" && call.url.includes("/from_user"))).toBe(true);
   });
 
-  it("explains the server-side grant when no account can open the console", async () => {
+  it("keeps the signed-out page to the form even when no account can open the console", async () => {
     mockApi({ unclaimed: true });
     renderApp("/");
-    expect(await screen.findByText("No account can open the console yet")).toBeTruthy();
-    expect(screen.getByText("orbitid owner you@example.com")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Account sign-in form" })).toBeTruthy();
+    expect(screen.queryByText("No account can open the console yet")).toBeNull();
   });
 
   it("fills in the signed-in account's email for the server-side grant", async () => {
@@ -273,6 +286,19 @@ describe("account console access", () => {
     renderApp("/");
     expect(await screen.findByText("No access to the console")).toBeTruthy();
     expect(screen.getByText("orbitid owner ada@example.com")).toBeTruthy();
+  });
+
+  it("keeps the form and says why when the session check fails right after signing in", async () => {
+    const { mock } = mockApi();
+    renderApp("/");
+    const form = await screen.findByRole("button", { name: "Account sign-in form" });
+    mock.mockImplementation(async () => {
+      throw new TypeError("Failed to fetch");
+    });
+    fireEvent.click(form);
+    expect(await screen.findByText("Could not open the console")).toBeTruthy();
+    expect(screen.getByRole("main", { name: "Sign in" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Account sign-in form" })).toBeTruthy();
   });
 
   it("shows why the console did not open after signing in", async () => {
