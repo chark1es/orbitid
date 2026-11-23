@@ -3,7 +3,19 @@
 @import "@fontsource-variable/hanken-grotesk";
 @import "@fontsource-variable/jetbrains-mono";
 
-@custom-variant dark (&:is(.dark *));
+/*
+ * `dark:` follows the nearest scheme class, not just any `.dark` ancestor: a `.light` surface inside a dark page
+ * (a prebuilt component the instance forces light, the branding preview) must not pick up dark-only utilities, and a
+ * `.dark` surface inside that `.light` one is dark again. Two levels of nesting cover every real case.
+ */
+@custom-variant dark {
+  &:is(.dark, .dark *):not(:where(.dark .light, .dark .light *)) {
+    @slot;
+  }
+  &:is(.dark .light .dark, .dark .light .dark *) {
+    @slot;
+  }
+}
 
 /* Timetable palette. Warm paper ground, ink type, one signal red, charcoal rail. */
 /* `.light` lets a light surface sit inside a dark page (the dashboard's branding preview). */
@@ -198,6 +210,15 @@
 
   html.dark {
     color-scheme: dark;
+  }
+
+  /* Scoped surfaces get native controls (scrollbars, date pickers, autofill) in their own scheme too. */
+  .dark {
+    color-scheme: dark;
+  }
+
+  .light {
+    color-scheme: light;
   }
 
   body {

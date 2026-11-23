@@ -59,3 +59,48 @@ describe("design tokens in UI primitives", () => {
     expect(styles).toMatch(/--ring:\s*oklch\(0\.57 0\.235 28\)/);
   });
 });
+
+describe("the dark: variant", () => {
+  const styles = readFileSync(join(process.cwd(), "src/styles.css"), "utf8");
+  const block = styles.slice(styles.indexOf("@custom-variant dark {"), styles.indexOf(":root,"));
+  // Each `&<selector> { @slot; }` rule of the variant, as a selector the browser can match on its own.
+  const selectors = [...block.matchAll(/^\s*&(.+?)\s*\{\s*$/gm)].map((match) => match[1]!);
+
+  /** Nest `<div class=…>` for each class (outermost first) and say whether the innermost gets `dark:` utilities. */
+  function darkAt(...classes: string[]): boolean {
+    let parent: HTMLElement = document.body;
+    for (const name of classes) {
+      const child = document.createElement("div");
+      if (name) child.className = name;
+      parent.appendChild(child);
+      parent = child;
+    }
+    const matched = selectors.some((selector) => parent.matches(selector));
+    document.body.innerHTML = "";
+    return matched;
+  }
+
+  it("is declared", () => {
+    expect(selectors.length).toBeGreaterThan(0);
+  });
+
+  it("applies inside a dark page and on a dark element itself", () => {
+    expect(darkAt("dark", "")).toBe(true);
+    expect(darkAt("dark")).toBe(true);
+    expect(darkAt("light", "dark", "")).toBe(true);
+  });
+
+  it("does not apply on a light page", () => {
+    expect(darkAt("", "")).toBe(false);
+    expect(darkAt("light", "")).toBe(false);
+  });
+
+  it("does not leak into a light surface inside a dark page", () => {
+    expect(darkAt("dark", "light", "")).toBe(false);
+    expect(darkAt("dark", "light")).toBe(false);
+  });
+
+  it("applies again to a dark surface inside that light one", () => {
+    expect(darkAt("dark", "light", "dark", "")).toBe(true);
+  });
+});
