@@ -39,7 +39,8 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      ORBITID_BASE_URL: ${SERVICE_URL_ORBITID_4000}
+      # Required: deploying before the domain is set would start a server with an empty token issuer.
+      ORBITID_BASE_URL: ${SERVICE_URL_ORBITID_4000:?Set the orbitid service domain, e.g. https://auth.example.com:4000, then deploy}
       ORBITID_DATABASE_HOST: postgres
       ORBITID_DATABASE_PORT: "5432"
       ORBITID_DATABASE_USER: orbitid

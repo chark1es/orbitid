@@ -8,8 +8,9 @@
 # an existing .env is never touched, and a changed compose file replaces the old one only after saving a
 # timestamped .bak copy. Settings, all optional and used only when the .env is first created unless noted:
 #
-#   ORBITID_DIR=orbitid              install directory (every run)
+#   ORBITID_DIR=orbitid              install directory (every run; `.` when run inside an existing install)
 #   ORBITID_PORT=4000                host port to publish
+#   ORBITID_BIND=127.0.0.1           host address to publish on; 0.0.0.0 exposes it on every interface
 #   ORBITID_BASE_URL=http://localhost:<port>   public URL; set the https:// address when a proxy fronts it
 #   ORBITID_VERSION=latest           image tag: latest, or a release such as 1, 1.2 or 1.2.3
 #   ORBITID_REF=main                 git ref the compose file is downloaded from (every run)
@@ -87,7 +88,9 @@ ORBITID_ENCRYPTION_KEY=$encryption_key
 # and set ORBITID_TRUST_PROXY=1.
 ORBITID_BASE_URL=$ORBITID_BASE_URL
 ORBITID_PORT=$ORBITID_PORT
-# ORBITID_BIND=127.0.0.1
+# Local only until you have created the owner account (the first visitor of a new instance does). Use a reverse
+# proxy on this host, or 0.0.0.0 to publish the port on every interface.
+ORBITID_BIND=$ORBITID_BIND
 # ORBITID_TRUST_PROXY=0
 
 # Image tag: latest, or a major, minor or exact release (1, 1.2, 1.2.3).
@@ -103,8 +106,14 @@ EOF
 }
 
 main() {
+  # Run again from inside an install directory, upgrade that one instead of creating ./orbitid in it.
+  if [ -z "${ORBITID_DIR:-}" ] && [ -f .env ] && [ -f docker-compose.yml ] \
+    && grep -q 'ghcr.io/chark1es/orbitid' docker-compose.yml; then
+    ORBITID_DIR=.
+  fi
   ORBITID_DIR=${ORBITID_DIR:-orbitid}
   ORBITID_PORT=${ORBITID_PORT:-4000}
+  ORBITID_BIND=${ORBITID_BIND:-127.0.0.1}
   ORBITID_VERSION=${ORBITID_VERSION:-latest}
   ORBITID_BASE_URL=${ORBITID_BASE_URL:-http://localhost:$ORBITID_PORT}
   ORBITID_REF=${ORBITID_REF:-main}
@@ -113,6 +122,9 @@ main() {
 
   case $ORBITID_PORT in
     '' | *[!0-9]*) die "ORBITID_PORT must be a port number, got '$ORBITID_PORT'." ;;
+  esac
+  case $ORBITID_BIND in
+    '' | *[!0-9a-fA-F.:]*) die "ORBITID_BIND must be an IP address such as 127.0.0.1 or 0.0.0.0, got '$ORBITID_BIND'." ;;
   esac
   case $ORBITID_VERSION in
     '' | *[!A-Za-z0-9._-]*) die "ORBITID_VERSION must be an image tag such as latest or 1.2.3, got '$ORBITID_VERSION'." ;;
@@ -175,16 +187,21 @@ main() {
   compose pull || die "could not pull the images; check the network and ORBITID_VERSION in .env."
   say "Starting OrbitID (this waits until it is healthy)..."
   if ! compose up -d --wait; then
-    compose logs --tail 50 orbitid >&2 || true
-    die "OrbitID did not become healthy; the log is above. Inspect it with: cd $PWD && docker compose logs orbitid"
+    compose logs --tail 50 >&2 || true
+    die "OrbitID did not become healthy; the logs are above. Inspect them with: cd $PWD && docker compose logs"
   fi
 
   say ""
   say "OrbitID is running."
   say "  Dashboard:   $url"
   say "  Open it now and create the owner account; the first visitor of a new instance becomes the owner."
+  bind=$(env_value ORBITID_BIND)
+  if [ "${bind:-127.0.0.1}" = 127.0.0.1 ]; then
+    say "  It listens on this host only. Put a reverse proxy in front, or set ORBITID_BIND=0.0.0.0 in .env"
+    say "  and run: cd $PWD && docker compose up -d"
+  fi
   say "  Secret key:  cd $PWD && docker compose exec orbitid orbitid keys"
-  say "  Upgrade:     run this installer again, or: docker compose pull && docker compose up -d"
+  say "  Upgrade:     run this installer again from $PWD, or: cd $PWD && docker compose pull && docker compose up -d"
 }
 
 main "$@"

@@ -59,8 +59,10 @@ services:
       ORBITID_SMTP_URL: ${ORBITID_SMTP_URL:-}
       ORBITID_EMAIL_FROM: ${ORBITID_EMAIL_FROM:-}
     ports:
-      # Bind to 127.0.0.1 (ORBITID_BIND=127.0.0.1) when a reverse proxy on this host is the only client.
-      - "${ORBITID_BIND:-0.0.0.0}:${ORBITID_PORT:-4000}:4000"
+      # Local only by default: the first visitor of a fresh instance creates the owner account, so nothing
+      # outside this host should reach it before you have. Put a reverse proxy in front, or set
+      # ORBITID_BIND=0.0.0.0 to publish the port on every interface.
+      - "${ORBITID_BIND:-127.0.0.1}:${ORBITID_PORT:-4000}:4000"
     healthcheck:
       test: ["CMD", "/usr/local/bin/orbitid", "healthcheck"]
       interval: 15s

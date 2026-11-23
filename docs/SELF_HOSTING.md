@@ -27,15 +27,22 @@ curl -fsSL https://raw.githubusercontent.com/chark1es/orbitid/main/scripts/insta
 
 The script creates `./orbitid`, downloads [`deploy/docker-compose.yml`](../deploy/docker-compose.yml) into it,
 writes a `.env` with a fresh `POSTGRES_PASSWORD` and `ORBITID_ENCRYPTION_KEY` (mode 600), pulls the images and
-waits until OrbitID is healthy, then prints the dashboard URL. Running it again upgrades: an existing `.env` is
-never touched, and a changed compose file replaces the old one only after a timestamped `.bak` copy is saved.
-Optional variables, read before the `.env` exists: `ORBITID_DIR`, `ORBITID_PORT`, `ORBITID_BASE_URL`,
-`ORBITID_VERSION` (image tag), plus `ORBITID_REF` (git ref of the compose file) and `ORBITID_NO_START=1`
-(write the files without starting anything). For example:
+waits until OrbitID is healthy, then prints the dashboard URL. Running it again, from the parent directory or
+from inside the install directory, upgrades: an existing `.env` is never touched, and a changed compose file
+replaces the old one only after a timestamped `.bak` copy is saved.
+
+The port is published on `127.0.0.1` only. The first visitor of a fresh instance creates the owner account, so
+create it (through an SSH tunnel or a reverse proxy on the host) before anything else can reach the server, then
+put a TLS proxy in front or set `ORBITID_BIND=0.0.0.0` in `.env` and run `docker compose up -d`.
+
+Optional variables used only when the `.env` is first written: `ORBITID_PORT`, `ORBITID_BIND`,
+`ORBITID_BASE_URL` and `ORBITID_VERSION` (image tag). Read on every run: `ORBITID_DIR` (install directory),
+`ORBITID_REF` (git ref of the compose file) and `ORBITID_NO_START=1` (write the files without starting
+anything). For example:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/chark1es/orbitid/main/scripts/install.sh \
-  | ORBITID_BASE_URL=https://auth.example.com ORBITID_VERSION=1 sh
+  | ORBITID_BASE_URL=https://auth.example.com ORBITID_VERSION=0.1 sh
 ```
 
 Back up the generated `.env`: the encryption key cannot be recovered, and a different key cannot read the
@@ -48,12 +55,16 @@ next to it, and start it:
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/chark1es/orbitid/main/deploy/docker-compose.yml
-printf 'POSTGRES_PASSWORD=%s\nORBITID_ENCRYPTION_KEY=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -base64 32)" > .env
+# Writes new secrets only when there is no .env yet: replacing the encryption key of an existing install makes
+# its stored keys unreadable.
+test -e .env || (umask 077; printf 'POSTGRES_PASSWORD=%s\nORBITID_ENCRYPTION_KEY=%s\n' \
+  "$(openssl rand -hex 32)" "$(openssl rand -base64 32)" > .env)
 docker compose up -d
 ```
 
-`ORBITID_VERSION` in `.env` picks the image tag (`latest` by default; pin `1`, `1.2` or `1.2.3` to control
-upgrades). Upgrade with `docker compose pull && docker compose up -d`. The other variables are the same as in
+`ORBITID_VERSION` in `.env` picks the image tag (`latest` by default; pin a major, minor or exact release such
+as `0.1` or `0.1.0` to control upgrades). The port is published on `127.0.0.1` unless `ORBITID_BIND` says
+otherwise, for the reason given above. Upgrade with `docker compose pull && docker compose up -d`. The other variables are the same as in
 the next section.
 
 ### Coolify
