@@ -150,7 +150,7 @@ describe("sign-in screen in light and dark mode", () => {
 
     expect(document.documentElement.classList.contains("dark")).toBe(true);
     expect(document.documentElement.style.colorScheme).toBe("dark");
-    expect(await screen.findByText("Sign in to the console")).toBeTruthy();
+    expect(await screen.findByRole("main", { name: "Sign in" })).toBeTruthy();
     expect((await screen.findByTestId("sdk-sign-in")).dataset.scheme).toBe("dark");
   });
 
