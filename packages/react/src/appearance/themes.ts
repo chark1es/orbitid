@@ -9,6 +9,19 @@ export const defaultTheme: BaseTheme = {
   elements: {},
 };
 
+/**
+ * Light scheme. Its `light` class marks the scheme rather than landing on `rootClassName`: components add `.light`
+ * (which `@orbitid/ui/styles.css` gives the light tokens) only inside a dark page, so a light page's own `:root`
+ * tokens are left alone.
+ */
+export const light: BaseTheme = {
+  name: "light",
+  classNames: ["light"],
+  variables: {},
+  layout: {},
+  elements: {},
+};
+
 /** Dark tokens. Mirrors the `--*` values of `.dark` in `@orbitid/ui/styles.css`, so a dark widget matches its page. */
 export const dark: BaseTheme = {
   name: "dark",
@@ -30,4 +43,4 @@ export const dark: BaseTheme = {
   },
 };
 
-export const themes = { defaultTheme, dark } as const;
+export const themes = { defaultTheme, light, dark } as const;

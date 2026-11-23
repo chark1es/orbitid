@@ -1,6 +1,6 @@
 import { useId, useMemo, useState } from "react";
 import { Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, cn } from "@orbitid/ui";
-import { useElementClasses } from "./appearance";
+import { useElementClasses, usePortalClass } from "./appearance";
 import { useAuthRuntime } from "./w6";
 
 export interface CountryOption {
@@ -58,6 +58,7 @@ export function PhoneInput({
   className,
   ...aria
 }: PhoneInputProps) {
+  const portalClass = usePortalClass();
   const { t } = useAuthRuntime();
   const { el } = useElementClasses();
   const generatedId = useId();
@@ -88,7 +89,7 @@ export function PhoneInput({
         <SelectTrigger className={cn("w-[7.25rem] shrink-0", el("formFieldInput"))} aria-label={t("common.phoneNumber")}>
           <SelectValue />
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent className={portalClass()}>
           {COUNTRIES.map((option) => (
             <SelectItem key={option.code} value={option.code}>
               {option.code} {option.dial}

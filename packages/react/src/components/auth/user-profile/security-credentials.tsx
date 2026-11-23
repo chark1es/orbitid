@@ -17,6 +17,7 @@ import { PasswordField } from "../_shared/password-field";
 import { useReverification } from "../../../hooks";
 import { useAuthRuntime } from "../_shared/w6";
 import { SectionHeader, formatDate, type SectionProps } from "./security-shared";
+import { usePortalClass } from "../_shared/appearance";
 
 export function PasswordSection({ user, refresh, onError, onNotice }: SectionProps) {
   const runtime = useAuthRuntime();
@@ -151,6 +152,7 @@ export function PasswordSection({ user, refresh, onError, onNotice }: SectionPro
 }
 
 export function PasskeysSection({ user, refresh, onError, onNotice }: SectionProps) {
+  const portalClass = usePortalClass();
   const runtime = useAuthRuntime();
   const { t } = runtime;
   const withVerification = useReverification(async (action: () => Promise<unknown>) => action());
@@ -256,7 +258,7 @@ export function PasskeysSection({ user, refresh, onError, onNotice }: SectionPro
         </ul>
       )}
       <Dialog open={renameTarget !== null} onOpenChange={(open) => !open && setRenameTarget(null)}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className={portalClass("max-w-sm")}>
           <DialogHeader>
             <DialogTitle>{t("common.rename")}</DialogTitle>
             <DialogDescription>{t("userProfile.passkeys.name")}</DialogDescription>

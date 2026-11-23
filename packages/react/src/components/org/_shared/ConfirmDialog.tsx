@@ -9,9 +9,9 @@ import {
   DialogTitle,
   Input,
   Label,
-  cn,
 } from "@orbitid/ui";
 import { useLocalizations } from "../../../localization";
+import { usePortalClass } from "../../auth/_shared/appearance";
 
 export interface ConfirmDialogProps {
   /** Controlled open state; omit to let the dialog manage it (with `trigger`). */
@@ -58,6 +58,7 @@ export function ConfirmDialog({
   children,
   className,
 }: ConfirmDialogProps) {
+  const portalClass = usePortalClass();
   const { t } = useLocalizations();
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const open = openProp ?? uncontrolledOpen;
@@ -94,7 +95,7 @@ export function ConfirmDialog({
     <>
       {trigger ?? null}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className={cn("sm:max-w-md", className)}>
+        <DialogContent className={portalClass("sm:max-w-md", className)}>
           <DialogHeader>
             <DialogTitle>{title}</DialogTitle>
             {description ? <DialogDescription>{description}</DialogDescription> : null}

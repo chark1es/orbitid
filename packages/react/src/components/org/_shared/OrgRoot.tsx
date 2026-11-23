@@ -4,13 +4,16 @@ import { BuildingIcon } from "lucide-react";
 import { AppearanceContext } from "../../../provider";
 import { resolveAppearance, useAppearance, type Appearance } from "../../../appearance";
 import { useLocalizations } from "../../../localization";
+import { useThemeScope } from "../../auth/_shared/appearance";
 import { useOrgSettings } from "./hooks";
 
 function OrgBox({ className, children }: { className?: string; children: ReactNode }) {
   const appearance = useAppearance();
+  // The scheme class is not part of `rootClassName`; a forced `dark` base theme still renders dark through here.
+  const { className: themeClass } = useThemeScope();
   return (
     <div
-      className={cn("orbitid-org w-full text-foreground", appearance.rootClassName, className)}
+      className={cn(themeClass, "orbitid-org w-full text-foreground", appearance.rootClassName, className)}
       style={appearance.cssVariables}
     >
       {children}

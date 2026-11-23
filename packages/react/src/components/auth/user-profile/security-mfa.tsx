@@ -21,8 +21,10 @@ import { useReverification } from "../../../hooks";
 import { useAuthRuntime } from "../_shared/w6";
 import { isRecord } from "../_shared/guards";
 import { SectionHeader, type SectionProps } from "./security-shared";
+import { usePortalClass } from "../_shared/appearance";
 
 export function TotpSection({ user, refresh, onError, onNotice }: SectionProps) {
+  const portalClass = usePortalClass();
   const runtime = useAuthRuntime();
   const { t } = runtime;
   const withVerification = useReverification(async (action: () => Promise<unknown>) => action());
@@ -96,7 +98,7 @@ export function TotpSection({ user, refresh, onError, onNotice }: SectionProps) 
       </div>
       {user.totp_enabled ? <Badge variant="secondary" className="w-fit">{t("userProfile.totp.title")}</Badge> : null}
       <Dialog open={setupOpen} onOpenChange={setSetupOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className={portalClass("max-w-md")}>
           <DialogHeader>
             <DialogTitle>{t("userProfile.totp.verifyTitle")}</DialogTitle>
             <DialogDescription>{t("userProfile.totp.scanQr")}</DialogDescription>
@@ -153,6 +155,7 @@ export function TotpSection({ user, refresh, onError, onNotice }: SectionProps) 
 }
 
 export function BackupCodesSection({ user, refresh, onError, onNotice }: SectionProps) {
+  const portalClass = usePortalClass();
   const runtime = useAuthRuntime();
   const { t } = runtime;
   const withVerification = useReverification(async (action: () => Promise<unknown>) => action());
@@ -189,7 +192,7 @@ export function BackupCodesSection({ user, refresh, onError, onNotice }: Section
       </div>
       {user.backup_code_enabled ? <p className="text-xs text-muted-foreground">{t("userProfile.backupCodes.enabled")}</p> : null}
       <Dialog open={codes !== null} onOpenChange={(open) => !open && setCodes(null)}>
-        <DialogContent className="max-w-md">
+        <DialogContent className={portalClass("max-w-md")}>
           <DialogHeader>
             <DialogTitle>{t("userProfile.backupCodes.title")}</DialogTitle>
             <DialogDescription>{t("userProfile.backupCodes.warning")}</DialogDescription>

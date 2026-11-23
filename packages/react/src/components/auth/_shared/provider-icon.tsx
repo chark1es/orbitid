@@ -165,7 +165,8 @@ export function ProviderIcon({ provider, className }: ProviderIconProps) {
       );
     case "tiktok":
       return (
-        <svg viewBox="0 0 24 24" className={cls} aria-hidden="true" fill="#000">
+        // A black mark, like GitHub's and X's: follow the text colour so it does not vanish on a dark button.
+        <svg viewBox="0 0 24 24" className={cls} aria-hidden="true" fill="currentColor">
           <path d="M16.6 5.82A5.9 5.9 0 0 1 15.3 2h-3.2v13.4a2.65 2.65 0 1 1-1.9-2.55V9.6a5.9 5.9 0 1 0 5.1 5.84V8.9a8.4 8.4 0 0 0 4.7 1.44V7.2a5.3 5.3 0 0 1-3.4-1.38Z" />
         </svg>
       );

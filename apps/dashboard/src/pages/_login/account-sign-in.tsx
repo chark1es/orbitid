@@ -1,7 +1,21 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useNavigate, type NavigateFunction } from "react-router-dom";
 import { OrbitID } from "@orbitid/js";
-import { OrbitIDProvider, SignIn, useAuth as useAccountAuth, type OrbitIDInstance } from "@orbitid/react";
+import { OrbitIDProvider, SignIn, light, useAuth as useAccountAuth, type Appearance, type BaseTheme, type OrbitIDInstance } from "@orbitid/react";
+import { useTheme } from "@orbitid/ui";
+
+/**
+ * The console's own scheme for the form. Without it the form would use the instance's branding theme, which is meant
+ * for hosted components in your apps: an instance branded "dark" would put a dark form on a light console.
+ * Class only: the dashboard's `.dark` tokens already apply, so branding falls back exactly as it does elsewhere.
+ */
+const consoleDark: BaseTheme = { name: "dark", classNames: ["dark"] };
+/** Full width inside the dashboard column; the card keeps its own step titles (second factor, reset, …). */
+const elements: Appearance["elements"] = { rootBox: "items-stretch", card: "max-w-none shadow-none" };
+const appearances: Record<"light" | "dark", Appearance> = {
+  light: { baseTheme: light, elements },
+  dark: { baseTheme: consoleDark, elements },
+};
 
 /**
  * The instance's own sign-in, the one its users see in your apps: every enabled method, second factors and passkeys
@@ -43,6 +57,7 @@ export function prepareAccountSignIn(publishableKey: string): void {
 
 export default function AccountSignIn({ publishableKey, onSignedIn }: { publishableKey: string; onSignedIn: () => void }) {
   const navigate = useNavigate();
+  const { resolvedTheme } = useTheme();
   const [{ orbit, navigate: router }] = useState(() =>
     prepared?.publishableKey === publishableKey ? prepared : createInstance(publishableKey),
   );
@@ -57,8 +72,7 @@ export default function AccountSignIn({ publishableKey, onSignedIn }: { publisha
   return (
     <OrbitIDProvider publishableKey={publishableKey} orbit={orbit}>
       <SignedInWatcher onSignedIn={onSignedIn} />
-      {/* Full width inside the dashboard column; the card keeps its own step titles (second factor, reset, …). */}
-      <SignIn routing="virtual" withSignUp={false} appearance={{ elements: { rootBox: "items-stretch", card: "max-w-none shadow-none" } }} />
+      <SignIn routing="virtual" withSignUp={false} appearance={appearances[resolvedTheme]} />
     </OrbitIDProvider>
   );
 }

@@ -20,7 +20,7 @@ import {
 } from "@orbitid/ui";
 import { ChevronsUpDownIcon, LogOutIcon, PlusIcon, SettingsIcon, UsersIcon } from "lucide-react";
 import { activateSession, currentUser, displayName, initials, primaryIdentifier, signOut } from "../_shared/api";
-import { AuthAppearanceScope, useElementClasses } from "../_shared/appearance";
+import { AuthAppearanceScope, useElementClasses, useThemeScope } from "../_shared/appearance";
 import { useAuthRuntime } from "../_shared/w6";
 import type { UserButtonProps } from "../_shared/types";
 import { UserProfile } from "../user-profile";
@@ -67,6 +67,8 @@ function UserButtonInner(props: UserButtonProps) {
   const runtime = useAuthRuntime();
   const { orbit, t } = runtime;
   const { el } = useElementClasses();
+  // The menu and the profile dialog are portaled out of the page's tree, so they carry the scheme themselves.
+  const { className: themeClass } = useThemeScope();
   const user = currentUser(orbit);
   const [profileOpen, setProfileOpen] = useState(false);
   const sessions = runtime.client?.sessions ?? [];
@@ -185,7 +187,7 @@ function UserButtonInner(props: UserButtonProps) {
             <ChevronsUpDownIcon className="size-3.5 text-muted-foreground" aria-hidden="true" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className={cn("w-64", el("menuList"))}>
+        <DropdownMenuContent align="end" className={cn(themeClass, "w-64", el("menuList"))}>
           <DropdownMenuLabel className="font-normal">
             <div className="flex items-center gap-2 py-1">
               <UserAvatar user={user} className="size-9" />
@@ -266,7 +268,7 @@ function UserButtonInner(props: UserButtonProps) {
       {profileOpen ? (
         <>
           <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
-            <DialogContent className="max-h-[90vh] w-full max-w-3xl overflow-y-auto p-0" showCloseButton>
+            <DialogContent className={cn(themeClass, "max-h-[90vh] w-full max-w-3xl overflow-y-auto p-0")} showCloseButton>
               <DialogHeader className="sr-only">
                 <DialogTitle>{t("userProfile.title")}</DialogTitle>
                 <DialogDescription>{t("userProfile.subtitle")}</DialogDescription>

@@ -1,7 +1,7 @@
 import { Button, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, cn } from "@orbitid/ui";
 import type { SocialProviderView } from "./environment";
 import { ProviderIcon } from "./provider-icon";
-import { useElementClasses } from "./appearance";
+import { useElementClasses, usePortalClass } from "./appearance";
 import { useAuthRuntime } from "./w6";
 
 export interface SocialButtonsProps {
@@ -22,6 +22,7 @@ export function SocialButtons({
   lastUsedStrategy,
   className,
 }: SocialButtonsProps) {
+  const portalClass = usePortalClass();
   const { t } = useAuthRuntime();
   const { el, appearance } = useElementClasses();
   if (providers.length === 0) return null;
@@ -74,7 +75,7 @@ export function SocialButtons({
                     ) : null}
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>{provider.name}</TooltipContent>
+                <TooltipContent className={portalClass()}>{provider.name}</TooltipContent>
               </Tooltip>
             );
           })}

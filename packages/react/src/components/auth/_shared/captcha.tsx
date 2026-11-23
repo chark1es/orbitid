@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@orbitid/ui";
-import { useElementClasses } from "./appearance";
+import { useElementClasses, useResolvedTheme } from "./appearance";
 import { useAuthRuntime } from "./w6";
 
 interface CaptchaWidgetApi {
@@ -55,9 +55,12 @@ export interface CaptchaWidgetProps {
  * Cloudflare Turnstile / hCaptcha slot. The script is loaded only when the environment enables
  * captcha and a site key is configured; the token is handed back for `captcha_token`.
  */
-export function CaptchaWidget({ siteKey, provider, onToken, theme = "auto", className }: CaptchaWidgetProps) {
+export function CaptchaWidget({ siteKey, provider, onToken, theme: themeProp, className }: CaptchaWidgetProps) {
   const runtime = useAuthRuntime();
   const { el } = useElementClasses();
+  // Match the card around it rather than the operating system ("auto"), which differs when the page picked a scheme.
+  const resolvedTheme = useResolvedTheme();
+  const theme = themeProp ?? resolvedTheme;
   const container = useRef<HTMLDivElement | null>(null);
   const [failed, setFailed] = useState(false);
   const resolvedProvider = provider && provider !== "none" ? provider : runtime.environment.captcha.provider;

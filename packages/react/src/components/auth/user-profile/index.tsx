@@ -8,7 +8,7 @@ import {
 } from "@orbitid/ui";
 import { KeyRoundIcon, ShieldCheckIcon, UserIcon } from "lucide-react";
 import { currentUser, displayName, primaryIdentifier } from "../_shared/api";
-import { AuthAppearanceScope, useElementClasses, useResolvedTheme } from "../_shared/appearance";
+import { AuthAppearanceScope, useElementClasses, useThemeScope } from "../_shared/appearance";
 import { contrastForeground, LIGHT_FOREGROUND } from "../../../appearance";
 import { AuthCard } from "../_shared/auth-card";
 import { useAuthRuntime } from "../_shared/w6";
@@ -84,7 +84,7 @@ function UserProfileInner(props: UserProfileProps) {
   const runtime = useAuthRuntime();
   const { orbit, t, environment } = runtime;
   const { el, appearance, cssVariables, primaryColor, rootClassName } = useElementClasses();
-  const resolvedTheme = useResolvedTheme();
+  const { theme: resolvedTheme, className: themeClass } = useThemeScope();
   const brandingStyle: Record<string, string> = { ...cssVariables };
   if (!appearance.variables.colorPrimary) {
     const foreground = contrastForeground(primaryColor);
@@ -198,11 +198,11 @@ function UserProfileInner(props: UserProfileProps) {
   return (
     <>
       {props.__modal ? (
-        <div className={cn(resolvedTheme === "dark" && "dark", rootClassName, "p-5 sm:p-6")} style={brandingStyle} data-orbit-theme={resolvedTheme}>
+        <div className={cn(themeClass, rootClassName, "p-5 sm:p-6")} style={brandingStyle} data-orbit-theme={resolvedTheme}>
           {panel}
         </div>
       ) : (
-        <div className={cn(resolvedTheme === "dark" && "dark", rootClassName, "flex w-full justify-center px-4 py-6")} style={brandingStyle} data-orbit-theme={resolvedTheme}>
+        <div className={cn(themeClass, rootClassName, "flex w-full justify-center px-4 py-6")} style={brandingStyle} data-orbit-theme={resolvedTheme}>
           <Card className={cn("w-full max-w-4xl", el("card"))}>
             <CardContent className="p-5 sm:p-6">{panel}</CardContent>
           </Card>
