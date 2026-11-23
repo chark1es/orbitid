@@ -194,6 +194,13 @@ The Appearance preview follows the selected theme and allows a temporary Light/D
 
   Pass the same `storageKey`/`defaultTheme` to the provider and the bootstrap if you customise them. Do not read
   `localStorage` during render in your own components either: use `useTheme()` after hydration.
+- **Scoped surfaces.** A `.light` element inside a dark page (or `.dark` inside a light one) gets that scheme's
+  tokens, native `color-scheme`, and `dark:` utilities that follow the nearest scheme class.
+
+The dashboard's sign-in and owner-setup screens use the same stored choice as the console: `index.html` applies it
+before the first paint, and the instance's sign-in form embedded there is given the console's scheme, not the
+branding theme meant for hosted components in your apps. The prebuilt `@orbitid/react` components follow the scheme
+the host page marks on `<html>` when the branding theme is "system"; see the package README.
 
 
 ## Connect your app
