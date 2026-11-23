@@ -32,13 +32,8 @@ fn cache() -> &'static Mutex<HashMap<String, CachedSecret>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Forgets cached Apple client secrets (tests change keys between cases).
-pub fn reset_apple_client_secret_cache() {
-    if let Ok(mut guard) = cache().lock() {
-        guard.clear();
-    }
-}
-
+/// Every input to the signed secret is part of the key, so a changed or rotated
+/// key never sees a secret minted from another, and nothing needs to clear it.
 fn cache_key(cfg: &OAuthProviderConfig) -> String {
     orbitid_core::crypto::sha256(
         &[
