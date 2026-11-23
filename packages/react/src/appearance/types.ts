@@ -140,7 +140,10 @@ export type AppearanceElements = Record<string, AppearanceElement> & {
  */
 export interface BaseTheme {
   name: string;
-  /** Extra class names for the `orbitid-root` wrapper (e.g. `['dark']`). */
+  /**
+   * Extra class names for the `orbitid-root` wrapper. `dark`/`light` are not added there: they force the scheme the
+   * components render in (see `useThemeScope()`).
+   */
   classNames?: string[];
   variables?: AppearanceVariables;
   layout?: AppearanceLayout;
@@ -166,6 +169,9 @@ export interface ResolvedAppearance {
   elements: AppearanceElements;
   /** CSS custom properties, ready for a `style` attribute. */
   cssVariables: Record<string, string>;
-  /** Wrapper classes: `orbitid-root`, theme class names (e.g. `dark`), `rootBox` override. */
+  /**
+   * Wrapper classes: `orbitid-root`, theme class names other than `dark`/`light`, `rootBox` override. The scheme
+   * class comes from `useThemeScope()`, which only adds `light` inside a dark page.
+   */
   rootClassName: string;
 }

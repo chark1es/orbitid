@@ -14,7 +14,9 @@ describe("appearance", () => {
     });
 
     expect(resolved.rootClassName).toContain("orbitid-root");
-    expect(resolved.rootClassName).toContain("dark");
+    // The scheme comes from `useThemeScope()`; `rootClassName` also lands on the wrapper around the host's app.
+    expect(resolved.rootClassName.split(" ")).not.toContain("dark");
+    expect(resolved.themes).toContain(dark);
     expect(resolved.variables.colorBackground).toBe(dark.variables?.colorBackground);
     expect(resolved.layout.socialButtonsVariant).toBe("iconButton");
     expect(resolved.elements.card).toBe("user-card");
@@ -83,7 +85,7 @@ describe("appearance", () => {
     const root = card.parentElement!;
     expect(root.className).toContain("orbitid-root");
     expect(root.className).toContain("my-root");
-    expect(root.className).toContain("dark");
+    expect(root.classList.contains("dark")).toBe(false);
     expect(root.getAttribute("data-orbitid-theme")).toBe("dark");
     expect(root.getAttribute("style")).toContain("--primary: #00ff00");
   });

@@ -107,6 +107,9 @@ export function resolveElementClass(override: AppearanceElement | undefined, ...
   return cn(...classes, userClass);
 }
 
+/** Scheme classes a base theme declares; read by `useThemeScope()`, never put on `rootClassName`. */
+const SCHEME_CLASSES = new Set(["dark", "light"]);
+
 /**
  * Merge `appearance` over its base theme(s): theme variables/layout/elements first,
  * then the explicit `appearance` prop. Later entries win.
@@ -125,7 +128,10 @@ export function resolveAppearance(appearance: Appearance = {}): ResolvedAppearan
     Object.assign(variables, theme.variables);
     Object.assign(layout, theme.layout);
     Object.assign(elements, theme.elements);
-    classNames.push(...(theme.classNames ?? []));
+    // `dark`/`light` stay out of `rootClassName`: it also lands on the provider wrapper around the host's own app,
+    // where `.light` would reset the host's `:root` tokens. Components take the scheme from `useThemeScope()` instead,
+    // which reads it from `themes`.
+    classNames.push(...(theme.classNames ?? []).filter((name) => !SCHEME_CLASSES.has(name)));
   };
   activeThemes.forEach(mergeTheme);
   Object.assign(variables, appearance.variables);
