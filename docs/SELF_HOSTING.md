@@ -14,7 +14,85 @@ which carries no instance data and which `ORBITID_UPDATE_CHECK=false` turns off
 - A Postgres database (version 14 or newer). SQLite and PGlite are not supported by this server.
 - A public URL for the server if browsers other than your own will use it.
 
-## Docker Compose (recommended)
+## Deploy the prebuilt image
+
+These run the published image (`ghcr.io/chark1es/orbitid`) and build nothing. The repository's own
+`docker-compose.yml`, described in the next section, builds the checkout instead and is meant for development.
+
+### One-line install
+
+On a host with Docker and the Compose v2 plugin:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/chark1es/orbitid/main/scripts/install.sh | sh
+```
+
+The script creates `./orbitid`, downloads [`deploy/docker-compose.yml`](../deploy/docker-compose.yml) into it,
+writes a `.env` with a fresh `POSTGRES_PASSWORD` and `ORBITID_ENCRYPTION_KEY` (mode 600), pulls the images and
+waits until OrbitID is healthy, then prints the dashboard URL. Running it again, from the parent directory or
+from inside the install directory, upgrades: an existing `.env` is never touched, and a changed compose file
+replaces the old one only after a timestamped `.bak` copy is saved.
+
+The port is published on `127.0.0.1` only. The first visitor of a fresh instance creates the owner account, so
+create it (through an SSH tunnel or a reverse proxy on the host) before anything else can reach the server, then
+put a TLS proxy in front or set `ORBITID_BIND=0.0.0.0` in `.env` and run `docker compose up -d`.
+
+Optional variables used only when the `.env` is first written: `ORBITID_PORT`, `ORBITID_BIND`,
+`ORBITID_BASE_URL` and `ORBITID_VERSION` (image tag). Read on every run: `ORBITID_DIR` (install directory),
+`ORBITID_REF` (git ref of the compose file) and `ORBITID_NO_START=1` (write the files without starting
+anything). For example:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/chark1es/orbitid/main/scripts/install.sh \
+  | ORBITID_BASE_URL=https://auth.example.com ORBITID_VERSION=0.1 sh
+```
+
+Back up the generated `.env`: the encryption key cannot be recovered, and a different key cannot read the
+signing keys and secrets stored in Postgres.
+
+### Docker Compose without a checkout
+
+Download [`deploy/docker-compose.yml`](../deploy/docker-compose.yml) into an empty directory, create a `.env`
+next to it, and start it:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/chark1es/orbitid/main/deploy/docker-compose.yml
+# Writes new secrets only when there is no .env yet: replacing the encryption key of an existing install makes
+# its stored keys unreadable.
+test -e .env || (umask 077; printf 'POSTGRES_PASSWORD=%s\nORBITID_ENCRYPTION_KEY=%s\n' \
+  "$(openssl rand -hex 32)" "$(openssl rand -base64 32)" > .env)
+docker compose up -d
+```
+
+`ORBITID_VERSION` in `.env` picks the image tag (`latest` by default; pin a major, minor or exact release such
+as `0.1` or `0.1.0` to control upgrades). The port is published on `127.0.0.1` unless `ORBITID_BIND` says
+otherwise, for the reason given above. Upgrade with `docker compose pull && docker compose up -d`. The other
+variables are the same as in the next section.
+
+### Coolify
+
+Create a **Docker Compose** resource, either "Docker Compose Empty" with the contents of
+[`deploy/coolify.yml`](../deploy/coolify.yml) pasted in, or a Git-based resource pointed at
+`/deploy/coolify.yml`. Coolify generates the Postgres password (`SERVICE_PASSWORD_64_POSTGRES`) and the
+encryption key (`SERVICE_BASE64_64_ENCRYPTIONKEY`) on the first deploy and keeps them across redeploys.
+
+1. On the `orbitid` service, set the domain to `https://auth.example.com:4000`. The `:4000` tells Coolify's
+   proxy which container port to route to; browsers still use 443. `ORBITID_BASE_URL` follows this domain
+   through `SERVICE_URL_ORBITID_4000`.
+2. Deploy. No host port is published, so Coolify's proxy is the only way in, and `ORBITID_TRUST_PROXY`
+   defaults to `1` (one proxy hop). Raise it only if another proxy you control sits in front of Coolify's.
+3. Open the domain right away and create the owner account: the first visitor of a fresh instance becomes the
+   owner, and here the domain is public from the first deploy.
+4. Copy `SERVICE_BASE64_64_ENCRYPTIONKEY` from the resource's Environment Variables page somewhere safe, and
+   never change it.
+
+Deploying before the domain is set stops with `required variable SERVICE_URL_ORBITID_4000 is missing a value`.
+If the Coolify server has a wildcard domain, Coolify generates a hostname instead and the deploy goes ahead on it.
+
+Set `ORBITID_VERSION` in the same page to pin an image tag, and email settings (`ORBITID_RESEND_API_KEY`,
+`ORBITID_SMTP_URL`, `ORBITID_EMAIL_FROM`) there or later in the dashboard.
+
+## Docker Compose from a checkout
 
 ```bash
 cp .env.example .env
@@ -48,7 +126,8 @@ override it with `ORBITID_SECRET_KEY`, production requires at least 32 random ch
 `http://localhost:<ORBITID_PORT>`, so the two stay in step; set it explicitly when a proxy or public hostname
 reaches the instance. `ORBITID_IMAGE` only sets the tag compose gives the image it builds. Because the
 service has a `build:` section, compose builds this checkout; to run an image from a registry instead,
-delete `build: .` from the `orbitid` service and set `ORBITID_IMAGE` to that image's tag.
+delete `build: .` from the `orbitid` service and set `ORBITID_IMAGE` to that image's tag, for example a
+[prebuilt image](#prebuilt-images).
 
 The image is a minimal Debian bookworm-slim with the Rust binary, the built dashboard and only the shared
 libraries SAML needs. It has no Node, no compiler and no curl. The container runs as the
@@ -69,6 +148,37 @@ afterwards:
 ```bash
 bash scripts/smoke-container.sh
 ```
+
+### Prebuilt images
+
+Every push to `main` and every release tag publishes the image to the GitHub Container Registry as
+`ghcr.io/chark1es/orbitid`, for `linux/amd64` and `linux/arm64`
+([`.github/workflows/docker.yml`](../.github/workflows/docker.yml)):
+
+| Tag | Points at |
+| --- | --- |
+| `X.Y.Z` | That release. Never moves; pin this in production. |
+| `X.Y`, `X` | The newest release in that minor or major line. Not published for prereleases (`X.Y.Z-rc.1`). |
+| `latest` | The newest release. Never a prerelease or an unreleased `main` build. |
+| `edge` | The newest commit on `main`. Unreleased; for trying changes before a release. |
+| `sha-<short>` | One exact commit (`main` or a release tag), by its 7-character short SHA. |
+
+GitHub creates a container package as private on its first publish, and the workflow token cannot change that.
+Until a maintainer makes it public once (the package's settings on GitHub → Change visibility → Public, with
+access inherited from the repository), pulls need `docker login ghcr.io` with a token that has `read:packages`.
+
+The files in [Deploy the prebuilt image](#deploy-the-prebuilt-image) already use these. To run one with this
+checkout's compose file instead, delete `build: .` from the `orbitid` service in `docker-compose.yml` and set
+the tag in `.env`, using a version from the repository's release tags:
+
+```bash
+ORBITID_IMAGE=ghcr.io/chark1es/orbitid:X.Y.Z
+```
+
+A release tag `vX.Y.Z` publishes only when it matches the `[workspace.package]` version in `Cargo.toml`, so
+the image tag and the version the binary reports always agree. Images carry the standard OCI labels
+(`org.opencontainers.image.source`, `.version`, `.revision`, `.licenses`, `.description`), so
+`docker inspect` shows the exact commit an image was built from.
 
 ## Without Docker
 
@@ -163,7 +273,8 @@ verification in one settings update. The smoke script uses the latter only for i
 ## Upgrading
 
 Pull the new image or code and restart. The server applies pending migrations before it starts listening.
-Back up the database first.
+Back up the database first. With a [prebuilt image](#prebuilt-images), change `ORBITID_IMAGE` to the new
+`X.Y.Z` tag, then `docker compose pull orbitid && docker compose up -d`.
 
 What happens on boot, which is what makes an unattended image update safe:
 
