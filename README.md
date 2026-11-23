@@ -51,7 +51,13 @@ You write `useUser`, `useAuth`, `<SignIn />`, `<UserButton />`, `auth()` and `ha
 
 ## Quick start
 
-With Docker, see [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md): copy `.env.example` to `.env`, set `ORBITID_ENCRYPTION_KEY` and `POSTGRES_PASSWORD`, then `docker compose up -d` starts Postgres and OrbitID, reports the dashboard URL and publishable key, and serves the dashboard at `http://localhost:4000`.
+With Docker, one command installs the prebuilt image, generates the secrets and starts Postgres and OrbitID:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/chark1es/orbitid/main/scripts/install.sh | sh
+```
+
+Coolify and a plain `docker compose` setup without a checkout are covered in [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md#deploy-the-prebuilt-image). From a checkout: copy `.env.example` to `.env`, set `ORBITID_ENCRYPTION_KEY` and `POSTGRES_PASSWORD`, then `docker compose up -d` starts Postgres and OrbitID, reports the dashboard URL and publishable key, and serves the dashboard at `http://localhost:4000`.
 
 From source (Rust for the server, Bun and Node 20 for the SDKs and dashboard). Postgres is required:
 
