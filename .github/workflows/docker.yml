@@ -1,0 +1,196 @@
+name: Docker image
+
+# Publishes the root Dockerfile to the GitHub Container Registry as ghcr.io/<owner>/<repo>.
+#
+#   push to main          -> edge, sha-<short>
+#   tag vX.Y.Z            -> X.Y.Z, X.Y, X, latest, sha-<short>
+#   tag vX.Y.Z-<pre>      -> X.Y.Z-<pre>, sha-<short> (no X.Y, X or latest); the workspace version must be
+#                            that same prerelease
+#   manual run            -> as for the branch or tag it runs on (main or a v* tag only)
+#
+# Pull requests are not built here: the `container` job in ci.yml already builds the image and smoke-tests
+# it whenever a change can affect it.
+#
+# Each platform builds on a native runner (a release Rust build under QEMU emulation takes far longer than a
+# native one) and pushes by digest; the `manifest` job then tags one multi-platform index over both digests.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+# Runs for the same ref queue instead of overlapping, so `edge` always ends on the newest commit.
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  DESCRIPTION: Open-source, self-hosted authentication and user management.
+
+jobs:
+  build:
+    name: build (${{ matrix.arch }})
+    # A manual run from any other branch would publish an unreviewed image under a sha tag.
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Image name
+        # Registry paths must be lowercase; the repository name may not be.
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      # The binary reports the workspace version from Cargo.toml (CARGO_PKG_VERSION), so a release tag
+      # must match it or the image would carry a version its binary disagrees with.
+      - name: Tag matches the Cargo workspace version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          cargo_version=$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version *= *"\(.*\)"/\1/p' Cargo.toml)
+          tag_version=${GITHUB_REF_NAME#v}
+          echo "Cargo.toml: $cargo_version, tag: $tag_version"
+          if [ "$cargo_version" != "$tag_version" ]; then
+            echo "::error file=Cargo.toml::Tag $GITHUB_REF_NAME does not match the workspace version $cargo_version. Bump [workspace.package] version and tag again."
+            exit 1
+          fi
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          # Unused for the push (it is by digest), but sets the version label to match the index's tags.
+          tags: |
+            type=edge,branch=main
+            type=semver,pattern={{version}}
+          labels: |
+            org.opencontainers.image.title=OrbitID
+            org.opencontainers.image.description=${{ env.DESCRIPTION }}
+          annotations: |
+            org.opencontainers.image.title=OrbitID
+            org.opencontainers.image.description=${{ env.DESCRIPTION }}
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          # OCI media types: `imagetools create --annotation` refuses Docker manifest lists.
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true
+          # One cache per platform; mode=max keeps the Rust dependency layer of the build stage.
+          cache-from: type=gha,scope=image-${{ matrix.arch }}
+          cache-to: type=gha,scope=image-${{ matrix.arch }},mode=max
+
+      - name: Export digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+          # "Re-run all jobs" uploads again under the same name.
+          overwrite: true
+
+  # Tags one multi-platform index over the per-platform digests.
+  manifest:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          # latest=auto adds `latest` for a release tag and never for a prerelease or a branch.
+          flavor: latest=auto
+          tags: |
+            type=edge,branch=main
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha
+          annotations: |
+            org.opencontainers.image.title=OrbitID
+            org.opencontainers.image.description=${{ env.DESCRIPTION }}
+        env:
+          # GHCR shows the index's description and links the package to its source repository.
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: index
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push the multi-platform index
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          args=()
+          while IFS= read -r tag; do args+=(--tag "$tag"); done < <(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          while IFS= read -r annotation; do args+=(--annotation "$annotation"); done < <(jq -r '.annotations[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          sources=()
+          for digest in *; do sources+=("$IMAGE@sha256:$digest"); done
+          if [ "${#sources[@]}" -ne 2 ]; then echo "::error::Expected 2 platform digests, found ${#sources[@]}"; exit 1; fi
+          docker buildx imagetools create "${args[@]}" "${sources[@]}"
+
+      - name: Inspect
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          docker buildx imagetools inspect "$IMAGE:$VERSION"
+          {
+            echo "### Published"
+            echo
+            jq -r '.tags[] | "- `" + . + "`"' <<< "$DOCKER_METADATA_OUTPUT_JSON"
+          } >> "$GITHUB_STEP_SUMMARY"
