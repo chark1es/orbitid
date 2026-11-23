@@ -107,19 +107,31 @@ describe("the pre-paint script in index.html", () => {
   });
 
   it.each([
-    { saved: null, os: "light", dark: false },
-    { saved: null, os: "dark", dark: true },
-    { saved: "system", os: "dark", dark: true },
-    { saved: "light", os: "dark", dark: false },
-    { saved: "dark", os: "light", dark: true },
-    { saved: "garbage", os: "dark", dark: true },
-  ] as const)("applies $saved on a $os system the way the app will", ({ saved, os, dark }) => {
+    { saved: null, os: "light", dark: false, blocked: false },
+    { saved: null, os: "dark", dark: true, blocked: false },
+    { saved: "system", os: "dark", dark: true, blocked: false },
+    { saved: "light", os: "dark", dark: false, blocked: false },
+    { saved: "dark", os: "light", dark: true, blocked: false },
+    { saved: "garbage", os: "dark", dark: true, blocked: false },
+    // Blocked storage: `getItem` throws, and both fall back to the system scheme.
+    { saved: "dark", os: "light", dark: false, blocked: true },
+    { saved: "light", os: "dark", dark: true, blocked: true },
+  ] as const)("applies $saved on a $os system the way the app will (storage blocked: $blocked)", ({ saved, os, dark, blocked }) => {
     osScheme(os);
     if (saved) localStorage.setItem("orbitid-theme", saved);
-    expect(prePaint()).toEqual({ dark, scheme: dark ? "dark" : "light" });
-    // The app's own `initTheme()` must agree, or the page would flip once React mounts.
-    document.documentElement.className = "";
-    expect(initTheme()).toBe(dark ? "dark" : "light");
+    const getItem = blocked
+      ? vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+          throw new DOMException("The operation is insecure.", "SecurityError");
+        })
+      : null;
+    try {
+      expect(prePaint()).toEqual({ dark, scheme: dark ? "dark" : "light" });
+      // The app's own `initTheme()` must agree, or the page would flip once React mounts.
+      document.documentElement.className = "";
+      expect(initTheme()).toBe(dark ? "dark" : "light");
+    } finally {
+      getItem?.mockRestore();
+    }
   });
 });
 
