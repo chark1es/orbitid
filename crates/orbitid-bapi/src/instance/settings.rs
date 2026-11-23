@@ -31,6 +31,9 @@ pub(super) fn instance_json(state: &AppState) -> Result<Value> {
         "email_delivery": {
             "provider": state.settings.effective_email_provider(),
         },
+        // The running version and the last release check. Read from memory:
+        // this request never waits on GitHub.
+        "version": orbitid_platform::version_status(state),
     });
     if let (Some(target), Some(source)) = (out.as_object_mut(), masked.as_object()) {
         for (key, value) in source {

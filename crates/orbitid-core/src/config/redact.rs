@@ -48,6 +48,7 @@ impl std::fmt::Debug for Env {
             .field("retention_interval_ms", &self.retention_interval_ms)
             .field("retention_budget_ms", &self.retention_budget_ms)
             .field("enrollment_interval_ms", &self.enrollment_interval_ms)
+            .field("update_check", &self.update_check)
             .finish()
     }
 }
@@ -78,6 +79,7 @@ impl std::fmt::Debug for EnvOverrides {
             .field("retention_interval_ms", &self.retention_interval_ms)
             .field("retention_budget_ms", &self.retention_budget_ms)
             .field("enrollment_interval_ms", &self.enrollment_interval_ms)
+            .field("update_check", &self.update_check)
             .finish()
     }
 }

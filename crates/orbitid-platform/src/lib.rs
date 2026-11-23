@@ -1,5 +1,5 @@
 //! L1 platform services: mail/SMS delivery, webhooks, the audit log, CAPTCHA
-//! verification, image validation and instance statistics.
+//! verification, image validation, instance statistics and the release check.
 //!
 //! Every service is context-free unless it needs the database or settings: state
 //! that must be shared with a test (mail outbox, captcha verifier, Resend
@@ -11,6 +11,7 @@ pub mod captcha;
 pub mod images;
 pub mod js;
 pub mod mail;
+pub mod release;
 pub mod stats;
 pub mod webhooks;
 
@@ -29,6 +30,9 @@ pub use mail::{
     set_mail_transport, set_resend_endpoint_for_tests, set_sms_sender, EmailDeliveryResult,
     EmailTemplate, MailProvider, MailTransportOverride, Mailer, SendEmailInput, SentEmail, SentSms,
     SmsSender,
+};
+pub use release::{
+    current_version, release_check, version_status, ReleaseCheck, ReleaseWorker, VersionStatus,
 };
 pub use stats::{instance_stats, InstanceStatsJson};
 pub use webhooks::{
