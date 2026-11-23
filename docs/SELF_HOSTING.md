@@ -165,8 +165,9 @@ GitHub creates a container package as private on its first publish, and the work
 Until a maintainer makes it public once (the package's settings on GitHub → Change visibility → Public, with
 access inherited from the repository), pulls need `docker login ghcr.io` with a token that has `read:packages`.
 
-To run one with the bundled compose file, delete `build: .` from the `orbitid` service in
-`docker-compose.yml` and set the tag in `.env`, using a version from the repository's release tags:
+The files in [Deploy the prebuilt image](#deploy-the-prebuilt-image) already use these. To run one with this
+checkout's compose file instead, delete `build: .` from the `orbitid` service in `docker-compose.yml` and set
+the tag in `.env`, using a version from the repository's release tags:
 
 ```bash
 ORBITID_IMAGE=ghcr.io/chark1es/orbitid:X.Y.Z
