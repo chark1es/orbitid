@@ -486,8 +486,7 @@ pointer and refuses a symlinked `uploads/orgs`. Never unlink a legacy
 
 The client grace is tied to `COOKIE_MAX_AGE_SECONDS`, not 24 h. `sweep_once(state, Some(at), Some(limit))` takes an injected clock.
 
-Startup banner (the same fields as the retired TypeScript server, including
-`email_startup_warnings`):
+Startup banner (the retired TypeScript server's fields plus the version, then `email_startup_warnings`):
 
 ```
   OrbitID is running at https://auth.example.com
@@ -496,5 +495,6 @@ Startup banner (the same fields as the retired TypeScript server, including
   Secret key      : hidden. Print it with: orbitid keys
   JWKS            : https://auth.example.com/.well-known/jwks.json
   Database        : postgres://orbit@db:5432/orbitid
+  Version         : 1.4.2
   Email           : Resend
 ```
