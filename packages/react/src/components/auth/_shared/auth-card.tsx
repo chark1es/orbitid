@@ -12,7 +12,7 @@ import {
   OrbitMark,
   cn,
 } from "@orbitid/ui";
-import { useAuthAppearance, useElementClasses, useResolvedTheme } from "./appearance";
+import { useAuthAppearance, useElementClasses, useThemeScope } from "./appearance";
 import { contrastForeground, LIGHT_FOREGROUND } from "../../../appearance";
 import { useAuthRuntime } from "./w6";
 import { SecuredByOrbitID } from "./form-error";
@@ -46,7 +46,7 @@ export function AuthCard({
   const { environment, t, navigate } = runtime;
   const appearance = useAuthAppearance();
   const { el, primaryColor, cssVariables, rootClassName } = useElementClasses();
-  const resolvedTheme = useResolvedTheme();
+  const { theme: resolvedTheme, className: themeClass } = useThemeScope();
   const brandingStyle: Record<string, string> = { ...cssVariables };
   if (!appearance.variables.colorPrimary) {
     const foreground = contrastForeground(primaryColor);
@@ -96,7 +96,7 @@ export function AuthCard({
     <div
       data-orbit-component="auth-card"
       data-orbit-theme={resolvedTheme}
-      className={cn(resolvedTheme === "dark" && "dark", "flex w-full flex-col items-center", rootClassName, el("rootBox"))}
+      className={cn(themeClass, "flex w-full flex-col items-center", rootClassName, el("rootBox"))}
       style={brandingStyle}
     >
       {logoPlacement === "outside" ? <div className="mb-4">{logo}</div> : null}

@@ -1,12 +1,19 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMemo, useSyncExternalStore, type ReactNode } from "react";
 import { AppearanceContext } from "../../../provider";
 import {
   resolveAppearance,
   useAppearance,
   type Appearance,
+  type BaseTheme,
   type ResolvedAppearance,
 } from "../../../appearance";
 import { useAuthRuntime } from "./w6";
+import {
+  pageSchemeSnapshot,
+  parsePageSchemeSnapshot,
+  serverPageSchemeSnapshot,
+  subscribePageScheme,
+} from "./page-theme";
 
 export type ElementName =
   | "rootBox"
@@ -127,34 +134,51 @@ export function useElementClasses(): ElementClasses {
 
 export type ResolvedTheme = "light" | "dark";
 
-/** Theme class names from the active base theme, falling back to the environment's theme. */
-export function useResolvedTheme(fallbackTheme?: string): ResolvedTheme {
+export interface ThemeScope {
+  /** The scheme the component renders in. */
+  theme: ResolvedTheme;
+  /**
+   * Class for the component's outermost element (and for anything it portals, such as a menu or a dialog), or
+   * `undefined` when the inherited tokens already match. `light` is only added inside a dark page: on a light page it
+   * would reset tokens the host may have customised on `:root`.
+   */
+  className: "dark" | "light" | undefined;
+}
+
+/** The last `dark`/`light` class among the configured base themes, so `[dark, myBrandTheme]` stays dark. */
+function forcedTheme(themes: readonly BaseTheme[]): ResolvedTheme | null {
+  for (let index = themes.length - 1; index >= 0; index -= 1) {
+    const classNames = themes[index]?.classNames ?? [];
+    if (classNames.includes("dark")) return "dark";
+    if (classNames.includes("light")) return "light";
+  }
+  return null;
+}
+
+/**
+ * Which scheme the prebuilt components render in, in order of precedence:
+ *
+ * 1. a `dark`/`light` base theme in `appearance` (the integrating app decides);
+ * 2. `fallbackTheme`, then the instance's branding theme when it is `light` or `dark`;
+ * 3. otherwise ("system"): the scheme the page declares on `<html>` (a `dark`/`light` class, `data-theme` or
+ *    `color-scheme`), and only when it declares none, `prefers-color-scheme`.
+ *
+ * Server rendering and the hydration render use light for "system", then the client snapshot takes over.
+ */
+export function useThemeScope(fallbackTheme?: string): ThemeScope {
   const appearance = useAppearance();
   const runtime = useAuthRuntime();
-  const classNames = appearance.theme.classNames ?? [];
+  const snapshot = useSyncExternalStore(subscribePageScheme, pageSchemeSnapshot, serverPageSchemeSnapshot);
+  const { declared, system } = parsePageSchemeSnapshot(snapshot);
   const configured = fallbackTheme === "dark" || fallbackTheme === "light" ? fallbackTheme : runtime.environment.app.theme;
-  const forced: ResolvedTheme | null = classNames.includes("dark")
-    ? "dark"
-    : classNames.includes("light")
-      ? "light"
-      : null;
-  const [resolved, setResolved] = useState<ResolvedTheme>(configured === "dark" ? "dark" : "light");
+  const theme: ResolvedTheme =
+    forcedTheme(appearance.themes) ??
+    (configured === "dark" || configured === "light" ? configured : (declared ?? system));
+  const className = theme === "dark" ? "dark" : declared === "dark" ? "light" : undefined;
+  return useMemo(() => ({ theme, className }), [theme, className]);
+}
 
-  useEffect(() => {
-    if (configured === "dark" || configured === "light") {
-      setResolved(configured);
-      return;
-    }
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-      setResolved("light");
-      return;
-    }
-    const query = window.matchMedia("(prefers-color-scheme: dark)");
-    const update = () => setResolved(query.matches ? "dark" : "light");
-    update();
-    query.addEventListener?.("change", update);
-    return () => query.removeEventListener?.("change", update);
-  }, [configured]);
-
-  return forced ?? resolved;
+/** See {@link useThemeScope}. */
+export function useResolvedTheme(fallbackTheme?: string): ResolvedTheme {
+  return useThemeScope(fallbackTheme).theme;
 }

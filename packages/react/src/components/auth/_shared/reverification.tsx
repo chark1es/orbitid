@@ -10,7 +10,7 @@ import {
   cn,
 } from "@orbitid/ui";
 import { errorMessage, invokeMethod, primaryIdentifier } from "./api";
-import { useElementClasses } from "./appearance";
+import { useElementClasses, useThemeScope } from "./appearance";
 import { FormError } from "./form-error";
 import { OtpField } from "./otp-field";
 import { PasswordField } from "./password-field";
@@ -53,6 +53,8 @@ export function ReverificationDialog({
   const runtime = useAuthRuntime();
   const { t, environment, orbit } = runtime;
   const { el } = useElementClasses();
+  // Portaled to <body>: carry the component's scheme so the dialog matches the page it was opened from.
+  const { className: themeClass } = useThemeScope();
   const user = runtime.user;
   const [stage, setStage] = useState<"first" | "email_code" | "second">("first");
   const [password, setPassword] = useState("");
@@ -173,7 +175,7 @@ export function ReverificationDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => (next ? onOpenChange(true) : close())}>
-      <DialogContent className={cn("max-w-md", el("modalContent"))} data-orbit-component="verification-modal">
+      <DialogContent className={cn(themeClass, "max-w-md", el("modalContent"))} data-orbit-component="verification-modal">
         <DialogHeader>
           <DialogTitle>{title ?? t("verification.title")}</DialogTitle>
           <DialogDescription>
