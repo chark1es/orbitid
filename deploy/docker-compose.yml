@@ -58,6 +58,8 @@ services:
       ORBITID_RESEND_API_KEY: ${ORBITID_RESEND_API_KEY:-}
       ORBITID_SMTP_URL: ${ORBITID_SMTP_URL:-}
       ORBITID_EMAIL_FROM: ${ORBITID_EMAIL_FROM:-}
+      # Release check against GitHub every 6 hours (no instance data sent); false makes no request.
+      ORBITID_UPDATE_CHECK: ${ORBITID_UPDATE_CHECK:-true}
     ports:
       # Local only by default: the first visitor of a fresh instance creates the owner account, so nothing
       # outside this host should reach it before you have. Put a reverse proxy in front, or set

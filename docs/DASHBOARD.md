@@ -146,7 +146,7 @@ The API reference is served by the server at `{apiUrl}/docs`, outside the dashbo
 When the server's release check finds a newer OrbitID release, the top bar shows **Update available** (with
 `vX → vY` on wide screens) linking to that release's notes on GitHub. It reads `version` from
 `GET /v1/instance`, which the server answers from memory, and shows nothing while the instance is current or
-when `ORBITID_UPDATE_CHECK=false`. See [SELF_HOSTING.md](SELF_HOSTING.md#version-and-update-check).
+when `ORBITID_UPDATE_CHECK=false`. See [UPDATES.md](UPDATES.md#version-and-update-check).
 
 ## Feature availability and user security
 
