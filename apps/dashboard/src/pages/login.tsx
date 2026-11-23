@@ -141,6 +141,8 @@ export default function LoginPage() {
             <FormSkeleton label="Checking your session" />
           ) : (
             <>
+              {/* The page's heading for assistive technology; nothing visible besides the form. */}
+              <h1 className="sr-only">Sign in</h1>
               {statusErrorNotice}
               <AccountSignInSlot onSignedIn={() => void afterAccountSignIn()} />
               {openErrorNotice}

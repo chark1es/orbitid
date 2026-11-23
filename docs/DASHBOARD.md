@@ -25,8 +25,9 @@ sk_…`), nothing else.
   role. Their `app:sys_dashboard:access` permission is reserved: a custom role cannot carry it, and system roles
   cannot be edited or deleted, so only a change to an account's roles changes who may enter. Assign the roles from
   a user's page, under Roles.
-- **What visitors see.** Signed out, the instance root (and every console route, which sends the visitor to
-  `/login`) is the sign-in form alone, with no other copy around it. Once an account is signed in on this browser,
+- **What visitors see.** Signed out, once an account exists, the instance root (and every console route, which
+  sends the visitor to `/login`) is the sign-in form alone, with no other copy around it. A fresh instance with no
+  account shows the owner setup form instead. Once an account is signed in on this browser,
   `/login` shows who it is. An account with access gets
   **Open the admin console** (`POST /v1/operator_sessions/from_user`); one without access is told so and can sign
   out. After signing in on that screen, an account with access goes straight into the console. Only this
