@@ -67,6 +67,10 @@ RUN for crate in crates/*; do \
 
 COPY crates ./crates
 COPY docs/openapi.json docs/openapi.json
+# The version the binary reports (startup banner, GET /v1/instance, release check). A release build passes
+# the tag, e.g. --build-arg ORBITID_BUILD_VERSION=1.4.2; empty means the Cargo.toml version. Declared after
+# the dependency build so changing it only recompiles the OrbitID crates.
+ARG ORBITID_BUILD_VERSION=
 # COPY preserves the source files' mtimes from the build context. The dummy build above
 # just created newer artifacts, so Cargo would consider this real (older) source fresh
 # and silently keep the stub binary. Touch every real input so the workspace crates are
