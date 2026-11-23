@@ -363,10 +363,7 @@ async fn create_settings_store_inner(
     if !encryption_key.is_empty() {
         // Pay scrypt once here, off the async worker, so request paths never do.
         let key = encryption_key.clone();
-        let _ = tokio::task::spawn_blocking(move || {
-            let _ = crypto::encrypt(&key, "");
-        })
-        .await;
+        let _ = tokio::task::spawn_blocking(move || crypto::derive_keys(&key)).await;
     }
 
     let read = |raw: Value| -> MigratedSettings { decode_migrated(&encryption_key, raw) };
