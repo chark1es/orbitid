@@ -4,7 +4,8 @@ name: Docker image
 #
 #   push to main          -> edge, sha-<short>
 #   tag vX.Y.Z            -> X.Y.Z, X.Y, X, latest, sha-<short>
-#   tag vX.Y.Z-<pre>      -> X.Y.Z-<pre>, sha-<short> (no X.Y, X or latest)
+#   tag vX.Y.Z-<pre>      -> X.Y.Z-<pre>, sha-<short> (no X.Y, X or latest); the workspace version must be
+#                            that same prerelease
 #   manual run            -> as for the branch or tag it runs on (main or a v* tag only)
 #
 # Pull requests are not built here: the `container` job in ci.yml already builds the image and smoke-tests
@@ -75,6 +76,10 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: ${{ env.IMAGE }}
+          # Unused for the push (it is by digest), but sets the version label to match the index's tags.
+          tags: |
+            type=edge,branch=main
+            type=semver,pattern={{version}}
           labels: |
             org.opencontainers.image.title=OrbitID
             org.opencontainers.image.description=${{ env.DESCRIPTION }}
@@ -100,7 +105,8 @@ jobs:
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
-          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          # OCI media types: `imagetools create --annotation` refuses Docker manifest lists.
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true
           # One cache per platform; mode=max keeps the Rust dependency layer of the build stage.
           cache-from: type=gha,scope=image-${{ matrix.arch }}
           cache-to: type=gha,scope=image-${{ matrix.arch }},mode=max
@@ -118,6 +124,8 @@ jobs:
           path: ${{ runner.temp }}/digests/*
           if-no-files-found: error
           retention-days: 1
+          # "Re-run all jobs" uploads again under the same name.
+          overwrite: true
 
   # Tags one multi-platform index over the per-platform digests.
   manifest:
