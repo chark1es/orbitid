@@ -17,6 +17,7 @@ import { useAuthRuntime } from "../_shared/w6";
 import type { NormalizedSession } from "../_shared/w6";
 import type { TrustedDeviceResource } from "../../../provider/types";
 import { SectionHeader, formatDate, type SectionProps } from "./security-shared";
+import { usePortalClass } from "../_shared/appearance";
 
 export function TrustedDevicesSection({ user, refresh, onError, onNotice }: SectionProps) {
   const runtime = useAuthRuntime();
@@ -188,6 +189,7 @@ export function DevicesSection({ user, refresh, onError, onNotice }: SectionProp
 }
 
 export function DeleteAccountSection({ user, onError, onDeleted }: SectionProps & { onDeleted: () => void }) {
+  const portalClass = usePortalClass();
   const runtime = useAuthRuntime();
   const { t, environment, navigate } = runtime;
   const withVerification = useReverification(async (action: () => Promise<unknown>) => action());
@@ -229,7 +231,7 @@ export function DeleteAccountSection({ user, onError, onDeleted }: SectionProps 
         </Button>
       )}
       <Dialog open={open} onOpenChange={changeOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className={portalClass("max-w-md")}>
           <DialogHeader>
             <DialogTitle>{t("userProfile.deleteAccount.confirmTitle")}</DialogTitle>
             <DialogDescription>{t("userProfile.deleteAccount.confirmSubtitle")}</DialogDescription>

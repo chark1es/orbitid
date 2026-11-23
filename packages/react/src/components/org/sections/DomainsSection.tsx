@@ -25,6 +25,7 @@ import { ConfirmDialog } from "../_shared/ConfirmDialog";
 import { EmptyState, ErrorBanner, LoadingRows } from "../_shared/Feedback";
 import { useAsyncAction, useOrgErrorText, type OrgScope } from "../_shared/hooks";
 import { isValidDomain } from "../_shared/utils";
+import { usePortalClass } from "../../auth/_shared/appearance";
 
 const ENROLLMENT_MODES = [
   "manual_invitation",
@@ -310,6 +311,7 @@ interface VerifyDomainDialogProps {
 }
 
 function VerifyDomainDialog({ domain, onOpenChange, onVerified }: VerifyDomainDialogProps) {
+  const portalClass = usePortalClass();
   const { t } = useLocalizations();
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
@@ -344,7 +346,7 @@ function VerifyDomainDialog({ domain, onOpenChange, onVerified }: VerifyDomainDi
 
   return (
     <Dialog open={domain !== null} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className={portalClass("sm:max-w-md")}>
         <DialogHeader>
           <DialogTitle>
             {t("organizationProfile.domainsSection.verifyDomainTitle", { domain: domain?.name ?? "" })}

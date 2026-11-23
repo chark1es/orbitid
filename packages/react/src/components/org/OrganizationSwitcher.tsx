@@ -45,6 +45,7 @@ import {
 } from "./_shared/hooks";
 import { fillUrlTemplate, resolveRedirect, roleLabel } from "./_shared/utils";
 import type { CommonOrgProps, RedirectUrl } from "./_shared/types";
+import { usePortalClass } from "../auth/_shared/appearance";
 
 export interface OrganizationSwitcherProps extends CommonOrgProps {
   /** Hide the personal account entry (forced organizations). */
@@ -87,6 +88,7 @@ function OrganizationSwitcherView({
   organizationProfileUrl,
   skipInvitationScreen,
 }: OrganizationSwitcherProps) {
+  const portalClass = usePortalClass();
   const { t } = useLocalizations();
   const instance = useOrbitID();
   const options = useContext(OrbitIDOptionsContext);
@@ -205,7 +207,7 @@ function OrganizationSwitcherView({
             <ChevronsUpDownIcon className="ml-auto size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent align="start" className="w-80 p-2">
+        <PopoverContent align="start" className={portalClass("w-80 p-2")}>
           <div className="flex flex-col gap-2">
             <Input
               value={query}
@@ -400,7 +402,7 @@ function OrganizationSwitcherView({
       </Popover>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className={OVERLAY_WIDTH.form}>
+        <DialogContent className={portalClass(OVERLAY_WIDTH.form)}>
           <DialogTitle className="sr-only">{t("createOrganization.title")}</DialogTitle>
           <CreateOrganization
             skipInvitationScreen={skipInvitationScreen}
@@ -416,7 +418,7 @@ function OrganizationSwitcherView({
       </Dialog>
 
       <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent className={portalClass("max-h-[85vh] overflow-y-auto sm:max-w-2xl")}>
           <DialogTitle className="sr-only">{t("organizationProfile.navbar.title")}</DialogTitle>
           <OrganizationProfile
             routing="virtual"

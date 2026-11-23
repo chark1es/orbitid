@@ -31,7 +31,7 @@ function subscribe(listener: () => void): () => void {
 }
 
 function systemTheme(): ResolvedTheme {
-  return typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  return typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)")?.matches ? "dark" : "light";
 }
 
 function readChoice(storageKey: string, fallback: ThemeChoice): ThemeChoice {

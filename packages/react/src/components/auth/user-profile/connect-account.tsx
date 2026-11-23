@@ -15,6 +15,7 @@ import { LinkIcon } from "lucide-react";
 import { currentUser, reloadOrbit } from "../_shared/api";
 import { ProviderIcon } from "../_shared/provider-icon";
 import { useAuthRuntime } from "../_shared/w6";
+import { usePortalClass } from "../_shared/appearance";
 
 export function ConnectAccountDialog({
   open,
@@ -27,6 +28,7 @@ export function ConnectAccountDialog({
   onOpenChange: (open: boolean) => void;
   onError: (caught: unknown) => void;
 }) {
+  const portalClass = usePortalClass();
   const runtime = useAuthRuntime();
   const { t, orbit, environment } = runtime;
   const [scopes, setScopes] = useState("");
@@ -65,7 +67,7 @@ export function ConnectAccountDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className={portalClass("max-w-md")}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ProviderIcon provider={provider ?? ""} className="size-5" />

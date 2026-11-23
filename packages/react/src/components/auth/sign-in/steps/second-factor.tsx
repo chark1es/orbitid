@@ -13,12 +13,13 @@ import {
 import { Loader2Icon } from "lucide-react";
 import { factorsOf } from "../../_shared/api";
 import { useAuthRuntime, type TranslateFn } from "../../_shared/w6";
-import { useElementClasses } from "../../_shared/appearance";
+import { useElementClasses, usePortalClass } from "../../_shared/appearance";
 import { FormError } from "../../_shared/form-error";
 import { OtpField } from "../../_shared/otp-field";
 import { LinkButton, type StepProps } from "./shared";
 
 export function SecondFactorStep({ flow }: StepProps) {
+  const portalClass = usePortalClass();
   const runtime = useAuthRuntime();
   const { t, environment } = runtime;
   const { el } = useElementClasses();
@@ -67,7 +68,7 @@ export function SecondFactorStep({ flow }: StepProps) {
             <SelectTrigger aria-label={t("signIn.secondFactor.useAnotherMethod")}>
               <SelectValue />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className={portalClass()}>
               {available.map((option) => (
                 <SelectItem key={option.strategy} value={option.strategy}>
                   {option.label}

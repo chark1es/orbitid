@@ -1,5 +1,5 @@
 export * from "./types";
-export { defaultTheme, dark, themes } from "./themes";
+export { defaultTheme, light, dark, themes } from "./themes";
 export {
   cssVariablesFrom,
   contrastForeground,

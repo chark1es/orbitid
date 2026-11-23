@@ -43,6 +43,7 @@ import {
 } from "../_shared/hooks";
 import { formatDate, membershipDisplayName, roleLabel } from "../_shared/utils";
 import type { RoleOption } from "../_shared/types";
+import { usePortalClass } from "../../auth/_shared/appearance";
 
 export interface MembersSectionProps {
   organization: OrganizationResource;
@@ -64,6 +65,7 @@ export function MembersSection({
   memberQuery,
   onMemberQueryChange,
 }: MembersSectionProps) {
+  const portalClass = usePortalClass();
   const { t } = useLocalizations();
   const { memberships, invitations, membershipRequests, settings } = scope;
   const membersTable = usePaginatedTable(memberships);
@@ -382,7 +384,7 @@ export function MembersSection({
       ) : null}
 
       <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className={portalClass("sm:max-w-md")}>
           <DialogHeader>
             <DialogTitle>{t("organizationProfile.invitationsSection.inviteTitle")}</DialogTitle>
             <DialogDescription>
