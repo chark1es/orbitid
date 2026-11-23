@@ -117,8 +117,6 @@ fn non_empty(value: Option<String>) -> Option<String> {
     value.filter(|v| !v.is_empty())
 }
 
-/// `path.resolve`-like: absolute paths pass through, relative ones are joined
-/// to the current directory and `.`/`..` components are normalised lexically.
 /// `ORBITID_UPDATE_CHECK`: unset means on. Anything other than a clear yes or
 /// no is refused, so a typo can never leave the check on by accident.
 pub fn parse_update_check(raw: Option<&str>) -> Result<bool, ConfigError> {
@@ -134,6 +132,8 @@ pub fn parse_update_check(raw: Option<&str>) -> Result<bool, ConfigError> {
     }
 }
 
+/// `path.resolve`-like: absolute paths pass through, relative ones are joined
+/// to the current directory and `.`/`..` components are normalised lexically.
 fn resolve_path(path: &Path) -> PathBuf {
     let joined = if path.is_absolute() {
         path.to_path_buf()
