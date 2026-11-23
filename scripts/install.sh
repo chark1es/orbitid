@@ -124,12 +124,13 @@ main() {
     '' | *[!0-9]*) die "ORBITID_PORT must be a port number, got '$ORBITID_PORT'." ;;
   esac
   case $ORBITID_BIND in
-    '' | *[!0-9a-fA-F.:]*) die "ORBITID_BIND must be an IP address such as 127.0.0.1 or 0.0.0.0, got '$ORBITID_BIND'." ;;
+    '' | *[!0-9.]*) die "ORBITID_BIND must be an IPv4 address such as 127.0.0.1 or 0.0.0.0, got '$ORBITID_BIND'." ;;
   esac
   case $ORBITID_VERSION in
     '' | *[!A-Za-z0-9._-]*) die "ORBITID_VERSION must be an image tag such as latest or 1.2.3, got '$ORBITID_VERSION'." ;;
   esac
   case $ORBITID_BASE_URL in
+    *[[:space:]\"\'#]*) die "ORBITID_BASE_URL must not contain spaces, quotes or #, got '$ORBITID_BASE_URL'." ;;
     http://?* | https://?*) ;;
     *) die "ORBITID_BASE_URL must start with http:// or https://, got '$ORBITID_BASE_URL'." ;;
   esac

@@ -64,8 +64,8 @@ docker compose up -d
 
 `ORBITID_VERSION` in `.env` picks the image tag (`latest` by default; pin a major, minor or exact release such
 as `0.1` or `0.1.0` to control upgrades). The port is published on `127.0.0.1` unless `ORBITID_BIND` says
-otherwise, for the reason given above. Upgrade with `docker compose pull && docker compose up -d`. The other variables are the same as in
-the next section.
+otherwise, for the reason given above. Upgrade with `docker compose pull && docker compose up -d`. The other
+variables are the same as in the next section.
 
 ### Coolify
 
@@ -79,8 +79,13 @@ encryption key (`SERVICE_BASE64_64_ENCRYPTIONKEY`) on the first deploy and keeps
    through `SERVICE_URL_ORBITID_4000`.
 2. Deploy. No host port is published, so Coolify's proxy is the only way in, and `ORBITID_TRUST_PROXY`
    defaults to `1` (one proxy hop). Raise it only if another proxy you control sits in front of Coolify's.
-3. Copy `SERVICE_BASE64_64_ENCRYPTIONKEY` from the resource's Environment Variables page somewhere safe, and
+3. Open the domain right away and create the owner account: the first visitor of a fresh instance becomes the
+   owner, and here the domain is public from the first deploy.
+4. Copy `SERVICE_BASE64_64_ENCRYPTIONKEY` from the resource's Environment Variables page somewhere safe, and
    never change it.
+
+Deploying before the domain is set stops with `required variable SERVICE_URL_ORBITID_4000 is missing a value`.
+If the Coolify server has a wildcard domain, Coolify generates a hostname instead and the deploy goes ahead on it.
 
 Set `ORBITID_VERSION` in the same page to pin an image tag, and email settings (`ORBITID_RESEND_API_KEY`,
 `ORBITID_SMTP_URL`, `ORBITID_EMAIL_FROM`) there or later in the dashboard.

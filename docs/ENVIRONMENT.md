@@ -26,6 +26,7 @@ Set these where OrbitID runs: the container environment, `docker compose`'s `.en
 | `ORBITID_DATABASE_NAME` / `PGDATABASE` | no | the user name | Database name. Each `ORBITID_DATABASE_*` part falls back to the standard libpq variable shown next to it. Every command that connects (`start`, `migrate`, `export`, `import`, `copy`, `import-uploads`, `keys`) resolves the connection the same way. |
 | `ORBITID_BASE_URL` | yes in production | `http://localhost:<port>` | The URL browsers and your apps use to reach the server. It is the token issuer. |
 | `PORT` / `ORBITID_PORT` | no | `4000` | Port to listen on. |
+| `ORBITID_BIND` | no | `127.0.0.1` | Read only by `deploy/docker-compose.yml`, not by the server: the host address the port is published on. `0.0.0.0` exposes it on every interface; keep it local until the owner account exists. |
 | `ORBITID_SECRET_KEY` | no | derived from the encryption key | Backend API key. Omit it to derive a strong key; an explicit production key must contain at least 32 random characters. Print the effective key with `orbitid keys`. |
 | `ORBITID_DB_MAX_CONNECTIONS` | no | `20` | Maximum pooled Postgres connections per replica. Each replica also opens one dedicated `LISTEN` connection for settings changes, so keep `replicas × (this + 1)` below Postgres's `max_connections` (the bundled compose file sets `300`). |
 | `ORBITID_DB_ACQUIRE_TIMEOUT_MS` | no | `30000` | How long a request waits for a pooled connection before failing. |
