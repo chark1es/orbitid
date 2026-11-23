@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { AuthCard } from "../_shared/auth-card";
@@ -187,12 +188,14 @@ describe("portaled surfaces carry the component's scheme", () => {
 
   it("gives every portaled `*Content` in the components the scheme class", () => {
     const tag = /<(?:AlertDialog|Dialog|DropdownMenu|DropdownMenuSub|Popover|Select|Tooltip|Sheet|Drawer|HoverCard|ContextMenu)Content\b(?:=>|[^>])*>/g;
-    const offenders = tsxFiles(resolve(process.cwd(), "src/components")).flatMap((file) =>
-      [...readFileSync(file, "utf8").matchAll(tag)]
-        .map((match) => match[0])
-        .filter((source) => !source.includes("portalClass(") && !source.includes("themeClass"))
-        .map((source) => `${file}: ${source.split("\n")[0]}`),
-    );
+    // Anchored to this file, so the scan works whichever directory vitest starts in.
+    const files = tsxFiles(resolve(dirname(fileURLToPath(import.meta.url)), "../.."));
+    const tags = files.flatMap((file) => [...readFileSync(file, "utf8").matchAll(tag)].map((match) => ({ file, source: match[0] })));
+    // Guards against a scan that silently finds nothing.
+    expect(tags.length).toBeGreaterThan(20);
+    const offenders = tags
+      .filter(({ source }) => !source.includes("portalClass(") && !source.includes("themeClass"))
+      .map(({ file, source }) => `${file}: ${source.split("\n")[0]}`);
     expect(offenders).toEqual([]);
   });
 });

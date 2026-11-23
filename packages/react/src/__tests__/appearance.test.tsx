@@ -26,6 +26,13 @@ describe("appearance", () => {
     expect(resolved.cssVariables["--orbitid-custom-token"]).toBe("1rem");
   });
 
+  it("keeps a scheme class out of rootClassName even inside a multi-class entry", () => {
+    const resolved = resolveAppearance({ baseTheme: { name: "brand", classNames: ["dark brand"] } });
+    const classes = resolved.rootClassName.split(" ");
+    expect(classes).toContain("brand");
+    expect(classes).not.toContain("dark");
+  });
+
   it("defaults to the default theme", () => {
     const resolved = resolveAppearance();
     expect(resolved.theme.name).toBe("default");

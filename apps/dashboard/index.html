@@ -11,7 +11,8 @@
     <title>OrbitID</title>
     <meta name="description" content="Dashboard for a self-hosted OrbitID instance" />
     <script>
-      // Mirrors themeBootstrapScript() in packages/ui/src/theme-provider.tsx: apply the stored theme before first paint.
+      // Applies the stored theme before first paint, resolving it exactly as initTheme() in
+      // packages/ui/src/theme-provider.tsx does (including the "system" fallback when storage is blocked).
       (() => {
         let stored = null;
         try {
@@ -22,7 +23,7 @@
         const theme = stored === "light" || stored === "dark" ? stored : "system";
         const dark =
           theme === "dark" ||
-          (theme === "system" && window.matchMedia?.("(prefers-color-scheme: dark)").matches === true);
+          (theme === "system" && window.matchMedia?.("(prefers-color-scheme: dark)")?.matches === true);
         const root = document.documentElement;
         root.classList.toggle("dark", dark);
         root.style.colorScheme = dark ? "dark" : "light";

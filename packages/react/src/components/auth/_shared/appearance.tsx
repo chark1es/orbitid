@@ -152,7 +152,8 @@ export interface ThemeScope {
 /** The last `dark`/`light` class among the configured base themes, so `[dark, myBrandTheme]` stays dark. */
 function forcedTheme(themes: readonly BaseTheme[]): ResolvedTheme | null {
   for (let index = themes.length - 1; index >= 0; index -= 1) {
-    const classNames = themes[index]?.classNames ?? [];
+    // An entry may hold several classes ("dark brand").
+    const classNames = (themes[index]?.classNames ?? []).flatMap((entry) => entry.split(/\s+/));
     if (classNames.includes("dark")) return "dark";
     if (classNames.includes("light")) return "light";
   }

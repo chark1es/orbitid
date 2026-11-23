@@ -131,7 +131,8 @@ export function resolveAppearance(appearance: Appearance = {}): ResolvedAppearan
     // `dark`/`light` stay out of `rootClassName`: it also lands on the provider wrapper around the host's own app,
     // where `.light` would reset the host's `:root` tokens. Components take the scheme from `useThemeScope()` instead,
     // which reads it from `themes`.
-    classNames.push(...(theme.classNames ?? []).filter((name) => !SCHEME_CLASSES.has(name)));
+    // An entry may hold several classes ("dark brand"), so filter class by class.
+    classNames.push(...(theme.classNames ?? []).flatMap((entry) => entry.split(/\s+/)).filter((name) => name && !SCHEME_CLASSES.has(name)));
   };
   activeThemes.forEach(mergeTheme);
   Object.assign(variables, appearance.variables);

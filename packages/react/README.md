@@ -120,13 +120,13 @@ creating, accepting, leaving or updating an organization invalidates the affecte
   `--orbitid-*` aliases for the rest. Unknown tokens become `--orbitid-<kebab-key>`.
 * `--primary-foreground` is derived from `colorPrimary` (hex colors) for legible button text.
 * Themes: `defaultTheme`, `light`, `dark`. Arrays merge in order; `appearance` wins over the theme.
-* Light and dark: the sign-in, sign-up, waitlist, user button and user profile components pick a scheme in this
-  order: a `light`/`dark` base theme in
+* Light and dark: the sign-in, sign-up, waitlist, user button, user profile and organization components pick a
+  scheme in this order: a `light`/`dark` base theme in
   `appearance`; the instance's branding theme when it is light or dark; otherwise the scheme your page marks on
   `<html>` (a `dark`/`light` class, `data-theme="dark|light"` or an inline `color-scheme`, as `@orbitid/ui`'s
   `ThemeProvider`, next-themes and most Tailwind setups do), and only when the page marks none,
   `prefers-color-scheme`. They follow the page live when it switches, and menus and dialogs they portal to
-  `<body>` carry the same scheme. The organization components inherit the page's tokens. To tie everything to your
+  `<body>` carry the same scheme. To tie everything to your
   app's own toggle, pass `appearance={{ baseTheme: isDark ? dark : light }}`.
 * The provider renders `<div className="orbitid-root …">` carrying the CSS variables; `rootBox`
   overrides are applied to that wrapper.
