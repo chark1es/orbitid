@@ -23,17 +23,33 @@ fn compares_by_semver_precedence() {
     let v = |raw: &str| parse_version(raw).unwrap();
     assert!(is_newer("0.1.0", &v("0.2.0")));
     assert!(is_newer("0.9.9", &v("0.10.0")), "numeric, not lexical");
-    assert!(is_newer("1.0.0-rc.1", &v("1.0.0")), "a release beats its rc");
+    assert!(
+        is_newer("1.0.0-rc.1", &v("1.0.0")),
+        "a release beats its rc"
+    );
     assert!(is_newer("v1.2.3", &v("1.2.4")), "a leading v is accepted");
     assert!(!is_newer("0.2.0", &v("0.2.0")));
-    assert!(!is_newer("0.3.0", &v("0.2.0")), "never suggests a downgrade");
-    assert!(!is_newer("1.0.0+build.5", &v("1.0.0")), "build metadata is ignored");
-    assert!(!is_newer("custom-build", &v("9.9.9")), "an unknown current version stays quiet");
+    assert!(
+        !is_newer("0.3.0", &v("0.2.0")),
+        "never suggests a downgrade"
+    );
+    assert!(
+        !is_newer("1.0.0+build.5", &v("1.0.0")),
+        "build metadata is ignored"
+    );
+    assert!(
+        !is_newer("custom-build", &v("9.9.9")),
+        "an unknown current version stays quiet"
+    );
 }
 
 #[test]
 fn the_running_version_is_semver() {
-    assert!(parse_version(current_version()).is_some(), "{}", current_version());
+    assert!(
+        parse_version(current_version()).is_some(),
+        "{}",
+        current_version()
+    );
 }
 
 #[test]
@@ -45,10 +61,19 @@ fn reads_a_published_release_and_skips_the_rest() {
         parsed.unwrap().release_url(),
         "https://github.com/chark1es/orbitid/releases/tag/v1.4.2"
     );
-    assert_eq!(parse_release(&json!({ "tag_name": "1.4.2" })), Some(release("1.4.2")));
+    assert_eq!(
+        parse_release(&json!({ "tag_name": "1.4.2" })),
+        Some(release("1.4.2"))
+    );
 
-    assert_eq!(parse_release(&json!({ "tag_name": "v2.0.0", "draft": true })), None);
-    assert_eq!(parse_release(&json!({ "tag_name": "v2.0.0", "prerelease": true })), None);
+    assert_eq!(
+        parse_release(&json!({ "tag_name": "v2.0.0", "draft": true })),
+        None
+    );
+    assert_eq!(
+        parse_release(&json!({ "tag_name": "v2.0.0", "prerelease": true })),
+        None
+    );
     assert_eq!(parse_release(&json!({ "tag_name": "v2.0.0-beta.1" })), None);
     assert_eq!(parse_release(&json!({ "tag_name": "nightly" })), None);
     assert_eq!(parse_release(&json!({ "message": "Not Found" })), None);
@@ -61,7 +86,9 @@ fn the_link_is_built_from_the_tag_not_the_response() {
         "html_url": "https://evil.example/phish",
     }))
     .unwrap();
-    assert!(parsed.release_url().starts_with("https://github.com/chark1es/orbitid/releases/tag/"));
+    assert!(parsed
+        .release_url()
+        .starts_with("https://github.com/chark1es/orbitid/releases/tag/"));
 }
 
 #[test]
