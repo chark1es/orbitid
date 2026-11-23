@@ -1,10 +1,12 @@
-import { useMemo, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useMemo, useSyncExternalStore, type ReactNode } from "react";
+import { cn } from "@orbitid/ui";
 import { AppearanceContext } from "../../../provider";
 import {
   resolveAppearance,
   useAppearance,
   type Appearance,
   type BaseTheme,
+  type ClassValue,
   type ResolvedAppearance,
 } from "../../../appearance";
 import { useAuthRuntime } from "./w6";
@@ -140,7 +142,9 @@ export interface ThemeScope {
   /**
    * Class for the component's outermost element (and for anything it portals, such as a menu or a dialog), or
    * `undefined` when the inherited tokens already match. `light` is only added inside a dark page: on a light page it
-   * would reset tokens the host may have customised on `:root`.
+   * would reset tokens the host may have customised on `:root`. Likewise, when the page declares no scheme and the
+   * operating system is dark, a component forced light gets no `light` class, so host tokens defined only under a
+   * `prefers-color-scheme: dark` media query are not reset.
    */
   className: "dark" | "light" | undefined;
 }
@@ -176,6 +180,16 @@ export function useThemeScope(fallbackTheme?: string): ThemeScope {
     (configured === "dark" || configured === "light" ? configured : (declared ?? system));
   const className = theme === "dark" ? "dark" : declared === "dark" ? "light" : undefined;
   return useMemo(() => ({ theme, className }), [theme, className]);
+}
+
+/**
+ * `className` builder for content a component portals under `<body>` (dialogs, menus, selects, tooltips). A portal
+ * leaves the component's DOM subtree, so it loses the scheme class on the component's root; this puts it back:
+ * `<DialogContent className={portalClass("max-w-md")}>`.
+ */
+export function usePortalClass(): (...classes: ClassValue[]) => string {
+  const { className } = useThemeScope();
+  return useCallback((...classes: ClassValue[]) => cn(className, ...classes), [className]);
 }
 
 /** See {@link useThemeScope}. */

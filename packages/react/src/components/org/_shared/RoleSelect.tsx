@@ -7,6 +7,7 @@ import {
   cn,
 } from "@orbitid/ui";
 import type { RoleOption } from "./types";
+import { usePortalClass } from "../../auth/_shared/appearance";
 
 export interface RoleSelectProps {
   roles: RoleOption[];
@@ -34,6 +35,7 @@ export function RoleSelect({
   size = "sm",
   className,
 }: RoleSelectProps) {
+  const portalClass = usePortalClass();
   const options = roles.length > 0 ? roles : [{ key: value, name: value }];
   return (
     <div className={cn("flex flex-col gap-1.5", className)}>
@@ -51,7 +53,7 @@ export function RoleSelect({
         >
           <SelectValue placeholder={value} />
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent className={portalClass()}>
           {options.map((role) => (
             <SelectItem key={role.key} value={role.key}>
               {role.name}

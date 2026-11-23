@@ -28,6 +28,7 @@ import {
 } from "./_shared/hooks";
 import { fillUrlTemplate, resolveRedirect, roleLabel } from "./_shared/utils";
 import type { CommonOrgProps, RedirectUrl } from "./_shared/types";
+import { usePortalClass } from "../auth/_shared/appearance";
 
 export interface OrganizationListProps extends CommonOrgProps {
   hidePersonal?: boolean;
@@ -53,6 +54,7 @@ function OrganizationListView({
   afterSelectPersonalUrl,
   skipInvitationScreen,
 }: OrganizationListProps) {
+  const portalClass = usePortalClass();
   const { t } = useLocalizations();
   const instance = useOrbitID();
   const navigate = useNavigate();
@@ -332,7 +334,7 @@ function OrganizationListView({
       ) : null}
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className={OVERLAY_WIDTH.form}>
+        <DialogContent className={portalClass(OVERLAY_WIDTH.form)}>
           <DialogTitle className="sr-only">{t("createOrganization.title")}</DialogTitle>
           <CreateOrganization
             afterCreateOrganizationUrl={afterCreateOrganizationUrl}

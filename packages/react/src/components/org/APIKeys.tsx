@@ -40,6 +40,7 @@ import {
 } from "./_shared/hooks";
 import { formatDate, isApiKeyExpired } from "./_shared/utils";
 import type { CommonOrgProps } from "./_shared/types";
+import { usePortalClass } from "../auth/_shared/appearance";
 
 export interface APIKeysProps extends CommonOrgProps {
   /** Whose keys are managed: the signed-in user or the active organization. */
@@ -111,6 +112,7 @@ export function APIKeys(props: APIKeysProps) {
 }
 
 function APIKeysView({ type = "user", perPage = 10, showDescription }: APIKeysProps) {
+  const portalClass = usePortalClass();
   const { t } = useLocalizations();
   const instance = useOrbitID();
   const { organization } = useOrgScope({
@@ -330,7 +332,7 @@ function APIKeysView({ type = "user", perPage = 10, showDescription }: APIKeysPr
       <PaginationBar {...table} />
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className={portalClass("sm:max-w-md")}>
           <DialogHeader>
             <DialogTitle>{t("apiKeys.createTitle")}</DialogTitle>
             <DialogDescription>{t("apiKeys.createSubtitle")}</DialogDescription>
@@ -366,7 +368,7 @@ function APIKeysView({ type = "user", perPage = 10, showDescription }: APIKeysPr
                 <SelectTrigger id="api-key-expiration" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className={portalClass()}>
                   <SelectItem value="never">{t("apiKeys.expiryNever")}</SelectItem>
                   <SelectItem value="30">{t("apiKeys.expiration30Days")}</SelectItem>
                   <SelectItem value="90">{t("apiKeys.expiration90Days")}</SelectItem>
@@ -420,7 +422,7 @@ function APIKeysView({ type = "user", perPage = 10, showDescription }: APIKeysPr
           if (!open) setRevealed(null);
         }}
       >
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className={portalClass("sm:max-w-md")}>
           <DialogHeader>
             <DialogTitle>{t("apiKeys.revealTitle")}</DialogTitle>
             <DialogDescription>{t("apiKeys.revealSubtitle")}</DialogDescription>

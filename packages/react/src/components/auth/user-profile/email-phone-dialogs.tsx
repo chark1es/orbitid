@@ -27,6 +27,7 @@ import {
   type PhoneNumberResource,
 } from "../_shared/w6";
 import { messageFor } from "./profile-parts";
+import { usePortalClass } from "../_shared/appearance";
 
 export function EmailAddressDialog({
   open,
@@ -43,6 +44,7 @@ export function EmailAddressDialog({
   onVerified: () => void;
   onError: (caught: unknown) => void;
 }) {
+  const portalClass = usePortalClass();
   const runtime = useAuthRuntime();
   const { t } = runtime;
   const [resource, setResource] = useState<EmailAddressResource | undefined>(email);
@@ -99,7 +101,7 @@ export function EmailAddressDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className={portalClass("max-w-md")}>
         <DialogHeader>
           <DialogTitle>
             {stage === "add" ? t("userProfile.emailAddresses.add") : t("userProfile.emailAddresses.verifyTitle")}
@@ -190,6 +192,7 @@ export function PhoneNumberDialog({
   onError: (caught: unknown) => void;
   reservedForSecondFactor?: boolean;
 }) {
+  const portalClass = usePortalClass();
   const runtime = useAuthRuntime();
   const { t } = runtime;
   const [resource, setResource] = useState<PhoneNumberResource | undefined>(phone);
@@ -247,7 +250,7 @@ export function PhoneNumberDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className={portalClass("max-w-md")}>
         <DialogHeader>
           <DialogTitle>
             {stage === "add" ? t("userProfile.phoneNumbers.add") : t("userProfile.phoneNumbers.verifyTitle")}
