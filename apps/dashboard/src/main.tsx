@@ -5,6 +5,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider, initTheme } from "@orbitid/ui";
 import App from "./App";
 import { DashboardToaster } from "./components/layout/dashboard-toaster";
+import { FaviconSync } from "./components/layout/favicon-sync";
 import { AuthProvider } from "./lib/auth";
 import { queryClient } from "./lib/query-client";
 import "./index.css";
@@ -19,6 +20,7 @@ initTheme();
 createRoot(container).render(
   <StrictMode>
     <ThemeProvider defaultTheme="system" storageKey="orbitid-theme">
+      <FaviconSync />
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <AuthProvider>
