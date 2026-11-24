@@ -39,6 +39,6 @@ export { OVERLAY_WIDTH } from "./lib/overlay";
 export { useIsMobile } from "./hooks/use-mobile";
 export { useMediaQuery } from "./hooks/use-media-query";
 export * from "./components/activity-board";
-export { OrbitMark } from "./components/orbit-mark";
+export { OrbitMark, AppIcon, ORBIT_GLYPH, APP_ICON_COLORS, type OrbitScheme } from "./components/orbit-mark";
 export { ThemeProvider, useTheme, initTheme, themeBootstrapScript, type ThemeChoice, type ResolvedTheme } from "./theme-provider";
 export { CONTROL_CENTER, CONTROL_LABEL, CONTROL_RECIPE } from "./lib/control";

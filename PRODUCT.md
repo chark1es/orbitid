@@ -40,7 +40,7 @@ The user's database, the user's server. There is no hosted service, no vendor ac
 - Terminology to keep: user, session, organization, membership, role, permission, publishable key, secret key, instance. Avoid naming other vendors' products in the interface or in marketing copy.
 
 ## Brand Commitments
-Name: OrbitID. Voice: plain and direct, engineer to engineer. Short sentences, concrete nouns, real numbers. No vendor comparisons in product copy. The icon is `assets/icon.svg`.
+Name: OrbitID. Voice: plain and direct, engineer to engineer. Short sentences, concrete nouns, real numbers. No vendor comparisons in product copy. The icon is `assets/icon.svg` in light mode and `assets/icon-dark.svg` in dark mode.
 
 ## Evidence on Hand
 No customers, testimonials or benchmarks exist, so none may be invented. Real data comes from the running instance: user counts, sessions, enabled methods, keys. Test and preview screens use data the instance generates.

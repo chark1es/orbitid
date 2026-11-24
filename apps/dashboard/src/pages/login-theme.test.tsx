@@ -8,6 +8,7 @@ import { ThemeProvider, initTheme, useTheme } from "@orbitid/ui";
 import type { Appearance, BaseTheme } from "@orbitid/react";
 import App from "../App";
 import { AuthProvider } from "../lib/auth";
+import { syncFavicon } from "../components/layout/favicon-sync";
 
 // The real `AccountSignIn` runs; only the SDK under it is stubbed. The stub reports which scheme the form was given.
 vi.mock("@orbitid/js", () => ({
@@ -131,6 +132,25 @@ describe("the pre-paint script in index.html", () => {
       expect(initTheme()).toBe(dark ? "dark" : "light");
     } finally {
       getItem?.mockRestore();
+    }
+  });
+
+  it("turns on the tab icon for the theme it applied, not the system's", () => {
+    const icons = new DOMParser().parseFromString(indexHtml, "text/html").querySelectorAll('link[rel="icon"][data-scheme]');
+    expect([...icons].map((icon) => icon.getAttribute("data-scheme"))).toEqual(["light", "dark"]);
+    document.head.append(...[...icons].map((icon) => document.importNode(icon, true)));
+    try {
+      osScheme("light");
+      localStorage.setItem("orbitid-theme", "dark");
+      prePaint();
+      const media = () => Object.fromEntries([...document.querySelectorAll<HTMLLinkElement>('link[rel="icon"]')].map((icon) => [icon.dataset.scheme, icon.media]));
+      expect(media()).toEqual({ light: "not all", dark: "all" });
+      // Once the app runs, FaviconSync keeps it on the theme as the operator switches.
+      syncFavicon("light");
+      expect(media()).toEqual({ light: "all", dark: "not all" });
+    } finally {
+      document.querySelectorAll('link[rel="icon"]').forEach((icon) => icon.remove());
+      localStorage.removeItem("orbitid-theme");
     }
   });
 });

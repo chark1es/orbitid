@@ -3,7 +3,7 @@ import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { preloadRoute } from "../../pages";
 import { PageFallback } from "../../lib/lazy-page";
 import {
-  OrbitMark,
+  AppIcon,
   Sidebar,
   SidebarContent,
   SidebarGroup,
@@ -78,9 +78,7 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild tooltip={instanceName}>
               <Link to="/" className="gap-2.5">
-                <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-rail-foreground/10 text-rail-foreground ring-1 ring-rail-foreground/10 ring-inset">
-                  <OrbitMark className="size-[18px]" accent="var(--sidebar-primary)" />
-                </span>
+                <AppIcon className="size-7" />
                 <span className="grid min-w-0 flex-1 text-left leading-tight">
                   <span className="truncate text-sm font-semibold text-rail-foreground">{instanceName}</span>
                   <span className="truncate font-data text-[0.6875rem] text-sidebar-foreground/60">

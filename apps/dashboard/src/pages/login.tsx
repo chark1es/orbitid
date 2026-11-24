@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
-import { Button, OrbitMark, Skeleton } from "@orbitid/ui";
+import { AppIcon, Button, Skeleton } from "@orbitid/ui";
 import { RefreshCw, Sun } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "../lib/auth";
@@ -157,9 +157,7 @@ export default function LoginPage() {
     <div className="min-h-svh bg-background">
       <header className="flex h-12 items-center justify-between border-b border-border px-6">
         <div className="flex items-center gap-2.5">
-          <span className="flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <OrbitMark className="size-[18px]" accent="var(--signal)" />
-          </span>
+          <AppIcon className="size-7" />
           <span className="text-sm font-semibold">OrbitID</span>
         </div>
         <ThemeToggle />

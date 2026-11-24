@@ -141,7 +141,7 @@ All stock shadcn/ui primitives from `packages/ui`, restyled through tokens only.
 - Skeletons for loading, never a centered spinner over content.
 - Icons: lucide, 1.5px stroke, 16px, one style everywhere.
 - Motion: overlays enter in 200ms on `ease-out-expo` (fade, 97% scale, 8px lift) and leave in 150ms on `ease-in-quick`; sheets slide in 300ms. Nothing loops, and `prefers-reduced-motion` turns it all into an instant swap.
-- The mark: an orbit ring broken where a satellite passes, around a solid core (`OrbitMark`, `assets/icon.svg`). Ring and satellite take `currentColor`; only the core may carry signal red.
+- The mark: a blob with two eyes, wrapped by a ring, on a rounded tile. Light mode uses the ink blob on a paper tile (`assets/icon.svg`), dark mode the paper blob on an ink tile (`assets/icon-dark.svg`). `AppIcon` draws the tile and follows the theme; `OrbitMark` draws the bare mascot in `currentColor`. The tab icon follows the dashboard's theme. The mark never carries signal red.
 
 ### Signature move: the activity board
 
