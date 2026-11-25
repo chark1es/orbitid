@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@orbitid/ui";
-import { useElementClasses, useResolvedTheme } from "./appearance";
+import { useComponentElements, useResolvedTheme } from "./appearance";
 import { useAuthRuntime } from "./w6";
 
 interface CaptchaWidgetApi {
@@ -57,7 +57,7 @@ export interface CaptchaWidgetProps {
  */
 export function CaptchaWidget({ siteKey, provider, onToken, theme: themeProp, className }: CaptchaWidgetProps) {
   const runtime = useAuthRuntime();
-  const { ep } = useElementClasses();
+  const { ep } = useComponentElements();
   // Match the card around it rather than the operating system ("auto"), which differs when the page picked a scheme.
   const resolvedTheme = useResolvedTheme();
   const theme = themeProp ?? resolvedTheme;

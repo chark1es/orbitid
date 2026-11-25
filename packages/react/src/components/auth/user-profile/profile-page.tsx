@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Badge, Button, Separator, cn } from "@orbitid/ui";
 import { MailIcon, PhoneIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { currentUser, findEmail, findPhone, reloadOrbit } from "../_shared/api";
-import { useElementClasses } from "../_shared/appearance";
+import { useComponentElements } from "../_shared/appearance";
 import { ConfirmDialog } from "../_shared/confirm-dialog";
 import { FormError } from "../_shared/form-error";
 import { ProviderIcon } from "../_shared/provider-icon";
@@ -27,7 +27,7 @@ import { ConnectAccountDialog, EnterpriseAccountsSection } from "./connect-accou
 export function ProfilePage() {
   const runtime = useAuthRuntime();
   const { orbit, t, environment } = runtime;
-  const { ep } = useElementClasses();
+  const { ep } = useComponentElements();
   const user = currentUser(orbit);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);

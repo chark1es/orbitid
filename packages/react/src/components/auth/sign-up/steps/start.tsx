@@ -12,7 +12,7 @@ import {
 } from "@orbitid/ui";
 import { Loader2Icon } from "lucide-react";
 import { useAuthRuntime } from "../../_shared/w6";
-import { useElementClasses } from "../../_shared/appearance";
+import { useComponentElements } from "../../_shared/appearance";
 import { CaptchaWidget } from "../../_shared/captcha";
 import { Field } from "../../_shared/field";
 import { FormError } from "../../_shared/form-error";
@@ -24,7 +24,7 @@ import { type SignUpStepProps, type StartFormValues, Divider, LegalConsent } fro
 export function SignUpStartStep({ flow, props }: SignUpStepProps) {
   const runtime = useAuthRuntime();
   const { t, environment, navigate } = runtime;
-  const { ep, appearance } = useElementClasses();
+  const { ep, appearance } = useComponentElements();
   const { attributes } = environment;
   const form = useForm<StartFormValues>({
     defaultValues: {

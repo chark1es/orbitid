@@ -3,7 +3,7 @@ import { useForm } from "react-hook-form";
 import { Button, Input, Label, Switch, cn } from "@orbitid/ui";
 import { Loader2Icon } from "lucide-react";
 import { useAuthRuntime } from "../../_shared/w6";
-import { useElementClasses } from "../../_shared/appearance";
+import { useComponentElements } from "../../_shared/appearance";
 import { FormError } from "../../_shared/form-error";
 import { Field } from "../../_shared/field";
 import { OtpField } from "../../_shared/otp-field";
@@ -13,7 +13,7 @@ import { LinkButton, factorIdentifier, type StepProps } from "./shared";
 
 export function ForgotPasswordStep({ flow }: StepProps) {
   const { t, environment } = useAuthRuntime();
-  const { ep } = useElementClasses();
+  const { ep } = useComponentElements();
   const form = useForm<{ email: string }>({
     defaultValues: { email: flow.identifierDraft },
     mode: "onSubmit",
@@ -73,7 +73,7 @@ export function ForgotPasswordStep({ flow }: StepProps) {
 
 export function ResetPasswordCodeStep({ flow }: StepProps) {
   const { t } = useAuthRuntime();
-  const { ep } = useElementClasses();
+  const { ep } = useComponentElements();
   const [code, setCode] = useState("");
   const identifier = factorIdentifier(flow.signIn) || flow.identifier;
 
@@ -114,7 +114,7 @@ export function ResetPasswordCodeStep({ flow }: StepProps) {
 export function ResetPasswordStep({ flow }: StepProps) {
   const runtime = useAuthRuntime();
   const { t, environment } = runtime;
-  const { ep } = useElementClasses();
+  const { ep } = useComponentElements();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [signOutOthers, setSignOutOthers] = useState(true);

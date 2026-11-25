@@ -3,7 +3,7 @@ import { Button, Separator, cn } from "@orbitid/ui";
 import { FingerprintIcon } from "lucide-react";
 import { factorsOf } from "../../_shared/api";
 import { useAuthRuntime, type TranslateFn } from "../../_shared/w6";
-import { useElementClasses } from "../../_shared/appearance";
+import { useComponentElements } from "../../_shared/appearance";
 import type { SignInProps, SignInResource } from "../../_shared/types";
 import type { SignInFlow } from "../flow";
 
@@ -14,7 +14,7 @@ export interface StepProps {
 
 export function Divider() {
   const { t } = useAuthRuntime();
-  const { ep } = useElementClasses();
+  const { ep } = useComponentElements();
   return (
     <div {...ep("dividerRow", "flex items-center gap-3")} role="separator">
       <Separator {...ep("dividerLine", "flex-1")} />
@@ -33,7 +33,7 @@ export function FooterSwitch({
   actionLabel: string;
   onClick: () => void;
 }) {
-  const { ep } = useElementClasses();
+  const { ep } = useComponentElements();
   return (
     <p {...ep("footerAction", "flex flex-wrap items-center justify-center gap-x-1 text-sm")}>
       <span {...ep("footerActionText", "text-muted-foreground")}>{text}</span>
@@ -51,7 +51,7 @@ export function FooterSwitch({
 }
 
 export function LinkButton({ label, onClick }: { label: string; onClick: () => void }) {
-  const { ep } = useElementClasses();
+  const { ep } = useComponentElements();
   return (
     <Button type="button" variant="link" size="sm" onClick={onClick} {...ep("formButtonSecondary", "h-auto min-h-6 px-0 py-1 text-sm font-medium")}>
       {label}
@@ -61,7 +61,7 @@ export function LinkButton({ label, onClick }: { label: string; onClick: () => v
 
 export function IdentifierPreview({ value, onEdit }: { value: string; onEdit: () => void }) {
   const { t } = useAuthRuntime();
-  const { ep } = useElementClasses();
+  const { ep } = useComponentElements();
   return (
     <div
       {...ep("identityPreview", "flex items-center justify-between gap-2 rounded-full border bg-muted/50 py-1 ps-3.5 pe-1 text-sm")}

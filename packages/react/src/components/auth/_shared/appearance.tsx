@@ -58,7 +58,7 @@ export interface ElementClasses {
 }
 
 /** Element helpers for the component in scope. */
-export function useElementClasses(): ElementClasses {
+export function useComponentElements(): ElementClasses {
   const appearance = useAppearance();
   const runtime = useAuthRuntime();
   const ep = useElementProps();
@@ -85,10 +85,9 @@ export interface ThemeScope {
   theme: ResolvedTheme;
   /**
    * Class for the component's outermost element (and for anything it portals, such as a menu or a dialog), or
-   * `undefined` when the inherited tokens already match. `light` is only added inside a dark page: on a light page it
-   * would reset tokens the host may have customised on `:root`. Likewise, when the page declares no scheme and the
-   * operating system is dark, a component forced light gets no `light` class, so host tokens defined only under a
-   * `prefers-color-scheme: dark` media query are not reset.
+   * `undefined` when the inherited tokens already match. `light` is only added where the inherited tokens would be
+   * dark (a dark page, or a page that declares nothing on a dark OS): on a light page it would reset tokens the host
+   * may have customised on `:root`. The class sits on the component root, never on the host's wrapper.
    */
   className: "dark" | "light" | undefined;
 }
@@ -124,7 +123,10 @@ export function useThemeScope(fallbackTheme?: string): ThemeScope {
   const theme: ResolvedTheme =
     forcedTheme(appearance.themes) ??
     (configured === "dark" || configured === "light" ? configured : (declared ?? system));
-  const className = theme === "dark" ? "dark" : declared === "dark" ? "light" : undefined;
+  // `light` is added only where the inherited tokens would be dark: inside a dark page, or on a page that declares
+  // nothing while the OS is dark (the component was forced light). On a light page it would reset the host's own
+  // `:root` tokens, so it stays off there.
+  const className = theme === "dark" ? "dark" : (declared ?? system) === "dark" ? "light" : undefined;
   return useMemo(() => ({ theme, className }), [theme, className]);
 }
 

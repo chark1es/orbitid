@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Button, cn } from "@orbitid/ui";
 import { Loader2Icon, MailIcon } from "lucide-react";
 import { useAuthRuntime } from "../../_shared/w6";
-import { useElementClasses } from "../../_shared/appearance";
+import { useComponentElements } from "../../_shared/appearance";
 import { FormError } from "../../_shared/form-error";
 import { OtpField } from "../../_shared/otp-field";
 import { ResendButton } from "../../_shared/resend-button";
@@ -10,7 +10,7 @@ import { type SignUpStepProps } from "./shared";
 
 export function VerifyCodeStep({ flow, strategy }: SignUpStepProps & { strategy: "email_code" | "phone_code" }) {
   const { t } = useAuthRuntime();
-  const { ep } = useElementClasses();
+  const { ep } = useComponentElements();
   const [code, setCode] = useState("");
   const identifier =
     strategy === "phone_code"

@@ -1,6 +1,6 @@
 import { useId, useMemo, useState } from "react";
 import { Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, cn } from "@orbitid/ui";
-import { useElementClasses, usePortalClass } from "./appearance";
+import { useComponentElements, usePortalClass } from "./appearance";
 import { useAuthRuntime } from "./w6";
 
 export interface CountryOption {
@@ -60,7 +60,7 @@ export function PhoneInput({
 }: PhoneInputProps) {
   const portalClass = usePortalClass();
   const { t } = useAuthRuntime();
-  const { ep } = useElementClasses();
+  const { ep } = useComponentElements();
   const generatedId = useId();
   const inputId = id ?? generatedId;
   const [countryCode, setCountryCode] = useState(() => countryForValue(value).code);

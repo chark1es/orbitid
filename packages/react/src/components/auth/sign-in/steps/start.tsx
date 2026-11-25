@@ -3,7 +3,7 @@ import { Button, Input, cn } from "@orbitid/ui";
 import { FingerprintIcon, Loader2Icon } from "lucide-react";
 import { signUpUrlFor } from "../flow";
 import { useAuthRuntime } from "../../_shared/w6";
-import { useElementClasses } from "../../_shared/appearance";
+import { useComponentElements } from "../../_shared/appearance";
 import { FormError } from "../../_shared/form-error";
 import { Field } from "../../_shared/field";
 import { SocialButtons } from "../../_shared/social-buttons";
@@ -21,7 +21,7 @@ import {
 export function StartStep({ flow, props }: StepProps) {
   const runtime = useAuthRuntime();
   const { environment, t, navigate, orbit } = runtime;
-  const { ep, appearance } = useElementClasses();
+  const { ep, appearance } = useComponentElements();
   const form = useForm<{ identifier: string }>({
     defaultValues: { identifier: flow.identifierDraft },
     mode: "onSubmit",

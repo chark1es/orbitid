@@ -5,14 +5,14 @@ import { CheckCircle2Icon, Loader2Icon } from "lucide-react";
 import { AuthenticateWithRedirectCallback } from "../../../../control";
 import { signUpUrlFor } from "../flow";
 import { useAuthRuntime } from "../../_shared/w6";
-import { useElementClasses } from "../../_shared/appearance";
+import { useComponentElements } from "../../_shared/appearance";
 import { FormError } from "../../_shared/form-error";
 import { Field } from "../../_shared/field";
 import { LinkButton, type StepProps } from "./shared";
 
 export function EnterpriseSsoStep({ flow }: StepProps) {
   const { t } = useAuthRuntime();
-  const { ep } = useElementClasses();
+  const { ep } = useComponentElements();
   const form = useForm<{ email: string }>({
     defaultValues: { email: flow.identifierDraft },
     mode: "onSubmit",

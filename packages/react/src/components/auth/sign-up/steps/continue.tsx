@@ -3,7 +3,7 @@ import { Button, Input, cn } from "@orbitid/ui";
 import { ArrowLeftIcon, CheckCircle2Icon, Loader2Icon } from "lucide-react";
 import { useAuthRuntime } from "../../_shared/w6";
 import type { TranslationKey } from "../../../../localization";
-import { useElementClasses } from "../../_shared/appearance";
+import { useComponentElements } from "../../_shared/appearance";
 import { Field } from "../../_shared/field";
 import { FormError } from "../../_shared/form-error";
 import { passwordMeetsPolicy } from "../../_shared/password-field";
@@ -22,7 +22,7 @@ const FIELD_LABELS: Record<string, TranslationKey> = {
 export function ContinueStep({ flow }: SignUpStepProps) {
   const runtime = useAuthRuntime();
   const { t, environment } = runtime;
-  const { ep } = useElementClasses();
+  const { ep } = useComponentElements();
   const missing = flow.signUp?.missing_fields ?? [];
   const fields = missing.filter((field) => field !== "legal_accepted" && FIELD_LABELS[field]);
 

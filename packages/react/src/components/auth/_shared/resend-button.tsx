@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Button, cn } from "@orbitid/ui";
-import { useElementClasses } from "./appearance";
+import { useComponentElements } from "./appearance";
 import { useAuthRuntime } from "./w6";
 
 export interface ResendButtonProps {
@@ -23,7 +23,7 @@ export function ResendButton({
   onError,
 }: ResendButtonProps) {
   const { t } = useAuthRuntime();
-  const { ep } = useElementClasses();
+  const { ep } = useComponentElements();
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [busy, setBusy] = useState(false);
   const countingDown = secondsLeft > 0;

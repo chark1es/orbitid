@@ -21,6 +21,7 @@ import {
   SwitchRow,
 } from "./_config/ui";
 import { useSettingsEditor } from "./_config/use-settings";
+import { contrastForeground, LIGHT_FOREGROUND } from "@orbitid/react";
 import { BrandingPreview, type PreviewScheme } from "./_appearance/preview";
 import { AppearancePlayground } from "./_appearance/playground";
 import { DEFAULT_DRAFT, type AppearanceDraft } from "./_appearance/draft";
@@ -51,15 +52,6 @@ function toPickerValue(hex: string): string {
   return `#${digits.slice(0, 6)}`;
 }
 
-/** Black or white, whichever reads better on the chosen brand color (hex, 3 or 6 digits). */
-function readableInk(hex: string): string {
-  const digits = hex.replace("#", "");
-  const full = digits.length === 3 ? digits.split("").map((d) => d + d).join("") : digits;
-  const [r = 0, g = 0, b = 0] = [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16) / 255);
-  const lin = (c: number) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
-  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b) > 0.18 ? "#111111" : "#ffffff";
-}
-
 export default function Page() {
   const editor = useSettingsEditor();
   const settings = editor.settings;
@@ -87,11 +79,10 @@ export default function Page() {
   if (app.allowedRedirectOrigins.some((origin) => !isHttpOrigin(origin))) errors.push("Every redirect origin must be an http(s) origin without a path.");
 
   const previewColor = COLOR_PATTERN.test(branding.primaryColor) ? branding.primaryColor : "#2b2522";
-  const previewInk = readableInk(previewColor);
   const configuredScheme: PreviewScheme = branding.theme === "system" ? systemScheme : branding.theme;
   const previewScheme = schemeOverride ?? configuredScheme;
   // A dark brand color would vanish on the dark surface, so the hosted components fall back to the theme's primary there.
-  const brandVanishes = previewScheme === "dark" && previewInk === "#ffffff";
+  const brandVanishes = previewScheme === "dark" && contrastForeground(previewColor) === LIGHT_FOREGROUND;
 
   return (
     <PageLayout>

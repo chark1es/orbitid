@@ -19,18 +19,38 @@ import {
 const brand: BaseTheme = { name: "brand", classNames: ["brand"], variables: { colorPrimary: "#111111", borderRadius: "2px" } };
 
 describe("appearance precedence", () => {
-  it("applies each layer's base themes, then that layer's own values, lowest layer first", () => {
+  it("takes the themes from the last layer that sets baseTheme, then applies every layer's own values", () => {
     const resolved = resolveAppearanceLayers([
       { baseTheme: brand, variables: { borderRadius: "4px", fontFamily: "Provider" } },
       { baseTheme: soft, variables: { fontFamily: "Component" } },
     ]);
-    // Component base theme beats the provider's explicit value; component explicit beats everything.
-    expect(resolved.variables.borderRadius).toBe(soft.variables!.borderRadius);
-    expect(resolved.variables.fontFamily).toBe("Component");
-    // Untouched provider values survive.
-    expect(resolved.variables.colorPrimary).toBe("#111111");
-    expect(resolved.themes.map((theme) => theme.name)).toEqual(["brand", "soft"]);
+    expect(resolved.themes.map((theme) => theme.name)).toEqual(["soft"]);
     expect(resolved.theme.name).toBe("soft");
+    // The provider's own values still sit over the component's theme; the component's own values win last.
+    expect(resolved.variables.borderRadius).toBe("4px");
+    expect(resolved.variables.fontFamily).toBe("Component");
+    // The replaced theme contributes nothing.
+    expect(resolved.variables.colorPrimary).toBeUndefined();
+    expect(resolved.themeClassNames).not.toContain("brand");
+  });
+
+  it("keeps the scheme and the theme's variables together when layers set different base themes", () => {
+    const lightOverDark = resolveAppearanceLayers([{ baseTheme: dark }, { baseTheme: light }]);
+    expect(lightOverDark.themes).toEqual([light]);
+    // No dark preset values written inline over a light card.
+    expect(lightOverDark.cssVariables["--card"]).toBeUndefined();
+    expect(lightOverDark.cssVariables["--primary"]).toBeUndefined();
+    expect(lightOverDark.cssVariables["--foreground"]).toBeUndefined();
+
+    const darkOverLight = resolveAppearanceLayers([{ baseTheme: light }, { baseTheme: dark }]);
+    expect(darkOverLight.themes).toEqual([dark]);
+    expect(darkOverLight.cssVariables["--card"]).toBe(dark.variables!.colorBackground);
+    expect(darkOverLight.cssVariables["--primary-foreground"]).toBe("oklch(0.145 0 0)");
+
+    // A component without baseTheme keeps the provider's.
+    const inherited = resolveAppearanceLayers([{ baseTheme: dark }, { variables: { colorPrimary: "#ff0000" } }]);
+    expect(inherited.themes).toEqual([dark]);
+    expect(inherited.cssVariables["--primary"]).toBe("#ff0000");
   });
 
   it("merges several base themes in order inside one layer", () => {
@@ -87,8 +107,9 @@ describe("appearance precedence", () => {
     expect(extendAppearance(parent, undefined)).toBe(parent);
   });
 
-  it("keeps scheme classes out of the wrapper and exports every preset", () => {
+  it("keeps scheme classes out of the class names and exports every preset", () => {
     const resolved = resolveAppearance({ baseTheme: [light, dark, contrast] });
+    expect(resolved.themeClassNames).toEqual(["orbitid-root", "orbitid-theme-contrast"]);
     expect(resolved.rootClassName.split(" ")).not.toContain("dark");
     expect(resolved.rootClassName.split(" ")).not.toContain("light");
     expect(Object.keys(themes)).toEqual(["defaultTheme", "light", "dark", "soft", "contrast", "flat"]);

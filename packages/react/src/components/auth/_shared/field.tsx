@@ -1,7 +1,7 @@
 import { useId, type ReactNode } from "react";
 import { Controller, type Control, type ControllerRenderProps, type FieldPath, type FieldValues } from "react-hook-form";
 import { Label, cn } from "@orbitid/ui";
-import { useElementClasses } from "./appearance";
+import { useComponentElements } from "./appearance";
 
 export interface FieldProps<TFieldValues extends FieldValues> {
   control: Control<TFieldValues>;
@@ -29,7 +29,7 @@ export function Field<TFieldValues extends FieldValues>({
   className,
   children,
 }: FieldProps<TFieldValues>) {
-  const { ep } = useElementClasses();
+  const { ep } = useComponentElements();
   const generatedId = useId();
   const inputId = `${generatedId}-${String(name)}`;
   const descriptionId = `${inputId}-description`;

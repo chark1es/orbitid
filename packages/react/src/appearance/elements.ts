@@ -73,7 +73,7 @@ export const PRIMITIVE_ELEMENTS = {
 } as const;
 
 export const COMPONENT_ELEMENTS = {
-  rootBox: "Outermost element of each component (and the provider wrapper).",
+  rootBox: "Outermost element of each component.",
   cardBox: "The main card of sign-in, sign-up, waitlist, consent and profile.",
   header: "Card header: logo, title and subtitle.",
   headerTitle: "Card or page title.",

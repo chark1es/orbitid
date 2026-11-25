@@ -121,9 +121,9 @@ import { OrbitIDProvider, SignIn, dark, soft } from "@orbitid/react";
 </OrbitIDProvider>
 ```
 
-* Layers, lowest first: the stylesheet, instance branding, the provider's `appearance` (its `baseTheme` entries,
-  then its own values), then each component's `appearance` the same way. Variables and layout replace key by key;
-  element classes and styles accumulate, later layers winning conflicts.
+* Layers, lowest first: the stylesheet, instance branding, the base themes of the last layer that sets
+  `baseTheme` (a component's replaces the provider's), then the provider's own values, then each component's.
+  Variables and layout replace key by key; element classes and styles accumulate, later layers winning conflicts.
 * Themes: `defaultTheme`, `light`, `dark`, `soft`, `contrast`, `flat`. Arrays merge in order.
 * Variables (`colorPrimary`, `colorBackground`, `colorForeground`, `colorMuted`, `colorDanger`, `colorInput`,
   `borderRadius`, `fontFamily`, `fontSize`, `spacingUnit`, `shadowStrength`, …) set the shadcn custom properties on
@@ -140,8 +140,8 @@ import { OrbitIDProvider, SignIn, dark, soft } from "@orbitid/react";
   the page marks none, `prefers-color-scheme`. They follow the page live when it switches, and menus and dialogs
   they portal to `<body>` carry the same scheme and variables. To tie everything to your app's own toggle, pass
   `appearance={{ baseTheme: isDark ? dark : light }}`.
-* The provider renders `<div className="orbitid-root …">` carrying the CSS variables; `rootBox` classes are applied
-  to that wrapper and to each component's root.
+* The provider renders a plain `<div className="orbitid-root">` around your app. Variables, theme class names and
+  `rootBox` go on each component's root (and its pop-ups), never on that wrapper, so they cannot restyle your page.
 * For your own parts inside a component, `useElementProps()` returns `ep(key, ...classes)`, which applies the
   appearance for that key.
 

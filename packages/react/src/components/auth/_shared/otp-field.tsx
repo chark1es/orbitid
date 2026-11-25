@@ -1,6 +1,6 @@
 import { useId } from "react";
 import { InputOTP, InputOTPGroup, InputOTPSeparator, InputOTPSlot, Label } from "@orbitid/ui";
-import { useElementClasses } from "./appearance";
+import { useComponentElements } from "./appearance";
 import { useAuthRuntime } from "./w6";
 
 export interface OtpFieldProps {
@@ -35,7 +35,7 @@ export function OtpField({
   grouped = true,
 }: OtpFieldProps) {
   const { t } = useAuthRuntime();
-  const { ep } = useElementClasses();
+  const { ep } = useComponentElements();
   const generatedId = useId();
   const inputId = id ?? generatedId;
   const errorId = `${inputId}-error`;

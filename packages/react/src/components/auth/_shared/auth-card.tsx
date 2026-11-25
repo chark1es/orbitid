@@ -11,7 +11,7 @@ import {
   CardTitle,
   OrbitMark,
 } from "@orbitid/ui";
-import { useAuthAppearance, useElementClasses } from "./appearance";
+import { useAuthAppearance, useComponentElements } from "./appearance";
 import { ComponentRoot } from "./component-root";
 import { useAuthRuntime } from "./w6";
 import { FooterPages, SecuredByOrbitID } from "./form-error";
@@ -48,7 +48,7 @@ export function AuthCard({
   const runtime = useAuthRuntime();
   const { environment, t, navigate } = runtime;
   const appearance = useAuthAppearance();
-  const { ep } = useElementClasses();
+  const { ep } = useComponentElements();
 
   const layout = appearance.layout ?? {};
   const logoPlacement = layout.logoPlacement ?? "inside";

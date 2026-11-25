@@ -37,13 +37,18 @@ Lowest first. A later step wins any conflict, and nothing earlier is thrown away
 
 1. `@orbitid/ui/styles.css`: the default tokens and each component's own classes.
 2. Instance branding from the dashboard (**Settings → Appearance**): the primary color and the default theme.
-3. The provider's `appearance`: its `baseTheme` entries in order, then its own `variables`, `layout`, `elements`.
-4. Each component's `appearance`, the same way.
+3. The base themes of the **last** layer that sets `baseTheme`. A component's `baseTheme` replaces the
+   provider's rather than stacking on it, so the scheme and the theme's colors always come from the same themes.
+   A component without `baseTheme` keeps the provider's. `baseTheme: []` resets to the default theme.
+4. The provider's own `variables`, `layout` and `elements`.
+5. Each component's own `variables`, `layout` and `elements`.
 
 Rules inside that order:
 
 - **Variables and layout** replace earlier values key by key. `colorText`, `colorTextSecondary` and
-  `colorInputText` are older names; the current name (`colorForeground`, …) wins when both are set.
+  `colorInputText` are older names. Each layer's older names are rewritten to the current names
+  (`colorForeground`, `colorMutedForeground`, `colorInputForeground`) before layers merge, so an older name in a
+  later layer still wins; inside one layer the current name wins when both are set.
 - **Elements accumulate.** Every layer's classes are kept, earliest first, and `style` objects merge in the same
   order. tailwind-merge keeps the last conflicting utility, so `p-6` from the component beats `p-2` from the
   provider while the provider's `shadow-none` stays.
@@ -52,7 +57,12 @@ Rules inside that order:
   sign-in submit its own look with `formButtonPrimary`.
 - **The scheme** (light or dark) comes from the last `light`/`dark` base theme across all layers, then the
   instance's branding theme, then the page (`<html class="dark">`, `data-theme`, `color-scheme`), then the OS.
-- `unstyled` takes the last value set across layers.
+- `unstyled` takes the last value set across layers. An element's own `unstyled` (true or false) beats it.
+- **Bad input does not crash.** `null` or `undefined` layers, themes and parts are skipped. A string `baseTheme`
+  (`"dark"` instead of the `dark` object) is ignored with a development warning.
+
+Tip: pass a stable `appearance` object (a module constant or `useMemo`). A new object on every render re-resolves
+the appearance each time.
 
 The same input always produces the same output; the tests in `packages/react/src/__tests__/appearance-layers.test.tsx`
 pin each rule.
@@ -88,9 +98,15 @@ export const acme: BaseTheme = {
 
 ## Variables
 
-Each variable sets custom properties on the component's root element only, so it never leaks into your page.
-Menus and dialogs a component opens get the same values through a scoped class. Colors take any CSS color;
-the on-color for `colorPrimary` and `colorDanger` is computed when the value is a hex color.
+Each variable sets custom properties on each component's root element, never on the provider's wrapper around your
+app, so even provider-level variables such as `spacingUnit` or `fontSize` never rescale your own page. Menus and
+dialogs a component opens get the same values through a scoped class. Colors take any CSS color. The on-color for
+`colorPrimary` and `colorDanger` is computed for hex, `rgb()`, `hsl()` and `oklch()` values; for anything else
+(named colors, `var()`, `color-mix()`) the theme's default stays and a development warning says so (set
+`colorPrimaryForeground` to choose it yourself).
+
+`fontSize` only scales text when given in `px` or `rem`; other units are ignored with a development warning. Every
+text size inside the prebuilt components multiplies the resulting `--font-scale`.
 
 ```tsx
 appearance={{
@@ -115,10 +131,8 @@ appearance={{
 | `colorPrimary` | `--primary`, `--orbitid-color-primary`, `--primary-foreground` (computed) | Primary buttons, links, selected states. The text on it is picked for contrast unless `colorPrimaryForeground` is set. |
 | `colorPrimaryForeground` | `--primary-foreground` | Text and icons on `colorPrimary`. |
 | `colorBackground` | `--card`, `--popover`, `--orbitid-color-background` | The component's card and pop-over surface. |
-| `colorText` | `--foreground`, `--card-foreground`, `--popover-foreground`, `--orbitid-color-text` | Older name for `colorForeground`. |
 | `colorForeground` | `--foreground`, `--card-foreground`, `--popover-foreground`, `--orbitid-color-text` | Main text. |
 | `colorMuted` | `--muted`, `--secondary`, `--orbitid-color-muted` | Quiet surfaces: the footer band, chips, hover rows. |
-| `colorTextSecondary` | `--muted-foreground`, `--orbitid-color-text-secondary` | Older name for `colorMutedForeground`. |
 | `colorMutedForeground` | `--muted-foreground`, `--orbitid-color-text-secondary` | Secondary text: subtitles, hints, column headers. |
 | `colorNeutral` | `--accent`, `--orbitid-color-neutral` | Hover and selected backgrounds of menus and ghost buttons. |
 | `colorDanger` | `--destructive`, `--orbitid-color-danger`, `--destructive-foreground` (computed) | Destructive buttons and errors. Its on-color is computed. |
@@ -128,7 +142,6 @@ appearance={{
 | `colorBorder` | `--border`, `--orbitid-color-border` | Hairline borders of cards, tables and dividers. |
 | `colorInput` | `--input`, `--orbitid-color-input` | Input, select and checkbox borders. |
 | `colorInputBackground` | `--input-background`, `--orbitid-color-input-background` | Input background (transparent by default). |
-| `colorInputText` | `--input-foreground`, `--orbitid-color-input-text` | Older name for `colorInputForeground`. |
 | `colorInputForeground` | `--input-foreground`, `--orbitid-color-input-text` | Typed text in inputs. |
 | `colorRing` | `--ring`, `--orbitid-color-ring` | Keyboard focus outline. |
 | `colorShadow` | `--shadow-color`, `--orbitid-color-shadow` | Ink of every shadow. |
@@ -141,11 +154,14 @@ appearance={{
 | `fontWeightBold` | `--orbitid-font-weight-bold` | Exposed for your own CSS. |
 | `spacingUnit` | `--spacing`, `--orbitid-spacing-unit` | The step every padding, gap and margin multiplies (Tailwind's `--spacing`, `0.25rem` default). |
 
-Any other key becomes `--orbitid-<kebab-case-key>` for your own CSS: `brandAccent` → `--orbitid-brand-accent`.
+Older names still work: `colorText` (now `colorForeground`), `colorTextSecondary` (`colorMutedForeground`) and
+`colorInputText` (`colorInputForeground`). Any other key becomes `--orbitid-<kebab-case-key>` for your own CSS:
+`brandAccent` → `--orbitid-brand-accent`.
 
 ## Elements
 
-Every key accepts a class string, an object, a function returning either, or a list of those:
+Every key accepts a class string, an object, a function (called with no arguments) returning either, or a list of
+those:
 
 ```tsx
 appearance={{
@@ -161,7 +177,9 @@ appearance={{
 
 - `className` is merged after OrbitID's classes with tailwind-merge, so your conflicting utilities win.
 - `style` is applied inline after OrbitID's style.
-- `unstyled: true` drops OrbitID's classes from that element only.
+- `unstyled: true` drops OrbitID's classes from that element only; `unstyled: false` restores them on that element
+  when `appearance.unstyled` is on. When several keys land on one element, the most specific key's setting wins.
+- A function that throws is ignored (with a development warning), so one bad override cannot break the form.
 - Every element also gets a stable class per key, `orbitid-<key>` (for example `orbitid-button
   orbitid-buttonPrimary orbitid-formButtonPrimary` on the sign-in submit), so plain CSS can target it. Parts named
   with a component key also carry `data-orbitid-element="<key>"`.
@@ -235,7 +253,7 @@ keys.
 
 | Key | Applies to |
 | --- | --- |
-| `rootBox` | Outermost element of each component (and the provider wrapper). |
+| `rootBox` | Outermost element of each component. |
 | `cardBox` | The main card of sign-in, sign-up, waitlist, consent and profile. |
 | `header` | Card header: logo, title and subtitle. |
 | `headerTitle` | Card or page title. |
@@ -317,6 +335,7 @@ keys.
 | `privacyPageUrl` / `termsPageUrl` | instance URLs | Override the instance's privacy and terms links. |
 | `showBranding` | instance setting | `false` hides "Secured by OrbitID"; `true` shows it. |
 | `showDevelopmentModeWarning` | `true` | `false` hides the development-mode banner. |
+| `unsafe_disableDevelopmentModeWarnings` | `false` | Older name: `true` is the same as `showDevelopmentModeWarning: false`. |
 | `animations` | `true` | `false` turns off transitions and entrance animations inside the components (spinners keep turning). |
 
 ## Restyling everything with Tailwind, shadcn or plain CSS
@@ -341,10 +360,17 @@ If your own CSS lives in a layer, declare your layer after Tailwind's: `@layer t
 Define them in your stylesheet (on `:root`, `.dark`, or any wrapper) and the components follow; `variables`
 are only a shortcut that scopes them to the component.
 
-**`unstyled`.** `appearance={{ unstyled: true }}` removes every OrbitID class from every element, layout classes
-included, keeping only your `elements` classes, the `orbitid-<key>` hooks and the markup. Use it when you want to
-own the whole look; you then style each element through `elements` or the stable classes. Element-level
-`unstyled: true` does the same for one part.
+**`unstyled`.** `appearance={{ unstyled: true }}` removes OrbitID's classes from every element that has a key:
+the primitive's own recipe and the component's layout classes on it. What stays:
+
+- your `elements` classes and `style`, and the `orbitid-<key>` hooks;
+- on each component root, the scheme class (`dark`/`light`), `orbitid-root`, `orbitid-component` and your theme's
+  `classNames`;
+- the CSS variables (branding and `variables`), the markup and accessibility attributes;
+- classes on small inner parts without a key (icons, a few wrappers).
+
+Use it when you want to own the whole look; you then style each element through `elements` or the stable
+classes. Element-level `unstyled: true` does the same for one part, and `unstyled: false` exempts one part.
 
 ## Building your own components on the same system
 
@@ -361,6 +387,25 @@ function PlanBadge() {
 ```
 
 `ep(key, ...classes)` returns `{ className, style, "data-orbitid-element" }` with the appearance applied.
+
+## Limitations
+
+- Theme `classNames` (for example `orbitid-theme-soft`) land on each component root but not on the menus and
+  dialogs a component opens, which render under `<body>`. Those pop-ups do get the scheme, the variables and their
+  element keys; target them through the element keys (`modalContent`, `menuList`, …) rather than a theme class.
+
+## Changes from the first appearance release
+
+- The provider's wrapper around your app no longer carries the variables, theme class names or `rootBox`; each
+  component root does. `rootBox` now styles each component's root.
+- A component's `baseTheme` replaces the provider's instead of stacking on it.
+- `variables.colorBackground` sets the component's card and pop-over surface (`--card`, `--popover`), not the page
+  `--background`.
+- `elements.form` now styles the `<form>` element itself; the card body is `main`.
+- Renamed or removed keys: `footerPageLink` is `footerPagesLink`; `formButtonReset` and the `paginationButton*`
+  keys were never attached to anything and are gone; `badge`, `menuItem`, `table*` and `avatar*` now apply to every
+  primitive of that kind.
+- `layout.applicationName` and `layout.shimmer` were never read and are gone.
 
 ## Instance branding
 

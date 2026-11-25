@@ -3,7 +3,7 @@ import { useForm } from "react-hook-form";
 import { Button, Input, cn } from "@orbitid/ui";
 import { useAuthRuntime, isRecord } from "./_shared/w6";
 import { apiRequest, errorMessage } from "./_shared/api";
-import { AuthAppearanceScope, useElementClasses } from "./_shared/appearance";
+import { AuthAppearanceScope, useComponentElements } from "./_shared/appearance";
 import { AuthCard } from "./_shared/auth-card";
 import { Field } from "./_shared/field";
 import { FormError } from "./_shared/form-error";
@@ -27,7 +27,7 @@ async function joinWaitlist(orbit: ReturnType<typeof useAuthRuntime>["orbit"], e
 function WaitlistInner({ afterJoinWaitlistUrl, signInUrl }: WaitlistProps) {
   const runtime = useAuthRuntime();
   const { environment, t, navigate, orbit } = runtime;
-  const { ep } = useElementClasses();
+  const { ep } = useComponentElements();
   const [joinedEmail, setJoinedEmail] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);

@@ -3,7 +3,8 @@ import { cn } from "@orbitid/ui/lib/utils";
 import type { ElementSlotResolver, ElementSlotStyle } from "@orbitid/ui";
 import { defaultTheme } from "./themes";
 import { elementClassName } from "./elements";
-import { cssVariablesFrom } from "./variables";
+import { cssVariablesFrom, normalizeVariables } from "./variables";
+import { devWarn } from "./warn";
 import type {
   Appearance,
   AppearanceElement,
@@ -15,37 +16,49 @@ import type {
   ResolvedAppearance,
 } from "./types";
 
-export { cssVariablesFrom, contrastForeground, LIGHT_FOREGROUND, DARK_FOREGROUND, VARIABLE_MAP } from "./variables";
+export {
+  cssVariablesFrom,
+  contrastForeground,
+  normalizeVariables,
+  LIGHT_FOREGROUND,
+  DARK_FOREGROUND,
+  VARIABLE_ALIASES,
+  VARIABLE_MAP,
+} from "./variables";
 
 interface FlatElement {
   classNames: string[];
   style?: CSSProperties;
-  unstyled: boolean;
+  /** `undefined` when no override says either way; otherwise the last explicit value. */
+  unstyled?: boolean;
 }
+
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** Flatten any override shape (string, object, function, list) into classes, style and the unstyled flag. */
 export function flattenElement(override: AppearanceElement | undefined): FlatElement {
-  const flat: FlatElement = { classNames: [], unstyled: false };
-  const visit = (value: AppearanceElement | string | undefined | null) => {
+  const flat: FlatElement = { classNames: [] };
+  const visit = (value: unknown) => {
     if (!value) return;
     if (typeof value === "string") {
       flat.classNames.push(value);
     } else if (typeof value === "function") {
-      let result: ReturnType<typeof value> | undefined;
+      let result: unknown;
       try {
-        result = value();
-      } catch {
+        result = (value as () => unknown)();
+      } catch (error) {
         // A throwing override must not take the whole form down.
+        devWarn(`An appearance.elements function threw and was ignored: ${error instanceof Error ? error.message : String(error)}`);
         result = undefined;
       }
-      visit(result as AppearanceElement | undefined);
+      visit(result);
     } else if (Array.isArray(value)) {
-      for (const entry of value as readonly AppearanceElement[]) visit(entry);
-    } else {
-      const object = value as Exclude<AppearanceElement, string | readonly AppearanceElement[] | ((...args: unknown[]) => unknown)>;
-      if (object.className) flat.classNames.push(object.className);
-      if (object.style) flat.style = { ...flat.style, ...object.style };
-      if (object.unstyled) flat.unstyled = true;
+      for (const entry of value) visit(entry);
+    } else if (isObject(value)) {
+      if (typeof value.className === "string" && value.className) flat.classNames.push(value.className);
+      if (isObject(value.style)) flat.style = { ...flat.style, ...(value.style as CSSProperties) };
+      if (typeof value.unstyled === "boolean") flat.unstyled = value.unstyled;
     }
   };
   visit(override);
@@ -55,7 +68,7 @@ export function flattenElement(override: AppearanceElement | undefined): FlatEle
 /** Component classes followed by the override's classes (tailwind-merge keeps the last conflict, so yours win). */
 export function resolveElementClass(override: AppearanceElement | undefined, ...classes: ClassValue[]): string {
   const flat = flattenElement(override);
-  return cn(...(flat.unstyled ? [] : classes), ...flat.classNames);
+  return cn(...(flat.unstyled === true ? [] : classes), ...flat.classNames);
 }
 
 /** Append `next` to an element override, keeping earlier layers first. */
@@ -65,79 +78,92 @@ function appendElement(current: AppearanceElement | undefined, next: AppearanceE
   return [current, next];
 }
 
-function mergeElements(target: Record<string, AppearanceElement>, source: AppearanceElements | undefined) {
-  if (!source) return;
+function mergeElements(target: Record<string, AppearanceElement>, source: unknown) {
+  if (!isObject(source)) return;
   for (const [key, value] of Object.entries(source)) {
-    const merged = appendElement(target[key], value);
+    const merged = appendElement(target[key], value as AppearanceElement);
     if (merged !== undefined) target[key] = merged;
   }
 }
 
 const SCHEME_CLASSES = new Set(["dark", "light"]);
 
-const themesOf = (appearance: Appearance | undefined): BaseTheme[] => {
-  const configured = appearance?.baseTheme;
-  if (configured === undefined) return [];
-  return Array.isArray(configured) ? configured : [configured];
-};
+/**
+ * The themes a layer sets, or `null` when it sets none. Falsy and non-object entries are dropped (a string is a
+ * common mistake, so it gets a warning); a layer whose entries are all invalid counts as not setting themes.
+ */
+function themesOf(appearance: Appearance): BaseTheme[] | null {
+  const configured = (appearance as { baseTheme?: unknown }).baseTheme;
+  if (configured === undefined || configured === null) return null;
+  const entries = Array.isArray(configured) ? configured : [configured];
+  const themes: BaseTheme[] = [];
+  for (const entry of entries) {
+    if (typeof entry === "string") {
+      devWarn(`appearance.baseTheme takes theme objects (import { dark } from "@orbitid/react"), not the string "${entry}". It was ignored.`);
+    } else if (isObject(entry)) {
+      themes.push(entry as unknown as BaseTheme);
+    }
+  }
+  if (Array.isArray(configured) && configured.length === 0) return [];
+  return themes.length > 0 ? themes : null;
+}
+
+const objectOrEmpty = <T,>(value: unknown): T => (isObject(value) ? (value as T) : ({} as T));
 
 /**
  * Merge appearance layers into one resolved appearance. Precedence, lowest first, is fixed:
  *
  * 1. `@orbitid/ui` defaults (the stylesheet; not represented here);
- * 2. for each layer in order (the provider's `appearance`, then each component's `appearance` prop):
- *    a. its `baseTheme` entries, in order;
- *    b. its own `variables`, `layout` and `elements`.
+ * 2. instance branding (see `useBrandingStyle()`);
+ * 3. the base themes of the **last** layer that sets `baseTheme` (a component's `baseTheme` replaces the provider's,
+ *    so the scheme and the theme's variables always come from the same themes);
+ * 4. each layer's own `variables`, `layout` and `elements`, provider first, then each component.
  *
- * Variables and layout keys replace earlier values. Element overrides accumulate: every layer's classes are kept,
- * earliest first, and styles merge in the same order, so a later layer wins any conflict without erasing the rest.
- * Instance branding from the dashboard sits under layer 2 (see `useBrandingStyle()`).
+ * Variables and layout keys replace earlier values; older variable names are normalized per layer before merging.
+ * Element overrides accumulate: every layer's classes are kept, earliest first, and styles merge in the same order,
+ * so a later layer wins any conflict without erasing the rest.
  */
-export function resolveAppearanceLayers(layers: readonly (Appearance | undefined)[]): ResolvedAppearance {
-  const present = layers.filter((layer): layer is Appearance => Boolean(layer));
+export function resolveAppearanceLayers(layers: readonly (Appearance | undefined | null)[]): ResolvedAppearance {
+  const present = layers.filter((layer): layer is Appearance => isObject(layer));
   const variables: AppearanceVariables = {};
   const layout: AppearanceLayout = {};
   const elements: Record<string, AppearanceElement> = {};
   const explicitVariables: AppearanceVariables = {};
   const explicitLayout: AppearanceLayout = {};
   const explicitElements: Record<string, AppearanceElement> = {};
-  const classNames: string[] = ["orbitid-root"];
-  const configuredThemes: BaseTheme[] = [];
+  const themeClassNames: string[] = ["orbitid-root"];
   let unstyled = false;
 
-  const applyTheme = (theme: BaseTheme) => {
-    Object.assign(variables, theme.variables);
-    Object.assign(layout, theme.layout);
-    mergeElements(elements, theme.elements);
-    // `dark`/`light` stay out of `rootClassName`: it also lands on the provider wrapper around the host's own app,
-    // where `.light` would reset the host's `:root` tokens. Components read the scheme through `useThemeScope()`.
-    classNames.push(
-      ...(theme.classNames ?? []).flatMap((entry) => entry.split(/\s+/)).filter((name) => name && !SCHEME_CLASSES.has(name)),
-    );
-  };
+  let configuredThemes: BaseTheme[] | null = null;
+  for (const layer of present) configuredThemes = themesOf(layer) ?? configuredThemes;
+  const activeThemes = configuredThemes && configuredThemes.length > 0 ? configuredThemes : [defaultTheme];
 
-  for (const layer of present) {
-    const themes = themesOf(layer);
-    configuredThemes.push(...themes);
-    themes.forEach(applyTheme);
-    Object.assign(variables, layer.variables);
-    Object.assign(layout, layer.layout);
-    mergeElements(elements, layer.elements);
-    Object.assign(explicitVariables, layer.variables);
-    Object.assign(explicitLayout, layer.layout);
-    mergeElements(explicitElements, layer.elements);
-    if (layer.unstyled !== undefined) unstyled = layer.unstyled;
+  for (const theme of activeThemes) {
+    Object.assign(variables, normalizeVariables(objectOrEmpty(theme.variables)));
+    Object.assign(layout, objectOrEmpty(theme.layout));
+    mergeElements(elements, theme.elements);
+    // `dark`/`light` never become classes here: components read the scheme through `useThemeScope()`.
+    const names = Array.isArray(theme.classNames) ? theme.classNames.filter((name) => typeof name === "string") : [];
+    themeClassNames.push(...names.flatMap((entry) => entry.split(/\s+/)).filter((name) => name && !SCHEME_CLASSES.has(name)));
   }
 
-  if (configuredThemes.length === 0) applyTheme(defaultTheme);
-  const activeThemes = configuredThemes.length > 0 ? configuredThemes : [defaultTheme];
+  for (const layer of present) {
+    const own = normalizeVariables(objectOrEmpty(layer.variables));
+    Object.assign(variables, own);
+    Object.assign(explicitVariables, own);
+    Object.assign(layout, objectOrEmpty(layer.layout));
+    Object.assign(explicitLayout, objectOrEmpty(layer.layout));
+    mergeElements(elements, layer.elements);
+    mergeElements(explicitElements, layer.elements);
+    if (typeof layer.unstyled === "boolean") unstyled = layer.unstyled;
+  }
 
   const appearance: Appearance = {
-    ...(configuredThemes.length > 0 ? { baseTheme: configuredThemes } : {}),
+    ...(configuredThemes ? { baseTheme: configuredThemes } : {}),
     variables: explicitVariables,
     layout: explicitLayout,
     elements: explicitElements,
-    ...(present.some((layer) => layer.unstyled !== undefined) ? { unstyled } : {}),
+    ...(present.some((layer) => typeof layer.unstyled === "boolean") ? { unstyled } : {}),
   };
 
   return {
@@ -150,7 +176,8 @@ export function resolveAppearanceLayers(layers: readonly (Appearance | undefined
     elements: elements as AppearanceElements,
     unstyled,
     cssVariables: cssVariablesFrom(variables),
-    rootClassName: resolveElementClass(elements.rootBox, ...classNames),
+    themeClassNames,
+    rootClassName: resolveElementClass(elements.rootBox, ...themeClassNames),
   };
 }
 
@@ -160,14 +187,15 @@ export function resolveAppearance(appearance: Appearance = {}): ResolvedAppearan
 }
 
 /** A component's `appearance` prop as a new layer over the appearance in scope. */
-export function extendAppearance(parent: ResolvedAppearance, appearance: Appearance | undefined): ResolvedAppearance {
-  if (!appearance) return parent;
+export function extendAppearance(parent: ResolvedAppearance, appearance: Appearance | undefined | null): ResolvedAppearance {
+  if (!isObject(appearance)) return parent;
   return resolveAppearanceLayers([...parent.layers, appearance]);
 }
 
 /**
  * Element resolver for `ElementSlotProvider`: for each key, the stable `orbitid-<key>` class then every override
- * layer, in key order. Global `unstyled` or any key's `unstyled: true` drops OrbitID's own classes.
+ * layer, in key order. `unstyled` starts from the global setting; each key's explicit `unstyled` (true or false)
+ * replaces it, the most specific key last.
  */
 export function createElementResolver(resolved: Pick<ResolvedAppearance, "elements" | "unstyled">): ElementSlotResolver {
   return (keys) => {
@@ -179,7 +207,7 @@ export function createElementResolver(resolved: Pick<ResolvedAppearance, "elemen
       const flat = flattenElement(resolved.elements[key]);
       classNames.push(...flat.classNames);
       if (flat.style) style = { ...style, ...flat.style };
-      if (flat.unstyled) unstyled = true;
+      if (flat.unstyled !== undefined) unstyled = flat.unstyled;
     }
     const result: ElementSlotStyle = { className: classNames.join(" ") };
     if (style) result.style = style;

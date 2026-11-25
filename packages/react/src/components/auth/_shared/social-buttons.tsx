@@ -1,7 +1,7 @@
 import { Button, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, cn } from "@orbitid/ui";
 import type { SocialProviderView } from "./environment";
 import { ProviderIcon } from "./provider-icon";
-import { useElementClasses, usePortalClass } from "./appearance";
+import { useComponentElements, usePortalClass } from "./appearance";
 import { useAuthRuntime } from "./w6";
 
 export interface SocialButtonsProps {
@@ -24,7 +24,7 @@ export function SocialButtons({
 }: SocialButtonsProps) {
   const portalClass = usePortalClass();
   const { t } = useAuthRuntime();
-  const { ep, appearance } = useElementClasses();
+  const { ep, appearance } = useComponentElements();
   if (providers.length === 0) return null;
 
   const resolvedVariant =
@@ -117,7 +117,7 @@ export function SocialButtons({
             {lastUsed ? (
               <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center">
                 <span
-                  {...ep("lastUsedBadge", "rounded-sm border border-border bg-card px-1.5 py-0.5 text-[0.6875rem] leading-none font-medium text-muted-foreground control-optical")}
+                  {...ep("lastUsedBadge", "rounded-sm border border-border bg-card px-1.5 py-0.5 text-2xs leading-none font-medium text-muted-foreground control-optical")}
                 >
                   {t("signIn.lastUsed")}
                 </span>

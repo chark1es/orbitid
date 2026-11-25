@@ -20,7 +20,7 @@ import {
 } from "@orbitid/ui";
 import { ChevronsUpDownIcon, LogOutIcon, PlusIcon, SettingsIcon, UsersIcon } from "lucide-react";
 import { activateSession, currentUser, displayName, initials, primaryIdentifier, signOut } from "../_shared/api";
-import { AuthAppearanceScope, useElementClasses, usePortalClass } from "../_shared/appearance";
+import { AuthAppearanceScope, useComponentElements, usePortalClass } from "../_shared/appearance";
 import { ComponentRoot } from "../_shared/component-root";
 import { useAuthRuntime } from "../_shared/w6";
 import type { UserButtonProps } from "../_shared/types";
@@ -67,7 +67,7 @@ function UserAvatar({ user, className }: { user: ReturnType<typeof currentUser>;
 function UserButtonInner(props: UserButtonProps) {
   const runtime = useAuthRuntime();
   const { orbit, t } = runtime;
-  const { ep } = useElementClasses();
+  const { ep } = useComponentElements();
   // The menu and the profile dialog are portaled out of the page's tree, so they carry the scheme themselves.
   const portalClass = usePortalClass();
   const user = currentUser(orbit);
@@ -225,13 +225,13 @@ function UserButtonInner(props: UserButtonProps) {
                   >
                     <Avatar className="size-5">
                       {publicUser?.image_url ? <AvatarImage src={publicUser.image_url} alt="" /> : null}
-                      <AvatarFallback className="text-[0.6875rem]">
+                      <AvatarFallback className="text-2xs">
                         {(publicUser?.first_name?.charAt(0) ?? publicUser?.identifier?.charAt(0) ?? "?").toUpperCase()}
                       </AvatarFallback>
                     </Avatar>
                     <span className="truncate">{label}</span>
                     {session.id === activeSessionId ? (
-                      <span className="ms-auto text-[0.6875rem] text-muted-foreground">{t("userProfile.devices.current")}</span>
+                      <span className="ms-auto text-2xs text-muted-foreground">{t("userProfile.devices.current")}</span>
                     ) : null}
                   </DropdownMenuItem>
                 );

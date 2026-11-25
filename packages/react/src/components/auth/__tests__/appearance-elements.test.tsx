@@ -86,6 +86,14 @@ describe("element key coverage", () => {
     expect([...requested].sort()).toEqual(Object.keys(PRIMITIVE_ELEMENTS).sort());
   });
 
+  it("uses only text sizes that scale with appearance.variables.fontSize", () => {
+    const fixed: string[] = [];
+    for (const file of sourceFiles(join(reactSrc, "components"))) {
+      for (const match of readFileSync(file, "utf8").matchAll(/\btext-\[(\d[^\]]*)\]/g)) fixed.push(`${file}: ${match[0]}`);
+    }
+    expect(fixed).toEqual([]);
+  });
+
   it("documents every element key and every variable in docs/APPEARANCE.md", () => {
     const docs = readFileSync(join(repoRoot, "docs/APPEARANCE.md"), "utf8");
     const missingKeys = Object.keys(ELEMENT_KEYS).filter((key) => !docs.includes(`\`${key}\``));

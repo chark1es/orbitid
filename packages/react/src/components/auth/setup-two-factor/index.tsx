@@ -4,7 +4,7 @@ import { CopyIcon, DownloadIcon, Loader2Icon, ShieldCheckIcon } from "lucide-rea
 import type { Appearance } from "../../../appearance/types";
 import type { TOTPResource } from "../../../provider/types";
 import { activateSession, errorMessage, invokeMethod, refreshClient, toAuthError } from "../_shared/api";
-import { AuthAppearanceScope, useElementClasses } from "../_shared/appearance";
+import { AuthAppearanceScope, useComponentElements } from "../_shared/appearance";
 import { AuthCard } from "../_shared/auth-card";
 import { copyText, downloadText } from "../_shared/clipboard";
 import { FormError } from "../_shared/form-error";
@@ -58,7 +58,7 @@ function readBackupCodes(value: unknown): string[] {
 export function TwoFactorSetup({ sessionId, onComplete, redirectUrl, className }: TwoFactorSetupProps) {
   const runtime = useAuthRuntime();
   const { environment, orbit, t, navigate, user } = runtime;
-  const { ep } = useElementClasses();
+  const { ep } = useComponentElements();
   const [phase, setPhase] = useState<Phase>("totp");
   const [totp, setTotp] = useState<TotpSetup | null>(null);
   const [codes, setCodes] = useState<string[]>([]);

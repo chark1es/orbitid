@@ -6,7 +6,7 @@ import {
 } from "@orbitid/ui";
 import { KeyRoundIcon, ShieldCheckIcon, UserIcon } from "lucide-react";
 import { currentUser, displayName, primaryIdentifier } from "../_shared/api";
-import { AuthAppearanceScope, useElementClasses } from "../_shared/appearance";
+import { AuthAppearanceScope, useComponentElements } from "../_shared/appearance";
 import { ComponentRoot } from "../_shared/component-root";
 import { AuthCard } from "../_shared/auth-card";
 import { useAuthRuntime } from "../_shared/w6";
@@ -81,7 +81,7 @@ function useApiKeysComponent(): ComponentType | null {
 function UserProfileInner(props: UserProfileProps) {
   const runtime = useAuthRuntime();
   const { orbit, t, environment } = runtime;
-  const { ep } = useElementClasses();
+  const { ep } = useComponentElements();
   const user = currentUser(orbit);
   const { pages, links } = parseChildren(props.children);
   const ApiKeys = useApiKeysComponent();

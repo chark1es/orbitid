@@ -38,6 +38,7 @@ export interface ComponentRootProps {
   style?: CSSProperties;
   children: ReactNode | ((theme: ResolvedTheme) => ReactNode);
   [data: `data-${string}`]: string | undefined;
+  [aria: `aria-${string}`]: string | undefined;
 }
 
 /**
@@ -59,7 +60,9 @@ export function ComponentRoot({ component, element, className, style, children, 
   const variables = useMemo(() => ({ ...branding, ...appearance.cssVariables }), [branding, appearance.cssVariables]);
   const declarations = useMemo(() => scopeDeclarations(variables), [variables]);
   useScopeRule(scopeClass, declarations);
-  const root = elementProps(resolver, element ? ["rootBox", element] : ["rootBox"], []);
+  // The component's layout classes go through `rootBox`, so `rootBox: { unstyled: true }` can drop them. The scheme
+  // class, `orbitid-root`/`orbitid-component`, theme class names and the motion switch always stay.
+  const root = elementProps(resolver, element ? ["rootBox", element] : ["rootBox"], [className]);
   const scope = useMemo(
     () => ({ portalClassName: cn(declarations ? scopeClass : null, "orbitid-component", motionOff) }),
     [declarations, scopeClass, motionOff],
@@ -73,7 +76,7 @@ export function ComponentRoot({ component, element, className, style, children, 
           data-orbit-component={component}
           data-orbit-theme={theme}
           data-orbitid-element={root["data-orbitid-element"]}
-          className={cn(themeClass, "orbitid-component", motionOff, appearance.rootClassName, className, root.className)}
+          className={cn(themeClass, "orbitid-component", motionOff, ...appearance.themeClassNames, root.className)}
           style={{ ...variables, ...style, ...root.style } as CSSProperties}
         >
           {typeof children === "function" ? children(theme) : children}

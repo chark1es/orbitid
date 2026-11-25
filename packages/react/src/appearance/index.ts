@@ -10,7 +10,9 @@ export {
   DARK_FOREGROUND,
   resolveAppearance,
   resolveAppearanceLayers,
+  normalizeVariables,
   resolveElementClass,
+  VARIABLE_ALIASES,
   VARIABLE_MAP,
 } from "./resolve";
 export {

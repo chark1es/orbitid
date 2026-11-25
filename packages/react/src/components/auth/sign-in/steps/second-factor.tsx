@@ -13,7 +13,7 @@ import {
 import { Loader2Icon } from "lucide-react";
 import { factorsOf } from "../../_shared/api";
 import { useAuthRuntime, type TranslateFn } from "../../_shared/w6";
-import { useElementClasses, usePortalClass } from "../../_shared/appearance";
+import { useComponentElements, usePortalClass } from "../../_shared/appearance";
 import { FormError } from "../../_shared/form-error";
 import { OtpField } from "../../_shared/otp-field";
 import { LinkButton, type StepProps } from "./shared";
@@ -22,7 +22,7 @@ export function SecondFactorStep({ flow }: StepProps) {
   const portalClass = usePortalClass();
   const runtime = useAuthRuntime();
   const { t, environment } = runtime;
-  const { ep } = useElementClasses();
+  const { ep } = useComponentElements();
   const factors = factorsOf(flow.signIn, "second");
   const available: Array<{ strategy: string; label: string }> =
     factors.length > 0

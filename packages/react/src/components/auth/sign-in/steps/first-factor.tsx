@@ -3,7 +3,7 @@ import { useForm } from "react-hook-form";
 import { Button, cn } from "@orbitid/ui";
 import { Loader2Icon, MailIcon } from "lucide-react";
 import { useAuthRuntime } from "../../_shared/w6";
-import { useElementClasses } from "../../_shared/appearance";
+import { useComponentElements } from "../../_shared/appearance";
 import { FormError } from "../../_shared/form-error";
 import { Field } from "../../_shared/field";
 import { OtpField } from "../../_shared/otp-field";
@@ -13,7 +13,7 @@ import { IdentifierPreview, LinkButton, factorIdentifier, type StepProps } from 
 
 export function PasswordStep({ flow }: StepProps) {
   const { t } = useAuthRuntime();
-  const { ep } = useElementClasses();
+  const { ep } = useComponentElements();
   const form = useForm<{ password: string }>({ defaultValues: { password: "" }, mode: "onSubmit" });
 
   const submit = form.handleSubmit(async (values) => {
@@ -65,7 +65,7 @@ export function PasswordStep({ flow }: StepProps) {
 
 export function EmailCodeStep({ flow }: StepProps) {
   const { t } = useAuthRuntime();
-  const { ep } = useElementClasses();
+  const { ep } = useComponentElements();
   const [code, setCode] = useState("");
   const identifier = factorIdentifier(flow.signIn) || flow.identifier;
 
@@ -107,7 +107,7 @@ export function EmailCodeStep({ flow }: StepProps) {
 
 export function PhoneCodeStep({ flow }: StepProps) {
   const { t } = useAuthRuntime();
-  const { ep } = useElementClasses();
+  const { ep } = useComponentElements();
   const [code, setCode] = useState("");
   const identifier = factorIdentifier(flow.signIn) || flow.identifier;
 

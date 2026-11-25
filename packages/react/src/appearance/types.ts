@@ -6,8 +6,9 @@ export type ClassValue = string | false | null | undefined;
 
 /**
  * Design tokens. Each one maps onto the CSS custom properties `@orbitid/ui/styles.css` reads (see
- * `VARIABLE_MAP` in `./variables.ts` and the table in `docs/APPEARANCE.md`), set on the component root only, so a
- * variable never leaks into the host page.
+ * `VARIABLE_MAP` in `./variables.ts` and the table in `docs/APPEARANCE.md`). They are set on each prebuilt
+ * component's root and on the pop-ups it opens, never on the provider's wrapper, so a variable does not leak into
+ * the host page.
  */
 export interface AppearanceVariables {
   /** Primary buttons, links and the selected state. The text on it is picked automatically unless set. */
@@ -47,7 +48,10 @@ export interface AppearanceVariables {
   borderRadius?: string;
   fontFamily?: string;
   fontFamilyButtons?: string;
-  /** Base text size (`14px`, `0.9375rem`). Every text size inside the component scales from it. */
+  /**
+   * Base text size in `px` or `rem` (`14px` is the default). Every text size inside the component scales from it.
+   * Other units are not supported and only produce a development warning.
+   */
   fontSize?: string;
   fontWeight?: string | number;
   fontWeightBold?: string | number;
@@ -70,7 +74,6 @@ export interface AppearanceLayout {
   logoPlacement?: "inside" | "outside" | "none";
   logoImageUrl?: string;
   logoLinkUrl?: string;
-  applicationName?: string;
   /** Show optional sign-up fields (first and last name, username when optional). Default `true`. */
   showOptionalFields?: boolean;
   /** Show the terms, privacy and help links in the card footer. Default `true`. */
@@ -84,9 +87,8 @@ export interface AppearanceLayout {
   helpPageUrl?: string;
   /** `false` turns off transitions and entrance animations inside the components. Default `true`. */
   animations?: boolean;
-  /** @deprecated Use `showDevelopmentModeWarning: false`. */
+  /** Older name: `true` is the same as `showDevelopmentModeWarning: false`. */
   unsafe_disableDevelopmentModeWarnings?: boolean;
-  shimmer?: boolean;
   [key: string]: unknown;
 }
 
@@ -94,7 +96,10 @@ export interface AppearanceLayout {
 export interface AppearanceElementStyle {
   className?: string;
   style?: CSSProperties;
-  /** Drop OrbitID's own classes from this element, keeping only yours. */
+  /**
+   * `true` drops OrbitID's classes from this element, keeping yours and the `orbitid-<key>` hook; `false` restores
+   * them on this element when `appearance.unstyled` is on.
+   */
   unstyled?: boolean;
 }
 
@@ -105,7 +110,7 @@ export interface AppearanceElementStyle {
 export type AppearanceElement =
   | string
   | AppearanceElementStyle
-  | ((...args: unknown[]) => string | AppearanceElementStyle | undefined)
+  | (() => string | AppearanceElementStyle | undefined)
   | readonly AppearanceElement[];
 
 /** Element overrides keyed by the stable element names in `ELEMENT_KEYS`. Unknown keys are allowed and ignored. */
@@ -128,7 +133,10 @@ export interface BaseTheme {
 }
 
 export interface Appearance {
-  /** One theme, or several merged in order. Defaults to `defaultTheme`. */
+  /**
+   * One theme, or several merged in order. The last layer that sets it wins: a component's `baseTheme` replaces the
+   * provider's. Defaults to `defaultTheme`.
+   */
   baseTheme?: BaseTheme | BaseTheme[];
   variables?: AppearanceVariables;
   layout?: AppearanceLayout;
@@ -146,7 +154,7 @@ export interface ResolvedAppearance {
   appearance: Appearance;
   /** The layers in precedence order, lowest first: provider, then each nested component scope. */
   layers: Appearance[];
-  /** Last theme across all layers, or `defaultTheme`. */
+  /** Last of the active themes (from the last layer that set `baseTheme`), or `defaultTheme`. */
   theme: BaseTheme;
   themes: BaseTheme[];
   variables: AppearanceVariables;
@@ -154,11 +162,13 @@ export interface ResolvedAppearance {
   /** Per element, every override from every layer, lowest precedence first. */
   elements: AppearanceElements;
   unstyled: boolean;
-  /** CSS custom properties, ready for a `style` attribute. */
+  /** CSS custom properties, ready for a `style` attribute. Only component roots and their pop-ups carry them. */
   cssVariables: Record<string, string>;
+  /** `orbitid-root` plus the active themes' class names other than `dark`/`light`. */
+  themeClassNames: string[];
   /**
-   * Wrapper classes: `orbitid-root`, theme class names other than `dark`/`light`, `rootBox` override. The scheme
-   * class comes from `useThemeScope()`, which only adds `light` inside a dark page.
+   * `themeClassNames` plus the `rootBox` override, as one class string (kept for custom roots). Prebuilt components
+   * build their root from `themeClassNames` and the `rootBox` element instead.
    */
   rootClassName: string;
 }
