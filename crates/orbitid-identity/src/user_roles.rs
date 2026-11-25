@@ -330,7 +330,7 @@ pub async fn set_user_roles_on(
 /// `user_roles` rows (rank 10).
 pub async fn reset_user_roles_on(conn: &mut sqlx::PgConnection, user_id: &str) -> Result<()> {
     crate::locks::lock_user_on(conn, user_id).await?;
-    sqlx::query("DELETE FROM user_roles WHERE user_id = $1 AND left(role_key, 8) <> $2")
+    sqlx::query("DELETE FROM user_roles WHERE user_id = $1 AND NOT starts_with(role_key, $2)")
         .bind(user_id)
         .bind(RESERVED_INSTANCE_KEY_PREFIX)
         .execute(&mut *conn)

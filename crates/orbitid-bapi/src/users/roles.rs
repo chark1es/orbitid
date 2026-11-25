@@ -78,6 +78,9 @@ async fn reset_roles(State(state): State<AppState>, Path(id): Path<String>) -> R
         orbitid_platform::webhooks::emit_event_on(&mut tx, "user.updated", value).await?;
         tx.commit().await?;
     }
+    // Safety net: reset keeps `app:sys_*` rows, so this should find nothing to
+    // revoke. It stays so a future change to reset can't leave a console
+    // session alive without console access.
     orbitid_identity::operator_session::revoke_console_sessions_without_access(
         &state,
         &existing.id,

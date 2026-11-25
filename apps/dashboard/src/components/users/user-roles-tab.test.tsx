@@ -61,3 +61,17 @@ it("resets an explicit assignment back to the instance default", async () => {
   await waitFor(() => expect(calls.some((call) => call.method === "DELETE" && call.url.includes("/v1/users/user_1/roles"))).toBe(true));
   expect(await screen.findByText("Inherited from default")).toBeTruthy();
 });
+
+it("says console access is kept and offers to clear custom roles when no default is set", async () => {
+  setup(assignment(["app:sys_owner"], "default", null));
+  renderPage(<UserRolesTab user={{ id: "user_1", roles: ["app:sys_owner"] } as UserJSON} />);
+  expect(await screen.findByText("No default set")).toBeTruthy();
+  expect(screen.getByText(/Console access \(system role\) is kept either way/)).toBeTruthy();
+  expect(screen.queryByText("Inherited from default")).toBeNull();
+});
+
+it("labels reset as clearing custom roles when no default is set", async () => {
+  setup(assignment(["app:support"], "assigned", null));
+  renderPage(<UserRolesTab user={{ id: "user_1", roles: ["app:support"] } as UserJSON} />);
+  expect(await screen.findByRole("button", { name: "Clear custom roles" })).toBeTruthy();
+});

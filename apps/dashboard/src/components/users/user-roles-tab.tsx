@@ -10,6 +10,7 @@ import { errorMessage } from "../../lib/errors";
 import { Section } from "../shared/section";
 
 const sameSet = (a: string[], b: string[]) => [...a].sort().join("\n") === [...b].sort().join("\n");
+const isSystemGrant = (key: string) => key.startsWith("app:sys_");
 
 /** Where the effective roles come from, in words. */
 function sourceText(assignment: UserRolesJSON, guest: boolean): string {
@@ -19,15 +20,17 @@ function sourceText(assignment: UserRolesJSON, guest: boolean): string {
       : "Assigned by an operator. The default role does not apply.";
   }
   if (guest) return "Guests don't inherit the default role. Saving makes these roles an explicit assignment.";
+  const consoleOnly = assignment.roles.some(isSystemGrant) ? " Console access (system role) is kept either way." : "";
   return assignment.default_role
-    ? "Follows the default role. Saving makes these roles an explicit assignment; this user will stop following the default."
-    : "No roles are assigned and no default role is set. Saving makes these roles an explicit assignment; this user will stop following the default.";
+    ? `Follows the default role.${consoleOnly} Saving makes these roles an explicit assignment; this user will stop following the default.`
+    : `No custom roles are assigned and no default role is set.${consoleOnly} Saving makes these roles an explicit assignment; this user will stop following the default.`;
 }
 
 /** Chip text for the role source. Guests report `default` but hold nothing from it. */
 function sourceLabel(assignment: UserRolesJSON, guest: boolean): string {
   if (assignment.source === "assigned") return "Assigned";
-  return guest ? "Guest: no default" : "Inherited from default";
+  if (guest) return "Guest: no default";
+  return assignment.default_role ? "Inherited from default" : "No default set";
 }
 
 /** Instance roles are assigned through an operator-only endpoint, never through editable metadata. */
@@ -36,6 +39,7 @@ export function UserRolesTab({ user }: { user: UserJSON }) {
   const assignmentQuery = useApi<UserRolesJSON>(["user", user.id, "roles"], `/users/${user.id}/roles`);
   const roles = unwrapList<RoleJSON>(query.data).filter((role) => role.key.startsWith("app:"));
   const assignment = assignmentQuery.data;
+  const defaultRole = assignment?.default_role ?? null;
   const effective = assignment?.roles ?? user.roles ?? [];
   const [selected, setSelected] = useState<string[]>(effective);
   const effectiveKey = effective.join("\n");
@@ -48,13 +52,12 @@ export function UserRolesTab({ user }: { user: UserJSON }) {
   });
   const reset = useApiMutation<undefined>("DELETE", `/users/${user.id}/roles`, {
     invalidate,
-    onSuccess: () => toast.success("Roles reset to the default"),
+    onSuccess: () => toast.success(defaultRole ? "Roles reset to the default" : "Custom roles cleared"),
   });
   const pending = save.isPending || reset.isPending;
   const dirty = !sameSet(selected, effective);
   const guest = user.is_anonymous === true;
   const inherited = assignment?.source === "default";
-  const defaultRole = assignment?.default_role ?? null;
   const loading = query.isLoading || assignmentQuery.isLoading;
   const error = query.error ?? assignmentQuery.error;
   return <Section title="Instance roles" className="border-t-0 pt-0"
@@ -75,7 +78,7 @@ export function UserRolesTab({ user }: { user: UserJSON }) {
       <div className="flex flex-wrap gap-2">
         <Button disabled={!dirty || pending} onClick={() => save.mutate({ roles: selected })}>{save.isPending ? "Saving…" : "Save roles"}</Button>
         {assignment && !inherited ? <Button variant="outline" disabled={pending} onClick={() => reset.mutate(undefined)}>
-          {reset.isPending ? "Resetting…" : defaultRole ? `Reset to default (${defaultRole})` : "Reset to default"}
+          {reset.isPending ? "Resetting…" : defaultRole ? `Reset to default (${defaultRole})` : "Clear custom roles"}
         </Button> : null}
       </div>
     </div>}

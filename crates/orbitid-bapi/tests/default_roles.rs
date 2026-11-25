@@ -431,6 +431,19 @@ async fn batched_claims_match_for_mixed_users() {
             json!({ "roles": [] }),
         )
         .await;
+    // A console holder with no custom rows: the system grant never decides
+    // the source, so they follow the default on top of it.
+    let console_only = create_user(&harness, "batch-console@example.com").await;
+    harness
+        .put(
+            &format!("/v1/users/{console_only}/roles"),
+            json!({ "roles": ["app:sys_admin"] }),
+        )
+        .await;
+    let reset = harness
+        .delete(&format!("/v1/users/{console_only}/roles"))
+        .await;
+    assert_eq!(reset.status, StatusCode::OK, "{}", reset.text());
     let guest = orbitid_identity::testing::create_test_guest(harness.state())
         .await
         .expect("guest")
@@ -439,6 +452,7 @@ async fn batched_claims_match_for_mixed_users() {
         inheriting.clone(),
         assigned.clone(),
         emptied.clone(),
+        console_only.clone(),
         guest.clone(),
         "user_missing".to_string(),
     ];
@@ -454,6 +468,11 @@ async fn batched_claims_match_for_mixed_users() {
     assert_eq!(batch[&assigned].source, RoleSource::Assigned);
     assert!(batch[&emptied].roles.is_empty());
     assert_eq!(batch[&emptied].source, RoleSource::Assigned);
+    assert_eq!(
+        batch[&console_only].roles,
+        vec!["app:member", "app:sys_admin"]
+    );
+    assert_eq!(batch[&console_only].source, RoleSource::Default);
     // Guests and unknown ids report the default while holding nothing.
     for id in [&guest, &"user_missing".to_string()] {
         assert!(batch[id].roles.is_empty(), "{id}");

@@ -62,7 +62,9 @@ Rules that make this safe:
 - Only `app:` keys that exist are accepted, including the seeded `app:sys_owner` / `app:sys_admin` console grants;
   anything else (an `org:` key, a missing role) is a `422` and leaves the existing assignment untouched.
 - `PUT` replaces the whole set, system grants included: `PUT { "roles": [] }` also removes console access. `DELETE`
-  (reset) never does; see below.
+  (reset) never does; see below. Any `PUT`, even one naming only a system grant, records an explicit assignment, so
+  `PUT { "roles": ["app:sys_admin"] }` leaves the user with no custom roles and the default no longer applies. To add
+  console access while keeping the default, include the default role in the set, or use `orbitid owner` for Owner.
 - A change does not end the user's sessions. The next minted token carries the new roles; a token already issued keeps
   its claims until it expires. `POST /v1/sessions/{id}/revoke` ends a session when you need the change at once. A
   change that removes the user's console access (`app:sys_owner` / `app:sys_admin`) ends their console sessions.
@@ -107,8 +109,8 @@ console) plus custom roles from exactly one source, reported as `source` by `GET
   `roles` / `role_permissions` claims), `UserJSON.roles`, `SessionJSON.user`, OIDC `groups` (ID token and userinfo) and
   every SDK `has()` that reads those claims.
 - **Guests do not inherit it.** An anonymous (guest) user holds no instance roles unless one is assigned. When the guest
-  becomes a full account, the default applies from the next token on. A guest (and an unknown user id) still reports
-  `source: "default"` while holding nothing from it.
+  becomes a full account, the default applies from the next token on. A guest still reports `source: "default"` while
+  holding nothing from it. (`GET /v1/users/{id}/roles` answers `404` for an unknown id.)
 - **Only custom instance roles.** The default must be an existing `app:` role. `org:` keys are refused because they would
   leak into `roles`, and the seeded `app:sys_owner` / `app:sys_admin` are refused because they open the admin console;
   console access is never inherited. All refusals are `422` with `meta.param_name = "roles.defaultRole"`.
@@ -120,8 +122,10 @@ console) plus custom roles from exactly one source, reported as `source` by `GET
   follows the default.
 - **No marker before this setting.** Before it existed, `PUT { "roles": [] }` did not record an explicit assignment.
   Users cleared that way look like users who were never assigned, so they inherit a default once you set one. The same
-  holds for an export taken before this change and imported later. Re-save such users with `PUT` if they must keep
-  holding nothing.
+  holds for an export taken before this change and imported later. It also covers users whose only rows before the
+  upgrade were system grants (for example `PUT { "roles": ["app:sys_admin"] }` meaning "console admin, no app roles"):
+  system grants never decide the source, so they inherit the default too. Re-save such users with `PUT` if they must
+  keep holding no custom roles.
 
 ## Claims and `has()`
 
