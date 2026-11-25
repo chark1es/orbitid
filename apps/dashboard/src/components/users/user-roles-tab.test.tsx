@@ -39,6 +39,17 @@ it("marks roles inherited from the instance default and offers no reset", async 
   expect(await screen.findByText("Inherited from default")).toBeTruthy();
   expect(screen.getByRole("checkbox", { name: /Member \(default\)/ }).getAttribute("aria-checked")).toBe("true");
   expect(screen.queryByRole("button", { name: /Reset to default/ })).toBeNull();
+  // Saving pins the roles: the copy says so before the operator saves.
+  expect(screen.getByText(/this user will stop following the default/)).toBeTruthy();
+});
+
+it("tells the operator that guests don't inherit the default role", async () => {
+  setup(assignment([], "default", "app:member"));
+  renderPage(<UserRolesTab user={{ id: "user_1", roles: [] as string[], is_anonymous: true } as UserJSON} />);
+  expect(await screen.findByText("Guest: no default")).toBeTruthy();
+  expect(screen.getByText(/Guests don't inherit the default role/)).toBeTruthy();
+  expect(screen.queryByText("Inherited from default")).toBeNull();
+  expect(screen.queryByRole("checkbox", { name: /\(default\)/ })).toBeNull();
 });
 
 it("resets an explicit assignment back to the instance default", async () => {

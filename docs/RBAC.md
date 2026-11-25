@@ -59,8 +59,10 @@ Rules that make this safe:
   writes `user_roles`.
 - Nothing a signed-in user can write reaches these rows: not `PATCH /v1/client/me`, not metadata, not the request body
   of any client call.
-- Only `app:` keys that exist and are not system organization roles are accepted; anything else is a `422` and leaves
-  the existing assignment untouched.
+- Only `app:` keys that exist are accepted, including the seeded `app:sys_owner` / `app:sys_admin` console grants;
+  anything else (an `org:` key, a missing role) is a `422` and leaves the existing assignment untouched.
+- `PUT` replaces the whole set, system grants included: `PUT { "roles": [] }` also removes console access. `DELETE`
+  (reset) never does; see below.
 - A change does not end the user's sessions. The next minted token carries the new roles; a token already issued keeps
   its claims until it expires. `POST /v1/sessions/{id}/revoke` ends a session when you need the change at once. A
   change that removes the user's console access (`app:sys_owner` / `app:sys_admin`) ends their console sessions.
@@ -81,12 +83,19 @@ PATCH /v1/instance
 { "roles": { "defaultRole": "app:member" } }    # or null for no default
 ```
 
-A user's **effective** instance roles come from exactly one source, reported as `source` by `GET /v1/users/{id}/roles`:
+A user's **effective** instance roles are their system grants (`app:sys_owner`, `app:sys_admin`, which open the
+console) plus custom roles from exactly one source, reported as `source` by `GET /v1/users/{id}/roles`:
 
-| Source | When | Effective roles |
+| Source | When | Custom roles |
 | --- | --- | --- |
-| `assigned` | The user has `user_roles` rows, or an operator set their roles with `PUT` (even to `[]`) | The assigned roles. The default plays no part. |
-| `default` | Nothing was assigned, or the assignment was dropped with `DELETE /v1/users/{id}/roles` | The default role, or none when no default is set |
+| `assigned` | The user has custom (non-`app:sys_*`) `user_roles` rows, or an operator set their roles with `PUT` (even to `[]`) | The assigned roles. The default plays no part. |
+| `default` | No custom roles were assigned, or the assignment was dropped with `DELETE /v1/users/{id}/roles` | The default role, or none when no default is set |
+
+- **System grants are additive.** They are always part of the effective roles and never decide the source, so an owner
+  who follows the default holds `app:sys_owner` *and* the default role. First-run owner setup and `orbitid owner
+  <email>` both add the Owner role this way, without pinning the account's custom roles.
+- **Reset keeps console access.** `DELETE /v1/users/{id}/roles` removes only custom rows and the explicit marker, so
+  resetting the only owner never leaves the console unclaimed.
 
 - **Explicit assignments always win.** Assigning roles replaces the default rather than adding to it. To give a user the
   default *and* another role, assign both.
@@ -98,18 +107,21 @@ A user's **effective** instance roles come from exactly one source, reported as 
   `roles` / `role_permissions` claims), `UserJSON.roles`, `SessionJSON.user`, OIDC `groups` (ID token and userinfo) and
   every SDK `has()` that reads those claims.
 - **Guests do not inherit it.** An anonymous (guest) user holds no instance roles unless one is assigned. When the guest
-  becomes a full account, the default applies from the next token on.
+  becomes a full account, the default applies from the next token on. A guest (and an unknown user id) still reports
+  `source: "default"` while holding nothing from it.
 - **Only custom instance roles.** The default must be an existing `app:` role. `org:` keys are refused because they would
   leak into `roles`, and the seeded `app:sys_owner` / `app:sys_admin` are refused because they open the admin console;
   console access is never inherited. All refusals are `422` with `meta.param_name = "roles.defaultRole"`.
 - **The default role cannot be deleted.** `DELETE /v1/roles/{id}` answers `403 not_allowed_access` while the role is
-  the default; choose another default (or none) first. Should the setting still name a role that no longer exists (an
-  import, or a delete racing the setting change), it grants nothing until the role exists again.
-- Before this setting existed, `PUT { "roles": [] }` did not record an explicit assignment. Users cleared that way look
-  like users who were never assigned, so they inherit a default once you set one. Re-save them with `PUT` if they must
-  keep holding nothing.
-- `orbitid owner <email>` adds the Owner role to the user's effective roles, so an account inheriting the default
-  keeps it as an explicit assignment.
+  the default; choose another default (or none) first.
+- **A dangling default grants nothing.** The setting can still name a role that no longer exists: a delete racing the
+  setting change, a replica that has not seen the new settings yet, or an import. Such a default grants nothing. But
+  the setting names a *key*, so re-creating a role with that key grants it again, immediately, to every user who
+  follows the default.
+- **No marker before this setting.** Before it existed, `PUT { "roles": [] }` did not record an explicit assignment.
+  Users cleared that way look like users who were never assigned, so they inherit a default once you set one. The same
+  holds for an export taken before this change and imported later. Re-save such users with `PUT` if they must keep
+  holding nothing.
 
 ## Claims and `has()`
 

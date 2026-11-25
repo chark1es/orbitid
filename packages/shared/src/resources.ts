@@ -317,9 +317,11 @@ export interface SignInTokenJSON { object: "sign_in_token"; id: string; user_id:
  * Instance-wide roles of a user (`GET`/`PUT`/`DELETE /v1/users/{id}/roles`). Written only by an operator through the
  * Backend API; the keys travel in the session token as the `roles` and `role_permissions` claims.
  *
- * `roles` is the *effective* set. `source` says where it comes from: `"assigned"` when an operator set the user's
- * roles (possibly to none), `"default"` when the user inherits the instance default role (`roles.defaultRole`,
- * none when that is unset). `default_role` is the configured instance default, for reference.
+ * `roles` is the *effective* set. `source` says where the custom roles come from: `"assigned"` when an operator set
+ * them (possibly to none), `"default"` when the user follows the instance default role (`roles.defaultRole`, none when
+ * that is unset). System grants (`app:sys_owner`, `app:sys_admin`) are included in `roles` either way and never decide
+ * `source`. Guests and unknown user ids report `"default"` while holding nothing from it: guests never inherit the
+ * default. `default_role` is the configured instance default, for reference.
  */
 export interface UserRolesJSON {
   object: "user_roles";

@@ -319,19 +319,191 @@ async fn a_dangling_default_grants_nothing() {
     );
 }
 
-/// `orbitid owner <email>` on an account that inherits the default keeps the
-/// inherited role once the assignment becomes explicit.
+/// Both owner paths add the Owner role on top of the user's roles without
+/// pinning them: an account that follows the default keeps following it.
 #[tokio::test]
-async fn granting_owner_keeps_the_inherited_default() {
-    use orbitid_identity::console::{grant_owner, OwnerGrant};
+async fn owner_paths_keep_following_the_default() {
+    use orbitid_identity::console::{create_owner, grant_owner, OwnerGrant, OwnerInput};
 
     let harness = setup().await;
     create_role(&harness, "app:member", &[]).await;
-    let user = create_user(&harness, "promote@example.com").await;
+    create_role(&harness, "app:viewer", &[]).await;
     set_default(&harness, json!("app:member")).await;
+
+    // First-run setup on the empty instance.
+    let owner = create_owner(
+        harness.state(),
+        &OwnerInput {
+            email: "first-owner@example.com".into(),
+            password_hash: "not-a-real-hash".into(),
+            first_name: None,
+            last_name: None,
+        },
+    )
+    .await
+    .expect("setup")
+    .expect("instance was empty");
+    let roles = roles_of(&harness, &owner.id).await;
+    assert_eq!(roles["roles"], json!(["app:member", "app:sys_owner"]));
+    assert_eq!(roles["source"], "default");
+
+    // `orbitid owner <email>` on an existing account behaves the same.
+    let user = create_user(&harness, "promote@example.com").await;
     let granted = grant_owner(harness.state(), &user).await.expect("grant");
     assert!(matches!(granted, OwnerGrant::Granted(_)));
     let roles = roles_of(&harness, &user).await;
     assert_eq!(roles["roles"], json!(["app:member", "app:sys_owner"]));
-    assert_eq!(roles["source"], "assigned");
+    assert_eq!(roles["source"], "default");
+    assert!(matches!(
+        grant_owner(harness.state(), &user).await.expect("again"),
+        OwnerGrant::AlreadyOwner(_)
+    ));
+
+    // Both keep following a changed default.
+    set_default(&harness, json!("app:viewer")).await;
+    for id in [&owner.id, &user] {
+        assert_eq!(
+            roles_of(&harness, id).await["roles"],
+            json!(["app:sys_owner", "app:viewer"])
+        );
+    }
+}
+
+/// Resetting a console holder never removes the console grant, so `DELETE`
+/// on the only owner cannot leave the console unclaimed.
+#[tokio::test]
+async fn reset_keeps_console_access() {
+    let harness = setup().await;
+    create_role(&harness, "app:member", &[]).await;
+    create_role(&harness, "app:support", &[]).await;
+    set_default(&harness, json!("app:member")).await;
+    let owner = create_user(&harness, "only-owner@example.com").await;
+    let put = harness
+        .put(
+            &format!("/v1/users/{owner}/roles"),
+            json!({ "roles": ["app:sys_owner", "app:support"] }),
+        )
+        .await;
+    assert_eq!(put.status, StatusCode::OK, "{}", put.text());
+    assert_eq!(put.value()["source"], "assigned");
+
+    let reset = harness.delete(&format!("/v1/users/{owner}/roles")).await;
+    assert_eq!(reset.status, StatusCode::OK, "{}", reset.text());
+    assert_eq!(
+        reset.value()["roles"],
+        json!(["app:member", "app:sys_owner"])
+    );
+    assert_eq!(reset.value()["source"], "default");
+    assert!(
+        orbitid_identity::operator_session::has_console_access(harness.state(), &owner)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !orbitid_identity::console::console_unclaimed(harness.state())
+            .await
+            .unwrap()
+    );
+}
+
+/// The batched path (`role_claims_for_users`, used by list endpoints) agrees
+/// with the single-user path for inheriting, assigned and guest users.
+#[tokio::test]
+async fn batched_claims_match_for_mixed_users() {
+    use orbitid_identity::user_roles::{role_claims_for_user, role_claims_for_users, RoleSource};
+
+    let harness = setup().await;
+    create_role(&harness, "app:member", &["app:reports:read"]).await;
+    create_role(&harness, "app:support", &[]).await;
+    set_default(&harness, json!("app:member")).await;
+    let inheriting = create_user(&harness, "batch-inherit@example.com").await;
+    let assigned = create_user(&harness, "batch-assigned@example.com").await;
+    let emptied = create_user(&harness, "batch-empty@example.com").await;
+    harness
+        .put(
+            &format!("/v1/users/{assigned}/roles"),
+            json!({ "roles": ["app:support"] }),
+        )
+        .await;
+    harness
+        .put(
+            &format!("/v1/users/{emptied}/roles"),
+            json!({ "roles": [] }),
+        )
+        .await;
+    let guest = orbitid_identity::testing::create_test_guest(harness.state())
+        .await
+        .expect("guest")
+        .id;
+    let ids = vec![
+        inheriting.clone(),
+        assigned.clone(),
+        emptied.clone(),
+        guest.clone(),
+        "user_missing".to_string(),
+    ];
+    let batch = role_claims_for_users(harness.state(), &ids).await.unwrap();
+    for id in &ids {
+        let single = role_claims_for_user(harness.state(), id).await.unwrap();
+        assert_eq!(batch[id], single, "{id}");
+    }
+    assert_eq!(batch[&inheriting].roles, vec!["app:member"]);
+    assert_eq!(batch[&inheriting].permissions, vec!["app:reports:read"]);
+    assert_eq!(batch[&inheriting].source, RoleSource::Default);
+    assert_eq!(batch[&assigned].roles, vec!["app:support"]);
+    assert_eq!(batch[&assigned].source, RoleSource::Assigned);
+    assert!(batch[&emptied].roles.is_empty());
+    assert_eq!(batch[&emptied].source, RoleSource::Assigned);
+    // Guests and unknown ids report the default while holding nothing.
+    for id in [&guest, &"user_missing".to_string()] {
+        assert!(batch[id].roles.is_empty(), "{id}");
+        assert_eq!(batch[id].source, RoleSource::Default, "{id}");
+    }
+}
+
+/// `SessionJSON.user` (single and list) carries the effective roles, and a
+/// token minted right after a default change carries the new role.
+#[tokio::test]
+async fn sessions_and_fresh_tokens_follow_the_default() {
+    let harness = setup().await;
+    create_role(&harness, "app:member", &[]).await;
+    create_role(&harness, "app:viewer", &[]).await;
+    set_default(&harness, json!("app:member")).await;
+    let user = create_user(&harness, "session-roles@example.com").await;
+    let session = harness.create_session(&user).await;
+
+    let read = harness
+        .get(&format!("/v1/sessions/{}", session.session_id))
+        .await;
+    assert_eq!(read.status, StatusCode::OK, "{}", read.text());
+    assert_eq!(read.value()["user"]["roles"], json!(["app:member"]));
+    let list = harness.get(&format!("/v1/sessions?user_id={user}")).await;
+    assert_eq!(list.status, StatusCode::OK, "{}", list.text());
+    let list = list.value();
+    let rows = list
+        .as_array()
+        .or_else(|| list["data"].as_array())
+        .expect("session list");
+    assert_eq!(rows[0]["user"]["roles"], json!(["app:member"]));
+
+    let mint = || async {
+        let jwt = orbitid_identity::tokens::sign_session_token(
+            harness.state(),
+            &session.session_id,
+            orbitid_identity::tokens::SignSessionTokenOptions {
+                template: None,
+                azp: None,
+            },
+        )
+        .await
+        .expect("sign");
+        orbitid_credentials::jwt::decode_jwt_payload(&jwt).expect("payload")
+    };
+    assert_eq!(mint().await["roles"], json!(["app:member"]));
+    assert_eq!(
+        set_default(&harness, json!("app:viewer")).await.status,
+        StatusCode::OK
+    );
+    // Same session, next mint: no re-login, no cache to expire.
+    assert_eq!(mint().await["roles"], json!(["app:viewer"]));
 }

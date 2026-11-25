@@ -7,6 +7,7 @@ use axum::Router;
 use orbitid_core::error::{error_codes, OrbitError, Result};
 use orbitid_core::http::OrbitJson;
 use orbitid_core::models::OrganizationMembershipRow;
+use orbitid_core::resources::UserRolesJson;
 use orbitid_core::state::AppState;
 use orbitid_identity::serializers::{
     serialize_memberships, serialize_trusted_device, UserSerializeOptions,
@@ -42,14 +43,14 @@ pub fn routes() -> Router<AppState> {
 /// configured instance default for reference.
 async fn user_roles_json(state: &AppState, user_id: &str) -> Result<serde_json::Value> {
     let claims = role_claims_for_user(state, user_id).await?;
-    Ok(json!({
-        "object": "user_roles",
-        "user_id": user_id,
-        "roles": claims.roles,
-        "role_permissions": claims.permissions,
-        "source": claims.source.as_str(),
-        "default_role": configured_default_role(state),
-    }))
+    to_value(UserRolesJson {
+        object: "user_roles".into(),
+        user_id: user_id.to_string(),
+        roles: claims.roles,
+        role_permissions: claims.permissions,
+        source: claims.source.as_str().into(),
+        default_role: configured_default_role(state),
+    })
 }
 
 async fn read_roles(State(state): State<AppState>, Path(id): Path<String>) -> Result<Response> {

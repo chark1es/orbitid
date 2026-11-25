@@ -409,8 +409,9 @@ pub async fn serialize_user_on(
     ))
 }
 
-/// Batch serializer for list endpoints: four relation queries plus the two
-/// role-claim queries, regardless of the number of users.
+/// Batch serializer for list endpoints: four relation queries plus the three
+/// role-claim queries (assignments, roles, permissions), regardless of the
+/// number of users.
 pub async fn serialize_users(
     state: &AppState,
     users: &[UserRow],

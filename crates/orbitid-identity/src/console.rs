@@ -15,15 +15,14 @@
 //! the proof of control. The secret key never opens the dashboard.
 
 use orbitid_core::error::{error_codes, OrbitError, Result};
-use orbitid_core::http::now;
 use orbitid_core::models::UserRow;
 use orbitid_core::state::AppState;
 use orbitid_platform::webhooks::emit_event_on;
 
-use crate::authorization::replace_user_roles;
 use crate::locks::lock_user_on;
 use crate::rbac::{DASHBOARD_ACCESS, OWNER_ROLE_KEY};
 use crate::serializers::{serialize_user_on, UserSerializeOptions};
+use crate::user_roles::add_system_grant_on;
 use crate::users::{
     after_user_created, create_user_on, emit_user_created_on, find_user_by_verified_email,
     get_user_by_id, CreateUserInput,
@@ -112,7 +111,9 @@ pub async fn create_owner(state: &AppState, input: &OwnerInput) -> Result<Option
     let user = create_user_on(state, &mut tx, &create).await?;
     emit_user_created_on(&mut tx, state, &user, &create).await?;
     lock_user_on(&mut tx, &user.id).await?;
-    replace_user_roles(&mut tx, &user.id, &[OWNER_ROLE_KEY.to_string()], now()).await?;
+    // Additive, like `grant_owner`: the owner still follows the instance
+    // default role for their custom roles.
+    add_system_grant_on(&mut tx, &user.id, OWNER_ROLE_KEY).await?;
     tx.commit().await?;
     after_user_created(state, &user, &create).await?;
     Ok(Some(user))
@@ -126,8 +127,8 @@ pub enum OwnerGrant {
     AlreadyOwner(UserRow),
 }
 
-/// Adds the Owner role to an existing account, keeping its other effective
-/// roles (an inherited instance default becomes an explicit assignment). The
+/// Adds the Owner role to an existing account, keeping its other roles and
+/// whether it follows the instance default role. The
 /// account is named by user id or by a *verified* email address, so an
 /// unverified address someone else added cannot be promoted.
 ///
@@ -174,17 +175,12 @@ pub async fn grant_owner(state: &AppState, account: &str) -> Result<OwnerGrant> 
             ),
         ));
     }
-    // The effective set, so an account inheriting the instance default keeps
-    // that role once the Owner role makes its assignment explicit.
-    let mut roles = crate::user_roles::role_claims_for_user_on(&mut tx, state, &user.id)
-        .await?
-        .roles;
-    if roles.iter().any(|role| role == OWNER_ROLE_KEY) {
+    // Additive: the other rows and the explicit-assignment marker are left
+    // alone, so an account that follows the instance default keeps following it.
+    if !add_system_grant_on(&mut tx, &user.id, OWNER_ROLE_KEY).await? {
         tx.rollback().await?;
         return Ok(OwnerGrant::AlreadyOwner(user));
     }
-    roles.push(OWNER_ROLE_KEY.to_string());
-    replace_user_roles(&mut tx, &user.id, &roles, now()).await?;
     let json = serialize_user_on(
         &mut tx,
         state,

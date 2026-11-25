@@ -12,15 +12,22 @@ import { Section } from "../shared/section";
 const sameSet = (a: string[], b: string[]) => [...a].sort().join("\n") === [...b].sort().join("\n");
 
 /** Where the effective roles come from, in words. */
-function sourceText(assignment: UserRolesJSON): string {
+function sourceText(assignment: UserRolesJSON, guest: boolean): string {
   if (assignment.source === "assigned") {
     return assignment.roles.length === 0
       ? "Assigned: this user explicitly has no instance roles, so the default role does not apply."
       : "Assigned by an operator. The default role does not apply.";
   }
+  if (guest) return "Guests don't inherit the default role. Saving makes these roles an explicit assignment.";
   return assignment.default_role
-    ? "Inherited from the default role. Assigning roles here replaces it."
-    : "No roles are assigned and no default role is set.";
+    ? "Follows the default role. Saving makes these roles an explicit assignment; this user will stop following the default."
+    : "No roles are assigned and no default role is set. Saving makes these roles an explicit assignment; this user will stop following the default.";
+}
+
+/** Chip text for the role source. Guests report `default` but hold nothing from it. */
+function sourceLabel(assignment: UserRolesJSON, guest: boolean): string {
+  if (assignment.source === "assigned") return "Assigned";
+  return guest ? "Guest: no default" : "Inherited from default";
 }
 
 /** Instance roles are assigned through an operator-only endpoint, never through editable metadata. */
@@ -45,6 +52,7 @@ export function UserRolesTab({ user }: { user: UserJSON }) {
   });
   const pending = save.isPending || reset.isPending;
   const dirty = !sameSet(selected, effective);
+  const guest = user.is_anonymous === true;
   const inherited = assignment?.source === "default";
   const defaultRole = assignment?.default_role ?? null;
   const loading = query.isLoading || assignmentQuery.isLoading;
@@ -54,11 +62,11 @@ export function UserRolesTab({ user }: { user: UserJSON }) {
     actions={<Button asChild variant="outline" size="sm"><Link to="/roles">Manage roles</Link></Button>}>
     {loading ? <TableSkeleton /> : error ? <ErrorAlert error={errorMessage(error)} onRetry={() => { void query.refetch(); void assignmentQuery.refetch(); }} /> : <div className="space-y-4">
       {assignment ? <div className="flex flex-wrap items-center gap-2 text-sm">
-        <MetaChip>{inherited ? "Inherited from default" : "Assigned"}</MetaChip>
-        <span className="text-muted-foreground">{sourceText(assignment)}</span>
+        <MetaChip>{sourceLabel(assignment, guest)}</MetaChip>
+        <span className="text-muted-foreground">{sourceText(assignment, guest)}</span>
       </div> : null}
       {roles.length === 0 ? <p className="text-sm text-muted-foreground">Create an instance role before assigning permissions to this user.</p> : roles.map((role) => {
-        const viaDefault = inherited && role.key === defaultRole && effective.includes(role.key);
+        const viaDefault = inherited && !guest && role.key === defaultRole && effective.includes(role.key);
         return <CheckboxRow key={role.id} label={viaDefault ? `${role.name} (default)` : role.name} description={role.key} disabled={pending} checked={selected.includes(role.key)}
           onCheckedChange={(checked) => setSelected((current) => checked ? [...current, role.key] : current.filter((key) => key !== role.key))} />;
       })}

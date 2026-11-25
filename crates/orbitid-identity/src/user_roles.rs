@@ -12,18 +12,23 @@
 //! `SessionJSON.user`, `GET /v1/users/{id}/roles`) goes through
 //! [`role_claims_for_user`] and friends, which resolve one **effective** set:
 //!
-//! - **Assigned**: the user has `user_roles` rows, or `users.instance_roles_assigned`
-//!   is true (an operator explicitly set the set, possibly to nothing). The
-//!   rows are the roles; the default plays no part.
+//! - **System grants** (`app:sys_owner`, `app:sys_admin` rows) always count and
+//!   never decide the source: console access is granted one account at a time
+//!   and is independent of the default.
+//! - **Assigned**: the user has custom (non-system) `user_roles` rows, or
+//!   `users.instance_roles_assigned` is true (an operator explicitly set the
+//!   set with `PUT`, possibly to nothing). Those rows are the custom roles; the
+//!   default plays no part.
 //! - **Default**: otherwise. A non-guest user holds the configured
 //!   `roles.defaultRole` when it names an existing custom `app:` role, and
 //!   nothing when no default is configured. Guests (`is_anonymous`) never
-//!   inherit it; they pick it up the moment they become a full account.
+//!   inherit it; they pick it up the moment they become a full account. A
+//!   guest, or an id with no user, reports `Default` while holding nothing.
 //!
 //! The default is resolved at read time and never copied into `user_roles`, so
 //! changing it applies to every inheriting user at their next token mint, and
 //! an explicit assignment always wins. [`reset_user_roles_on`] returns a user to
-//! the default.
+//! the default, keeping their system grants.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -106,6 +111,12 @@ fn default_role_eligible(key: &str) -> bool {
     role_scope(key) == "instance" && !key.starts_with(RESERVED_INSTANCE_KEY_PREFIX)
 }
 
+/// Seeded instance roles (`app:sys_*`): console grants, never inherited and
+/// never removed by a reset.
+pub fn system_grant_key(key: &str) -> bool {
+    key.starts_with(RESERVED_INSTANCE_KEY_PREFIX)
+}
+
 /// `(source, candidate keys)` per existing user, before role rows are checked.
 async fn sources_on(
     conn: &mut sqlx::PgConnection,
@@ -139,14 +150,20 @@ async fn sources_on(
     Ok(per_user
         .into_iter()
         .map(|(user_id, (flagged, anonymous, keys))| {
-            let resolved = if flagged || !keys.is_empty() {
-                (RoleSource::Assigned, keys)
-            } else if anonymous {
-                (RoleSource::Default, Vec::new())
+            // System grants are additive; only custom rows (or the explicit
+            // marker) decide whether the default applies.
+            let (mut effective, custom): (Vec<String>, Vec<String>) =
+                keys.into_iter().partition(|key| system_grant_key(key));
+            let source = if flagged || !custom.is_empty() {
+                effective.extend(custom);
+                RoleSource::Assigned
             } else {
-                (RoleSource::Default, default_role.iter().cloned().collect())
+                if !anonymous {
+                    effective.extend(default_role.iter().cloned());
+                }
+                RoleSource::Default
             };
-            (user_id, resolved)
+            (user_id, (source, effective))
         })
         .collect())
 }
@@ -306,13 +323,16 @@ pub async fn set_user_roles_on(
     Ok(unique)
 }
 
-/// Drops a user's explicit instance-role assignment so they inherit the
-/// instance default again. Same locking as [`set_user_roles_on`]: the user row
-/// (rank 3) before its `user_roles` rows (rank 10).
+/// Drops a user's explicit custom instance-role assignment so they inherit the
+/// instance default again. System grants (`app:sys_*`, console access) are
+/// kept, so resetting the only owner never leaves the console unclaimed. Same
+/// locking as [`set_user_roles_on`]: the user row (rank 3) before its
+/// `user_roles` rows (rank 10).
 pub async fn reset_user_roles_on(conn: &mut sqlx::PgConnection, user_id: &str) -> Result<()> {
     crate::locks::lock_user_on(conn, user_id).await?;
-    sqlx::query("DELETE FROM user_roles WHERE user_id = $1")
+    sqlx::query("DELETE FROM user_roles WHERE user_id = $1 AND left(role_key, 8) <> $2")
         .bind(user_id)
+        .bind(RESERVED_INSTANCE_KEY_PREFIX)
         .execute(&mut *conn)
         .await?;
     sqlx::query("UPDATE users SET instance_roles_assigned = false WHERE id = $1")
@@ -320,6 +340,30 @@ pub async fn reset_user_roles_on(conn: &mut sqlx::PgConnection, user_id: &str) -
         .execute(&mut *conn)
         .await?;
     Ok(())
+}
+
+/// Adds one system grant (`app:sys_*`) to a user, keeping every other row and
+/// leaving the explicit-assignment marker alone: a console grant is additive
+/// and never pins the user's custom roles, so a user who follows the default
+/// keeps following it. Returns whether a row was inserted. The caller holds the
+/// user row lock (rank 3).
+pub async fn add_system_grant_on(
+    conn: &mut sqlx::PgConnection,
+    user_id: &str,
+    role_key: &str,
+) -> Result<bool> {
+    debug_assert!(system_grant_key(role_key));
+    let inserted = sqlx::query(
+        "INSERT INTO user_roles (user_id, role_key, created_at, updated_at) \
+         VALUES ($1, $2, $3, $3) ON CONFLICT DO NOTHING",
+    )
+    .bind(user_id)
+    .bind(role_key)
+    .bind(now())
+    .execute(&mut *conn)
+    .await?
+    .rows_affected();
+    Ok(inserted > 0)
 }
 
 /// How many users hold `role_key` through an explicit assignment (role

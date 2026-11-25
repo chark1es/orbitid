@@ -92,8 +92,15 @@ impl std::fmt::Debug for SignInTokenJson {
 pub struct UserRolesJson {
     pub object: String,
     pub user_id: String,
+    /// Effective instance role keys, sorted.
     pub roles: Vec<String>,
     pub role_permissions: Vec<String>,
+    /// `"assigned"` (an operator set the custom roles, possibly to none) or
+    /// `"default"` (the instance default applies). Guests report `"default"`
+    /// while holding no custom role.
+    pub source: String,
+    /// The configured instance default role (`roles.defaultRole`).
+    pub default_role: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
