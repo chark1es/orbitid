@@ -445,11 +445,13 @@ pub async fn decide_device_code(
     }
     // A user who may not use this organization-owned application can neither
     // approve nor deny it: a deny would hand them the application's details and
-    // cancel a request meant for someone else. The code stays `pending`, so the
-    // person it was meant for can still decide; the caller learns why. Checked
-    // under the application `FOR SHARE` (after the user key-share on approval),
-    // before the device row: application deletion locks the application first
-    // and cascades into it.
+    // cancel a request meant for someone else in one step. The code stays
+    // `pending`, so the person it was meant for can still decide, within the
+    // code's attempt budget (spending it burns the code; see routes/device.rs);
+    // the caller learns why. Checked under the application `FOR SHARE` (after
+    // the user key-share on approval; a denial writes no user foreign key and
+    // takes none), before the device row: application deletion locks the
+    // application first and cascades into it.
     if !orbitid_identity::app_access::user_may_use_application_on(
         &mut tx,
         &application.id,

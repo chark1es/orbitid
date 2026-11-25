@@ -18,7 +18,7 @@ Everyone else is refused wherever a grant or token would be issued:
 
 | Where | What a refused user gets |
 |---|---|
-| `GET /oauth/authorize` | redirect to the client with `error=access_denied`, right after `client_id`, `redirect_uri` and `response_mode` are checked, so a signed-in non-member learns nothing about the application's scopes or PKCE policy. A request that may still switch accounts (`prompt=login`/`select_account`, or a `login_hint` naming a different existing account) is checked after sign-in instead; such requests, like signed-out ones, can still see scope and PKCE errors first |
+| `GET /oauth/authorize` | redirect to the client with `error=access_denied`, right after `client_id`, `redirect_uri` and `response_mode` are checked, so a signed-in non-member learns nothing about the application's scopes or PKCE policy. A request that may still switch accounts (`prompt=login`/`select_account`, or a `login_hint` naming a different existing account) is checked after sign-in instead; such requests, like signed-out ones, can still see scope and PKCE errors first. As for every application, a signed-in caller can tell from the redirect whether a `login_hint` names another existing account (sign-in) or not; that is how account switching has always worked and is not gated by enumeration protection |
 | `GET /oauth/consent_info` | `404 resource_not_found`, the same answer as an unknown `client_id` |
 | `POST /oauth/consent` | a `redirect_url` carrying `error=access_denied` and no code (checked before the scopes) |
 | `GET /oauth/device`, `GET /v1/client/oauth/device` | a "no access" page / `403 not_allowed_access`, without the application's name or scopes |
@@ -83,7 +83,8 @@ if it should stay closed.
 ## Locking
 
 The rule is `orbitid_identity::app_access`. Every issuer (code exchange, refresh, device approval and poll, consent)
-checks it with `user_may_use_application_on` **after** its user key-share (rank 3): it reads the owner under
+checks it with `user_may_use_application_on` **after** its user key-share (rank 3); a device denial writes no user
+foreign key, so it takes the application `FOR SHARE` without one, then the device row: it reads the owner under
 `FOR SHARE` on the application row (rank 10a in [LOCK_ORDER.md](LOCK_ORDER.md)) and the membership and access-grant
 rows plainly. `oauth_application_access_grants` rows rank after their application row (10a): every writer takes the
 application first and never locks a grant row ahead of it. The changes that narrow access meet issuers on one of

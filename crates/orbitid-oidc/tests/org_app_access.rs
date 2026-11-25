@@ -942,6 +942,40 @@ async fn a_non_member_learns_nothing_about_the_applications_configuration() {
         .await;
         assert_eq!(hinted["error"], "access_denied", "{hint}");
     }
+    // A well-formed request whose hint names a different existing account (here
+    // a member) still defers the refusal, so the outsider is sent to sign in as
+    // that account instead of being told no.
+    let challenge = challenge_for(&pkce_verifier());
+    let query = url::form_urlencoded::Serializer::new(String::new())
+        .extend_pairs([
+            ("client_id", app["client_id"].as_str().unwrap()),
+            ("redirect_uri", REDIRECT_URI),
+            ("response_type", "code"),
+            ("scope", "openid"),
+            ("state", "s1"),
+            ("code_challenge", challenge.as_str()),
+            ("code_challenge_method", "S256"),
+            ("login_hint", "owner@acme.test"),
+        ])
+        .finish();
+    let switching = send(
+        &h.router,
+        Method::GET,
+        &format!("/oauth/authorize?{query}"),
+        Body::empty(),
+        &[("cookie", &outsider.cookie)],
+    )
+    .await;
+    let location = switching
+        .headers
+        .get("location")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        !location.contains("error=access_denied") && location.contains("login_hint"),
+        "{location}"
+    );
     let member_query = authorize(
         &h,
         &owner,

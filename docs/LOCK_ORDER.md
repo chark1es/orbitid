@@ -277,7 +277,7 @@ in this pass.
 | `oidc tokens` (code exchange) | user key-share (`key_share_active_user_on`, banned and organization authority re-checked under it)→code grant row→new grants (family) | OK (fixed) |
 | `oidc refresh` | user key-share (banned and organization authority re-checked)→family advisory→oauth_grants | OK (fixed) |
 | `oidc consent` (`record_consent_on` + code issue) | user key-share→consent row→grant insert | OK (fixed) |
-| `oidc device` (approval, token poll) | user key-share (the poll re-checks the authority)→device row→grant inserts | OK (fixed) |
+| `oidc device` (approve, deny, poll) | user key-share (not on deny)→app `FOR SHARE`→device row→grants | OK (fixed) |
 | `oidc revocation`, `api_keys` | advisory→oauth_grants / one table | OK |
 | `credentials::keys` | signing-key advisory→signing_keys | OK |
 | `core::settings` | instance only | OK |

@@ -166,13 +166,18 @@ async fn authorize(
             .split_whitespace()
             .any(|value| value == "login" || value == "select_account")
     });
-    let hint_switches = match (
+    // Resolved once for a signed-in caller and reused by the hint check below.
+    let hinted_user = match (
         caller_id.as_deref(),
         get("login_hint").filter(|hint| !hint.is_empty()),
     ) {
-        (Some(caller_id), Some(hint)) => get_user_by_identifier(&state, &hint)
+        (Some(_), Some(hint)) => get_user_by_identifier(&state, &hint)
             .await?
-            .is_some_and(|(hinted, _)| hinted.id != caller_id),
+            .map(|(hinted, _)| hinted),
+        _ => None,
+    };
+    let hint_switches = match (caller_id.as_deref(), hinted_user.as_ref()) {
+        (Some(caller_id), Some(hinted)) => hinted.id != caller_id,
         _ => false,
     };
     let may_switch_account = prompts_switch || hint_switches;
@@ -283,7 +288,7 @@ async fn authorize(
     // A hint that names a different account means the current session is not
     // the one the client wants.
     if let Some(hint) = login_hint.as_deref().filter(|value| !value.is_empty()) {
-        if let Some((hinted, _)) = get_user_by_identifier(&state, hint).await? {
+        if let Some(hinted) = hinted_user.as_ref() {
             if hinted.id != user_id {
                 if has_prompt("none") {
                     return Ok(fail(
