@@ -278,7 +278,6 @@ keys.
 | `footerActionLink` | Link of the footer action. |
 | `footerPages` | Terms, privacy and help links. |
 | `footerPagesLink` | One terms, privacy or help link. |
-| `securedBy` | The "Secured by OrbitID" line. |
 | `socialButtons` | Group of social sign-in buttons. |
 | `socialButtonsBlockButton` | Full-width social button. |
 | `socialButtonsBlockButtonText` | Label inside a full-width social button. |
@@ -342,7 +341,6 @@ keys.
 | `showFooterPages` | `true` | `false` hides the help, privacy and terms links. |
 | `helpPageUrl` | none | Adds a Help link to the card footer. |
 | `privacyPageUrl` / `termsPageUrl` | instance URLs | Override the instance's privacy and terms links. |
-| `showBranding` | instance setting | `false` hides "Secured by OrbitID"; `true` shows it. |
 | `showDevelopmentModeWarning` | `true` | `false` hides the development-mode banner. |
 | `unsafe_disableDevelopmentModeWarnings` | `false` | Older name: `true` is the same as `showDevelopmentModeWarning: false`. |
 | `animations` | `true` | `false` turns off transitions and entrance animations inside the components (spinners keep turning). |
@@ -418,8 +416,7 @@ function PlanBadge() {
 
 ## Instance branding
 
-**Settings → Appearance** in the dashboard stores the instance's primary color, default theme and the "Secured by
-OrbitID" switch, and every prebuilt component reads them (step 2 of the precedence). Any `variables.colorPrimary`
+**Settings → Appearance** in the dashboard stores the instance's primary color and default theme, and every prebuilt component reads them (step 2 of the precedence). Any `variables.colorPrimary`
 replaces the branded color. A dark brand color is not used on a dark surface, where it would vanish; the theme's
 primary takes over. The same page has a variables playground with a live preview that writes an `appearance`
 snippet to copy into your app.

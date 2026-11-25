@@ -46,7 +46,6 @@ impl Default for SecuritySettings {
 #[serde(rename_all = "camelCase", default)]
 pub struct BrandingSettings {
     pub primary_color: String,
-    pub show_powered_by: bool,
     pub theme: Theme,
 }
 
@@ -54,7 +53,6 @@ impl Default for BrandingSettings {
     fn default() -> Self {
         Self {
             primary_color: "#2b2522".into(),
-            show_powered_by: true,
             theme: Theme::System,
         }
     }

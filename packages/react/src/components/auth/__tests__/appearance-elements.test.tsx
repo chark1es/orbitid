@@ -148,7 +148,7 @@ describe("elements are applied with className and style", () => {
       "main", "form", "formField", "formFieldLabel", "label", "formFieldInput", "input", "formButtonPrimary", "button",
       "buttonPrimary", "buttonOutline", "buttonLink", "socialButtons", "socialButtonsBlockButton",
       "socialButtonsBlockButtonText", "socialButtonsProviderIcon", "dividerRow", "dividerLine", "dividerText", "separator", "footer", "cardFooter",
-      "footerAction", "footerActionText", "footerActionLink", "formButtonSecondary", "securedBy", "footerPages",
+      "footerAction", "footerActionText", "footerActionLink", "formButtonSecondary", "footerPages",
       "footerPagesLink",
     ]) {
       expectApplied(key);

@@ -78,8 +78,6 @@ export interface AppearanceLayout {
   showOptionalFields?: boolean;
   /** Show the terms, privacy and help links in the card footer. Default `true`. */
   showFooterPages?: boolean;
-  /** Show the "Secured by OrbitID" line. Defaults to the instance's branding setting. */
-  showBranding?: boolean;
   /** Show the development-mode banner. Default `true` while the instance is in development mode. */
   showDevelopmentModeWarning?: boolean;
   termsPageUrl?: string;

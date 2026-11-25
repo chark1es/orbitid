@@ -89,7 +89,6 @@ export const COMPONENT_ELEMENTS = {
   footerActionLink: "Link of the footer action.",
   footerPages: "Terms, privacy and help links.",
   footerPagesLink: "One terms, privacy or help link.",
-  securedBy: "The \"Secured by OrbitID\" line.",
   socialButtons: "Group of social sign-in buttons.",
   socialButtonsBlockButton: "Full-width social button.",
   socialButtonsBlockButtonText: "Label inside a full-width social button.",

@@ -14,7 +14,7 @@ import {
 import { useAuthAppearance, useComponentElements } from "./appearance";
 import { ComponentRoot } from "./component-root";
 import { useAuthRuntime } from "./w6";
-import { FooterPages, SecuredByOrbitID } from "./form-error";
+import { FooterPages } from "./form-error";
 
 export interface AuthCardProps {
   title: string;
@@ -31,7 +31,7 @@ export interface AuthCardProps {
 
 /**
  * The card every auth flow renders in: logo, title and subtitle on top, the step in the middle, and a quiet footer
- * band with the instance's pages and the "Secured by" line. Branding, theme and `appearance` come from
+ * band with the instance's pages. Branding, theme and `appearance` come from
  * `ComponentRoot`.
  */
 export function AuthCard({
@@ -120,7 +120,6 @@ export function AuthCard({
         </CardContent>
         <CardFooter {...ep("footer", "flex flex-col items-center gap-2.5 border-t bg-muted/60 px-8 py-4 empty:hidden")}>
           {footer}
-          <SecuredByOrbitID />
           <FooterPages />
         </CardFooter>
       </Card>

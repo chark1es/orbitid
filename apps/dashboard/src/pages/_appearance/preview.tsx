@@ -1,6 +1,5 @@
 import type { CSSProperties } from "react";
-import { Button, Card, CardContent, CardFooter, CardHeader, Input, Label, OrbitMark, Separator, cn } from "@orbitid/ui";
-import { LockIcon } from "lucide-react";
+import { Button, Card, CardContent, CardHeader, Input, Label, OrbitMark, Separator, cn } from "@orbitid/ui";
 import { resolveAppearanceLayers, resolveElementClass } from "@orbitid/react";
 import { PRESETS, draftVariables, type AppearanceDraft } from "./draft";
 
@@ -14,14 +13,12 @@ export function BrandingPreview({
   scheme,
   appName,
   brandFill,
-  showPoweredBy,
   draft,
 }: {
   scheme: PreviewScheme;
   appName: string;
   /** The brand color as the components would use it (dark brand colors fall back on a dark surface). */
   brandFill: string | null;
-  showPoweredBy: boolean;
   draft: AppearanceDraft;
 }) {
   const preset = PRESETS[draft.preset];
@@ -73,14 +70,6 @@ export function BrandingPreview({
             No account? <span className="font-medium text-primary">Sign up</span>
           </p>
         </CardContent>
-        {showPoweredBy ? (
-          <CardFooter className="justify-center border-t bg-muted/60 px-7 py-3.5">
-            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <LockIcon className="size-3" aria-hidden />
-              Secured by OrbitID
-            </p>
-          </CardFooter>
-        ) : null}
       </Card>
     </div>
   );

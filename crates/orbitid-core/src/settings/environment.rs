@@ -345,7 +345,8 @@ pub fn build_environment(
                 crate::settings::types::Theme::System => "system",
             }
             .to_string(),
-            branded: st.branding.show_powered_by,
+            // OrbitID shows no attribution line on its components.
+            branded: false,
             captcha_enabled: st.security.captcha_provider != CaptchaProvider::None
                 && !st.security.captcha_secret.is_empty(),
             captcha_provider: match st.security.captcha_provider {

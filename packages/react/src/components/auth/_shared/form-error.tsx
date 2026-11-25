@@ -1,4 +1,4 @@
-import { AlertCircleIcon, LockIcon } from "lucide-react";
+import { AlertCircleIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@orbitid/ui";
 import { useComponentElements } from "./appearance";
 import { useAuthRuntime } from "./w6";
@@ -37,22 +37,6 @@ export function FormError({ message, title, className, onRetry }: FormErrorProps
         ) : null}
       </AlertDescription>
     </Alert>
-  );
-}
-
-/** "Secured by OrbitID". Follows the instance's branding setting unless `layout.showBranding` says otherwise. */
-export function SecuredByOrbitID({ className }: { className?: string }) {
-  const { environment, t } = useAuthRuntime();
-  const { ep, appearance } = useComponentElements();
-  const show = appearance.layout.showBranding ?? environment.app.branded;
-  if (!show) return null;
-  return (
-    <p
-      {...ep("securedBy", "flex items-center justify-center gap-1.5 text-xs text-muted-foreground", className)}
-    >
-      <LockIcon className="size-3" aria-hidden="true" />
-      {t("footer.securedBy")}
-    </p>
   );
 }
 

@@ -83,13 +83,12 @@ describe("appearance.layout", () => {
     expect(card().querySelector(".orbitid-footerPages")).toBeNull();
   });
 
-  it("hides the branding line and the development banner on request", async () => {
+  it("shows no OrbitID branding line, and hides the development banner on request", async () => {
     const defaults = await renderSignIn({});
-    expect(card().querySelector(".orbitid-securedBy")).not.toBeNull();
+    expect(card().textContent).not.toMatch(/Secured by|Powered by/);
     expect(card().querySelector(".orbitid-developmentModeBanner")).not.toBeNull();
     defaults.unmount();
-    await renderSignIn({ showBranding: false, showDevelopmentModeWarning: false });
-    expect(card().querySelector(".orbitid-securedBy")).toBeNull();
+    await renderSignIn({ showDevelopmentModeWarning: false });
     expect(card().querySelector(".orbitid-developmentModeBanner")).toBeNull();
   });
 

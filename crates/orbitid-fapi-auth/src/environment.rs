@@ -176,7 +176,7 @@ pub fn build_environment(state: &AppState) -> Value {
             "privacy_url": settings.application.privacy_url,
             "primary_color": settings.branding.primary_color,
             "theme": settings.branding.theme,
-            "branded": settings.branding.show_powered_by,
+            "branded": false,
             "captcha_enabled": settings.security.captcha_provider
                 != orbitid_core::settings::types::CaptchaProvider::None
                 && !settings.security.captcha_secret.is_empty(),
