@@ -156,8 +156,8 @@ Who sees which link:
 | Organization | `GET /v1/client/organizations/{id}/billing` → `{ object: "organization_billing", organization_id, portal_url }` | members with `org:sys_billing:manage`; other members get `403 org_permission_required`, non-members `404` |
 | OAuth application | `billing_portal_url` on each entry of `GET /v1/client/me/oauth_applications` | every user who may use the application |
 
-The Backend API returns `billing_portal_url` on `Organization` and `OAuthApplication`. The Frontend API organization
-object never includes it.
+The Backend API returns `billing_portal_url` on `Organization` and `OAuthApplication`, and `organization.*` webhook
+payloads carry it like the other Backend API fields. The Frontend API organization object never includes it.
 
 ## Frontend API and SDK
 
