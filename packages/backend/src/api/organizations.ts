@@ -27,6 +27,8 @@ export interface CreateOrganizationParams {
   maxAllowedMemberships?: number;
   publicMetadata?: Metadata;
   privateMetadata?: Metadata;
+  /** External billing portal: an absolute https URL. */
+  billingPortalUrl?: string | null;
 }
 
 export interface CreateOrganizationInvitationParams {
@@ -68,7 +70,8 @@ export function createOrganizationsApi(http: BackendHttp) {
     getOrganization(organizationId: string) {
       return http.get<Organization>(`/v1/organizations/${organizationId}`);
     },
-    updateOrganization(organizationId: string, params: { name?: string; slug?: string; maxAllowedMemberships?: number; publicMetadata?: Metadata; privateMetadata?: Metadata; adminDeleteEnabled?: boolean }) {
+    /** `billingPortalUrl` must be an absolute https URL; `null` clears it. */
+    updateOrganization(organizationId: string, params: { name?: string; slug?: string; maxAllowedMemberships?: number; publicMetadata?: Metadata; privateMetadata?: Metadata; adminDeleteEnabled?: boolean; billingPortalUrl?: string | null }) {
       return http.patch<Organization>(`/v1/organizations/${organizationId}`, { body: params });
     },
     deleteOrganization(organizationId: string) {

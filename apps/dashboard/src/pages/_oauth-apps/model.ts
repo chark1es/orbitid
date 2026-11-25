@@ -24,6 +24,10 @@ export interface AppForm {
   organizationId: string;
   /** The owner when the sheet opened, so the form can warn before access narrows. */
   originalOrganizationId: string;
+  /** External billing portal shown to the application's users; empty for none. */
+  billingPortalUrl: string;
+  /** The billing portal when the sheet opened; the save sends the field only when it changed. */
+  originalBillingPortalUrl: string;
 }
 
 /** Select value standing for "no owning organization" (Radix Select items cannot use an empty value). */
@@ -44,6 +48,8 @@ export const EMPTY_FORM: AppForm = {
   groupsClaim: DEFAULT_OAUTH_GROUPS_CLAIM,
   organizationId: "",
   originalOrganizationId: "",
+  billingPortalUrl: "",
+  originalBillingPortalUrl: "",
 };
 
 export function numberFrom(value: string): number {

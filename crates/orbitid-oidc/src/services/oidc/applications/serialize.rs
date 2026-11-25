@@ -40,6 +40,7 @@ pub fn serialize_application(
         id_token_lifetime_seconds: row.id_token_lifetime_seconds,
         groups_claim: row.groups_claim.clone(),
         organization_id: row.organization_id.clone(),
+        billing_portal_url: row.billing_portal_url.clone(),
         created_at: row.created_at,
         updated_at: row.updated_at,
     }
@@ -96,6 +97,8 @@ pub struct CreateApplicationInput {
     pub groups_claim: Option<String>,
     /// Owning organization; `None` creates an instance-wide application.
     pub organization_id: Option<String>,
+    /// External billing portal, already validated (`validate_billing_portal_url`).
+    pub billing_portal_url: Option<String>,
 }
 
 pub fn clamp_lifetime(value: i64, bounds: (i64, i64)) -> i64 {
@@ -160,6 +163,7 @@ pub async fn create_application(
         organization_id: input.organization_id,
         created_at: now,
         updated_at: now,
+        billing_portal_url: input.billing_portal_url,
     };
     let mut tx = state.pool.begin().await?;
     let outcome = async {
@@ -206,8 +210,8 @@ pub(super) async fn insert_application_on(
         "INSERT INTO oauth_applications (id, name, client_id, client_secret_hash, is_public, \
          redirect_uris, post_logout_redirect_uris, scopes, consent_screen_enabled, pkce_required, \
          access_token_lifetime_seconds, refresh_token_lifetime_seconds, id_token_lifetime_seconds, \
-         groups_claim, organization_id, created_at, updated_at) \
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)",
+         groups_claim, organization_id, created_at, updated_at, billing_portal_url) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)",
     )
     .bind(&row.id)
     .bind(&row.name)
@@ -226,6 +230,7 @@ pub(super) async fn insert_application_on(
     .bind(&row.organization_id)
     .bind(row.created_at)
     .bind(row.updated_at)
+    .bind(&row.billing_portal_url)
     .execute(&mut *conn)
     .await?;
     Ok(())

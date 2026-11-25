@@ -5,6 +5,7 @@ export { SignUp } from "./sign-up";
 export { UserButton } from "./user-button";
 export type { UserButtonActionProps, UserButtonLinkProps } from "./user-button";
 export { UserProfile } from "./user-profile";
+export { USER_PROFILE_PAGES } from "./_shared/types";
 export type { UserProfilePageProps, UserProfileLinkProps } from "./user-profile";
 export { UserVerificationModal } from "./user-verification-modal";
 export { Waitlist } from "./waitlist";

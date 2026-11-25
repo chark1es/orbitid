@@ -157,6 +157,9 @@ describe("organizations", () => {
       if (key.endsWith("/membership_requests/orgmreq_1/accept")) return { body: { response: requestJSON("accepted") } };
       if (key.endsWith("/membership_requests/orgmreq_1/reject")) return { body: { response: requestJSON("rejected") } };
       if (key === "GET /v1/client/organizations/org_1/roles") return { body: { response: [roleJSON()] } };
+      if (key === "GET /v1/client/organizations/org_1/billing") {
+        return { body: { response: { object: "organization_billing", organization_id: "org_1", portal_url: "https://pay.example.com/acme" } } };
+      }
       if (key === "GET /v1/client/me/organization_memberships") return { body: { response: { data: [membershipJSON()], total_count: 2 } } };
       if (key === "DELETE /v1/client/me/organization_memberships/org_1") return { body: { response: { object: "organization_membership", id: "orgmem_1", deleted: true } } };
       if (key === "GET /v1/client/me/organization_invitations") {
@@ -228,6 +231,9 @@ describe("organizations", () => {
     const roles = await organization.getRoles();
     expect(roles[0]?.key).toBe("org:admin");
     expect(roles[0]?.permissions[0]?.key).toBe("org:sys_memberships:manage");
+
+    const billing = await organization.getBilling();
+    expect(billing).toEqual({ organizationId: "org_1", portalUrl: "https://pay.example.com/acme" });
     orbit.dispose();
   });
 

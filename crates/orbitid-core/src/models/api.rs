@@ -66,6 +66,9 @@ pub struct OauthApplicationRow {
     pub organization_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Operator-configured external billing portal (migration 0021).
+    #[sqlx(default)]
+    pub billing_portal_url: Option<String>,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]

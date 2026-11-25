@@ -92,6 +92,23 @@ mount together share one in-flight request, and a response is reused for a few s
 page issue each GET once. `revalidate()` bypasses the cache and replaces the current page;
 creating, accepting, leaving or updating an organization invalidates the affected entries.
 
+## Account pages
+
+`<UserProfile>` and `<OrganizationProfile>` take `Page`/`Link` children: add pages, reorder or hide the
+built-in ones, or replace a built-in page's content, for example to put your billing UI on the Billing page.
+`<UserButton>` and `<OrganizationSwitcher>` pass the same children to the dialogs they open. See
+[docs/ACCOUNT_PAGES.md](../../docs/ACCOUNT_PAGES.md).
+
+```tsx
+<UserProfile>
+  <UserProfile.Page label="billing">
+    <MyBillingPanel />
+  </UserProfile.Page>
+  <UserProfile.Page label="security" />
+  <UserProfile.Link label="Help" url="https://help.example.com" />
+</UserProfile>
+```
+
 ## Control components
 
 `<SignedIn>`, `<SignedOut>`, `<Protect role permission feature condition fallback>`,

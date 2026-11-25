@@ -168,6 +168,9 @@ struct CreateApplicationBody {
     groups_claim: Option<String>,
     #[serde(default)]
     organization_id: Option<String>,
+    /// External billing portal (absolute https URL); `null` or omitted for none.
+    #[serde(default, deserialize_with = "nullable_string")]
+    billing_portal_url: Option<Option<String>>,
 }
 
 async fn create(
@@ -198,6 +201,14 @@ async fn create(
     )?;
     check_groups_claim(body.groups_claim.as_ref())?;
     check_owner(body.organization_id.as_deref())?;
+    let billing_portal_url = orbitid_identity::billing::validate_billing_portal_url(
+        &state,
+        body.billing_portal_url
+            .as_ref()
+            .and_then(|url| url.as_deref()),
+        "billing_portal_url",
+    )
+    .await?;
     let (row, client_secret) = create_application(
         &state,
         CreateApplicationInput {
@@ -213,6 +224,7 @@ async fn create(
             id_token_lifetime_seconds: body.id_token_lifetime_seconds,
             groups_claim: body.groups_claim,
             organization_id: body.organization_id,
+            billing_portal_url,
         },
     )
     .await?;
@@ -288,6 +300,9 @@ struct UpdateApplicationBody {
     groups_claim: Option<String>,
     #[serde(default, deserialize_with = "nullable_string")]
     organization_id: Option<Option<String>>,
+    /// `null` or `""` clears the billing portal; omitted leaves it unchanged.
+    #[serde(default, deserialize_with = "nullable_string")]
+    billing_portal_url: Option<Option<String>>,
 }
 
 async fn update(
@@ -307,7 +322,8 @@ async fn update(
         && body.refresh_token_lifetime_seconds.is_none()
         && body.id_token_lifetime_seconds.is_none()
         && body.groups_claim.is_none()
-        && body.organization_id.is_none();
+        && body.organization_id.is_none()
+        && body.billing_portal_url.is_none();
     if empty {
         return Err(unprocessable("body", "at least one field is required"));
     }
@@ -340,6 +356,17 @@ async fn update(
             .as_ref()
             .and_then(|owner| owner.as_deref()),
     )?;
+    let billing_portal_url = match &body.billing_portal_url {
+        Some(url) => Some(
+            orbitid_identity::billing::validate_billing_portal_url(
+                &state,
+                url.as_deref(),
+                "billing_portal_url",
+            )
+            .await?,
+        ),
+        None => None,
+    };
     let (updated, effects) = update_application_with_effects(
         &state,
         &row,
@@ -355,6 +382,7 @@ async fn update(
             id_token_lifetime_seconds: body.id_token_lifetime_seconds,
             groups_claim: body.groups_claim,
             organization_id: body.organization_id,
+            billing_portal_url,
         },
     )
     .await?;

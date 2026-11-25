@@ -8,6 +8,7 @@ import { oneTimeSecret, unwrapList } from "../_config/data";
 import { errorMessage, isHttpUrl } from "../_config/settings";
 import { useSettingsEditor } from "../_config/use-settings";
 import { type AppForm, EMPTY_FORM, LIFETIME_LIMITS, uniqueScopes } from "./model";
+import { billingPortalUrlError, billingPortalUrlValue } from "../../lib/billing";
 
 export interface OidcDiscovery {
   issuer: string;
@@ -71,6 +72,8 @@ export function useOAuthApps() {
       groupsClaim: application.groups_claim,
       organizationId: application.organization_id ?? "",
       originalOrganizationId: application.organization_id ?? "",
+      billingPortalUrl: application.billing_portal_url ?? "",
+      originalBillingPortalUrl: application.billing_portal_url ?? "",
     });
     setSheetOpen(true);
   };
@@ -84,6 +87,8 @@ export function useOAuthApps() {
   if (logoutUris.some((uri) => !isHttpUrl(uri))) formErrors.push("Every post-logout redirect URI must be an absolute http(s) URL.");
   if (form.publicClient && !form.pkceRequired) formErrors.push("Public clients must require PKCE (S256).");
   if (!form.scopes.trim()) formErrors.push("At least one scope is required.");
+  const billingError = billingPortalUrlError(form.billingPortalUrl);
+  if (billingError) formErrors.push(billingError);
   for (const [label, value, bounds] of [
     ["Access token lifetime", form.accessTokenLifetimeSeconds, LIFETIME_LIMITS.access],
     ["Refresh token lifetime", form.refreshTokenLifetimeSeconds, LIFETIME_LIMITS.refresh],
@@ -124,6 +129,9 @@ export function useOAuthApps() {
       // Send the owner only when the operator chose one or changed it (`null` makes it instance-wide), so saving
       // other fields never overwrites an owner someone else changed meanwhile.
       if (form.organizationId !== form.originalOrganizationId) body.organization_id = form.organizationId || null;
+      // The billing portal follows the same rule (`null` clears it).
+      const billingPortalUrl = billingPortalUrlValue(form.billingPortalUrl);
+      if (billingPortalUrl !== billingPortalUrlValue(form.originalBillingPortalUrl)) body.billing_portal_url = billingPortalUrl;
       const response = await api<unknown>(form.id ? "PATCH" : "POST", form.id ? `/oauth_applications/${form.id}` : "/oauth_applications", body);
       await query.refetch();
       setSheetOpen(false);

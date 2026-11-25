@@ -17,6 +17,27 @@ export const componentProfileStrings = {
       profile: "Profile",
       security: "Security",
       organization: "Organizations",
+      apps: "Apps",
+      billing: "Billing",
+    },
+    organizations: {
+      title: "Organizations",
+      description: "Organizations you belong to, and your role in each.",
+      empty: "You are not a member of any organization.",
+    },
+    apps: {
+      title: "Apps",
+      description: "Applications you can sign in to with this account.",
+      empty: "There are no applications to show.",
+      accessInstance: "Available to every account",
+      accessMembership: "Through your membership in {{organization}}",
+      accessGrant: "Access granted by an administrator ({{organization}})",
+    },
+    billing: {
+      title: "Billing",
+      description: "Manage billing for the applications you use.",
+      empty: "None of your applications has billing to manage.",
+      manage: "Manage billing",
     },
     profile: {
       title: "Profile",

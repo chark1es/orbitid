@@ -132,7 +132,8 @@ export function createOAuthApplicationsApi(http: BackendHttp) {
       return http.get<OAuthApplication>(`/v1/oauth_applications/${applicationId}`);
     },
     /** `organizationId` makes the application organization-owned: only its members and granted users may use it. */
-    createOAuthApplication(params: { name: string; redirectUris: string[]; scopes?: string; public?: boolean; consentScreenEnabled?: boolean; pkceRequired?: boolean; organizationId?: string }) {
+    /** `billingPortalUrl` (an absolute https URL) is shown to the application's users on their account page. */
+    createOAuthApplication(params: { name: string; redirectUris: string[]; scopes?: string; public?: boolean; consentScreenEnabled?: boolean; pkceRequired?: boolean; organizationId?: string; billingPortalUrl?: string | null }) {
       return http.post<OAuthApplication>("/v1/oauth_applications", { body: params });
     },
     updateOAuthApplication(applicationId: string, params: Record<string, unknown>) {

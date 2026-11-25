@@ -12,6 +12,7 @@ import type { OrganizationJSON } from "@orbitid/shared";
 import { api } from "../../lib/api";
 import { errorMessage } from "../../lib/errors";
 import { uploadOrganizationLogo } from "../../lib/uploads";
+import { billingPortalUrlError, billingPortalUrlValue } from "../../lib/billing";
 import { UserAvatar } from "../shared/user-avatar";
 import { ConfirmDialog } from "../shared/confirm-dialog";
 import { Panel, Section } from "../shared/section";
@@ -22,6 +23,11 @@ export function OrganizationSettingsTab({ org, onChanged }: { org: OrganizationJ
   const [slug, setSlug] = useState(org.slug);
   const [maxMemberships, setMaxMemberships] = useState(String(org.max_allowed_memberships));
   const [adminDelete, setAdminDelete] = useState(org.admin_delete_enabled);
+  const savedBillingUrl = org.billing_portal_url ?? "";
+  const [billingUrl, setBillingUrl] = useState(savedBillingUrl);
+  const billingError = billingPortalUrlError(billingUrl);
+  // Compared normalized (trimmed, empty = none), so stray whitespace is neither a change nor a no-op save.
+  const billingChanged = billingPortalUrlValue(billingUrl) !== billingPortalUrlValue(savedBillingUrl);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -31,7 +37,8 @@ export function OrganizationSettingsTab({ org, onChanged }: { org: OrganizationJ
     name !== org.name ||
     slug !== org.slug ||
     maxMemberships !== String(org.max_allowed_memberships) ||
-    adminDelete !== org.admin_delete_enabled;
+    adminDelete !== org.admin_delete_enabled ||
+    billingChanged;
 
   async function save() {
     setSaving(true);
@@ -41,6 +48,8 @@ export function OrganizationSettingsTab({ org, onChanged }: { org: OrganizationJ
         slug: slug.trim(),
         max_allowed_memberships: Number(maxMemberships),
         admin_delete_enabled: adminDelete,
+        // Sent only when edited, so a save never rewrites a portal it did not show.
+        ...(billingChanged ? { billing_portal_url: billingPortalUrlValue(billingUrl) } : {}),
       });
       toast.success("Organization updated");
       onChanged();
@@ -81,7 +90,7 @@ export function OrganizationSettingsTab({ org, onChanged }: { org: OrganizationJ
 
   return (
     <div className="space-y-8">
-      <Section title="Settings" description="Name, slug, capacity and logo for this organization.">
+      <Section title="Settings" description="Name, slug, capacity, billing portal and logo for this organization.">
         <Panel className="p-4">
           <div className="space-y-5">
             <div className="grid gap-4 sm:grid-cols-2">
@@ -104,6 +113,24 @@ export function OrganizationSettingsTab({ org, onChanged }: { org: OrganizationJ
                   onChange={(event) => setMaxMemberships(event.target.value)}
                 />
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="org-settings-billing">Billing portal URL</Label>
+              <Input
+                id="org-settings-billing"
+                type="url"
+                inputMode="url"
+                placeholder="https://billing.example.com/portal"
+                value={billingUrl}
+                aria-invalid={billingError ? true : undefined}
+                aria-describedby="org-settings-billing-help"
+                onChange={(event) => setBillingUrl(event.target.value)}
+              />
+              <p id="org-settings-billing-help" className={billingError ? "text-xs leading-5 text-signal" : "text-xs leading-5 text-muted-foreground"}>
+                {billingError ??
+                  "Optional. Members with org:sys_billing:manage get a Manage billing link to it in the organization profile. Leave empty for none."}
+              </p>
             </div>
 
             <div className="flex items-center justify-between gap-3 rounded-[3px] border border-border p-3">
@@ -138,7 +165,7 @@ export function OrganizationSettingsTab({ org, onChanged }: { org: OrganizationJ
                 Created <span className="font-data">{new Date(org.created_at).toLocaleString()}</span> · Updated{" "}
                 <span className="font-data">{new Date(org.updated_at).toLocaleString()}</span>
               </p>
-              <Button onClick={() => void save()} disabled={!dirty || saving}>
+              <Button onClick={() => void save()} disabled={!dirty || saving || Boolean(billingError)}>
                 {saving ? <Loader2 className="animate-spin" aria-hidden /> : <Save aria-hidden />}
                 Save changes
               </Button>

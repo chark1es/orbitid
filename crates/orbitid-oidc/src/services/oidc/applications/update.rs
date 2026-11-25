@@ -23,6 +23,9 @@ pub struct UpdateApplicationInput {
     /// `Some(Some(org))` assigns the application to an organization,
     /// `Some(None)` makes it instance-wide, `None` leaves the owner unchanged.
     pub organization_id: Option<Option<String>>,
+    /// `Some(Some(url))` sets the billing portal (already validated),
+    /// `Some(None)` clears it, `None` leaves it unchanged.
+    pub billing_portal_url: Option<Option<String>>,
 }
 
 /// What an update changed that callers report (the audit log).
@@ -123,7 +126,9 @@ pub async fn update_application_with_effects(
              scopes = $5, consent_screen_enabled = $6, pkce_required = $7, \
              access_token_lifetime_seconds = $8, refresh_token_lifetime_seconds = $9, \
              id_token_lifetime_seconds = $10, groups_claim = $11, organization_id = $12, \
-             updated_at = $13 WHERE id = $1 RETURNING *",
+             updated_at = $13, \
+             billing_portal_url = CASE WHEN $14 THEN $15 ELSE billing_portal_url END \
+             WHERE id = $1 RETURNING *",
         )
         .bind(&row.id)
         .bind(&name)
@@ -138,6 +143,8 @@ pub async fn update_application_with_effects(
         .bind(&groups)
         .bind(&owner)
         .bind(now)
+        .bind(patch.billing_portal_url.is_some())
+        .bind(patch.billing_portal_url.clone().flatten())
         .fetch_one(&mut *tx)
         .await?;
         let mut effects = ApplicationUpdateEffects::default();

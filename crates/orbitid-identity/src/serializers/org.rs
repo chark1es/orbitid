@@ -41,6 +41,7 @@ fn organization_json(
         created_by: org.created_by.clone(),
         created_at: org.created_at,
         updated_at: org.updated_at,
+        billing_portal_url: backend.then(|| org.billing_portal_url.clone()),
     }
 }
 
