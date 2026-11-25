@@ -181,4 +181,31 @@ describe("UserButton account modal", () => {
     expect(screen.queryByRole("menuitem", { name: "Team" })).toBeNull();
     expect(within(dialog).getByRole("button", { name: "Team" }).getAttribute("aria-current")).toBe("page");
   });
+
+  it("reads pages wrapped in a fragment, like UserProfile does", async () => {
+    const showTeam = true as boolean;
+    renderAuth(
+      <UserButton>
+        {showTeam ? (
+          <>
+            <UserButton.UserProfilePage label="Team" url="team">
+              <p>Team page</p>
+            </UserButton.UserProfilePage>
+            <UserButton.UserProfileLink label="Help" url="https://example.com/help" />
+          </>
+        ) : null}
+        <UserButton.MenuItems>
+          <UserButton.Action label="Open team" open="team" />
+        </UserButton.MenuItems>
+      </UserButton>,
+      harnessWith([]),
+    );
+    const trigger = await screen.findByRole("button", { name: "Account" });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Enter", code: "Enter" });
+    fireEvent.click(await screen.findByText("Open team"));
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText("Team page")).toBeTruthy();
+    expect(within(dialog).getByRole("link", { name: "Help" }).getAttribute("href")).toBe("https://example.com/help");
+  });
 });

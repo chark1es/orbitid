@@ -75,6 +75,8 @@ export interface BackendCalls {
 }
 
 export interface FakeBackend {
+  /** When set, `GET /organizations/:id/billing` waits for it (to observe the loading state). */
+  billingGate?: Promise<void>;
   self: FakeUser;
   orgs: FakeOrg[];
   members: Record<string, FakeMember[]>;

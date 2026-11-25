@@ -8453,7 +8453,7 @@
                       "null"
                     ],
                     "format": "uri",
-                    "description": "External billing portal: an absolute `https` URL (at most 2048 characters, no embedded credentials, no private or loopback IP address unless private networks are allowed). OrbitID does not process payments; the prebuilt account components link here. `null` or `\"\"` clears it; omit it to leave it unchanged. Anything else answers `422 form_param_format_invalid` with `meta.param_name = \"billing_portal_url\"`."
+                    "description": "External billing portal: an absolute `https` URL (at most 2048 characters, no embedded credentials, no whitespace, no private or loopback IP literal unless private networks are allowed; host names are not resolved, since OrbitID only links to the URL). OrbitID does not process payments; the prebuilt account components link here. `null` or `\"\"` clears it; omit it to leave it unchanged. Anything else answers `422 form_param_format_invalid` with `meta.param_name = \"billing_portal_url\"`."
                   }
                 },
                 "required": [
@@ -8584,7 +8584,7 @@
                       "null"
                     ],
                     "format": "uri",
-                    "description": "External billing portal: an absolute `https` URL (at most 2048 characters, no embedded credentials, no private or loopback IP address unless private networks are allowed). OrbitID does not process payments; the prebuilt account components link here. `null` or `\"\"` clears it; omit it to leave it unchanged. Anything else answers `422 form_param_format_invalid` with `meta.param_name = \"billing_portal_url\"`."
+                    "description": "External billing portal: an absolute `https` URL (at most 2048 characters, no embedded credentials, no whitespace, no private or loopback IP literal unless private networks are allowed; host names are not resolved, since OrbitID only links to the URL). OrbitID does not process payments; the prebuilt account components link here. `null` or `\"\"` clears it; omit it to leave it unchanged. Anything else answers `422 form_param_format_invalid` with `meta.param_name = \"billing_portal_url\"`."
                   }
                 }
               }
@@ -20174,7 +20174,7 @@
                       "null"
                     ],
                     "format": "uri",
-                    "description": "External billing portal: an absolute `https` URL (at most 2048 characters, no embedded credentials, no private or loopback IP address unless private networks are allowed). OrbitID does not process payments; the prebuilt account components link here. `null` or `\"\"` clears it; omit it to leave it unchanged. Anything else answers `422 form_param_format_invalid` with `meta.param_name = \"billing_portal_url\"`."
+                    "description": "External billing portal: an absolute `https` URL (at most 2048 characters, no embedded credentials, no whitespace, no private or loopback IP literal unless private networks are allowed; host names are not resolved, since OrbitID only links to the URL). OrbitID does not process payments; the prebuilt account components link here. `null` or `\"\"` clears it; omit it to leave it unchanged. Anything else answers `422 form_param_format_invalid` with `meta.param_name = \"billing_portal_url\"`."
                   }
                 },
                 "required": [
@@ -20338,7 +20338,7 @@
                       "null"
                     ],
                     "format": "uri",
-                    "description": "External billing portal: an absolute `https` URL (at most 2048 characters, no embedded credentials, no private or loopback IP address unless private networks are allowed). OrbitID does not process payments; the prebuilt account components link here. `null` or `\"\"` clears it; omit it to leave it unchanged. Anything else answers `422 form_param_format_invalid` with `meta.param_name = \"billing_portal_url\"`."
+                    "description": "External billing portal: an absolute `https` URL (at most 2048 characters, no embedded credentials, no whitespace, no private or loopback IP literal unless private networks are allowed; host names are not resolved, since OrbitID only links to the URL). OrbitID does not process payments; the prebuilt account components link here. `null` or `\"\"` clears it; omit it to leave it unchanged. Anything else answers `422 form_param_format_invalid` with `meta.param_name = \"billing_portal_url\"`."
                   }
                 }
               }

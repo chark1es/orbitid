@@ -17,8 +17,8 @@ Built-in pages, in their default order:
 |---|---|---|
 | `profile` | Name, photo, email addresses, phone numbers, connected accounts | always |
 | `security` | Password, passkeys, authenticator app, backup codes, trusted devices, active sessions, delete account | always |
-| `organizations` | The organizations the user belongs to, with their role in each | organizations are enabled on the instance |
-| `apps` | The OAuth applications the user may sign in to, and why (instance-wide, membership, or an access grant) | the user may use at least one application |
+| `organizations` | The organizations the user belongs to, with their role in each (the first 50) | organizations are enabled on the instance |
+| `apps` | The OAuth applications the user may sign in to, and why (instance-wide, membership, or an access grant); the first 500 by name | the user may use at least one application |
 | `billing` | A **Manage billing** link for each application with a billing portal | you supply billing content, or one of the user's applications has a portal |
 | `api-keys` | The user's API keys | always (loaded lazily) |
 
@@ -99,7 +99,9 @@ Built-in pages: `general`, `members`, `billing`, `api-keys`. Billing and API key
 
 - **Billing** needs the `org:sys_billing:manage` permission (seeded on `org:admin`; see [RBAC.md](RBAC.md)) and either
   your billing content or an operator-configured billing portal for the organization. Without the permission the page
-  is hidden, your billing content included, and no billing request is made. The server enforces the same permission.
+  is hidden, including content you supplied on the built-in Billing page (`<OrganizationProfile.Page label="billing">`),
+  and no billing request is made. The server enforces the same permission. A custom page at `url="billing"` replaces
+  the built-in page and its gate, so gate that content yourself.
 - **API keys** needs `org:sys_profile:manage`.
 
 ```tsx
@@ -145,7 +147,8 @@ curl -X PATCH http://localhost:4000/v1/organizations/org_123 \
 
 `POST /v1/organizations` and `POST /v1/oauth_applications` accept the field too. A value is stored only if it is an
 absolute `https` URL of at most 2048 characters with a host, no embedded username or password, no whitespace and no
-private or loopback IP literal (unless the instance allows private networks). Anything else answers `422
+private or loopback IP literal (unless the instance allows private networks). Host names are not resolved: OrbitID never
+fetches the URL, it only links to it. Anything else answers `422
 form_param_format_invalid` with `meta.param_name = "billing_portal_url"`. The components also refuse to render a
 non-`https` value as a link, and open portals in a new tab with `rel="noopener noreferrer"`.
 

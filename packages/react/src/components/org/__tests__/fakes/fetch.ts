@@ -58,6 +58,7 @@ export function createFakeFetch(
 
     const billing = /^\/organizations\/([^/]+)\/billing$/.exec(path);
     if (method === "GET" && billing) {
+      if (backend.billingGate) await backend.billingGate;
       const org = backend.orgs.find((candidate) => candidate.id === decodeURIComponent(billing[1]!));
       if (!org) return respond(apiError("organization_not_found"), 404);
       const member = selfMember(org.id);

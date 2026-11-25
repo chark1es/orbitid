@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  hasRenderableContent,
   normalizePageSlug,
   parseProfileChildren,
   resolveProfileNav,
@@ -103,6 +104,39 @@ describe("profile pages", () => {
     );
     expect(nav.map((entry) => entry.label)).toEqual(["Security", "Billing", "Team", "Profile"]);
     expect(nav.find((entry) => entry.id === "team")).toMatchObject({ content: "first" });
+  });
+
+  it("treats false, true, empty strings and empty arrays as no content", () => {
+    const show = false as boolean;
+    const { nav, parsed } = resolve(
+      <Page label="billing">
+        {show && <p>Plans</p>}
+      </Page>,
+    );
+    expect(parsed.customContent.has("billing")).toBe(false);
+    expect(nav.find((entry) => entry.id === "billing")).toMatchObject({ content: "billing-content" });
+    for (const empty of [false, true, null, undefined, "", "  ", [], [false, null], <>{false}</>]) {
+      expect(hasRenderableContent(empty as React.ReactNode)).toBe(false);
+    }
+    for (const content of ["text", 0, <p key="p">x</p>, [null, "x"], <>{"x"}</>]) {
+      expect(hasRenderableContent(content as React.ReactNode)).toBe(true);
+    }
+  });
+
+  it("names unlabelled entries after their slug or URL, lists a URL once and drops links without one", () => {
+    const { nav } = resolve(
+      <>
+        <Page label="" url="team">
+          team
+        </Page>
+        <Link label="Docs" url="https://docs.example.com" />
+        <Link label="Docs again" url="https://docs.example.com" />
+        <Link label="  " url="https://help.example.com" />
+        <Link label="Nowhere" url="" />
+      </>,
+    );
+    expect(nav.slice(3).map((entry) => entry.label)).toEqual(["team", "Docs", "https://help.example.com"]);
+    expect(new Set(nav.map((entry) => entry.id)).size).toBe(nav.length);
   });
 
   it("normalizes slugs", () => {

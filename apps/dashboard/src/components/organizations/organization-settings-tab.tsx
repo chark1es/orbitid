@@ -26,7 +26,8 @@ export function OrganizationSettingsTab({ org, onChanged }: { org: OrganizationJ
   const savedBillingUrl = org.billing_portal_url ?? "";
   const [billingUrl, setBillingUrl] = useState(savedBillingUrl);
   const billingError = billingPortalUrlError(billingUrl);
-  const billingChanged = billingUrl.trim() !== savedBillingUrl;
+  // Compared normalized (trimmed, empty = none), so stray whitespace is neither a change nor a no-op save.
+  const billingChanged = billingPortalUrlValue(billingUrl) !== billingPortalUrlValue(savedBillingUrl);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);

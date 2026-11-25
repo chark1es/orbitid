@@ -86,7 +86,6 @@ export interface BackupCodeResource {
   [key: string]: unknown;
 }
 
-/** A browser remembered for skipping the second factor (`GET /v1/client/me/trusted_devices`). */
 /** An OAuth application the signed-in user may use (`user.getOAuthApplications()`). */
 export interface UserOAuthApplicationResource {
   id: string;
@@ -102,6 +101,7 @@ export interface UserOAuthApplicationResource {
   billing_portal_url?: string | null;
 }
 
+/** A browser remembered for skipping the second factor (`GET /v1/client/me/trusted_devices`). */
 export interface TrustedDeviceResource {
   id: string;
   userId?: string;

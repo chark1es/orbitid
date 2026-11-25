@@ -109,4 +109,10 @@ describe("organization settings tab", () => {
     fireEvent.click(save);
     expect(calls.some((call) => call.method === "PATCH")).toBe(false);
   });
+
+  it("does not treat whitespace in an empty billing field as a change", () => {
+    renderTab();
+    fireEvent.change(screen.getByLabelText("Billing portal URL"), { target: { value: "   " } });
+    expect((screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled).toBe(true);
+  });
 });

@@ -1,4 +1,4 @@
-import { Children, isValidElement, useState, type ReactNode } from "react";
+import { Children, Fragment, isValidElement, useState, type ReactNode } from "react";
 import {
   Avatar,
   AvatarFallback,
@@ -24,6 +24,7 @@ import { AuthAppearanceScope, useElementClasses, useThemeScope } from "../_share
 import { useAuthRuntime } from "../_shared/w6";
 import type { UserButtonProps } from "../_shared/types";
 import { UserProfile } from "../user-profile";
+import { flattenChildren } from "../../../lib/profile-pages";
 import { UserVerificationModal } from "../user-verification-modal";
 
 export interface UserButtonActionProps {
@@ -110,7 +111,7 @@ function UserButtonInner(props: UserButtonProps) {
       }
       // Profile pages and links belong to the account screen, not the menu.
       if (node.type === UserProfile.Page || node.type === UserProfile.Link) return;
-      if (node.type === UserButtonMenuItems) {
+      if (node.type === UserButtonMenuItems || node.type === Fragment) {
         Children.forEach((node.props as { children?: ReactNode }).children, (child, index) => {
           renderItem(child, `${key}-${index}`);
         });
@@ -133,8 +134,11 @@ function UserButtonInner(props: UserButtonProps) {
   };
 
   // `<UserButton.UserProfilePage>` / `.UserProfileLink` children customize the account screen it opens.
-  const profileChildren = Children.toArray(props.children).filter(
-    (child) => isValidElement(child) && (child.type === UserProfile.Page || child.type === UserProfile.Link),
+  // Read like `<UserProfile>` reads its own children (fragments flattened), then keyed for the array.
+  const profileChildren = Children.toArray(
+    flattenChildren(props.children).filter(
+      (child) => child.type === UserProfile.Page || child.type === UserProfile.Link,
+    ),
   );
 
   const handleSignOut = async () => {

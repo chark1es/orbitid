@@ -51,8 +51,11 @@ export function normalizePageSlug(value: string): string {
   return value.trim().replace(/^\/+/, "").replace(/\/+$/, "");
 }
 
-/** Children in order, with fragments (`<>…</>`, often used for conditional pages) flattened. */
-function flattenChildren(children: ReactNode): ReactElement[] {
+/**
+ * Element children in order, with fragments (`<>…</>`, often used for conditional pages) flattened. Shared by every
+ * component that reads `Page`/`Link` children, so they all see the same elements.
+ */
+export function flattenChildren(children: ReactNode): ReactElement[] {
   const out: ReactElement[] = [];
   Children.forEach(children, (child) => {
     if (!isValidElement(child)) return;
@@ -60,6 +63,19 @@ function flattenChildren(children: ReactNode): ReactElement[] {
     else out.push(child);
   });
   return out;
+}
+
+/**
+ * Whether `children` renders anything: `false`, `true`, `null`, empty strings and arrays, and fragments holding only
+ * those do not count, so `{show && <Billing />}` with `show` false leaves the built-in page in place.
+ */
+export function hasRenderableContent(children: ReactNode): boolean {
+  return Children.toArray(children).some((child) => {
+    if (isValidElement(child) && child.type === Fragment) {
+      return hasRenderableContent((child.props as { children?: ReactNode }).children);
+    }
+    return typeof child === "string" ? child.trim() !== "" : true;
+  });
 }
 
 /**
@@ -85,7 +101,7 @@ export function parseProfileChildren(
         // A built-in reference; the first reference to a page wins.
         if (!builtInIds.includes(props.label) || seen.has(props.label)) continue;
         seen.add(props.label);
-        const hasContent = props.children !== undefined && props.children !== null;
+        const hasContent = hasRenderableContent(props.children);
         if (props.hidden) hidden.add(props.label);
         else if (hasContent) customContent.add(props.label);
         items.push({
@@ -101,12 +117,18 @@ export function parseProfileChildren(
       if (seen.has(slug)) continue;
       seen.add(slug);
       if (builtInIds.includes(slug)) overridden.add(slug);
-      items.push({ type: "page", id: slug, label: props.label, icon: props.labelIcon, content: props.children });
+      // A page without a label would be a blank navigation button; its slug names it instead.
+      const label = props.label?.trim() || slug;
+      items.push({ type: "page", id: slug, label, icon: props.labelIcon, content: props.children });
       continue;
     }
     if (child.type === linkType) {
       const props = child.props as ProfileLinkProps;
-      items.push({ type: "link", id: `link:${props.url}`, label: props.label, icon: props.labelIcon, url: props.url });
+      const url = props.url?.trim();
+      // Links are keyed by URL, so the first link to a URL wins, like pages; a link without a URL goes nowhere.
+      if (!url || seen.has(`link:${url}`)) continue;
+      seen.add(`link:${url}`);
+      items.push({ type: "link", id: `link:${url}`, label: props.label?.trim() || url, icon: props.labelIcon, url });
     }
   }
   return { items, customContent, hidden, overridden };

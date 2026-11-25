@@ -89,10 +89,9 @@ function OrganizationProfileView({
     ORGANIZATION_PROFILE_PAGES,
   );
   const canManageBilling = can(ORG_PERMISSIONS.billingManage);
-  const billing = useOrganizationBilling(
-    organization,
-    canManageBilling && !parsed.hidden.has("billing") && !parsed.overridden.has("billing"),
-  );
+  const billingEnabled =
+    canManageBilling && !parsed.hidden.has("billing") && !parsed.overridden.has("billing");
+  const billing = useOrganizationBilling(organization, billingEnabled);
 
   const canManageMembers = can(ORG_PERMISSIONS.membershipsManage);
   const canReadDomains = can(ORG_PERMISSIONS.domainsRead);
@@ -180,8 +179,12 @@ function OrganizationProfileView({
   const nav = resolveProfileNav(sections, parsed);
   const pages = nav.filter((entry) => entry.type === "page");
   const currentSlug = normalizePageSlug(router.path);
-  // A page that is not (or not yet) available falls back to the first page.
-  const activeSection = pages.find((section) => section.id === currentSlug) ?? pages[0]!;
+  // A page that is still loading (Billing, before its portal is known) shows nothing yet, so a deep link does not
+  // flash another page; a page that will not appear falls back to the first page. With every page hidden or not
+  // permitted there is nothing to show.
+  const billingPending = currentSlug === "billing" && billingEnabled && !billing.loaded;
+  const activeSection: (typeof pages)[number] | undefined =
+    pages.find((section) => section.id === currentSlug) ?? (billingPending ? undefined : pages[0]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -214,14 +217,14 @@ function OrganizationProfileView({
             if (entry.type === "link") {
               return (
                 <Button key={entry.id} asChild variant="ghost" size="sm" className="justify-start">
-                  <a href={entry.url}>
+                  <a href={entry.url} target="_blank" rel="noreferrer">
                     {entry.icon}
                     {entry.label}
                   </a>
                 </Button>
               );
             }
-            const active = entry.id === activeSection.id;
+            const active = entry.id === activeSection?.id;
             return (
               <Button
                 key={entry.id}
@@ -239,7 +242,7 @@ function OrganizationProfileView({
           })}
         </nav>
 
-        <div className="min-w-0 flex-1">{activeSection.content}</div>
+        <div className="min-w-0 flex-1">{activeSection?.content ?? null}</div>
       </div>
     </div>
   );

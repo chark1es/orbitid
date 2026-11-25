@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { resetVirtualRouter } from "../../../lib/routing";
 import { OrganizationProfile } from "../OrganizationProfile";
@@ -7,6 +7,10 @@ import { createFakeInstance, renderWithOrbit } from "./harness";
 
 beforeEach(() => {
   resetVirtualRouter();
+});
+
+afterEach(() => {
+  window.location.hash = "";
 });
 
 type Fake = ReturnType<typeof createFakeInstance>;
@@ -156,5 +160,58 @@ describe("<OrganizationProfile /> page customization", () => {
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(await within(dialog).findByRole("button", { name: "Team" }));
     expect(await within(dialog).findByText("Custom team page")).toBeTruthy();
+  });
+});
+
+describe("<OrganizationProfile /> edge cases", () => {
+  test("renders an empty panel instead of crashing when no page is left", async () => {
+    const fake = createFakeInstance();
+    selfAs(fake, "org:member", ["org:sys_memberships:read", "org:sys_domains:read"]);
+    renderWithOrbit(
+      <OrganizationProfile routing="virtual">
+        <OrganizationProfile.Page label="general" hidden />
+        <OrganizationProfile.Page label="members" hidden />
+      </OrganizationProfile>,
+      fake,
+    );
+    expect(await screen.findByRole("heading", { name: "Acme" })).toBeTruthy();
+    expect(within(nav()).queryAllByRole("button")).toHaveLength(0);
+    expect(screen.queryByLabelText("Organization name")).toBeNull();
+  });
+
+  test("a deep link to Billing waits for the portal instead of flashing General", async () => {
+    let release: () => void = () => undefined;
+    const fake = createFakeInstance();
+    fake.backend.billingGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    withPortal(fake, "https://billing.example.com/acme");
+    window.location.hash = "#/billing";
+    renderWithOrbit(<OrganizationProfile routing="hash" />, fake);
+
+    await within(await screen.findByRole("navigation", { name: "Organization" })).findByRole("button", { name: "General" });
+    await waitFor(() => expect(billingCalls(fake)).toHaveLength(1));
+    expect(screen.queryByLabelText("Organization name")).toBeNull();
+    expect(within(nav()).getByRole("button", { name: "General" }).getAttribute("aria-current")).toBeNull();
+
+    release();
+    expect(await screen.findByRole("link", { name: /Manage billing/ })).toBeTruthy();
+    expect(within(nav()).getByRole("button", { name: "Billing" }).getAttribute("aria-current")).toBe("page");
+  });
+
+  test("links open in a new tab like UserProfile links, and repeated links are listed once", async () => {
+    const fake = createFakeInstance();
+    renderWithOrbit(
+      <OrganizationProfile routing="virtual">
+        <OrganizationProfile.Link label="Docs" url="https://docs.example.com" />
+        <OrganizationProfile.Link label="Docs again" url="https://docs.example.com" />
+      </OrganizationProfile>,
+      fake,
+    );
+    const links = await within(await screen.findByRole("navigation", { name: "Organization" })).findAllByRole("link");
+    expect(links).toHaveLength(1);
+    expect(links[0]!.textContent).toBe("Docs");
+    expect(links[0]!.getAttribute("target")).toBe("_blank");
+    expect(links[0]!.getAttribute("rel")).toBe("noreferrer");
   });
 });

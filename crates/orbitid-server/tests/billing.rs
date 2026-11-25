@@ -120,6 +120,25 @@ async fn organization_billing_portal_is_validated_and_backend_only() {
         .await;
     assert_eq!(fapi.status, StatusCode::OK, "{}", fapi.text());
     assert!(fapi.value()["response"].get("billing_portal_url").is_none());
+    // Nor does the organization embedded in the user's memberships. (Invitations carry only the
+    // organization's name and image, never the organization object.)
+    let memberships = owner
+        .browser
+        .get("/v1/client/me/organization_memberships", &[])
+        .await;
+    assert_eq!(memberships.status, StatusCode::OK, "{}", memberships.text());
+    let rows = memberships.value()["response"]
+        .as_array()
+        .cloned()
+        .unwrap_or_else(|| {
+            memberships.value()["response"]["data"]
+                .as_array()
+                .cloned()
+                .expect("membership list")
+        });
+    assert_eq!(rows.len(), 1, "{}", memberships.text());
+    assert_eq!(rows[0]["organization"]["id"], org.id);
+    assert!(rows[0]["organization"].get("billing_portal_url").is_none());
 
     // `null` and "" both clear it.
     let cleared = e2e
