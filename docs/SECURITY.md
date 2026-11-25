@@ -152,8 +152,8 @@ path-traversal guard on the image and logo routes stays.
   are never logged.
 - **Regex DoS**: no user-supplied value ever becomes a regular expression.
 - **Enumeration**: an unknown identifier or a user without a password spends the same password-hashing work as a
-  real check (`spendPasswordCheck`), so response timing does not reveal whether an account exists. Setting
-  `security.enumerationProtection` additionally makes both paths return the same neutral response.
+  real check (`spendPasswordCheck`), so response timing does not reveal whether an account exists.
+  `security.enumerationProtection` (on by default) additionally makes both paths return the same response.
 - **Session fixation**: when a session is created, the browser's `__client` token is rotated, so a token captured
   before sign-in is useless afterwards.
 - **IDOR**: every `/v1/client/*` route that takes an id scopes its query to the caller (own user, own client,
@@ -323,11 +323,13 @@ A proxy that sends only `X-Real-IP` leaves the server seeing the proxy's address
   refused. An identity provider that has verified the address (Google, a verified GitHub address, an enterprise IdP) takes
   precedence: signing in through it replaces the unproven claim. Leave email verification on if mailbox ownership matters.
 
-- **Account enumeration.** `security.enumerationProtection` (off by default) makes sign-in answer an unknown
-  identifier like a known one. It is off because the friendly "couldn't find your account, sign up?" message is what most
-  apps want, and because sign-up must say when an address is already registered. Turn it on if hiding which addresses have
-  accounts matters more to you than that message. Failed attempts are rate limited and unknown identifiers cost the same
-  password work either way.
+- **Account enumeration.** `security.enumerationProtection` (on by default) answers sign-in for an identifier with no
+  account as if the account existed: the form moves on to the password step, offers the factors a typical account would
+  have (password, a code to the email or phone that was typed), and every attempt fails with the same error a wrong
+  password or code gives. A code is issued but never sent and never accepted. The account's name is not returned before
+  the first factor succeeds. What it does not hide: a code prepare skips the delivery, so it can answer faster than one
+  for a real account; failed attempts lock a real account but never a decoy; and sign-up still says when an address is
+  already registered. Turn it off for the friendlier "couldn't find your account" message.
 - **Authorization requests are not CSRF-protected.** `GET /oauth/authorize` is a top-level navigation by design (the
   OAuth protocol requires it). What keeps it safe is that a code can only be sent to a `redirect_uri` registered for the
   client, is bound to PKCE, and a client with `consent_screen_enabled: false` is treated as first-party. Only turn the

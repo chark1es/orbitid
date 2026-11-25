@@ -145,12 +145,6 @@ export default function Page() {
             </Select>
           </Field>
         </div>
-        <SwitchRow
-          label="Show Powered by OrbitID"
-          description="Display attribution beneath hosted forms."
-          checked={branding.showPoweredBy}
-          onCheckedChange={(showPoweredBy) => editor.patch({ branding: { showPoweredBy } })}
-        />
         <div className="space-y-2 border-t border-border pt-3">
           <div className="flex items-baseline justify-between gap-3">
             <p className="text-sm font-medium">Preview</p>
@@ -208,9 +202,6 @@ export default function Page() {
                   <span className="h-px flex-1 bg-border" />
                 </div>
                 <div className="grid h-[34px] place-items-center border border-border text-xs font-medium">Continue with Google</div>
-                {branding.showPoweredBy ? (
-                  <p className="pt-1 text-center text-[11px] text-muted-foreground">Powered by OrbitID</p>
-                ) : null}
               </div>
             </div>
           </div>

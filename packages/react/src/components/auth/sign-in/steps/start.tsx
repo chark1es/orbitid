@@ -7,6 +7,7 @@ import { useElementClasses } from "../../_shared/appearance";
 import { FormError } from "../../_shared/form-error";
 import { Field } from "../../_shared/field";
 import { SocialButtons } from "../../_shared/social-buttons";
+import { IDENTIFIER_STRATEGIES, LastUsedBadge } from "../../_shared/last-used-badge";
 import {
   Divider,
   FooterSwitch,
@@ -31,6 +32,10 @@ export function StartStep({ flow, props }: StepProps) {
   const canResetPassword = environment.attributes.password.enabled && environment.attributes.email_address.enabled;
   const passkeyEnabled = environment.attributes.passkey.enabled;
   const socialAtTop = appearance.layout?.socialButtonsPlacement !== "bottom";
+  // Remembered per browser by the SDK: a strategy name only, never who signed in.
+  const lastUsedStrategy = orbit.lastUsedStrategy ?? null;
+  const identifierLastUsed = lastUsedStrategy !== null && IDENTIFIER_STRATEGIES.has(lastUsedStrategy);
+  const passkeyLastUsed = lastUsedStrategy === "passkey";
 
   useConditionalPasskey(flow, passkeyEnabled && environment.passkey.allowAutofill);
 
@@ -51,7 +56,7 @@ export function StartStep({ flow, props }: StepProps) {
     <SocialButtons
       providers={environment.social}
       disabled={flow.busy}
-      lastUsedStrategy={orbit.lastUsedStrategy ?? null}
+      lastUsedStrategy={lastUsedStrategy}
       onSelect={(provider) => void flow.authenticateWithRedirect(provider.strategy)}
     />
   ) : null;
@@ -72,6 +77,7 @@ export function StartStep({ flow, props }: StepProps) {
             name="identifier"
             label={identifierLabel(t, environment.identifiers)}
             required
+            labelAccessory={identifierLastUsed ? <LastUsedBadge testId="identifier-last-used" /> : undefined}
           >
             {(field) => (
               <Input
@@ -95,12 +101,18 @@ export function StartStep({ flow, props }: StepProps) {
         <Button
           type="button"
           variant="outline"
-          className="w-full gap-2"
+          className={cn("relative w-full gap-2", passkeyLastUsed && "px-[4.75rem] has-[>svg]:px-[4.75rem]")}
           disabled={flow.busy}
+          aria-label={passkeyLastUsed ? `${t("signIn.passkey.button")}, ${t("signIn.lastUsed")}` : undefined}
           onClick={() => void flow.authenticateWithPasskey()}
         >
           <FingerprintIcon className="size-4" aria-hidden="true" />
           {t("signIn.passkey.button")}
+          {passkeyLastUsed ? (
+            <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center">
+              <LastUsedBadge testId="passkey-last-used" />
+            </span>
+          ) : null}
         </Button>
       ) : null}
       {social && !socialAtTop ? (
