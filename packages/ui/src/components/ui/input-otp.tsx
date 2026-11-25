@@ -7,17 +7,27 @@ import { MinusIcon } from "lucide-react"
 function InputOTP({
   className,
   containerClassName,
+  containerElement,
   ...props
 }: React.ComponentProps<typeof OTPInput> & {
   containerClassName?: string
+  /**
+   * Element key for the container row that holds the slot groups. Its className and `unstyled` apply to the row;
+   * the input library's container takes no `style`, so a style override does not reach it.
+   */
+  containerElement?: string
 }) {
+  const container = useElementSlot(
+    [],
+    "flex items-center gap-2 has-disabled:opacity-50",
+    containerClassName,
+    undefined,
+    containerElement ? { "data-orbitid-element": containerElement } : undefined
+  )
   return (
     <OTPInput
       data-slot="input-otp"
-      containerClassName={cn(
-        "flex items-center gap-2 has-disabled:opacity-50",
-        containerClassName
-      )}
+      containerClassName={container.className}
       className={cn("disabled:cursor-not-allowed", className)}
       {...props}
     />

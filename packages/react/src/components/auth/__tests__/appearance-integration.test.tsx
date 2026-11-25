@@ -228,7 +228,7 @@ describe("parts that are not plain primitives", () => {
       {
         appearance: {
           elements: {
-            formFieldInputGroup: { style: { gap: "11px" } },
+            formFieldInputGroup: "gap-6 justify-start",
             otpCodeFieldInput: { unstyled: true, className: "my-slot" },
             socialButtonsProviderIcon: { style: { opacity: "0.5" } },
             logoImage: { unstyled: true, className: "my-logo" },
@@ -236,7 +236,13 @@ describe("parts that are not plain primitives", () => {
         },
       },
     );
-    expect((document.querySelector(".orbitid-formFieldInputGroup") as HTMLElement).style.gap).toBe("11px");
+    // The key sits on the row that holds the slot groups, so spacing and alignment overrides reach the slots.
+    const row = document.querySelector(".orbitid-formFieldInputGroup") as HTMLElement;
+    expect(row.querySelector('[data-slot="input-otp-group"]')).not.toBeNull();
+    expect(row.className).toContain("gap-6");
+    expect(row.className).toContain("justify-start");
+    expect(row.className).not.toContain("gap-2");
+    expect(row.className).not.toContain("justify-center");
     const slot = document.querySelector('[data-slot="input-otp-slot"]') as HTMLElement;
     expect(slot.className).toContain("my-slot");
     expect(slot.className).not.toContain("size-[34px]");
@@ -252,3 +258,11 @@ describe("parts that are not plain primitives", () => {
 function elementPropsForTest(key: string) {
   return { "data-orbitid-element": key, className: "size-4" };
 }
+
+describe("malformed theme class names", () => {
+  it("render instead of throwing when a theme's classNames hold non-strings", () => {
+    const broken = { name: "x", classNames: [null, "dark"] } as unknown as typeof dark;
+    renderAuth(<AuthCard title="Sign in"><p>body</p></AuthCard>, setupAuth({ signedIn: false }), { appearance: { baseTheme: broken } });
+    expect(cardRoot()).not.toBeNull();
+  });
+});

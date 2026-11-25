@@ -29,6 +29,7 @@ function componentKeysInSource(): Set<string> {
     /\bep\(\s*"(\w+)"/g,
     /\bep\(\s*\[([^\]]+)\]/g,
     /\belement="(\w+)"/g,
+    /\bcontainerElement="(\w+)"/g,
     /data-orbitid-element="(\w+)"/g,
     /useElementClasses\("(\w+)"\)/g,
     /\["(rootBox)"/g,

@@ -289,7 +289,7 @@ keys.
 | `formField` | One label + input + message group. |
 | `formFieldLabel` | Field label. |
 | `formFieldInput` | Field input (text, password, phone, select). |
-| `formFieldInputGroup` | Wrapper around grouped inputs (one-time code slots). |
+| `formFieldInputGroup` | The row that holds the one-time code slot groups. Takes classes and `unstyled`; a `style` override does not reach it. |
 | `formFieldInputShowPasswordButton` | Show/hide password toggle. |
 | `formFieldHintText` | Helper text under a field. |
 | `formFieldErrorText` | Validation message under a field. |

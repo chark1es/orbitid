@@ -77,7 +77,10 @@ export interface ThemeScope {
 function forcedTheme(themes: readonly BaseTheme[]): ResolvedTheme | null {
   for (let index = themes.length - 1; index >= 0; index -= 1) {
     // An entry may hold several classes ("dark brand").
-    const classNames = (themes[index]?.classNames ?? []).flatMap((entry) => entry.split(/\s+/));
+    const entries = themes[index]?.classNames;
+    const classNames = (Array.isArray(entries) ? entries : [])
+      .filter((entry): entry is string => typeof entry === "string")
+      .flatMap((entry) => entry.split(/\s+/));
     if (classNames.includes("dark")) return "dark";
     if (classNames.includes("light")) return "light";
   }

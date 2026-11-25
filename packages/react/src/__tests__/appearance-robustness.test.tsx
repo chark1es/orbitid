@@ -158,6 +158,22 @@ describe("scheme presets inside one theme array", () => {
     // The last scheme preset still writes its own tokens.
     expect(resolveAppearance({ baseTheme: [light, dark] }).cssVariables["--card"]).toBe(dark.variables!.colorBackground);
   });
+
+  it("merge same-scheme themes in order", () => {
+    const myDark = { name: "brand", classNames: ["dark"], variables: { colorBackground: "#101014", borderRadius: "9px" } };
+    const accent = { name: "accent", classNames: ["dark"], variables: { colorPrimary: "#00ff88" } };
+    const stacked = resolveAppearance({ baseTheme: [myDark, accent] }).cssVariables;
+    expect(stacked["--card"]).toBe("#101014");
+    expect(stacked["--radius"]).toBe("9px");
+    expect(stacked["--primary"]).toBe("#00ff88");
+    // The built-in dark preset never sets a radius, so the earlier brand theme's radius survives it.
+    expect(resolveAppearance({ baseTheme: [myDark, dark] }).cssVariables["--radius"]).toBe("9px");
+  });
+
+  it("tolerate non-string class names when picking the scheme", () => {
+    const broken = { name: "x", classNames: [null, 3, "dark"] } as unknown as BaseTheme;
+    expect(() => resolveAppearance({ baseTheme: broken })).not.toThrow();
+  });
 });
 
 describe("undefined values", () => {

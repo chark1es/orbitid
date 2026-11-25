@@ -88,10 +88,15 @@ function mergeElements(target: Record<string, AppearanceElement>, source: unknow
 
 const SCHEME_CLASSES = new Set(["dark", "light"]);
 
-/** A theme that forces the scheme (its classes include `dark` or `light`). */
-function isSchemeTheme(theme: BaseTheme): boolean {
+/** The scheme a theme forces (`dark` or `light`, the last one in its classes), or `null` when it forces none. */
+function schemeOf(theme: BaseTheme): string | null {
   const names = Array.isArray(theme.classNames) ? theme.classNames : [];
-  return names.some((entry) => typeof entry === "string" && entry.split(/\s+/).some((name) => SCHEME_CLASSES.has(name)));
+  let scheme: string | null = null;
+  for (const entry of names) {
+    if (typeof entry !== "string") continue;
+    for (const name of entry.split(/\s+/)) if (SCHEME_CLASSES.has(name)) scheme = name;
+  }
+  return scheme;
 }
 
 /**
@@ -145,10 +150,12 @@ export function resolveAppearanceLayers(layers: readonly (Appearance | undefined
   const activeThemes = configuredThemes && configuredThemes.length > 0 ? configuredThemes : [defaultTheme];
 
   // In `[dark, light]` the scheme ends up light, so the earlier `dark` preset's tokens must not be written either:
-  // a scheme preset's variables only apply when no later scheme preset overrides it.
-  const lastScheme = activeThemes.reduce((last, theme, index) => (isSchemeTheme(theme) ? index : last), -1);
-  activeThemes.forEach((theme, index) => {
-    if (!(isSchemeTheme(theme) && index < lastScheme)) {
+  // a scheme theme's variables apply only when it forces the final scheme. Same-scheme themes (`[myDark, dark]`)
+  // still merge in order.
+  const finalScheme = activeThemes.reduce<string | null>((last, theme) => schemeOf(theme) ?? last, null);
+  activeThemes.forEach((theme) => {
+    const scheme = schemeOf(theme);
+    if (scheme === null || scheme === finalScheme) {
       Object.assign(variables, normalizeVariables(objectOrEmpty(theme.variables)));
     }
     Object.assign(layout, objectOrEmpty(theme.layout));

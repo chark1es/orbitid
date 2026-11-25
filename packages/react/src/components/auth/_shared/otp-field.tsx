@@ -57,7 +57,6 @@ export function OtpField({
           {label}
         </Label>
       ) : null}
-      <div {...ep("formFieldInputGroup", "flex justify-center")}>
       <InputOTP
         id={inputId}
         name={name}
@@ -72,6 +71,7 @@ export function OtpField({
         aria-label={label ?? t("formFieldLabel__code")}
         aria-invalid={Boolean(error)}
         aria-describedby={error ? errorId : undefined}
+        containerElement="formFieldInputGroup"
         containerClassName="justify-center"
       >
         <InputOTPGroup>
@@ -96,7 +96,6 @@ export function OtpField({
           </InputOTPGroup>
         ) : null}
       </InputOTP>
-      </div>
       {error ? (
         <p id={errorId} role="alert" {...ep("formFieldErrorText", "text-center text-xs text-destructive")}>
           {error}
