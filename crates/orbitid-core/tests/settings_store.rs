@@ -97,7 +97,7 @@ async fn update_seals_secrets_and_serves_plaintext() {
     assert!(is_sealed_secret(
         &stored["social"]["google"]["clientSecret"]
     ));
-    assert_eq!(stored["__settingsVersion"], 2);
+    assert_eq!(stored["__settingsVersion"], 3);
 }
 
 #[tokio::test]
@@ -228,7 +228,7 @@ async fn legacy_settings_are_migrated_and_sessions_rescued() {
             .fetch_one(&reopened.state.pool)
             .await
             .unwrap();
-    assert_eq!(stored["__settingsVersion"], 2);
+    assert_eq!(stored["__settingsVersion"], 3);
 }
 
 #[tokio::test]

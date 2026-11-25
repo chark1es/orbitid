@@ -15,7 +15,6 @@ import {
 import { useAuthAppearance, useElementClasses, useThemeScope } from "./appearance";
 import { contrastForeground, LIGHT_FOREGROUND } from "../../../appearance";
 import { useAuthRuntime } from "./w6";
-import { SecuredByOrbitID } from "./form-error";
 
 export interface AuthCardProps {
   title: string;
@@ -30,7 +29,7 @@ export interface AuthCardProps {
   eyebrow?: ReactNode;
 }
 
-/** Shared shadcn card shell: branding, theme, development banner, pages, "Secured by OrbitID". */
+/** Shared shadcn card shell: branding, theme, development banner, footer pages. */
 export function AuthCard({
   title,
   subtitle,
@@ -163,7 +162,6 @@ export function AuthCard({
               ) : null}
             </nav>
           ) : null}
-          <SecuredByOrbitID />
         </CardFooter>
       </Card>
     </div>

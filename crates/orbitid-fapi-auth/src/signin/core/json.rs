@@ -38,9 +38,16 @@ pub async fn build_sign_in_json(state: &AppState, row: &SignInRow) -> Result<Sig
             .as_ref()
             .map(|first| first.strategy.starts_with("reset_password"))
             .unwrap_or(false);
-    let supported_first_factors = match &user {
-        Some(user) => Some(compute_first_factors(state, user, requested_reset).await?),
-        None => None,
+    let decoy = sign_in_state.decoy.as_ref().filter(|_| user.is_none());
+    let supported_first_factors = match (&user, decoy) {
+        (Some(user), _) => Some(compute_first_factors(state, user, requested_reset).await?),
+        (None, Some(decoy)) => Some(crate::signin::decoy::first_factors(
+            state,
+            row.identifier.as_deref().unwrap_or_default(),
+            decoy,
+            requested_reset,
+        )),
+        (None, None) => None,
     };
     let supported_second_factors_json = match &user {
         Some(user) => Some(
@@ -61,14 +68,26 @@ pub async fn build_sign_in_json(state: &AppState, row: &SignInRow) -> Result<Sig
             )
             .await?,
         ),
+        // A real account's list at this stage, as far as the factors a decoy offers go.
+        None if decoy.is_some() => Some(Vec::new()),
         None => None,
     };
-    let user_data = user_json.as_ref().map(|json| SignInUserData {
-        first_name: json.first_name.clone(),
-        last_name: json.last_name.clone(),
-        image_url: json.image_url.clone(),
-        has_image: json.has_image,
-    });
+    // Who the account belongs to is not shown before the first factor proves it, or a name would tell an
+    // existing account from a decoy.
+    let hide_profile = state.settings.get().security.enumeration_protection
+        && matches!(
+            row.status.as_str(),
+            "needs_identifier" | "needs_first_factor"
+        );
+    let user_data = user_json
+        .as_ref()
+        .filter(|_| !hide_profile)
+        .map(|json| SignInUserData {
+            first_name: json.first_name.clone(),
+            last_name: json.last_name.clone(),
+            image_url: json.image_url.clone(),
+            has_image: json.has_image,
+        });
     Ok(SignInJson {
         object: "sign_in".into(),
         id: row.id.clone(),
