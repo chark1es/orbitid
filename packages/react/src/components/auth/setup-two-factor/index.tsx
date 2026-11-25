@@ -58,7 +58,7 @@ function readBackupCodes(value: unknown): string[] {
 export function TwoFactorSetup({ sessionId, onComplete, redirectUrl, className }: TwoFactorSetupProps) {
   const runtime = useAuthRuntime();
   const { environment, orbit, t, navigate, user } = runtime;
-  const { el } = useElementClasses();
+  const { ep } = useElementClasses();
   const [phase, setPhase] = useState<Phase>("totp");
   const [totp, setTotp] = useState<TotpSetup | null>(null);
   const [codes, setCodes] = useState<string[]>([]);
@@ -249,7 +249,7 @@ export function TwoFactorSetup({ sessionId, onComplete, redirectUrl, className }
               <Button
                 type="button"
                 disabled={busy || code.length < 6}
-                className={cn("w-full", el("formButtonPrimary"))}
+                {...ep("formButtonPrimary", "w-full")}
                 onClick={() => void verifyTotp(code)}
               >
                 {busy ? <Loader2Icon className="size-4 animate-spin" aria-hidden="true" /> : null}
@@ -296,7 +296,7 @@ export function TwoFactorSetup({ sessionId, onComplete, redirectUrl, className }
           <Button
             type="button"
             disabled={busy || phoneValue.trim().length === 0}
-            className={cn("w-full", el("formButtonPrimary"))}
+            {...ep("formButtonPrimary", "w-full")}
             onClick={() => void sendPhoneCode()}
           >
             {busy ? <Loader2Icon className="size-4 animate-spin" aria-hidden="true" /> : null}
@@ -330,7 +330,7 @@ export function TwoFactorSetup({ sessionId, onComplete, redirectUrl, className }
           <Button
             type="button"
             disabled={busy || code.length < 6}
-            className={cn("w-full", el("formButtonPrimary"))}
+            {...ep("formButtonPrimary", "w-full")}
             onClick={() => void verifyPhone(code)}
           >
             {busy ? <Loader2Icon className="size-4 animate-spin" aria-hidden="true" /> : null}
@@ -384,7 +384,7 @@ export function TwoFactorSetup({ sessionId, onComplete, redirectUrl, className }
           <Button
             type="button"
             disabled={busy}
-            className={cn("w-full", el("formButtonPrimary"))}
+            {...ep("formButtonPrimary", "w-full")}
             onClick={() => void finish()}
           >
             {busy ? <Loader2Icon className="size-4 animate-spin" aria-hidden="true" /> : null}

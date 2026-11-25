@@ -1,10 +1,33 @@
 export * from "./types";
-export { defaultTheme, light, dark, themes } from "./themes";
+export { defaultTheme, light, dark, soft, contrast, flat, themes } from "./themes";
 export {
   cssVariablesFrom,
   contrastForeground,
+  createElementResolver,
+  extendAppearance,
+  flattenElement,
   LIGHT_FOREGROUND,
+  DARK_FOREGROUND,
   resolveAppearance,
+  resolveAppearanceLayers,
   resolveElementClass,
+  VARIABLE_MAP,
 } from "./resolve";
-export { useAppearance, useElementClasses, type UseAppearanceReturn } from "./useAppearance";
+export {
+  COMPONENT_ELEMENTS,
+  ELEMENT_KEYS,
+  PRIMITIVE_ELEMENTS,
+  elementClassName,
+  type ComponentElementKey,
+  type ElementKey,
+  type PrimitiveElementKey,
+} from "./elements";
+export {
+  elementProps,
+  useAppearance,
+  useElementClasses,
+  useElementProps,
+  type ElementProps,
+  type ElementPropsFn,
+  type UseAppearanceReturn,
+} from "./useAppearance";

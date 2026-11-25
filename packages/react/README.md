@@ -63,7 +63,7 @@ Contexts: `OrbitIDContext`, `ClientContext`, `SessionContext`, `UserContext`,
 | `useOrganizationList(params)` | `{ isLoaded, userMemberships, userInvitations, userSuggestions, setActive, createOrganization }` |
 | `useReverification(fetcher)` | wrapped fetcher that handles `session_reverification_required` |
 | `useOrbitIDStatus()` | `{ isLoaded, isSignedIn, status: "loading" \| "signed-in" \| "signed-out" }` |
-| `useAppearance()` / `useElementClasses(name)` | merged appearance, per-element class helper |
+| `useAppearance()` / `useElementProps()` / `useElementClasses(name)` | merged appearance; `ep(key, ...classes)` element props; per-element class helper |
 | `useLocalizations()` | `{ locale, resource, t }` |
 
 `has()` accepts exactly one of `role`, `permission`, `feature`, `condition`, `reverification`
@@ -104,34 +104,46 @@ creating, accepting, leaving or updating an organization invalidates the affecte
 
 ## Appearance
 
+The full guide, with every variable and element key, is [docs/APPEARANCE.md](../../docs/APPEARANCE.md).
+
 ```tsx
+import { OrbitIDProvider, SignIn, dark, soft } from "@orbitid/react";
+
 <OrbitIDProvider
   appearance={{
-    baseTheme: [dark],
+    baseTheme: soft,
     variables: { colorPrimary: "#4f46e5", borderRadius: "0.75rem", fontFamily: "Inter, sans-serif" },
     layout: { socialButtonsVariant: "iconButton", logoPlacement: "inside" },
-    elements: { card: "shadow-xl", formButtonPrimary: "rounded-full" },
+    elements: { cardBox: "shadow-none", formButtonPrimary: { className: "rounded-full", style: { letterSpacing: "0.02em" } } },
   }}
 >
+  <SignIn appearance={{ baseTheme: dark }} />
+</OrbitIDProvider>
 ```
 
-* Tokens map onto the shadcn variables: `colorPrimary → --primary`, `colorBackground → --background`,
-  `colorText → --foreground`, `colorDanger → --destructive`, `borderRadius → --radius`, plus
-  `--orbitid-*` aliases for the rest. Unknown tokens become `--orbitid-<kebab-key>`.
-* `--primary-foreground` is derived from `colorPrimary` (hex colors) for legible button text.
-* Themes: `defaultTheme`, `light`, `dark`. Arrays merge in order; `appearance` wins over the theme.
+* Layers, lowest first: the stylesheet, instance branding, the provider's `appearance` (its `baseTheme` entries,
+  then its own values), then each component's `appearance` the same way. Variables and layout replace key by key;
+  element classes and styles accumulate, later layers winning conflicts.
+* Themes: `defaultTheme`, `light`, `dark`, `soft`, `contrast`, `flat`. Arrays merge in order.
+* Variables (`colorPrimary`, `colorBackground`, `colorForeground`, `colorMuted`, `colorDanger`, `colorInput`,
+  `borderRadius`, `fontFamily`, `fontSize`, `spacingUnit`, `shadowStrength`, …) set the shadcn custom properties on
+  the component root only. Unknown tokens become `--orbitid-<kebab-key>`.
+* Elements: primitive keys (`button`, `buttonPrimary`, `input`, `card`, `table`, `modalContent`, …) apply to every
+  component; component keys (`formButtonPrimary`, `headerTitle`, `socialButtonsIconButton`, …) to one part. Each
+  takes a class string, `{ className, style, unstyled }`, a function or a list, and every element carries a stable
+  `orbitid-<key>` class for plain CSS.
+* `unstyled: true` drops every OrbitID class so Tailwind or your own CSS owns the look.
 * Light and dark: the sign-in, sign-up, waitlist, user button, user profile and organization components pick a
-  scheme in this order: a `light`/`dark` base theme in
-  `appearance`; the instance's branding theme when it is light or dark; otherwise the scheme your page marks on
-  `<html>` (a `dark`/`light` class, `data-theme="dark|light"` or an inline `color-scheme`, as `@orbitid/ui`'s
-  `ThemeProvider`, next-themes and most Tailwind setups do), and only when the page marks none,
-  `prefers-color-scheme`. They follow the page live when it switches, and menus and dialogs they portal to
-  `<body>` carry the same scheme. To tie everything to your
-  app's own toggle, pass `appearance={{ baseTheme: isDark ? dark : light }}`.
-* The provider renders `<div className="orbitid-root …">` carrying the CSS variables; `rootBox`
-  overrides are applied to that wrapper.
-* Components resolve element classes with `useElementClasses("card")(...defaults)`; user overrides
-  win over component defaults (`tailwind-merge` semantics).
+  scheme in this order: a `light`/`dark` base theme in `appearance`; the instance's branding theme when it is light
+  or dark; otherwise the scheme your page marks on `<html>` (a `dark`/`light` class, `data-theme="dark|light"` or an
+  inline `color-scheme`, as `@orbitid/ui`'s `ThemeProvider`, next-themes and most Tailwind setups do), and only when
+  the page marks none, `prefers-color-scheme`. They follow the page live when it switches, and menus and dialogs
+  they portal to `<body>` carry the same scheme and variables. To tie everything to your app's own toggle, pass
+  `appearance={{ baseTheme: isDark ? dark : light }}`.
+* The provider renders `<div className="orbitid-root …">` carrying the CSS variables; `rootBox` classes are applied
+  to that wrapper and to each component's root.
+* For your own parts inside a component, `useElementProps()` returns `ep(key, ...classes)`, which applies the
+  appearance for that key.
 
 ## Localization
 

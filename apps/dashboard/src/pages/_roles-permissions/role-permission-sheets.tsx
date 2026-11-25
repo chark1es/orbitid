@@ -85,7 +85,7 @@ export function RoleSheet({ ctl }: { ctl: RolesPermissionsController }) {
           <div className="max-h-72 space-y-3 overflow-y-auto border border-border p-3">
             {Object.entries(roleGroups).map(([feature, entries]) => (
               <div key={feature} className="space-y-1">
-                <p className="text-xs font-semibold uppercase tracking-[0.04em] text-muted-foreground">{feature}</p>
+                <p className="text-xs font-medium text-muted-foreground">{feature}</p>
                 {entries.map((permission) => (
                   <CheckboxRow
                     key={permission.key}

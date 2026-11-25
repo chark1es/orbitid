@@ -57,7 +57,7 @@ export interface CaptchaWidgetProps {
  */
 export function CaptchaWidget({ siteKey, provider, onToken, theme: themeProp, className }: CaptchaWidgetProps) {
   const runtime = useAuthRuntime();
-  const { el } = useElementClasses();
+  const { ep } = useElementClasses();
   // Match the card around it rather than the operating system ("auto"), which differs when the page picked a scheme.
   const resolvedTheme = useResolvedTheme();
   const theme = themeProp ?? resolvedTheme;
@@ -121,7 +121,7 @@ export function CaptchaWidget({ siteKey, provider, onToken, theme: themeProp, cl
       ref={container}
       data-orbit-element="captcha"
       data-testid="captcha-widget"
-      className={cn("flex min-h-[65px] w-full justify-center", el("captcha"), className)}
+      {...ep("captcha", "flex min-h-[65px] w-full justify-center", className)}
     />
   );
 }

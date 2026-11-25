@@ -1,3 +1,4 @@
+import { ProfileSection, ProfileSectionTitle } from "./security-shared";
 import { useEffect, useState } from "react";
 import {
   Badge,
@@ -130,9 +131,9 @@ export function EnterpriseAccountsSection() {
   if (accounts.length === 0) return null;
 
   return (
-    <section className="flex flex-col gap-3" data-orbit-section="enterprise-accounts">
+    <ProfileSection id="enterprise-accounts" className="flex flex-col gap-3">
       <div>
-        <h2 className="text-sm font-semibold">{t("userProfile.enterpriseAccounts.title")}</h2>
+        <ProfileSectionTitle>{t("userProfile.enterpriseAccounts.title")}</ProfileSectionTitle>
         <p className="text-xs text-muted-foreground">{t("userProfile.enterpriseAccounts.description")}</p>
       </div>
       <ul className="flex flex-col divide-y rounded-md border">
@@ -149,6 +150,6 @@ export function EnterpriseAccountsSection() {
           );
         })}
       </ul>
-    </section>
+    </ProfileSection>
   );
 }

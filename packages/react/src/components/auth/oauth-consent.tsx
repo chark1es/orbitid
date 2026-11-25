@@ -94,7 +94,7 @@ async function consentRequest<T>(
 function OAuthConsentInner(props: OAuthConsentProps) {
   const runtime = useAuthRuntime();
   const { orbit, environment, t, navigate } = runtime;
-  const { el } = useElementClasses();
+  const { ep } = useElementClasses();
   const query = useMemo(() => {
     if (typeof window === "undefined") return new URLSearchParams();
     return new URLSearchParams(window.location.search);
@@ -251,7 +251,7 @@ function OAuthConsentInner(props: OAuthConsentProps) {
           <Button
             type="button"
             disabled={busy || !info}
-            className={cn("flex-1 gap-2", el("formButtonPrimary"))}
+            {...ep("formButtonPrimary", "flex-1 gap-2")}
             onClick={() => void decide(true)}
           >
             <LockIcon className="size-4" aria-hidden="true" />

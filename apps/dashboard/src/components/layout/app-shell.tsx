@@ -80,7 +80,7 @@ export function AppSidebar() {
               <Link to="/" className="gap-2.5">
                 <AppIcon className="size-7" />
                 <span className="grid min-w-0 flex-1 text-left leading-tight">
-                  <span className="truncate text-sm font-semibold text-rail-foreground">{instanceName}</span>
+                  <span className="truncate text-sm font-semibold text-foreground">{instanceName}</span>
                   <span className="truncate font-data text-[0.6875rem] text-sidebar-foreground/60">
                     {hostOf(getApiUrl())}
                   </span>

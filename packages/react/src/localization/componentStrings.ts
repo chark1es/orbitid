@@ -57,6 +57,7 @@ export const componentStrings = {
     poweredBy: "Powered by OrbitID",
     terms: "Terms",
     privacy: "Privacy",
+    help: "Help",
   },
   devMode: {
     banner: "Development mode: use test credentials, they will not work in production.",

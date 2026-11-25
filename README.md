@@ -227,6 +227,7 @@ changes — it is the source of truth the Rust server embeds and serves.
 | Identity provider and federation | [docs/OIDC.md](docs/OIDC.md), [docs/FEDERATION.md](docs/FEDERATION.md) |
 | OIDC client guides | [Tinyauth](docs/integrations/tinyauth.md), [Authentik](docs/integrations/authentik.md), [generic clients](docs/integrations/generic.md) |
 | SDKs | [docs/NODE_SDK.md](docs/NODE_SDK.md), [packages/nextjs](packages/nextjs/README.md), [packages/react](packages/react/README.md) |
+| Theming the prebuilt components | [docs/APPEARANCE.md](docs/APPEARANCE.md) |
 | Dashboard | [docs/DASHBOARD.md](docs/DASHBOARD.md) |
 | Architecture | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 

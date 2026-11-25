@@ -2,23 +2,24 @@
 
 import * as React from "react"
 import { cn } from "../../lib/utils"
+import { useElementSlot } from "../../lib/element-slots"
 import { Avatar as AvatarPrimitive } from "radix-ui"
 
 function Avatar({
   className,
+  style,
   size = "default",
   ...props
 }: React.ComponentProps<typeof AvatarPrimitive.Root> & {
   size?: "default" | "sm" | "lg"
 }) {
+  const slot = useElementSlot(["avatarBox"], "group/avatar relative flex size-8 shrink-0 overflow-hidden rounded-full select-none data-[size=lg]:size-10 data-[size=sm]:size-6", className, style, props)
   return (
     <AvatarPrimitive.Root
       data-slot="avatar"
       data-size={size}
-      className={cn(
-        "group/avatar relative flex size-8 shrink-0 overflow-hidden rounded-full select-none data-[size=lg]:size-10 data-[size=sm]:size-6",
-        className
-      )}
+      className={slot.className}
+      style={slot.style}
       {...props}
     />
   )
@@ -26,12 +27,15 @@ function Avatar({
 
 function AvatarImage({
   className,
+  style,
   ...props
 }: React.ComponentProps<typeof AvatarPrimitive.Image>) {
+  const slot = useElementSlot(["avatarImage"], "aspect-square size-full", className, style, props)
   return (
     <AvatarPrimitive.Image
       data-slot="avatar-image"
-      className={cn("aspect-square size-full", className)}
+      className={slot.className}
+      style={slot.style}
       {...props}
     />
   )
@@ -39,15 +43,15 @@ function AvatarImage({
 
 function AvatarFallback({
   className,
+  style,
   ...props
 }: React.ComponentProps<typeof AvatarPrimitive.Fallback>) {
+  const slot = useElementSlot(["avatarFallback"], "flex size-full items-center justify-center rounded-full bg-muted text-sm leading-none font-medium text-muted-foreground control-optical group-data-[size=sm]/avatar:text-xs", className, style, props)
   return (
     <AvatarPrimitive.Fallback
       data-slot="avatar-fallback"
-      className={cn(
-        "flex size-full items-center justify-center rounded-full bg-muted text-sm leading-none font-medium text-muted-foreground control-optical group-data-[size=sm]/avatar:text-xs",
-        className
-      )}
+      className={slot.className}
+      style={slot.style}
       {...props}
     />
   )

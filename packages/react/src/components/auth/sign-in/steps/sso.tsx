@@ -12,7 +12,7 @@ import { LinkButton, type StepProps } from "./shared";
 
 export function EnterpriseSsoStep({ flow }: StepProps) {
   const { t } = useAuthRuntime();
-  const { el } = useElementClasses();
+  const { ep } = useElementClasses();
   const form = useForm<{ email: string }>({
     defaultValues: { email: flow.identifierDraft },
     mode: "onSubmit",
@@ -31,7 +31,7 @@ export function EnterpriseSsoStep({ flow }: StepProps) {
   return (
     <div className="flex flex-col gap-4">
       <FormError message={flow.error} />
-      <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
+      <form onSubmit={submit} {...ep("form", "flex flex-col gap-4")} noValidate>
         <Field control={form.control} name="email" label={t("formFieldLabel__emailAddress")} required>
           {(field) => (
             <Input
@@ -41,11 +41,11 @@ export function EnterpriseSsoStep({ flow }: StepProps) {
               placeholder={t("formFieldPlaceholder__emailAddress")}
               autoFocus
               disabled={flow.busy}
-              className={cn(el("formFieldInput"))}
+              {...ep("formFieldInput")}
             />
           )}
         </Field>
-        <Button type="submit" disabled={flow.busy} className={cn("w-full", el("formButtonPrimary"))}>
+        <Button type="submit" disabled={flow.busy} {...ep("formButtonPrimary", "w-full")}>
           {t("signIn.enterpriseSso.action")}
         </Button>
       </form>

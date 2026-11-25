@@ -41,9 +41,20 @@ describe.each([["light", light], ["dark", dark]])("%s theme opaque token contras
   it("keeps secondary labels readable on every ordinary surface", () => {
     for (const surface of ["background", "card", "muted", "accent"]) expect(contrast(block, "muted-foreground", surface), `muted-foreground on ${surface}`).toBeGreaterThanOrEqual(4.5);
   });
-  it("keeps the active rail item's label readable", () => {
-    expect(contrast(block, "primary-foreground", "sidebar-primary")).toBeGreaterThanOrEqual(4.5);
+  it("keeps the sidebar readable, active item included", () => {
+    expect(contrast(block, "sidebar-foreground", "sidebar")).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(block, "sidebar-foreground", "sidebar-accent")).toBeGreaterThanOrEqual(4.5);
     expect(contrast(block, "sidebar-primary-foreground", "sidebar-primary")).toBeGreaterThanOrEqual(4.5);
+    // The active item's icon turns signal red: a graphic, so 3:1.
+    expect(contrast(block, "signal", "sidebar-primary")).toBeGreaterThanOrEqual(3);
+    // Line codes on the activity board.
     expect(contrast(block, "rail-muted", "rail")).toBeGreaterThanOrEqual(4.5);
+  });
+  it("keeps the keyboard focus ring visible on every surface", () => {
+    for (const surface of ["background", "card", "muted", "sidebar"]) expect(contrast(block, "ring", surface), `ring on ${surface}`).toBeGreaterThanOrEqual(3);
+  });
+  it("keeps primary buttons legible", () => {
+    expect(contrast(block, "primary-foreground", "primary")).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(block, "destructive-foreground", "destructive")).toBeGreaterThanOrEqual(4.5);
   });
 });

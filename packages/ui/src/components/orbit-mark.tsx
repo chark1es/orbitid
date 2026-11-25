@@ -1,3 +1,4 @@
+import type * as React from "react"
 import { cn } from "../lib/utils"
 
 /**
@@ -29,14 +30,18 @@ export type OrbitScheme = keyof typeof ORBIT_GLYPH
  */
 export function OrbitMark({
   className,
+  style,
   title,
   color = "currentColor",
   scheme,
+  "data-orbitid-element": element,
 }: {
   className?: string
+  style?: React.CSSProperties
   title?: string
   color?: string
   scheme?: OrbitScheme
+  "data-orbitid-element"?: string
 }) {
   return (
     <svg
@@ -44,6 +49,8 @@ export function OrbitMark({
       role={title ? "img" : undefined}
       aria-hidden={title ? undefined : true}
       className={cn("size-4 shrink-0", className)}
+      style={style}
+      data-orbitid-element={element}
     >
       {title ? <title>{title}</title> : null}
       {scheme ? (

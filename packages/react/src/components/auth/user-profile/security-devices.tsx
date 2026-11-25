@@ -16,7 +16,7 @@ import { useReverification } from "../../../hooks";
 import { useAuthRuntime } from "../_shared/w6";
 import type { NormalizedSession } from "../_shared/w6";
 import type { TrustedDeviceResource } from "../../../provider/types";
-import { SectionHeader, formatDate, type SectionProps } from "./security-shared";
+import { SectionHeader, formatDate, type SectionProps, ProfileSection } from "./security-shared";
 import { usePortalClass } from "../_shared/appearance";
 
 export function TrustedDevicesSection({ user, refresh, onError, onNotice }: SectionProps) {
@@ -60,7 +60,7 @@ export function TrustedDevicesSection({ user, refresh, onError, onNotice }: Sect
   if (!enabled) return null;
 
   return (
-    <section className="flex flex-col gap-3" data-orbit-section="trusted-devices">
+    <ProfileSection id="trusted-devices" className="flex flex-col gap-3">
       <SectionHeader title={t("userProfile.trustedDevices.title")} description={t("userProfile.trustedDevices.description")} />
       {devices.length === 0 ? (
         <p className="text-sm text-muted-foreground">{t("userProfile.trustedDevices.none")}</p>
@@ -88,7 +88,7 @@ export function TrustedDevicesSection({ user, refresh, onError, onNotice }: Sect
           })}
         </ul>
       )}
-    </section>
+    </ProfileSection>
   );
 }
 
@@ -149,7 +149,7 @@ export function DevicesSection({ user, refresh, onError, onNotice }: SectionProp
   };
 
   return (
-    <section className="flex flex-col gap-3" data-orbit-section="devices">
+    <ProfileSection id="devices" className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-2">
         <SectionHeader title={t("userProfile.devices.title")} description={t("userProfile.devices.description")} />
         {sessions.length > 0 ? (
@@ -184,7 +184,7 @@ export function DevicesSection({ user, refresh, onError, onNotice }: SectionProp
           })}
         </ul>
       )}
-    </section>
+    </ProfileSection>
   );
 }
 
@@ -221,7 +221,7 @@ export function DeleteAccountSection({ user, onError, onDeleted }: SectionProps 
   };
 
   return (
-    <section className="flex flex-col gap-3 rounded-md border border-destructive/30 p-3" data-orbit-section="delete-account">
+    <ProfileSection id="delete-account" className="flex flex-col gap-3 rounded-md border border-destructive/30 p-3">
       <SectionHeader title={t("userProfile.deleteAccount.title")} description={t("userProfile.deleteAccount.description")} />
       {disabled ? (
         <p className="text-xs text-muted-foreground">{t("userProfile.deleteAccount.disabled")}</p>
@@ -261,6 +261,6 @@ export function DeleteAccountSection({ user, onError, onDeleted }: SectionProps 
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </section>
+    </ProfileSection>
   );
 }

@@ -13,7 +13,7 @@ import { IdentifierPreview, LinkButton, factorIdentifier, type StepProps } from 
 
 export function PasswordStep({ flow }: StepProps) {
   const { t } = useAuthRuntime();
-  const { el } = useElementClasses();
+  const { ep } = useElementClasses();
   const form = useForm<{ password: string }>({ defaultValues: { password: "" }, mode: "onSubmit" });
 
   const submit = form.handleSubmit(async (values) => {
@@ -32,7 +32,7 @@ export function PasswordStep({ flow }: StepProps) {
         </div>
       ) : null}
       <IdentifierPreview value={flow.identifier} onEdit={() => flow.go("start")} />
-      <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
+      <form onSubmit={submit} {...ep("form", "flex flex-col gap-4")} noValidate>
         <Field control={form.control} name="password" label={t("formFieldLabel__password")} required>
           {(field) => (
             <PasswordInput
@@ -50,7 +50,7 @@ export function PasswordStep({ flow }: StepProps) {
             />
           )}
         </Field>
-        <Button type="submit" disabled={flow.busy} className={cn("w-full", el("formButtonPrimary"))}>
+        <Button type="submit" disabled={flow.busy} {...ep("formButtonPrimary", "w-full")}>
           {flow.busy ? <Loader2Icon className="size-4 animate-spin" aria-hidden="true" /> : null}
           {t("signIn.password.action")}
         </Button>
@@ -65,7 +65,7 @@ export function PasswordStep({ flow }: StepProps) {
 
 export function EmailCodeStep({ flow }: StepProps) {
   const { t } = useAuthRuntime();
-  const { el } = useElementClasses();
+  const { ep } = useElementClasses();
   const [code, setCode] = useState("");
   const identifier = factorIdentifier(flow.signIn) || flow.identifier;
 
@@ -86,7 +86,7 @@ export function EmailCodeStep({ flow }: StepProps) {
       <Button
         type="button"
         disabled={flow.busy || code.length < 6}
-        className={cn("w-full", el("formButtonPrimary"))}
+        {...ep("formButtonPrimary", "w-full")}
         onClick={() => void flow.attemptFirstFactor({ strategy: "email_code", code })}
       >
         {flow.busy ? <Loader2Icon className="size-4 animate-spin" aria-hidden="true" /> : null}
@@ -107,7 +107,7 @@ export function EmailCodeStep({ flow }: StepProps) {
 
 export function PhoneCodeStep({ flow }: StepProps) {
   const { t } = useAuthRuntime();
-  const { el } = useElementClasses();
+  const { ep } = useElementClasses();
   const [code, setCode] = useState("");
   const identifier = factorIdentifier(flow.signIn) || flow.identifier;
 
@@ -126,7 +126,7 @@ export function PhoneCodeStep({ flow }: StepProps) {
       <Button
         type="button"
         disabled={flow.busy || code.length < 6}
-        className={cn("w-full", el("formButtonPrimary"))}
+        {...ep("formButtonPrimary", "w-full")}
         onClick={() => void flow.attemptFirstFactor({ strategy: "phone_code", code })}
       >
         {flow.busy ? <Loader2Icon className="size-4 animate-spin" aria-hidden="true" /> : null}

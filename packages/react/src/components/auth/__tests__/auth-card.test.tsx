@@ -7,7 +7,7 @@ function headerOf(container: HTMLElement): HTMLElement {
 }
 
 describe("AuthCard header rhythm", () => {
-  it("lands the subtitle on the 16px form rhythm above the first field", () => {
+  it("keeps one 24px gap between the header and the first field, with or without a subtitle", () => {
     const harness = setupAuth({ signedIn: false });
     const { container } = renderAuth(
       <AuthCard title="Sign in" subtitle="Enter your details to continue">
@@ -15,19 +15,26 @@ describe("AuthCard header rhythm", () => {
       </AuthCard>,
       harness,
     );
-    // The line boxes already read as ~10px of air; 6px of header padding makes it 16px, matching the
-    // gap the shared form uses between its fields.
-    expect(headerOf(container).className).toContain("pb-1.5");
-  });
-
-  it("does not add the extra gap to a step without a subtitle", () => {
-    const harness = setupAuth({ signedIn: false });
-    const { container } = renderAuth(
+    expect(headerOf(container).className).toContain("pb-6");
+    const bare = renderAuth(
       <AuthCard title="Check your email">
         <label htmlFor="code">Code</label>
       </AuthCard>,
       harness,
     );
-    expect(headerOf(container).className).not.toContain("pb-1.5");
+    expect(headerOf(bare.container).className).toContain("pb-6");
+  });
+
+  it("puts the card on the component root, not on the host page", () => {
+    const harness = setupAuth({ signedIn: false });
+    const { container } = renderAuth(
+      <AuthCard title="Sign in">
+        <span />
+      </AuthCard>,
+      harness,
+    );
+    const root = container.querySelector('[data-orbit-component="auth-card"]') as HTMLElement;
+    expect(root.classList).toContain("orbitid-component");
+    expect(root.querySelector('[data-slot="card"]')?.classList).toContain("orbitid-cardBox");
   });
 });

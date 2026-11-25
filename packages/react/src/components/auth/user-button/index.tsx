@@ -20,7 +20,8 @@ import {
 } from "@orbitid/ui";
 import { ChevronsUpDownIcon, LogOutIcon, PlusIcon, SettingsIcon, UsersIcon } from "lucide-react";
 import { activateSession, currentUser, displayName, initials, primaryIdentifier, signOut } from "../_shared/api";
-import { AuthAppearanceScope, useElementClasses, useThemeScope } from "../_shared/appearance";
+import { AuthAppearanceScope, useElementClasses, usePortalClass } from "../_shared/appearance";
+import { ComponentRoot } from "../_shared/component-root";
 import { useAuthRuntime } from "../_shared/w6";
 import type { UserButtonProps } from "../_shared/types";
 import { UserProfile } from "../user-profile";
@@ -66,9 +67,9 @@ function UserAvatar({ user, className }: { user: ReturnType<typeof currentUser>;
 function UserButtonInner(props: UserButtonProps) {
   const runtime = useAuthRuntime();
   const { orbit, t } = runtime;
-  const { el } = useElementClasses();
+  const { ep } = useElementClasses();
   // The menu and the profile dialog are portaled out of the page's tree, so they carry the scheme themselves.
-  const { className: themeClass } = useThemeScope();
+  const portalClass = usePortalClass();
   const user = currentUser(orbit);
   const [profileOpen, setProfileOpen] = useState(false);
   const sessions = runtime.client?.sessions ?? [];
@@ -167,27 +168,27 @@ function UserButtonInner(props: UserButtonProps) {
   if (!user) return null;
 
   return (
-    <div className={cn("inline-flex", el("userButtonBox"))}>
+    <ComponentRoot component="user-button" element="userButtonBox" className="inline-flex">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
             type="button"
             variant="ghost"
-            className={cn("h-auto gap-2 rounded-full p-1 pe-2", !props.showName && "pe-1", el("userButtonTrigger"))}
+            {...ep("userButtonTrigger", "h-auto gap-2 rounded-full p-1 pe-2", !props.showName && "pe-1")}
             aria-label={t("userButton.account")}
           >
-            <span className={cn(el("userButtonAvatarBox"))}>
+            <span {...ep("userButtonAvatarBox")}>
               <UserAvatar user={user} />
             </span>
             {props.showName ? (
-              <span className={cn("max-w-[10rem] truncate text-sm font-medium", el("userButtonOuterIdentifier"))}>
+              <span {...ep("userButtonOuterIdentifier", "max-w-[10rem] truncate text-sm font-medium")}>
                 {displayName(user)}
               </span>
             ) : null}
             <ChevronsUpDownIcon className="size-3.5 text-muted-foreground" aria-hidden="true" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className={cn(themeClass, "w-64", el("menuList"))}>
+        <DropdownMenuContent align="end" {...ep("userButtonPopover", portalClass("w-64 p-1.5"))}>
           <DropdownMenuLabel className="font-normal">
             <div className="flex items-center gap-2 py-1">
               <UserAvatar user={user} className="size-9" />
@@ -198,7 +199,7 @@ function UserButtonInner(props: UserButtonProps) {
             </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={openProfile} className="gap-2">
+          <DropdownMenuItem onSelect={openProfile} {...ep("userButtonPopoverActionButton", "gap-2")}>
             <SettingsIcon className="size-4" aria-hidden="true" />
             {t("userButton.manageAccount")}
           </DropdownMenuItem>
@@ -219,7 +220,7 @@ function UserButtonInner(props: UserButtonProps) {
                   <DropdownMenuItem
                     key={session.id}
                     onSelect={() => void handleSwitch(session.id).catch(() => undefined)}
-                    className="gap-2"
+                    {...ep("userButtonPopoverActionButton", "gap-2")}
                     data-testid={`session-${session.id}`}
                   >
                     <Avatar className="size-5">
@@ -241,14 +242,14 @@ function UserButtonInner(props: UserButtonProps) {
             onSelect={() =>
               runtime.navigate(`${signInUrl}${signInUrl.includes("?") ? "&" : "?"}prompt=select_account`)
             }
-            className="gap-2"
+            {...ep("userButtonPopoverActionButton", "gap-2")}
             data-testid="user-button-add-account"
           >
             <PlusIcon className="size-4" aria-hidden="true" />
             {t("userButton.addAccount")}
           </DropdownMenuItem>
           {multiSession ? (
-            <DropdownMenuItem onSelect={() => void handleSignOutAll().catch(() => undefined)} className="gap-2 text-destructive">
+            <DropdownMenuItem onSelect={() => void handleSignOutAll().catch(() => undefined)} {...ep("userButtonPopoverActionButton", "gap-2 text-destructive")}>
               <UsersIcon className="size-4" aria-hidden="true" />
               {t("userButton.signOutAll")}
             </DropdownMenuItem>
@@ -256,7 +257,7 @@ function UserButtonInner(props: UserButtonProps) {
           <DropdownMenuSeparator />
           <DropdownMenuItem
             onSelect={() => void handleSignOut().catch(() => undefined)}
-            className="gap-2"
+            {...ep("userButtonPopoverActionButton", "gap-2")}
             data-testid="user-button-sign-out"
           >
             <LogOutIcon className="size-4" aria-hidden="true" />
@@ -268,7 +269,7 @@ function UserButtonInner(props: UserButtonProps) {
       {profileOpen ? (
         <>
           <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
-            <DialogContent className={cn(themeClass, "max-h-[90vh] w-full max-w-3xl overflow-y-auto p-0")} showCloseButton>
+            <DialogContent className={portalClass("max-h-[90vh] w-full max-w-4xl overflow-y-auto p-0")} showCloseButton>
               <DialogHeader className="sr-only">
                 <DialogTitle>{t("userProfile.title")}</DialogTitle>
                 <DialogDescription>{t("userProfile.subtitle")}</DialogDescription>
@@ -280,7 +281,7 @@ function UserButtonInner(props: UserButtonProps) {
       ) : null}
 
       <UserVerificationModal />
-    </div>
+    </ComponentRoot>
   );
 }
 

@@ -10,7 +10,7 @@ import { type SignUpStepProps } from "./shared";
 
 export function VerifyCodeStep({ flow, strategy }: SignUpStepProps & { strategy: "email_code" | "phone_code" }) {
   const { t } = useAuthRuntime();
-  const { el } = useElementClasses();
+  const { ep } = useElementClasses();
   const [code, setCode] = useState("");
   const identifier =
     strategy === "phone_code"
@@ -36,7 +36,7 @@ export function VerifyCodeStep({ flow, strategy }: SignUpStepProps & { strategy:
       <Button
         type="button"
         disabled={flow.busy || code.length < 6}
-        className={cn("w-full", el("formButtonPrimary"))}
+        {...ep("formButtonPrimary", "w-full")}
         onClick={() => void flow.attemptVerification(strategy, code)}
       >
         {flow.busy ? <Loader2Icon className="size-4 animate-spin" aria-hidden="true" /> : null}

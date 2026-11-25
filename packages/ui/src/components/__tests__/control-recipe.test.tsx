@@ -91,7 +91,7 @@ describe("shared control recipe", () => {
     const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
     expect(css).toContain("@utility control-optical");
     expect(css).toMatch(/svg\.lucide\s*\{\s*stroke-width:\s*1\.5;/);
-    expect(css).toContain("--font-weight-heading: 650");
+    expect(css).toContain("--font-weight-heading: 620");
   });
 });
 

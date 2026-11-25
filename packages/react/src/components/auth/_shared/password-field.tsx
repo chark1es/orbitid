@@ -91,7 +91,7 @@ export function PasswordInput({
   ...aria
 }: PasswordInputProps) {
   const { t } = useAuthRuntime();
-  const { el } = useElementClasses();
+  const { ep } = useElementClasses();
   const generatedId = useId();
   const inputId = id ?? generatedId;
   const [visible, setVisible] = useState(false);
@@ -110,7 +110,7 @@ export function PasswordInput({
         autoFocus={autoFocus}
         aria-invalid={aria["aria-invalid"]}
         aria-describedby={aria["aria-describedby"]}
-        className={cn("pe-10", el("formFieldInput"), className)}
+        {...ep("formFieldInput", "pe-10", className)}
       />
       <Button
         type="button"
@@ -120,7 +120,7 @@ export function PasswordInput({
         onClick={() => setVisible((current) => !current)}
         aria-label={visible ? t("common.hidePassword") : t("common.showPassword")}
         aria-pressed={visible}
-        className="absolute end-1 top-1/2 size-8 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+        {...ep("formFieldInputShowPasswordButton", "absolute end-1 top-1/2 size-8 -translate-y-1/2 text-muted-foreground hover:text-foreground")}
       >
         {visible ? <EyeOffIcon className="size-4" /> : <EyeIcon className="size-4" />}
       </Button>
@@ -152,7 +152,7 @@ export function PasswordField({
   ...inputProps
 }: PasswordFieldProps) {
   const { t } = useAuthRuntime();
-  const { el } = useElementClasses();
+  const { ep } = useElementClasses();
   const generatedId = useId();
   const inputId = generatedId;
   const hintId = `${inputId}-hint`;
@@ -160,9 +160,9 @@ export function PasswordField({
   const score = passwordScore(value, settings);
 
   return (
-    <div className={cn("flex flex-col gap-1.5", el("formField"), className)}>
+    <div {...ep("formField", "flex flex-col gap-1.5", className)}>
       {label ? (
-        <Label htmlFor={inputId} className={cn("text-sm font-medium", el("formFieldLabel"))}>
+        <Label htmlFor={inputId} {...ep("formFieldLabel", "text-sm font-medium")}>
           {label}
           {required ? (
             <span aria-hidden="true" className="text-destructive">
@@ -177,7 +177,7 @@ export function PasswordField({
         value={value}
         aria-invalid={Boolean(error)}
         aria-describedby={hintId}
-        className={el("formFieldInput")}
+        {...ep("formFieldInput")}
       />
       {showStrength && value.length > 0 ? (
         <div className="flex items-center gap-2" data-testid="password-strength">
@@ -201,12 +201,12 @@ export function PasswordField({
           ))}
         </ul>
       ) : description ? (
-        <p id={hintId} className={cn("text-xs text-muted-foreground", el("formFieldHintText"))}>
+        <p id={hintId} {...ep("formFieldHintText", "text-xs text-muted-foreground")}>
           {description}
         </p>
       ) : null}
       {error ? (
-        <p role="alert" className={cn("text-xs text-destructive", el("formFieldErrorText"))}>
+        <p role="alert" {...ep("formFieldErrorText", "text-xs text-destructive")}>
           {error}
         </p>
       ) : null}

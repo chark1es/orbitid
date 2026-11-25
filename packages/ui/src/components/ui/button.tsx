@@ -1,19 +1,19 @@
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
-import { cn } from "../../lib/utils"
+import { useElementSlot, slotKeysFor } from "../../lib/element-slots"
 import { CONTROL_RECIPE } from "../../lib/control"
 import { Slot } from "radix-ui"
 
 const buttonVariants = cva(
-  `${CONTROL_RECIPE} shrink-0 gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-colors select-none disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4`,
+  `${CONTROL_RECIPE} shrink-0 gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-[color,background-color,border-color,box-shadow] duration-150 select-none disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4`,
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/90",
+        default: "bg-primary text-primary-foreground shadow-xs hover:bg-primary/88 active:bg-primary/82",
         destructive:
-          "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+          "bg-destructive text-destructive-foreground shadow-xs hover:bg-destructive/90",
         outline:
-          "border border-border bg-transparent hover:bg-accent hover:text-accent-foreground",
+          "border border-border bg-card shadow-xs hover:bg-accent hover:text-accent-foreground",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-secondary/80",
         ghost:
@@ -40,6 +40,7 @@ const buttonVariants = cva(
 
 function Button({
   className,
+  style,
   variant = "default",
   size = "default",
   asChild = false,
@@ -50,12 +51,14 @@ function Button({
   }) {
   const Comp = asChild ? Slot.Root : "button"
 
+  const slot = useElementSlot(slotKeysFor("button", variant), buttonVariants({ variant, size }), className, style, props)
   return (
     <Comp
       data-slot="button"
       data-variant={variant}
       data-size={size}
-      className={cn(buttonVariants({ variant, size, className }))}
+      className={slot.className}
+      style={slot.style}
       {...props}
     />
   )

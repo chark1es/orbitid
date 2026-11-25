@@ -25,6 +25,7 @@ export function OrgAvatar({ name, imageUrl, hasImage, size = "sm", className }: 
   const showImage = Boolean(imageUrl) && hasImage !== false;
   return (
     <Avatar
+      data-orbitid-element="organizationPreview"
       className={cn("shrink-0 rounded-md after:rounded-md", SIZE_CLASSES[size], className)}
       data-testid="org-avatar"
     >

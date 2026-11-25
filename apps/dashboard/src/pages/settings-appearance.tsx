@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Page as PageLayout } from "../components/shared/page";
 import {
-  cn,
   Input,
   Select,
   SelectContent,
@@ -22,8 +21,10 @@ import {
   SwitchRow,
 } from "./_config/ui";
 import { useSettingsEditor } from "./_config/use-settings";
+import { BrandingPreview, type PreviewScheme } from "./_appearance/preview";
+import { AppearancePlayground } from "./_appearance/playground";
+import { DEFAULT_DRAFT, type AppearanceDraft } from "./_appearance/draft";
 
-type PreviewScheme = "light" | "dark";
 
 /** Follows the operating system's color scheme, for a branding theme of "system". */
 function useSystemScheme(): PreviewScheme {
@@ -65,6 +66,7 @@ export default function Page() {
   const systemScheme = useSystemScheme();
   // The operator can flip the preview without touching the saved theme; picking a theme resets the flip.
   const [schemeOverride, setSchemeOverride] = useState<PreviewScheme | null>(null);
+  const [draft, setDraft] = useState<AppearanceDraft>(DEFAULT_DRAFT);
 
   if (editor.isLoading) return <LoadingPage rows={4} />;
   if (!settings) {
@@ -90,8 +92,6 @@ export default function Page() {
   const previewScheme = schemeOverride ?? configuredScheme;
   // A dark brand color would vanish on the dark surface, so the hosted components fall back to the theme's primary there.
   const brandVanishes = previewScheme === "dark" && previewInk === "#ffffff";
-  const brandFill = brandVanishes ? "var(--primary)" : previewColor;
-  const brandText = brandVanishes ? "var(--primary-foreground)" : previewInk;
 
   return (
     <PageLayout>
@@ -171,50 +171,21 @@ export default function Page() {
               </div>
             </div>
           </div>
-          <div
-            data-testid="branding-preview"
-            data-scheme={previewScheme}
-            className={cn(
-              "border border-border bg-muted/30 p-6 text-foreground transition-colors duration-200 motion-reduce:transition-none",
-              previewScheme === "dark" ? "dark bg-background" : "light",
-            )}
-          >
-            <div className="mx-auto w-full max-w-sm border border-border bg-card px-6 py-7">
-              <div className="space-y-1 text-center">
-                <div
-                  className="mx-auto grid size-9 place-items-center text-sm font-semibold"
-                  style={{ backgroundColor: brandFill, color: brandText }}
-                  aria-hidden
-                >
-                  {(app.name || "O").trim().charAt(0).toUpperCase()}
-                </div>
-                <p className="pt-2 text-[0.9375rem] font-semibold">{app.name || "Your application"}</p>
-                <p className="text-xs text-muted-foreground">Sign in to continue</p>
-              </div>
-              <div className="mt-5 space-y-3">
-                <div className="space-y-1.5">
-                  <p className="text-xs font-medium">Email address</p>
-                  <div className="h-[34px] border border-input bg-background px-3 py-2 text-xs text-muted-foreground">you@example.com</div>
-                </div>
-                <div
-                  className="grid h-[34px] place-items-center text-xs font-medium"
-                  style={{ backgroundColor: brandFill, color: brandText }}
-                >
-                  Continue
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="h-px flex-1 bg-border" />
-                  <span className="text-[11px] uppercase tracking-[0.04em] text-muted-foreground">or</span>
-                  <span className="h-px flex-1 bg-border" />
-                </div>
-                <div className="grid h-[34px] place-items-center border border-border text-xs font-medium">Continue with Google</div>
-                {branding.showPoweredBy ? (
-                  <p className="pt-1 text-center text-[11px] text-muted-foreground">Powered by OrbitID</p>
-                ) : null}
-              </div>
-            </div>
-          </div>
+          <BrandingPreview
+            scheme={previewScheme}
+            appName={app.name}
+            brandFill={brandVanishes ? null : previewColor}
+            showPoweredBy={branding.showPoweredBy}
+            draft={draft}
+          />
         </div>
+      </SettingsSection>
+
+      <SettingsSection
+        title="Component theme"
+        description="Try the appearance variables against the preview above, then copy them into your app's appearance prop. These are not saved on the instance."
+      >
+        <AppearancePlayground draft={draft} onChange={(patch) => setDraft((current) => ({ ...current, ...patch }))} />
       </SettingsSection>
 
       <SettingsSection title="Origins and redirects" description="Only allowed origins get CORS access. Redirect origins limit where sign-in can send a user.">

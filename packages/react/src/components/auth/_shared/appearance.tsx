@@ -1,12 +1,18 @@
-import { useCallback, useMemo, useSyncExternalStore, type ReactNode } from "react";
-import { cn } from "@orbitid/ui";
+import { createContext, useCallback, useContext, useMemo, useSyncExternalStore, type ReactNode } from "react";
+import { ElementSlotProvider, cn } from "@orbitid/ui";
 import { AppearanceContext } from "../../../provider";
 import {
-  resolveAppearance,
+  contrastForeground,
+  createElementResolver,
+  extendAppearance,
+  LIGHT_FOREGROUND,
   useAppearance,
+  useElementProps,
   type Appearance,
   type BaseTheme,
   type ClassValue,
+  type ElementKey,
+  type ElementPropsFn,
   type ResolvedAppearance,
 } from "../../../appearance";
 import { useAuthRuntime } from "./w6";
@@ -17,90 +23,23 @@ import {
   subscribePageScheme,
 } from "./page-theme";
 
-export type ElementName =
-  | "rootBox"
-  | "card"
-  | "cardBox"
-  | "header"
-  | "headerTitle"
-  | "headerSubtitle"
-  | "logoBox"
-  | "logoImage"
-  | "headerLogo"
-  | "socialButtons"
-  | "socialButtonsBlockButton"
-  | "socialButtonsBlockButtonText"
-  | "dividerLine"
-  | "dividerText"
-  | "form"
-  | "formField"
-  | "formFieldLabel"
-  | "formFieldInput"
-  | "formFieldInputGroup"
-  | "formFieldHintText"
-  | "formFieldErrorText"
-  | "formButtonPrimary"
-  | "formButtonReset"
-  | "formButtonSecondary"
-  | "footer"
-  | "footerAction"
-  | "footerActionLink"
-  | "footerActionText"
-  | "footerPages"
-  | "alert"
-  | "alertText"
-  | "badge"
-  | "avatarBox"
-  | "avatarImage"
-  | "userButtonBox"
-  | "userButtonTrigger"
-  | "userButtonAvatarBox"
-  | "userButtonOuterIdentifier"
-  | "userProfile"
-  | "userProfilePage"
-  | "userProfileNavbar"
-  | "navbar"
-  | "navbarButton"
-  | "navbarButtonIcon"
-  | "profileSection"
-  | "profileSectionTitle"
-  | "profileSectionContent"
-  | "profileSectionPrimaryButton"
-  | "menuList"
-  | "menuItem"
-  | "modalContent"
-  | "modalBackdrop"
-  | "otpCodeFieldInput"
-  | "formResendCodeLink"
-  | "identityPreview"
-  | "identityPreviewText"
-  | "identityPreviewEditButton"
-  | "pageScrollBox"
-  | "table"
-  | "tableHead"
-  | "tableBody"
-  | "tableRow"
-  | "tableCell"
-  | "captcha";
+/** @deprecated Use `ElementKey` from the appearance module. */
+export type ElementName = ElementKey;
 
 /**
- * Merge a component's `appearance` prop over the provider appearance and publish it to the same
- * context `useAppearance()` reads.
+ * Publishes a component's `appearance` prop as a new layer over the appearance in scope (see
+ * `resolveAppearanceLayers` for the precedence), and the element resolver every `@orbitid/ui` primitive inside reads.
+ * Every prebuilt component renders inside one, so primitives pick up `appearance.elements` even with no prop.
  */
 export function AuthAppearanceScope({ appearance, children }: { appearance?: Appearance; children: ReactNode }) {
   const parent = useAppearance();
-  const resolved = useMemo(() => {
-    if (!appearance) return parent;
-    const base = parent.appearance;
-    return resolveAppearance({
-      ...base,
-      ...appearance,
-      elements: { ...base.elements, ...appearance.elements },
-      variables: { ...base.variables, ...appearance.variables },
-      layout: { ...base.layout, ...appearance.layout },
-    });
-  }, [parent, appearance]);
-  return <AppearanceContext.Provider value={resolved}>{children}</AppearanceContext.Provider>;
+  const resolved = useMemo(() => extendAppearance(parent, appearance), [parent, appearance]);
+  const resolver = useMemo(() => createElementResolver(resolved), [resolved]);
+  return (
+    <AppearanceContext.Provider value={resolved}>
+      <ElementSlotProvider value={resolver}>{children}</ElementSlotProvider>
+    </AppearanceContext.Provider>
+  );
 }
 
 export function useAuthAppearance(): ResolvedAppearance {
@@ -108,29 +47,34 @@ export function useAuthAppearance(): ResolvedAppearance {
 }
 
 export interface ElementClasses {
-  el: (name: ElementName | string) => string | undefined;
+  /** Classes only. Prefer `ep`, which also applies `style`, `unstyled` and the stable class. */
+  el: (name: ElementKey) => string | undefined;
+  /** `ep(key, ...classes)` → `{ className, style, "data-orbitid-element" }`. */
+  ep: ElementPropsFn;
   appearance: ResolvedAppearance;
   primaryColor: string;
   cssVariables: Record<string, string>;
   rootClassName: string;
 }
 
-/** Resolve `appearance.elements.<name>` classes, including function/object overrides. */
+/** Element helpers for the component in scope. */
 export function useElementClasses(): ElementClasses {
   const appearance = useAppearance();
   const runtime = useAuthRuntime();
+  const ep = useElementProps();
   const primaryColor =
     (typeof appearance.variables.colorPrimary === "string" && appearance.variables.colorPrimary) ||
     runtime.environment.app.primaryColor;
   return useMemo(
     () => ({
-      el: (name: ElementName | string) => appearance.getElementClass(name),
+      el: (name: ElementKey) => appearance.getElementClass(name),
+      ep,
       appearance,
       primaryColor,
       cssVariables: appearance.cssVariables,
       rootClassName: appearance.rootClassName,
     }),
-    [appearance, primaryColor],
+    [appearance, primaryColor, ep],
   );
 }
 
@@ -163,7 +107,8 @@ function forcedTheme(themes: readonly BaseTheme[]): ResolvedTheme | null {
 /**
  * Which scheme the prebuilt components render in, in order of precedence:
  *
- * 1. a `dark`/`light` base theme in `appearance` (the integrating app decides);
+ * 1. a `dark`/`light` base theme in `appearance` (the integrating app decides; a component's own prop wins over the
+ *    provider's because its themes come later);
  * 2. `fallbackTheme`, then the instance's branding theme when it is `light` or `dark`;
  * 3. otherwise ("system"): the scheme the page declares on `<html>` (a `dark`/`light` class, `data-theme` or
  *    `color-scheme`), and only when it declares none, `prefers-color-scheme`.
@@ -183,17 +128,47 @@ export function useThemeScope(fallbackTheme?: string): ThemeScope {
   return useMemo(() => ({ theme, className }), [theme, className]);
 }
 
+/** What a component root hands to the content it portals under `<body>`. */
+export interface ComponentScope {
+  /** Scope class carrying the root's custom properties, font and motion setting. */
+  portalClassName?: string;
+}
+
+export const ComponentScopeContext = createContext<ComponentScope>({});
+
 /**
  * `className` builder for content a component portals under `<body>` (dialogs, menus, selects, tooltips). A portal
- * leaves the component's DOM subtree, so it loses the scheme class on the component's root; this puts it back:
- * `<DialogContent className={portalClass("max-w-md")}>`.
+ * leaves the component's DOM subtree, so it loses the scheme class and the custom properties on the component's root;
+ * this puts both back: `<DialogContent className={portalClass("max-w-md")}>`.
  */
 export function usePortalClass(): (...classes: ClassValue[]) => string {
   const { className } = useThemeScope();
-  return useCallback((...classes: ClassValue[]) => cn(className, ...classes), [className]);
+  const { portalClassName } = useContext(ComponentScopeContext);
+  return useCallback((...classes: ClassValue[]) => cn(className, portalClassName, ...classes), [className, portalClassName]);
 }
 
 /** See {@link useThemeScope}. */
 export function useResolvedTheme(fallbackTheme?: string): ResolvedTheme {
   return useThemeScope(fallbackTheme).theme;
 }
+
+/**
+ * Instance branding (the dashboard's primary color) as custom properties. It sits under every `appearance` layer:
+ * any `variables.colorPrimary` replaces it. A dark brand color would vanish on a dark surface, so dark mode keeps the
+ * theme's own primary in that case.
+ */
+export function useBrandingStyle(theme: ResolvedTheme): Record<string, string> {
+  const appearance = useAppearance();
+  const runtime = useAuthRuntime();
+  const primaryColor = runtime.environment.app.primaryColor;
+  return useMemo(() => {
+    if (appearance.variables.colorPrimary || !primaryColor) return {};
+    const foreground = contrastForeground(primaryColor);
+    if (theme === "dark" && foreground === LIGHT_FOREGROUND) return {};
+    const style: Record<string, string> = { "--primary": primaryColor };
+    if (foreground) style["--primary-foreground"] = foreground;
+    return style;
+  }, [appearance.variables.colorPrimary, primaryColor, theme]);
+}
+
+export type { ElementKey };

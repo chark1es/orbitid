@@ -84,8 +84,8 @@ describe("users table", () => {
     for (const name of ["Search", "Status", "MFA", "Account type", "Created after", "Created before"]) {
       const label = screen.getByText(name, { selector: "label" });
       expect(label.className, `${name} label`).toContain("text-[0.75rem]");
-      expect(label.className).toContain("font-semibold");
-      expect(label.className).toContain("tracking-[0.04em]");
+      expect(label.className).toContain("font-medium");
+      expect(label.className).not.toContain("uppercase");
     }
     for (const name of ["Created after", "Created before"]) {
       const input = screen.getByLabelText(name) as HTMLInputElement;

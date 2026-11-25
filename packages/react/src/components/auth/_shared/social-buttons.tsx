@@ -24,7 +24,7 @@ export function SocialButtons({
 }: SocialButtonsProps) {
   const portalClass = usePortalClass();
   const { t } = useAuthRuntime();
-  const { el, appearance } = useElementClasses();
+  const { ep, appearance } = useElementClasses();
   if (providers.length === 0) return null;
 
   const resolvedVariant =
@@ -43,7 +43,7 @@ export function SocialButtons({
         <div
           role="group"
           aria-label={t("common.continue")}
-          className={cn("flex flex-wrap items-center justify-center gap-2", el("socialButtons"), className)}
+          {...ep("socialButtons", "grid grid-cols-[repeat(auto-fit,minmax(3rem,1fr))] gap-2", className)}
           data-orbit-element="socialButtons"
         >
           {providers.map((provider) => {
@@ -59,12 +59,12 @@ export function SocialButtons({
                     aria-label={lastUsed ? `${provider.name}, ${t("signIn.lastUsed")}` : provider.name}
                     data-testid={`social-button-${provider.id}`}
                     onClick={() => onSelect(provider)}
-                    className={cn("relative size-10 rounded-lg", el("socialButtonsBlockButton"))}
+                    {...ep("socialButtonsIconButton", "relative h-9 w-full shadow-xs")}
                   >
                     {provider.logoUrl ? (
-                      <img src={provider.logoUrl} alt="" className="size-5 rounded-sm object-contain" />
+                      <img src={provider.logoUrl} alt="" {...ep("socialButtonsProviderIcon", "size-4 shrink-0 rounded-sm object-contain")} />
                     ) : (
-                      <ProviderIcon provider={provider.id} className="size-5" />
+                      <ProviderIcon provider={provider.id} className={ep("socialButtonsProviderIcon", "size-4").className} />
                     )}
                     {lastUsed ? (
                       <span
@@ -85,7 +85,7 @@ export function SocialButtons({
   }
 
   return (
-    <div className={cn("flex flex-col gap-2", el("socialButtons"), className)} role="group" aria-label={t("common.continue")}>
+    <div {...ep("socialButtons", "flex flex-col gap-2", className)} role="group" aria-label={t("common.continue")}>
       {providers.map((provider) => {
         const lastUsed = lastUsedStrategy === provider.strategy || lastUsedStrategy === provider.id;
         return (
@@ -96,32 +96,28 @@ export function SocialButtons({
             disabled={disabled}
             data-testid={`social-button-${provider.id}`}
             onClick={() => onSelect(provider)}
-            className={cn(
-              "relative w-full max-w-full min-w-0 justify-center gap-2",
-              // The badge is absolutely positioned at the right edge. When any provider is the
-              // last used one, reserve its width on every block button so all labels keep one
-              // left edge (and the centred label never runs underneath the badge at 375px).
-              // The `has-[>svg]` variant must repeat it: the base button size sets padding under
-              // `:has(>svg)` for inline icons, and that variant would otherwise win by source order.
+            // The badge is absolutely positioned at the right edge. When any provider is the last used one, reserve
+            // its width on every block button so all labels keep one left edge (and the centred label never runs
+            // underneath the badge at 375px). The `has-[>svg]` variant must repeat it: the base button size sets
+            // padding under `:has(>svg)` for inline icons, and that variant would otherwise win by source order.
+            {...ep(
+              "socialButtonsBlockButton",
+              "relative h-9 w-full max-w-full min-w-0 justify-center gap-2.5 shadow-xs",
               anyLastUsed && "pr-[4.75rem] has-[>svg]:pr-[4.75rem]",
-              el("socialButtonsBlockButton"),
             )}
           >
             {provider.logoUrl ? (
-              <img src={provider.logoUrl} alt="" className="size-4 rounded-sm object-contain" />
+              <img src={provider.logoUrl} alt="" {...ep("socialButtonsProviderIcon", "size-4 shrink-0 rounded-sm object-contain")} />
             ) : (
-              <ProviderIcon provider={provider.id} className="size-4" />
+              <ProviderIcon provider={provider.id} className={ep("socialButtonsProviderIcon", "size-4").className} />
             )}
-            <span className={cn("min-w-0 truncate", el("socialButtonsBlockButtonText"))}>
+            <span {...ep("socialButtonsBlockButtonText", "min-w-0 truncate")}>
               {t("signIn.chooseStrategy.oauth", { provider: provider.name })}
             </span>
             {lastUsed ? (
               <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center">
                 <span
-                  className={cn(
-                    "rounded-sm border border-border/70 bg-muted px-1.5 py-0.5 text-[0.6875rem] leading-none font-medium text-muted-foreground control-optical",
-                    el("badge"),
-                  )}
+                  {...ep("lastUsedBadge", "rounded-sm border border-border bg-card px-1.5 py-0.5 text-[0.6875rem] leading-none font-medium text-muted-foreground control-optical")}
                 >
                   {t("signIn.lastUsed")}
                 </span>

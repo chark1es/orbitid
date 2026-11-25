@@ -20,7 +20,7 @@ import { PhoneNumberDialog } from "./email-phone-dialogs";
 import { useReverification } from "../../../hooks";
 import { useAuthRuntime } from "../_shared/w6";
 import { isRecord } from "../_shared/guards";
-import { SectionHeader, type SectionProps } from "./security-shared";
+import { SectionHeader, type SectionProps, ProfileSection } from "./security-shared";
 import { usePortalClass } from "../_shared/appearance";
 
 export function TotpSection({ user, refresh, onError, onNotice }: SectionProps) {
@@ -82,7 +82,7 @@ export function TotpSection({ user, refresh, onError, onNotice }: SectionProps) 
   };
 
   return (
-    <section className="flex flex-col gap-3" data-orbit-section="totp">
+    <ProfileSection id="totp" className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-2">
         <SectionHeader title={t("userProfile.totp.title")} description={t("userProfile.totp.description")} />
         {user.totp_enabled ? (
@@ -150,7 +150,7 @@ export function TotpSection({ user, refresh, onError, onNotice }: SectionProps) 
         destructive
         onConfirm={disable}
       />
-    </section>
+    </ProfileSection>
   );
 }
 
@@ -183,7 +183,7 @@ export function BackupCodesSection({ user, refresh, onError, onNotice }: Section
   };
 
   return (
-    <section className="flex flex-col gap-3" data-orbit-section="backup-codes">
+    <ProfileSection id="backup-codes" className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-2">
         <SectionHeader title={t("userProfile.backupCodes.title")} description={t("userProfile.backupCodes.description")} />
         <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void generate()}>
@@ -225,7 +225,7 @@ export function BackupCodesSection({ user, refresh, onError, onNotice }: Section
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </section>
+    </ProfileSection>
   );
 }
 
@@ -265,7 +265,7 @@ export function MfaPhonesSection({ user, refresh, onError, onNotice }: SectionPr
   };
 
   return (
-    <section className="flex flex-col gap-3" data-orbit-section="mfa-phones">
+    <ProfileSection id="mfa-phones" className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-2">
         <SectionHeader title={t("userProfile.mfaPhones.title")} description={t("userProfile.mfaPhones.description")} />
         <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={() => setAddOpen(true)}>
@@ -312,6 +312,6 @@ export function MfaPhonesSection({ user, refresh, onError, onNotice }: SectionPr
         }}
         onError={onError}
       />
-    </section>
+    </ProfileSection>
   );
 }
