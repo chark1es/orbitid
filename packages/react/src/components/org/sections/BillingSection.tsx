@@ -28,10 +28,10 @@ export function useOrganizationBilling(
   const [state, setState] = useState<OrganizationBillingState>(IDLE);
   const organizationId = organization?.id ?? null;
   useEffect(() => {
-    if (!organization || !enabled) {
-      setState(IDLE);
-      return;
-    }
+    // Every change of organization starts from "not loaded": the previous organization's portal must never show,
+    // even for the length of one request, after a switch.
+    setState(IDLE);
+    if (!organization || !enabled) return;
     let cancelled = false;
     const read: Promise<OrganizationBillingResource> =
       typeof organization.getBilling === "function"

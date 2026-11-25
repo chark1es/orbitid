@@ -47,7 +47,9 @@ same way. Each element is read in the order you write it:
 
 Built-in pages you do not mention stay first, in their default order. Everything you write follows, in your order.
 (`<UserProfile>` groups its links below the pages, after a separator. `<OrganizationProfile>` keeps them in place.)
-Fragments are fine, so pages can be added conditionally. A custom page whose `url` equals a built-in id (`url="billing"`)
+Fragments are fine, so pages can be added conditionally. Children that render nothing literally (`false`, `null`,
+`""`, an empty fragment, so `{isAdmin && <Billing />}` when `isAdmin` is false) count as no content; a component that
+returns `null` still counts as content, since that is only known once it renders. A custom page whose `url` equals a built-in id (`url="billing"`)
 replaces that built-in page completely, including its access rules. To keep the built-in rules, use the reference
 form without a `url`.
 
@@ -100,8 +102,9 @@ Built-in pages: `general`, `members`, `billing`, `api-keys`. Billing and API key
 - **Billing** needs the `org:sys_billing:manage` permission (seeded on `org:admin`; see [RBAC.md](RBAC.md)) and either
   your billing content or an operator-configured billing portal for the organization. Without the permission the page
   is hidden, including content you supplied on the built-in Billing page (`<OrganizationProfile.Page label="billing">`),
-  and no billing request is made. The server enforces the same permission. A custom page at `url="billing"` replaces
-  the built-in page and its gate, so gate that content yourself.
+  and no billing request is made. The server enforces the same permission. If the billing request fails, the Billing
+  page shows an error rather than disappearing. A custom page at `url="billing"` replaces the built-in page and its
+  gate, so gate that content yourself.
 - **API keys** needs `org:sys_profile:manage`.
 
 ```tsx

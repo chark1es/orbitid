@@ -41,22 +41,31 @@ function UserProfileLink(_: UserProfileLinkProps) {
   return null;
 }
 
-function useApiKeysComponent(): ComponentType | null {
-  const [component, setComponent] = useState<ComponentType | null>(null);
+/**
+ * The API keys page, loaded lazily. `settled` turns true once the import finished either way, so a failed chunk
+ * load (a stale page after a redeploy) stops the deep link from waiting and falls back to the first page.
+ */
+function useApiKeysComponent(): { component: ComponentType | null; settled: boolean } {
+  const [state, setState] = useState<{ component: ComponentType | null; settled: boolean }>({
+    component: null,
+    settled: false,
+  });
   useEffect(() => {
     let cancelled = false;
     void import("../../org")
       .then((module) => {
         if (cancelled) return;
         const candidate: unknown = Reflect.get(module, "APIKeys");
-        if (typeof candidate === "function") setComponent(() => candidate as ComponentType);
+        setState({ component: typeof candidate === "function" ? (candidate as ComponentType) : null, settled: true });
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!cancelled) setState({ component: null, settled: true });
+      });
     return () => {
       cancelled = true;
     };
   }, []);
-  return component;
+  return state;
 }
 
 function UserProfileInner(props: UserProfileProps) {
@@ -76,7 +85,7 @@ function UserProfileInner(props: UserProfileProps) {
     }
   }
   const user = currentUser(orbit);
-  const ApiKeys = useApiKeysComponent();
+  const { component: ApiKeys, settled: apiKeysSettled } = useApiKeysComponent();
   const { applications, loaded: applicationsLoaded } = useUserApplications(orbit, user?.id ?? null);
   const parsed = parseProfileChildren(props.children, UserProfilePage, UserProfileLink, USER_PROFILE_PAGES);
   const icon = (Icon: typeof UserIcon) => <Icon className="size-4" aria-hidden="true" />;
@@ -139,7 +148,7 @@ function UserProfileInner(props: UserProfileProps) {
   }
 
   // A page that is still loading shows nothing yet; one that will not appear falls back to the first page.
-  const pending = (!applicationsLoaded && (step === "apps" || step === "billing")) || (step === "api-keys" && !ApiKeys);
+  const pending = (!applicationsLoaded && (step === "apps" || step === "billing")) || (step === "api-keys" && !ApiKeys && !apiKeysSettled);
   const activePage = pages.find((page) => page.id === step) ?? (pending ? undefined : pages[0]);
   const title = activePage?.label ?? t("userProfile.title");
 

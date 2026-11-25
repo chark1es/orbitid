@@ -3,6 +3,9 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { resetVirtualRouter } from "../../../lib/routing";
 import { OrganizationProfile } from "../OrganizationProfile";
 import { OrganizationSwitcher } from "../OrganizationSwitcher";
+import { useOrganizationBilling } from "../sections/BillingSection";
+import { OrbitIDProvider } from "../../../provider";
+import type { OrganizationResource } from "../../../provider";
 import { createFakeInstance, renderWithOrbit } from "./harness";
 
 beforeEach(() => {
@@ -31,6 +34,19 @@ const navLabels = () => within(nav()).getAllByRole("button").map((button) => but
 const billingCalls = (fake: Fake) => fake.backend.calls.fetch.filter((call) => call.path.endsWith("/billing"));
 
 describe("<OrganizationProfile /> billing", () => {
+  test("a failed billing request shows an error on the Billing page instead of hiding it", async () => {
+    const fake = createFakeInstance();
+    withPortal(fake, "https://billing.example.com/acme");
+    const failure = Promise.reject(new Error("network down"));
+    failure.catch(() => undefined);
+    fake.backend.billingGate = failure as unknown as Promise<void>;
+    renderWithOrbit(<OrganizationProfile routing="virtual" />, fake);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Billing" }));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /Manage billing/ })).toBeNull();
+  });
+
   test("billing managers get a Billing page linking to the configured portal", async () => {
     const fake = createFakeInstance();
     withPortal(fake, "https://billing.example.com/acme");
@@ -213,5 +229,36 @@ describe("<OrganizationProfile /> edge cases", () => {
     expect(links[0]!.textContent).toBe("Docs");
     expect(links[0]!.getAttribute("target")).toBe("_blank");
     expect(links[0]!.getAttribute("rel")).toBe("noreferrer");
+  });
+});
+
+describe("useOrganizationBilling", () => {
+  function Probe({ organization }: { organization: OrganizationResource }) {
+    const billing = useOrganizationBilling(organization, true);
+    return <span data-testid="billing">{billing.loaded ? (billing.portalUrl ?? "none") : "loading"}</span>;
+  }
+
+  test("never shows the previous organization's portal while the next one loads", async () => {
+    const fake = createFakeInstance();
+    const acme = { id: "org_acme", getBilling: () => Promise.resolve({ portalUrl: "https://billing.example.com/acme" }) };
+    let releaseGlobex: () => void = () => undefined;
+    const globex = {
+      id: "org_globex",
+      getBilling: () =>
+        new Promise((resolve) => {
+          releaseGlobex = () => resolve({ portalUrl: "https://billing.example.com/globex" });
+        }),
+    };
+    const result = renderWithOrbit(<Probe organization={acme as unknown as OrganizationResource} />, fake);
+    await waitFor(() => expect(screen.getByTestId("billing").textContent).toBe("https://billing.example.com/acme"));
+
+    result.rerender(
+      <OrbitIDProvider orbit={fake.instance} publishableKey="pk_test_harness">
+        <Probe organization={globex as unknown as OrganizationResource} />
+      </OrbitIDProvider>,
+    );
+    expect(screen.getByTestId("billing").textContent).toBe("loading");
+    releaseGlobex();
+    await waitFor(() => expect(screen.getByTestId("billing").textContent).toBe("https://billing.example.com/globex"));
   });
 });

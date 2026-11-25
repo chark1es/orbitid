@@ -49,6 +49,8 @@ export function useUserApplications(orbit: OrbitInstance, userId: string | null)
       setState({ applications: [], loaded: true });
       return;
     }
+    // A session switch must never show the previous account's applications while the new list loads.
+    setState({ applications: [], loaded: false });
     read
       .call(user)
       .then((list) => {

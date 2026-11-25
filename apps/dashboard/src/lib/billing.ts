@@ -1,6 +1,6 @@
 /**
  * Client-side check for an operator-configured billing-portal URL (organizations and OAuth applications). The
- * server enforces the same rule (and more: no credentials, no private addresses); this only catches typos early.
+ * server enforces the same rule (and more: no credentials, no private or loopback IP literal); this only catches typos early.
  * Returns an error message, or `null` when the value is empty (clears the portal) or an absolute https URL.
  */
 export function billingPortalUrlError(value: string): string | null {
