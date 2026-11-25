@@ -36,7 +36,7 @@ impl Default for SecuritySettings {
             captcha_secret: String::new(),
             captcha_site_key: String::new(),
             rate_limit_enabled: true,
-            enumeration_protection: false,
+            enumeration_protection: true,
             testing_tokens_enabled: true,
         }
     }

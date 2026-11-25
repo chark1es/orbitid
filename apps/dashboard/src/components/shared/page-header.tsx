@@ -20,6 +20,7 @@ export function PageHeader({
 }) {
   return (
     <div
+      data-slot="page-header"
       className={cn(
         "flex flex-col gap-3 border-b border-border pb-3 sm:flex-row sm:items-end sm:justify-between",
         className,

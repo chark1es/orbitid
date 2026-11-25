@@ -104,3 +104,24 @@ describe("text inputs", () => {
     expect(className).not.toContain("leading-none");
   });
 });
+
+describe("truncated labels", () => {
+  it("clip only sideways, so descenders under a leading-none control stay visible", () => {
+    const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    expect(css).toMatch(/@utility truncate\s*\{\s*overflow-x:\s*clip;\s*overflow-y:\s*visible;/);
+  });
+
+  it("give a select's value a full line box under its line clamp", async () => {
+    const { Select, SelectTrigger, SelectValue } = await import("../ui/select");
+    render(
+      <Select>
+        <SelectTrigger aria-label="Theme">
+          <SelectValue placeholder="System" />
+        </SelectTrigger>
+      </Select>,
+    );
+    expect(screen.getByRole("combobox", { name: "Theme" }).className).toContain(
+      "*:data-[slot=select-value]:leading-normal",
+    );
+  });
+});

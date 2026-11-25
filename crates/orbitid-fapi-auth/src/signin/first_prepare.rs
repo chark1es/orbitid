@@ -90,6 +90,11 @@ pub async fn prepare(
         Some(&client_ip(&state, &headers)),
     )
     .await?;
+    if strategy != "passkey" && crate::signin::decoy::is_decoy(&row) {
+        crate::signin::decoy::prepare(&state, &row, &strategy, &body).await?;
+        let fresh = reload(&state, &row.id).await?;
+        return respond_sign_in(&state, &client, azp.as_deref(), &fresh, cookies).await;
+    }
     let user = match &row.user_id {
         Some(user_id) => get_user_by_id(&state, user_id).await?,
         None => None,
