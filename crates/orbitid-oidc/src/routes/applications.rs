@@ -217,7 +217,7 @@ async fn create(
     )
     .await?;
     if let Some(organization_id) = row.organization_id.as_deref() {
-        audit_owner_change(&state, &row.id, None, Some(organization_id), 0).await;
+        audit_owner_change(&state, &row.id, None, Some(organization_id), 0, 0).await;
     }
     Ok((
         StatusCode::CREATED,
@@ -365,6 +365,7 @@ async fn update(
             previous.as_deref(),
             owner.as_deref(),
             effects.revoked_grants,
+            effects.deleted_access_grants,
         )
         .await;
     }
@@ -403,6 +404,7 @@ async fn audit_owner_change(
     previous: Option<&str>,
     organization_id: Option<&str>,
     revoked_grants: u64,
+    deleted_access_grants: u64,
 ) {
     audit(
         state,
@@ -414,6 +416,7 @@ async fn audit_owner_change(
                 "previous_organization_id": previous,
                 "organization_id": organization_id,
                 "revoked_grants": revoked_grants,
+                "deleted_access_grants": deleted_access_grants,
             })),
     )
     .await;

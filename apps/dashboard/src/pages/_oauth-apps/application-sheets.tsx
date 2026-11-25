@@ -108,7 +108,10 @@ export function ApplicationFormSheet({ ctl }: { ctl: OAuthAppsController }) {
         ) : null}
         {ownerChanged && !form.organizationId ? (
           <Notice title="Every user will be able to sign in">
-            <p>The application stops being limited to {ownerLabel(form.originalOrganizationId, organizations)}.</p>
+            <p>
+              The application stops being limited to {ownerLabel(form.originalOrganizationId, organizations)}. Its
+              per-user access grants are deleted, since they no longer mean anything.
+            </p>
           </Notice>
         ) : null}
         <Field label="Redirect URIs" required description="Exact match. Native apps may use a custom scheme.">

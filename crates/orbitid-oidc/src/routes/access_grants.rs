@@ -85,6 +85,11 @@ async fn create(
     OrbitJson(body): OrbitJson<CreateBody>,
 ) -> Result<Response, OrbitError> {
     let application = require_application(&state, &id).await?;
+    if application.organization_id.is_none() {
+        // Re-checked under the application lock by the service; this answers
+        // before the user lookup.
+        return Err(crate::services::oidc::access_grants::instance_wide_grant_refused());
+    }
     if body.user_id.trim().is_empty() {
         return Err(OrbitError::unprocessable(
             error_codes::FORM_PARAM_VALUE_INVALID,

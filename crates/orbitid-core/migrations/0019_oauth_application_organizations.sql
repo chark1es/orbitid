@@ -11,31 +11,26 @@
 -- silently widen an application to the whole instance (SET NULL) or delete an
 -- operator-configured client (CASCADE). Organization deletion refuses while the
 -- organization owns applications; operators reassign or delete them first.
-ALTER TABLE "oauth_applications" ADD COLUMN IF NOT EXISTS "organization_id" text;
+--
+-- No IF NOT EXISTS guards: a partially applied run must fail loudly, not skip.
+ALTER TABLE "oauth_applications" ADD COLUMN "organization_id" text;
 
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint WHERE conname = 'oauth_applications_organization_id_organizations_id_fk'
-    ) THEN
-        ALTER TABLE "oauth_applications"
-            ADD CONSTRAINT "oauth_applications_organization_id_organizations_id_fk"
-            FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id")
-            ON DELETE RESTRICT ON UPDATE NO ACTION;
-    END IF;
-END
-$$;
+ALTER TABLE "oauth_applications"
+    ADD CONSTRAINT "oauth_applications_organization_id_organizations_id_fk"
+    FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id")
+    ON DELETE RESTRICT ON UPDATE NO ACTION;
 
 -- `oauth_applications` is a small table; a plain (transactional) build is a
 -- short lock.
-CREATE INDEX IF NOT EXISTS "oauth_applications_organization_idx"
+CREATE INDEX "oauth_applications_organization_idx"
     ON "oauth_applications" ("organization_id")
     WHERE "organization_id" IS NOT NULL;
 
 -- Explicit access to one organization-owned application for a user who is not
 -- (or no longer) a member of the owning organization. Operators manage these
--- rows through the Backend API only.
-CREATE TABLE IF NOT EXISTS "oauth_application_access_grants" (
+-- rows through the Backend API only, and only while the application has an
+-- owner (clearing the owner deletes them).
+CREATE TABLE "oauth_application_access_grants" (
     "application_id" text NOT NULL
         REFERENCES "public"."oauth_applications"("id") ON DELETE CASCADE,
     "user_id" text NOT NULL
@@ -44,5 +39,5 @@ CREATE TABLE IF NOT EXISTS "oauth_application_access_grants" (
     CONSTRAINT "oauth_application_access_grants_pk" PRIMARY KEY ("application_id", "user_id")
 );
 
-CREATE INDEX IF NOT EXISTS "oauth_application_access_grants_user_idx"
+CREATE INDEX "oauth_application_access_grants_user_idx"
     ON "oauth_application_access_grants" ("user_id");

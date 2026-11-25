@@ -322,3 +322,30 @@ describe("OAuth application ownership", () => {
     });
   });
 });
+
+describe("OAuth application owner on save", () => {
+  it("leaves the owner out of a PATCH that did not change it", async () => {
+    const calls = mockApi({
+      instance: instanceBody(),
+      handle: (call) =>
+        call.url.includes("/v1/oauth_applications")
+          ? new Response(JSON.stringify({ data: [{ ...APPLICATION, organization_id: "org_acme" }], total_count: 1 }), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            })
+          : undefined,
+    });
+    renderPage(<Page />);
+
+    fireEvent.click((await screen.findAllByTitle("Edit"))[0]!);
+    const sheet = await screen.findByRole("dialog");
+    fireEvent.change(within(sheet).getByLabelText(/Application name/), { target: { value: "Renamed" } });
+    fireEvent.click(within(sheet).getByRole("button", { name: /Save changes/ }));
+
+    await waitFor(() => {
+      const patch = calls.find((call) => call.method === "PATCH");
+      expect(patch?.body?.name).toBe("Renamed");
+      expect(patch?.body).not.toHaveProperty("organization_id");
+    });
+  });
+});

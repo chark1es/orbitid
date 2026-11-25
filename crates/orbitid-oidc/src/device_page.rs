@@ -18,6 +18,9 @@ pub enum DevicePageState {
     Expired,
     AlreadyDecided,
     SignInRequired,
+    /// Signed in, but the account may not use this organization-owned
+    /// application: no application details are shown.
+    NotAllowed,
     Consent,
 }
 
@@ -119,6 +122,11 @@ pub fn device_page_html(input: &DevicePageInput, product: &str) -> String {
             "{intro}\n<p><strong>{app_name}</strong> wants to connect to your account.</p>\n\
 {sign_in_link}\n{}",
             code_form(input.code.as_deref())
+        ),
+        DevicePageState::NotAllowed => format!(
+            "{intro}<p class=\"error\">Your account does not have access to the application behind this code. \
+Ask an administrator for access, or sign in with an account that has it.</p>\
+{sign_in_link}"
         ),
         DevicePageState::Consent => {
             let described: Vec<(String, String)> = match &input.scopes_with_descriptions {

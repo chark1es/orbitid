@@ -152,6 +152,18 @@ pub(crate) async fn consent(
     };
     let redirect_uri = assert_redirect_uri(&app_row, body.redirect_uri.as_deref())?;
     let state_param = body.state.as_deref().filter(|value| !value.is_empty());
+    // Refuse a non-member before the scopes are validated, so the answer never
+    // reveals the application's configuration. Re-checked under locks below.
+    if !orbitid_identity::app_access::user_may_use_application(
+        &state.pool,
+        &app_row.id,
+        app_row.organization_id.as_deref(),
+        &user_id,
+    )
+    .await?
+    {
+        return Ok(access_denied_redirect(&redirect_uri, state_param));
+    }
 
     let scopes = match assert_scopes_allowed(
         &app_row,

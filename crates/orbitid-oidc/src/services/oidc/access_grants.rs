@@ -97,28 +97,46 @@ pub async fn user_exists(state: &AppState, user_id: &str) -> Result<bool> {
     )
 }
 
-/// `FOR SHARE` on the application row (between ranks 10 and 11); not found when
-/// it was deleted meanwhile.
-async fn share_application_on(conn: &mut sqlx::PgConnection, application_id: &str) -> Result<()> {
-    let found: Option<String> =
-        sqlx::query_scalar("SELECT id FROM oauth_applications WHERE id = $1 FOR SHARE")
-            .bind(application_id)
-            .fetch_optional(&mut *conn)
-            .await?;
-    if found.is_none() {
-        return Err(OrbitError::not_found(
+/// `FOR SHARE` on the application row (rank 10a); returns its owning
+/// organization. Not found when it was deleted meanwhile.
+async fn share_application_on(
+    conn: &mut sqlx::PgConnection,
+    application_id: &str,
+) -> Result<Option<String>> {
+    let found: Option<Option<String>> = sqlx::query_scalar(
+        "SELECT organization_id FROM oauth_applications WHERE id = $1 FOR SHARE",
+    )
+    .bind(application_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    found.ok_or_else(|| {
+        OrbitError::not_found(
             error_codes::RESOURCE_NOT_FOUND,
             "OAuth application not found",
-        ));
-    }
-    Ok(())
+        )
+    })
+}
+
+/// The refusal for a grant on an application without an owner: every user may
+/// already use it, and a grant stored now would silently take effect the day
+/// the application gets an owner, without anyone re-approving it.
+pub fn instance_wide_grant_refused() -> OrbitError {
+    OrbitError::unprocessable(
+        error_codes::FORM_PARAM_VALUE_INVALID,
+        "This application is instance-wide, so every user can already use it. \
+         Give it an owning organization before granting access.",
+    )
+    .with_meta(serde_json::json!({ "param_name": "organization_id" }))
 }
 
 /// Grants `user_id` access to `application_id`. Idempotent: returns the row and
-/// whether it was created by this call.
+/// whether it was created by this call. Refused (422) while the application has
+/// no owner.
 ///
 /// Lock order: user key-share (rank 3, not found when missing), then the
-/// application `FOR SHARE`; the insert's foreign keys reference both.
+/// application `FOR SHARE`; the insert's foreign keys reference both. Clearing
+/// the owner updates the application row, so it cannot interleave between the
+/// owner check and the insert.
 pub async fn grant_application_access(
     state: &AppState,
     application_id: &str,
@@ -127,7 +145,12 @@ pub async fn grant_application_access(
     let mut tx = state.pool.begin().await?;
     let outcome = async {
         orbitid_identity::locks::key_share_user_on(&mut tx, user_id).await?;
-        share_application_on(&mut tx, application_id).await?;
+        if share_application_on(&mut tx, application_id)
+            .await?
+            .is_none()
+        {
+            return Err(instance_wide_grant_refused());
+        }
         let inserted = sqlx::query_as::<_, AccessGrantRow>(
             "INSERT INTO oauth_application_access_grants (application_id, user_id, created_at) \
              VALUES ($1, $2, $3) ON CONFLICT (application_id, user_id) DO NOTHING \

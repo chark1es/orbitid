@@ -44,7 +44,7 @@ async fn client_device_info(
             OrbitError::not_found(error_codes::RESOURCE_NOT_FOUND, "Route not found").into(),
         );
     }
-    require_user_caller(&state, &headers).await?;
+    let caller = require_user_caller(&state, &headers).await?;
     let query = query_map(uri.query());
     let raw = query.get("user_code").cloned().unwrap_or_default();
     let Some(code) = normalize_user_code(&raw) else {
@@ -78,6 +78,22 @@ async fn client_device_info(
         )
         .into());
     };
+    // The prebuilt device screen must not show an organization's application
+    // (name, scopes) to a user who may not use it, nor offer to approve it.
+    if !orbitid_identity::app_access::user_may_use_application(
+        &state.pool,
+        &application.id,
+        application.organization_id.as_deref(),
+        caller.user_id.as_deref().unwrap_or_default(),
+    )
+    .await?
+    {
+        return Err(OrbitError::forbidden(
+            error_codes::NOT_ALLOWED_ACCESS,
+            "Your account does not have access to this application",
+        )
+        .into());
+    }
     let scopes: Vec<serde_json::Value> = parse_scopes(&row.scopes)
         .into_iter()
         .map(|scope| {

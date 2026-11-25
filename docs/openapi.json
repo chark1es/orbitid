@@ -3602,7 +3602,7 @@
         ],
         "summary": "Look up a device code",
         "operationId": "getDeviceAuthorization",
-        "description": "Shows the application and scopes behind a user code, so the signed-in user can confirm before approving. Only available when device authorization is enabled. Each lookup counts against a small per-code and per-address attempt budget.",
+        "description": "Shows the application and scopes behind a user code, so the signed-in user can confirm before approving. Only available when device authorization is enabled. Each lookup counts against a small per-code and per-address attempt budget. For an organization-owned application the signed-in user may not use, answers `403 not_allowed_access` without the application's name or scopes.",
         "security": [
           {
             "ClientCookie": []
@@ -3730,7 +3730,7 @@
         ],
         "summary": "Approve or deny a device code",
         "operationId": "decideDeviceAuthorization",
-        "description": "The signed-in user approves or denies the device that showed `user_code`. A code that expired answers 410; one already decided answers 409. Approving an organization-owned application the user may not use answers `403 not_allowed_access` and denies the code (the device's next poll gets `access_denied`).",
+        "description": "The signed-in user approves or denies the device that showed `user_code`. A code that expired answers 410; one already decided answers 409. Approving an organization-owned application the user may not use answers `403 not_allowed_access`; the code stays pending, so the intended user can still approve it.",
         "security": [
           {
             "ClientCookie": []
@@ -18953,7 +18953,7 @@
         ],
         "summary": "Authorization endpoint",
         "operationId": "authorize",
-        "description": "Standard authorization code flow. PKCE (`S256`) is required for public clients and optional for confidential clients unless the application sets `pkce_required`. Without a session the browser is sent to the app's sign-in page and brought back; with consent enabled the consent screen data comes from `/oauth/consent_info`. Ends in a redirect or, with `response_mode=form_post`, a self-submitting form carrying `code` and `state` (or `error`). An organization-owned application (`organization_id` set) is refused to a signed-in user who is neither a member of that organization nor granted access: the browser returns to the client's redirect URI with `error=access_denied`.",
+        "description": "Standard authorization code flow. PKCE (`S256`) is required for public clients and optional for confidential clients unless the application sets `pkce_required`. Without a session the browser is sent to the app's sign-in page and brought back; with consent enabled the consent screen data comes from `/oauth/consent_info`. Ends in a redirect or, with `response_mode=form_post`, a self-submitting form carrying `code` and `state` (or `error`). An organization-owned application (`organization_id` set) is refused to a signed-in user who is neither a member of that organization nor granted access: right after `client_id`, `redirect_uri` and `response_mode` are validated, the browser returns to the client's redirect URI with `error=access_denied`.",
         "security": [],
         "parameters": [
           {
@@ -19213,7 +19213,7 @@
         ],
         "summary": "Submit the consent decision",
         "operationId": "submitConsent",
-        "description": "Records the grant for this user and application and returns where to send the browser next. A user who may not use an organization-owned application gets a `redirect_url` carrying `error=access_denied` and no code.",
+        "description": "Records the grant for this user and application and returns where to send the browser next. A user who may not use an organization-owned application gets a `redirect_url` carrying `error=access_denied` and no code, before the scopes are validated.",
         "security": [
           {
             "ClientCookie": []
@@ -20306,7 +20306,7 @@
                       "string",
                       "null"
                     ],
-                    "description": "Owning organization id, or `null` to make the application instance-wide. Assigning or changing the owner revokes, in the same transaction, the codes and tokens of users the new owner does not entitle (neither members nor granted access)."
+                    "description": "Owning organization id, or `null` to make the application instance-wide. Assigning or changing the owner revokes, in the same transaction, the codes and tokens of users the new owner does not entitle (neither members nor granted access). Making it instance-wide deletes its access grants. Leave the field out to keep the current owner."
                   }
                 }
               }
@@ -21121,7 +21121,7 @@
         ],
         "summary": "Grant a user access to an application",
         "operationId": "createOAuthApplicationAccessGrant",
-        "description": "Lets the user obtain codes and tokens for this organization-owned application although they are not a member of its organization. Idempotent: `201` when created, `200` when the grant already existed. A grant on an instance-wide application has no effect until the application gets an owner. Recorded in the audit log as `oauth_application_access_grant.created`.",
+        "description": "Lets the user obtain codes and tokens for this organization-owned application although they are not a member of its organization. Idempotent: `201` when created, `200` when the grant already existed. Refused with `422 form_param_value_invalid` while the application is instance-wide (it has no owner): every user can already use it. Recorded in the audit log as `oauth_application_access_grant.created`.",
         "security": [
           {
             "SecretKey": []

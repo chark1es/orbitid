@@ -32,6 +32,8 @@ pub struct ApplicationUpdateEffects {
     pub owner_change: Option<(Option<String>, Option<String>)>,
     /// Grants revoked because their users lost access with the owner change.
     pub revoked_grants: u64,
+    /// Access grants deleted because the application became instance-wide.
+    pub deleted_access_grants: u64,
 }
 
 pub async fn update_application(
@@ -140,7 +142,9 @@ pub async fn update_application_with_effects(
         .await?;
         let mut effects = ApplicationUpdateEffects::default();
         if owner != previous {
-            // Widening (to instance-wide) revokes nothing; any other change
+            // Widening (to instance-wide) revokes nothing, but its access
+            // grants mean nothing any more and would silently apply again if an
+            // owner were set later: they go with the owner. Any other change
             // revokes the grants of users the new owner does not entitle.
             if owner.is_some() {
                 effects.revoked_grants =
@@ -148,6 +152,14 @@ pub async fn update_application_with_effects(
                         &mut tx, &row.id,
                     )
                     .await?;
+            } else {
+                effects.deleted_access_grants = sqlx::query(
+                    "DELETE FROM oauth_application_access_grants WHERE application_id = $1",
+                )
+                .bind(&row.id)
+                .execute(&mut *tx)
+                .await?
+                .rows_affected();
             }
             effects.owner_change = Some((previous, owner));
         }

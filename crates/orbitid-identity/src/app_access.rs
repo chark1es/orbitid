@@ -74,9 +74,8 @@ pub async fn user_may_use_application(
     user_may_use_application_id(pool, application_id, user_id).await
 }
 
-/// [`user_may_use_application`] when only the application id is known (the
-/// userinfo path resolves a token, not a client).
-pub async fn user_may_use_application_id(
+/// The unlocked rule as one query (callers short-circuit instance-wide apps).
+async fn user_may_use_application_id(
     pool: &sqlx::PgPool,
     application_id: &str,
     user_id: &str,

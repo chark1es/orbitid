@@ -443,8 +443,8 @@ pub async fn decide_device_code(
             Some(_) => {}
         }
         // A user who may not use this organization-owned application cannot
-        // approve it: the request is answered as denied (the device's next
-        // poll gets `access_denied`), and the caller learns why. Checked under
+        // approve it. The code stays `pending`, so the person the request was
+        // meant for can still approve it; the caller learns why. Checked under
         // the application `FOR SHARE`, before the device row (application
         // deletion locks the application first and cascades into it).
         if !orbitid_identity::app_access::user_may_use_application_on(
@@ -454,21 +454,9 @@ pub async fn decide_device_code(
         )
         .await?
         {
-            let denied = sqlx::query_scalar::<_, String>(
-                "UPDATE device_codes SET status = 'denied' \
-                 WHERE id = $1 AND status = 'pending' AND expires_at > $2 RETURNING id",
-            )
-            .bind(&row.id)
-            .bind(now())
-            .fetch_optional(&mut *tx)
-            .await?;
-            tx.commit().await?;
+            tx.rollback().await.ok();
             return Ok(DeviceDecision::Rejected {
-                reason: if denied.is_some() {
-                    "access_denied"
-                } else {
-                    "already_decided"
-                },
+                reason: "access_denied",
             });
         }
     }

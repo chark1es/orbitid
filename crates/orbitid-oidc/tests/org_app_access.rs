@@ -539,13 +539,54 @@ async fn device_flow_refuses_non_members_and_members_who_leave() {
         .unwrap();
     let app = h.create_app(json!({ "organization_id": org.id })).await;
 
-    // A non-member cannot approve; the device is told access_denied.
+    // A non-member sees neither the application nor an approve button, and
+    // cannot approve. The code stays pending for the person it was meant for.
     let started = start_device(&h, &app).await;
-    let refused = approve(&outsider, started["user_code"].as_str().unwrap()).await;
+    let user_code = started["user_code"].as_str().unwrap();
+    let info = outsider
+        .client
+        .get(
+            &format!("/v1/client/oauth/device?user_code={user_code}"),
+            &[],
+        )
+        .await;
+    assert_eq!(info.status, StatusCode::FORBIDDEN, "{}", info.text());
+    assert!(!info.text().contains("Test App"));
+    let page = send(
+        &h.router,
+        Method::GET,
+        &format!("/oauth/device?user_code={user_code}"),
+        Body::empty(),
+        &[("cookie", &outsider.cookie)],
+    )
+    .await;
+    assert_eq!(page.status, StatusCode::OK);
+    assert!(
+        page.text().contains("does not have access"),
+        "{}",
+        page.text()
+    );
+    assert!(!page.text().contains("Test App"));
+    assert!(!page.text().contains("value=\"approve\""));
+    let refused = approve(&outsider, user_code).await;
     assert_eq!(refused.status, StatusCode::FORBIDDEN, "{}", refused.text());
     assert_eq!(refused.value()["errors"][0]["code"], "not_allowed_access");
-    let denied = poll(&h, &app, started["device_code"].as_str().unwrap()).await;
-    assert_eq!(denied.value()["error"], "access_denied");
+    let pending = poll(&h, &app, started["device_code"].as_str().unwrap()).await;
+    assert_eq!(pending.value()["error"], "authorization_pending");
+    let member_page = send(
+        &h.router,
+        Method::GET,
+        &format!("/oauth/device?user_code={user_code}"),
+        Body::empty(),
+        &[("cookie", &member.cookie)],
+    )
+    .await;
+    assert!(member_page.text().contains("Test App"));
+    let approved = approve(&member, user_code).await;
+    assert_eq!(approved.status, StatusCode::OK, "{}", approved.text());
+    tokio::time::sleep(std::time::Duration::from_millis(1_100)).await;
+    let issued = poll(&h, &app, started["device_code"].as_str().unwrap()).await;
+    assert_eq!(issued.status, StatusCode::OK, "{}", issued.text());
 
     // A member approves, then leaves before the device polls.
     let started = start_device(&h, &app).await;
@@ -682,4 +723,227 @@ async fn an_organization_that_owns_applications_is_not_deleted() {
             .unwrap()
             .is_some()
     );
+}
+
+async fn introspect(h: &Harness, app: &Value, token: &str) -> Value {
+    let response = h
+        .form(
+            "/oauth/introspect",
+            &[
+                ("token", token),
+                ("client_id", app["client_id"].as_str().unwrap()),
+                ("client_secret", app["client_secret"].as_str().unwrap()),
+            ],
+        )
+        .await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    response.value()
+}
+
+#[tokio::test]
+async fn introspection_reports_inactive_once_access_is_lost() {
+    let h = harness().await;
+    let owner = insert_user(&h, "owner@acme.test").await;
+    let member = insert_user(&h, "member@acme.test").await;
+    let org = organization(&h, &owner, "Acme").await;
+    add_test_member(h.state(), &org.id, &member.user.id, "org:member")
+        .await
+        .unwrap();
+    let app = h.create_app(json!({ "organization_id": org.id })).await;
+    let flow = code_flow(&h, &member, &app, "openid").await;
+    let token = flow.tokens["access_token"].as_str().unwrap().to_string();
+    assert_eq!(introspect(&h, &app, &token).await["active"], true);
+
+    // Remove the membership behind the service's back: no revocation runs, the
+    // introspection's own check answers.
+    sqlx::query("DELETE FROM organization_memberships WHERE user_id = $1")
+        .bind(&member.user.id)
+        .execute(&h.state().pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        introspect(&h, &app, &token).await,
+        json!({ "active": false })
+    );
+}
+
+#[tokio::test]
+async fn silent_authorization_with_stored_consent_is_refused_after_leaving() {
+    let h = harness().await;
+    let owner = insert_user(&h, "owner@acme.test").await;
+    let member = insert_user(&h, "member@acme.test").await;
+    let org = organization(&h, &owner, "Acme").await;
+    add_test_member(h.state(), &org.id, &member.user.id, "org:member")
+        .await
+        .unwrap();
+    let app = h
+        .create_app(json!({ "organization_id": org.id, "consent_screen_enabled": true }))
+        .await;
+    sqlx::query(
+        "INSERT INTO oauth_consents (application_id, user_id, scopes, created_at) \
+         VALUES ($1, $2, 'openid', 1)",
+    )
+    .bind(app["id"].as_str().unwrap())
+    .bind(&member.user.id)
+    .execute(&h.state().pool)
+    .await
+    .unwrap();
+    let (mut params, _) = code_request(&app, "openid");
+    params.push(("prompt".into(), "none".into()));
+    let borrowed: Vec<(&str, &str)> = params
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    let query = authorize(&h, &member, &borrowed).await;
+    assert!(query.contains_key("code"), "stored consent: {query:?}");
+
+    orbitid_identity::orgs::leave_organization(h.state(), &org.id, &member.user.id)
+        .await
+        .unwrap();
+    let query = authorize(&h, &member, &borrowed).await;
+    assert_eq!(query["error"], "access_denied");
+    assert!(!query.contains_key("code"));
+}
+
+#[tokio::test]
+async fn moving_an_application_between_organizations_swaps_who_may_use_it() {
+    let h = harness().await;
+    let alice = insert_user(&h, "alice@a.test").await;
+    let bob = insert_user(&h, "bob@b.test").await;
+    let org_a = organization(&h, &alice, "Org A").await;
+    let org_b = organization(&h, &bob, "Org B").await;
+    let app = h.create_app(json!({ "organization_id": org_a.id })).await;
+    let flow = code_flow(&h, &alice, &app, "openid offline_access").await;
+    let (refused, _) = authorize_query(&h, &bob, &app, "openid").await;
+    assert_eq!(refused["error"], "access_denied");
+
+    let moved = h
+        .patch(
+            &format!("/v1/oauth_applications/{}", app["id"].as_str().unwrap()),
+            json!({ "organization_id": org_b.id }),
+        )
+        .await;
+    assert_eq!(moved.status, StatusCode::OK, "{}", moved.text());
+    assert_eq!(live_grants(&h, &app, &alice.user.id).await, 0);
+    let stale = refresh(&h, &app, flow.tokens["refresh_token"].as_str().unwrap()).await;
+    assert_eq!(stale.value()["error"], "invalid_grant");
+    let (query, _) = authorize_query(&h, &alice, &app, "openid").await;
+    assert_eq!(query["error"], "access_denied");
+    code_flow(&h, &bob, &app, "openid").await;
+}
+
+#[tokio::test]
+async fn revoking_a_grant_from_a_member_keeps_their_tokens() {
+    let h = harness().await;
+    let owner = insert_user(&h, "owner@acme.test").await;
+    let member = insert_user(&h, "member@acme.test").await;
+    let org = organization(&h, &owner, "Acme").await;
+    add_test_member(h.state(), &org.id, &member.user.id, "org:member")
+        .await
+        .unwrap();
+    let app = h.create_app(json!({ "organization_id": org.id })).await;
+    h.post(&grants_path(&app), json!({ "user_id": member.user.id }))
+        .await;
+    let flow = code_flow(&h, &member, &app, "openid offline_access").await;
+    let before = live_grants(&h, &app, &member.user.id).await;
+
+    let removed = h
+        .delete(&format!("{}/{}", grants_path(&app), member.user.id))
+        .await;
+    assert_eq!(removed.status, StatusCode::OK);
+    assert_eq!(live_grants(&h, &app, &member.user.id).await, before);
+    let still = refresh(&h, &app, flow.tokens["refresh_token"].as_str().unwrap()).await;
+    assert_eq!(still.status, StatusCode::OK, "{}", still.text());
+}
+
+#[tokio::test]
+async fn instance_wide_applications_take_no_access_grants() {
+    let h = harness().await;
+    let owner = insert_user(&h, "owner@acme.test").await;
+    let guest = insert_user(&h, "guest@other.test").await;
+    let org = organization(&h, &owner, "Acme").await;
+    let open = h.create_app(json!({})).await;
+    let refused = h
+        .post(&grants_path(&open), json!({ "user_id": guest.user.id }))
+        .await;
+    assert_eq!(refused.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        refused.value()["errors"][0]["code"],
+        "form_param_value_invalid"
+    );
+
+    // Clearing an owner deletes the grants it made meaningful, so they cannot
+    // silently apply again when an owner is set later.
+    let owned = h.create_app(json!({ "organization_id": org.id })).await;
+    let granted = h
+        .post(&grants_path(&owned), json!({ "user_id": guest.user.id }))
+        .await;
+    assert_eq!(granted.status, StatusCode::CREATED);
+    let path = format!("/v1/oauth_applications/{}", owned["id"].as_str().unwrap());
+    h.patch(&path, json!({ "organization_id": null })).await;
+    assert_eq!(h.get(&grants_path(&owned)).await.value()["total_count"], 0);
+    h.patch(&path, json!({ "organization_id": org.id })).await;
+    let (query, _) = authorize_query(&h, &guest, &owned, "openid").await;
+    assert_eq!(query["error"], "access_denied");
+}
+
+#[tokio::test]
+async fn a_non_member_learns_nothing_about_the_applications_configuration() {
+    let h = harness().await;
+    let owner = insert_user(&h, "owner@acme.test").await;
+    let outsider = insert_user(&h, "outsider@other.test").await;
+    let org = organization(&h, &owner, "Acme").await;
+    let app = h
+        .create_app(json!({ "organization_id": org.id, "pkce_required": true }))
+        .await;
+    // An unsupported scope and no PKCE challenge: a member would be told
+    // `invalid_scope`; the outsider is only told no.
+    let query = authorize(
+        &h,
+        &outsider,
+        &[
+            ("client_id", app["client_id"].as_str().unwrap()),
+            ("redirect_uri", REDIRECT_URI),
+            ("response_type", "code"),
+            ("scope", "openid admin:everything"),
+            ("state", "s1"),
+        ],
+    )
+    .await;
+    assert_eq!(query["error"], "access_denied");
+    let member_query = authorize(
+        &h,
+        &owner,
+        &[
+            ("client_id", app["client_id"].as_str().unwrap()),
+            ("redirect_uri", REDIRECT_URI),
+            ("response_type", "code"),
+            ("scope", "openid admin:everything"),
+            ("state", "s1"),
+        ],
+    )
+    .await;
+    assert_eq!(member_query["error"], "invalid_scope");
+
+    let consent = send(
+        &h.router,
+        Method::POST,
+        "/oauth/consent",
+        Body::from(
+            serde_json::to_vec(&json!({
+                "client_id": app["client_id"],
+                "approve": true,
+                "scopes": ["openid", "admin:everything"],
+                "redirect_uri": REDIRECT_URI,
+            }))
+            .unwrap(),
+        ),
+        &[
+            ("content-type", "application/json"),
+            ("cookie", &outsider.cookie),
+        ],
+    )
+    .await;
+    let redirect = query_of(consent.value()["redirect_url"].as_str().unwrap());
+    assert_eq!(redirect["error"], "access_denied");
 }

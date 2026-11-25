@@ -153,6 +153,37 @@ async fn authorize(
         )
     };
 
+    // A signed-in non-member of an organization's application is refused before
+    // any further validation, so the answer never reveals the application's
+    // scopes or PKCE policy. Requests that may still switch accounts
+    // (`prompt=login`/`select_account`, a `login_hint`) are checked after
+    // sign-in instead, below.
+    let caller = resolve_caller(&state, &headers).await?;
+    let may_switch_account = get("prompt").is_some_and(|prompt| {
+        prompt
+            .split_whitespace()
+            .any(|value| value == "login" || value == "select_account")
+    }) || get("login_hint").is_some_and(|hint| !hint.is_empty());
+    if let Some(user_id) = caller
+        .as_ref()
+        .and_then(|caller| caller.user_id.as_deref())
+        .filter(|_| !may_switch_account)
+    {
+        if !orbitid_identity::app_access::user_may_use_application(
+            &state.pool,
+            &app_row.id,
+            app_row.organization_id.as_deref(),
+            user_id,
+        )
+        .await?
+        {
+            return Ok(fail(
+                "access_denied",
+                "The user is not allowed to use this application",
+            ));
+        }
+    }
+
     if get("response_type").unwrap_or_default() != "code" {
         return Ok(fail(
             "unsupported_response_type",
@@ -211,7 +242,6 @@ async fn authorize(
         }
     }
 
-    let caller = resolve_caller(&state, &headers).await?;
     let login_hint = get("login_hint");
 
     let reauthenticate = has_prompt("login") || has_prompt("select_account");

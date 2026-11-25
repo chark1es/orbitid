@@ -264,6 +264,35 @@ async fn device_state(
             state: DevicePageState::SignInRequired,
         });
     }
+    // A signed-in user who may not use this organization-owned application
+    // sees neither its name nor its scopes, and gets no approve button.
+    let user_id = caller
+        .as_ref()
+        .and_then(|caller| caller.user_id.as_deref())
+        .unwrap_or_default();
+    let entitled = match application.as_ref() {
+        Some(application) => {
+            orbitid_identity::app_access::user_may_use_application(
+                &state.pool,
+                &application.id,
+                application.organization_id.as_deref(),
+                user_id,
+            )
+            .await?
+        }
+        None => true,
+    };
+    if !entitled {
+        return Ok(DevicePageInput {
+            signed_in,
+            sign_in_href,
+            code: Some(code),
+            app_name: None,
+            scopes: Vec::new(),
+            scopes_with_descriptions: None,
+            state: DevicePageState::NotAllowed,
+        });
+    }
     let described = scopes
         .iter()
         .map(|scope| (scope.clone(), scope_description(scope)))

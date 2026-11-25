@@ -11,10 +11,13 @@ use orbitid_core::state::AppState;
 use orbitid_credentials::jwt::{verify_jws, Jwk, JwkSet, JwsAlgorithm, VerifyOptions};
 use orbitid_credentials::keys::get_jwks;
 
-use super::applications::{get_application, pkce_challenge_for, ApplicationRow};
+use super::applications::{pkce_challenge_for, ApplicationRow};
 use super::claims::primary_email;
 pub use super::consent::{has_consent, record_consent, record_consent_on, stored_consent};
-use super::grants::{authorizing_session_active, find_grant_by_token, is_grant_live};
+use super::grants::{
+    authorizing_session_active, find_grant_by_token, find_grant_with_application_by_token,
+    is_grant_live,
+};
 use super::revocation::revoke_grant_family;
 use super::shared::{parse_scopes, OAuthError, AUTHORIZATION_CODE_TTL_SECONDS};
 use super::token_set::{
@@ -356,15 +359,17 @@ pub async fn access_grant_from_token(
 ) -> std::result::Result<(OauthGrantRow, UserRow), OAuthError> {
     let invalid =
         || OAuthError::unauthorized("invalid_token", "Access token is invalid or expired");
-    let row = find_grant_by_token(state, token)
+    let found = find_grant_with_application_by_token(state, token)
         .await
         .map_err(internal_oauth_error)?
-        .filter(|row| row.kind == "access" && is_grant_live(row, now()))
+        .filter(|found| found.grant.kind == "access" && is_grant_live(&found.grant, now()))
         .ok_or_else(invalid)?;
+    let row = found.grant;
     if !token.starts_with("oat_") {
         // JWT access tokens are recorded, so revocation still wins over an
         // offline-valid signature.
-        if !verify_jwt_access_token(state, &row, token, issuer).await {
+        if !verify_jwt_access_token(state, &row, &found.application_client_id, token, issuer).await
+        {
             return Err(invalid());
         }
     }
@@ -388,9 +393,10 @@ pub async fn access_grant_from_token(
     }
     // Losing access to an organization-owned application ends its tokens
     // here too, even if the revocation of this row raced the change.
-    if !orbitid_identity::app_access::user_may_use_application_id(
+    if !orbitid_identity::app_access::user_may_use_application(
         &state.pool,
         &row.application_id,
+        found.application_organization_id.as_deref(),
         &row.user_id,
     )
     .await
@@ -404,15 +410,10 @@ pub async fn access_grant_from_token(
 async fn verify_jwt_access_token(
     state: &AppState,
     row: &OauthGrantRow,
+    client_id: &str,
     token: &str,
     issuer: Option<&str>,
 ) -> bool {
-    let Ok(app) = get_application(state, &row.application_id).await else {
-        return false;
-    };
-    let Some(app) = app else {
-        return false;
-    };
     let Ok(keys) = get_jwks(state).await else {
         return false;
     };
@@ -429,7 +430,7 @@ async fn verify_jwt_access_token(
             issuer: Some(vec![issuer
                 .map(str::to_string)
                 .unwrap_or_else(|| state.env.base_url.clone())]),
-            audience: Some(vec![app.client_id]),
+            audience: Some(vec![client_id.to_string()]),
             clock_tolerance_seconds: 0,
         },
     );

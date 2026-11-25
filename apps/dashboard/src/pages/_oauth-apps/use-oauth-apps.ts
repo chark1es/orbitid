@@ -121,9 +121,9 @@ export function useOAuthApps() {
         groups_claim: form.groupsClaim,
       };
       if (!form.id) body.public = form.publicClient;
-      // Creating sends an owner only when one is chosen; editing always sends it (`null` makes it instance-wide).
-      if (form.id) body.organization_id = form.organizationId || null;
-      else if (form.organizationId) body.organization_id = form.organizationId;
+      // Send the owner only when the operator chose one or changed it (`null` makes it instance-wide), so saving
+      // other fields never overwrites an owner someone else changed meanwhile.
+      if (form.organizationId !== form.originalOrganizationId) body.organization_id = form.organizationId || null;
       const response = await api<unknown>(form.id ? "PATCH" : "POST", form.id ? `/oauth_applications/${form.id}` : "/oauth_applications", body);
       await query.refetch();
       setSheetOpen(false);
