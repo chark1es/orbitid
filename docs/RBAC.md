@@ -11,6 +11,27 @@ for a role's scope — there is no column that can drift from it.
 Both are ordinary custom roles created through the Backend API; `org:sys_*` and `app:sys_*` are reserved for seeded
 entries, and the two system roles `org:admin` / `org:member` cannot be edited, deleted, or assigned as instance roles.
 
+Which OAuth applications a user may sign in to is a separate rule, not a role or permission: an application owned
+by an organization is open to that organization's members and to users an operator granted access to it. See
+[APP_ACCESS.md](APP_ACCESS.md).
+
+## Seeded organization permissions
+
+| Permission | `org:admin` | `org:member` | Allows |
+|---|---|---|---|
+| `org:sys_profile:manage` | yes | no | update the organization name, slug, logo and metadata; organization API keys |
+| `org:sys_profile:delete` | yes | no | delete the organization |
+| `org:sys_memberships:read` | yes | yes | view members, invitations, requests and roles |
+| `org:sys_memberships:manage` | yes | no | add, remove and re-role members; manage invitations and requests |
+| `org:sys_domains:read` | yes | yes | view organization domains |
+| `org:sys_domains:manage` | yes | no | add, verify, update and remove domains |
+| `org:sys_billing:manage` | yes | no | open the organization's Billing page and its billing portal (`GET /v1/client/organizations/{id}/billing`) |
+
+`org:sys_billing:manage` is new in this release. It is added on the next boot, together with its grant on
+`org:admin`. Custom roles do not get it automatically: to let a non-admin handle billing, attach it to a role, for
+example `{ "key": "org:billing", "name": "Billing", "permissions": ["org:sys_billing:manage"] }`. See
+[ACCOUNT_PAGES.md](ACCOUNT_PAGES.md).
+
 ## Creating roles and permissions
 
 ```http

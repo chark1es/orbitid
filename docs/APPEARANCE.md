@@ -283,7 +283,7 @@ keys.
 | `socialButtonsBlockButtonText` | Label inside a full-width social button. |
 | `socialButtonsIconButton` | Icon-only social button. |
 | `socialButtonsProviderIcon` | Provider logo inside a social button. |
-| `lastUsedBadge` | "Last used" marker on a social button. |
+| `lastUsedBadge` | "Last used" marker on the sign-in method used last. |
 | `dividerRow` | The "or" divider row. |
 | `dividerLine` | Lines on each side of the divider. |
 | `dividerText` | The divider's text. |
@@ -324,6 +324,9 @@ keys.
 | `organizationSwitcherPopover` | Organization switcher menu. |
 | `organizationPreview` | Organization or personal-account avatar. |
 | `organizationList` | Organization list root. |
+| `applicationList` | Applications list on the account page. |
+| `billingList` | Billing list on the account page. |
+| `billingPortalLink` | Link to an outside billing portal. |
 | `organizationProfile` | Organization profile root. |
 | `createOrganization` | Create organization root. |
 | `apiKeys` | API keys root. |

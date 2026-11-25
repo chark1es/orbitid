@@ -16,12 +16,14 @@ import { OrganizationMembersTab } from "../components/organizations/organization
 import { OrganizationInvitationsTab } from "../components/organizations/organization-invitations-tab";
 import { OrganizationDomainsTab } from "../components/organizations/organization-domains-tab";
 import { OrganizationMetadataTab } from "../components/organizations/organization-metadata-tab";
+import { OrganizationApplicationsTab } from "../components/organizations/organization-applications-tab";
 import { OrganizationSettingsTab } from "../components/organizations/organization-settings-tab";
 
 const TABS = [
   { value: "members", label: "Members" },
   { value: "invitations", label: "Invitations" },
   { value: "domains", label: "Domains" },
+  { value: "applications", label: "Applications" },
   { value: "metadata", label: "Metadata" },
   { value: "settings", label: "Settings" },
 ] as const;
@@ -159,6 +161,9 @@ export default function OrganizationDetailPage() {
         </TabsContent>
         <TabsContent value="domains">
           <OrganizationDomainsTab org={org} onChanged={refresh} />
+        </TabsContent>
+        <TabsContent value="applications">
+          <OrganizationApplicationsTab org={org} />
         </TabsContent>
         <TabsContent value="metadata">
           <OrganizationMetadataTab key={`metadata-${org.updated_at}`} org={org} onChanged={refresh} />

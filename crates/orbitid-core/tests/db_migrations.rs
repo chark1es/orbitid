@@ -132,6 +132,19 @@ async fn fresh_database_has_the_full_drizzle_schema() {
         Some("false")
     );
 
+    for table in ["organizations", "oauth_applications"] {
+        let row = sqlx::query(
+            "SELECT data_type, is_nullable FROM information_schema.columns \
+             WHERE table_name = $1 AND column_name = 'billing_portal_url'",
+        )
+        .bind(table)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row.get::<String, _>("data_type"), "text", "{table}");
+        assert_eq!(row.get::<String, _>("is_nullable"), "YES", "{table}");
+    }
+
     let row = sqlx::query(
         "SELECT data_type FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'totp_last_used_step'",
     )
@@ -279,7 +292,8 @@ async fn existing_drizzle_database_is_baselined() {
             .unwrap();
     assert_eq!(
         versions,
-        vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+        // 0020 belongs to a parallel change (default roles); 0021 is the billing portal URLs.
+        vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21]
     );
     assert!(tables(&pool)
         .await
@@ -405,7 +419,7 @@ async fn concurrent_starts_on_a_fresh_database_all_succeed() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(versions, 18);
+    assert_eq!(versions, 20);
     pool.close().await;
 }
 

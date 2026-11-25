@@ -19,6 +19,7 @@ const APPLICATION = {
   refresh_token_lifetime_seconds: 2_592_000,
   id_token_lifetime_seconds: 3600,
   groups_claim: "all" as const,
+  organization_id: null as string | null,
   created_at: 1_700_000_000_000,
   updated_at: 1_700_000_000_000,
 };
@@ -221,5 +222,130 @@ describe("OAuth application sheet widths", () => {
     fireEvent.click((await screen.findAllByTitle("Details"))[0]!);
     const sheet = await screen.findByRole("dialog");
     expect(sheet.className).toContain("sm:max-w-3xl");
+  });
+});
+
+describe("OAuth application ownership", () => {
+  const ORGS = [{ object: "organization", id: "org_acme", name: "Acme" }];
+
+  function mockOwned(application = APPLICATION) {
+    return mockApi({
+      instance: instanceBody(),
+      handle: (call) => {
+        if (call.url.includes("/v1/oauth_applications")) {
+          return new Response(JSON.stringify({ data: [application], total_count: 1 }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (call.url.includes("/v1/organizations")) {
+          return new Response(JSON.stringify({ data: ORGS, total_count: 1 }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return undefined;
+      },
+    });
+  }
+
+  it("shows the owning organization in the list and the detail view", async () => {
+    mockOwned({ ...APPLICATION, organization_id: "org_acme" });
+    renderPage(<Page />);
+
+    expect((await screen.findAllByText("Acme")).length).toBeGreaterThan(0);
+    fireEvent.click((await screen.findAllByTitle("Details"))[0]!);
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.textContent).toContain("Owned by Acme");
+    expect(within(dialog).getByRole("link", { name: "Acme" }).getAttribute("href")).toBe(
+      "/organizations/org_acme?tab=applications",
+    );
+  });
+
+  it("labels instance-wide applications", async () => {
+    mockOwned();
+    renderPage(<Page />);
+    expect(await screen.findByText("Instance-wide")).toBeTruthy();
+  });
+
+  it("assigns an owner, warns that access narrows, and sends it on save", async () => {
+    const calls = mockOwned();
+    renderPage(<Page />);
+
+    fireEvent.click((await screen.findAllByTitle("Edit"))[0]!);
+    const sheet = await screen.findByRole("dialog");
+    const trigger = within(sheet).getByRole("combobox", { name: /Owner/ });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("option", { name: "Acme" }));
+
+    expect(await within(sheet).findByText("Access narrows when you save")).toBeTruthy();
+    fireEvent.click(within(sheet).getByRole("button", { name: /Save changes/ }));
+    await waitFor(() => {
+      expect(calls.find((call) => call.method === "PATCH")?.body).toMatchObject({ organization_id: "org_acme" });
+    });
+  });
+
+  it("sends null to make an owned application instance-wide", async () => {
+    const calls = mockOwned({ ...APPLICATION, organization_id: "org_acme" });
+    renderPage(<Page />);
+
+    fireEvent.click((await screen.findAllByTitle("Edit"))[0]!);
+    const sheet = await screen.findByRole("dialog");
+    const trigger = within(sheet).getByRole("combobox", { name: /Owner/ });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("option", { name: /Instance-wide/ }));
+
+    expect(await within(sheet).findByText("Every user will be able to sign in")).toBeTruthy();
+    fireEvent.click(within(sheet).getByRole("button", { name: /Save changes/ }));
+    await waitFor(() => {
+      expect(calls.find((call) => call.method === "PATCH")?.body).toMatchObject({ organization_id: null });
+    });
+  });
+
+  it("creates an instance-wide application without an owner field", async () => {
+    const calls = mockOwned();
+    renderPage(<Page />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Create application/ }));
+    const sheet = await screen.findByRole("dialog");
+    fireEvent.change(within(sheet).getByLabelText(/Application name/), { target: { value: "New app" } });
+    fireEvent.change(within(sheet).getByPlaceholderText("https://app.example.com/oauth/callback"), {
+      target: { value: "https://new.example.com/cb" },
+    });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Create application" }));
+    await waitFor(() => {
+      const created = calls.find((call) => call.method === "POST" && call.url.endsWith("/v1/oauth_applications"));
+      expect(created?.body?.name).toBe("New app");
+      expect(created?.body).not.toHaveProperty("organization_id");
+    });
+  });
+});
+
+describe("OAuth application owner on save", () => {
+  it("leaves the owner out of a PATCH that did not change it", async () => {
+    const calls = mockApi({
+      instance: instanceBody(),
+      handle: (call) =>
+        call.url.includes("/v1/oauth_applications")
+          ? new Response(JSON.stringify({ data: [{ ...APPLICATION, organization_id: "org_acme" }], total_count: 1 }), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            })
+          : undefined,
+    });
+    renderPage(<Page />);
+
+    fireEvent.click((await screen.findAllByTitle("Edit"))[0]!);
+    const sheet = await screen.findByRole("dialog");
+    fireEvent.change(within(sheet).getByLabelText(/Application name/), { target: { value: "Renamed" } });
+    fireEvent.click(within(sheet).getByRole("button", { name: /Save changes/ }));
+
+    await waitFor(() => {
+      const patch = calls.find((call) => call.method === "PATCH");
+      expect(patch?.body?.name).toBe("Renamed");
+      expect(patch?.body).not.toHaveProperty("organization_id");
+    });
   });
 });

@@ -33,6 +33,7 @@ export type {
   M2MToken,
   M2MTokenVerification,
   OAuthApplication,
+  OAuthApplicationAccessGrant,
   Organization,
   OrganizationDomain,
   OrganizationInvitation,

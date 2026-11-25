@@ -93,6 +93,12 @@ struct CreateBody {
     admin_delete_enabled: Option<bool>,
     public_metadata: Option<Metadata>,
     private_metadata: Option<Metadata>,
+    /// External billing portal (absolute https URL); `null` or omitted for none.
+    #[serde(
+        default,
+        deserialize_with = "crate::shared::deserialize_opt_nullable_string"
+    )]
+    billing_portal_url: Option<Option<String>>,
 }
 
 async fn create(
@@ -127,6 +133,14 @@ async fn create(
             ));
         }
     }
+    let billing_portal_url = orbitid_identity::billing::validate_billing_portal_url(
+        &state,
+        body.billing_portal_url
+            .as_ref()
+            .and_then(|url| url.as_deref()),
+        "billing_portal_url",
+    )
+    .await?;
     let settings = state.settings.get();
     let now_ms = now();
     let id = new_id(id_prefix::ORG);
@@ -146,7 +160,7 @@ async fn create(
     let row: OrganizationRow = sqlx::query_as(
         "INSERT INTO organizations (id, name, slug, max_allowed_memberships, \
          admin_delete_enabled, public_metadata, private_metadata, created_by, created_at, \
-         updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9) RETURNING *",
+         updated_at, billing_portal_url) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10) RETURNING *",
     )
     .bind(&id)
     .bind(&name)
@@ -167,6 +181,7 @@ async fn create(
     ))
     .bind(&body.created_by)
     .bind(now_ms)
+    .bind(&billing_portal_url)
     .fetch_one(&mut *tx)
     .await?;
     // The creator's membership and both event rows commit with the organization:
@@ -235,6 +250,12 @@ struct UpdateBody {
     admin_delete_enabled: Option<bool>,
     public_metadata: Option<Metadata>,
     private_metadata: Option<Metadata>,
+    /// `null` or `""` clears the billing portal; omitted leaves it unchanged.
+    #[serde(
+        default,
+        deserialize_with = "crate::shared::deserialize_opt_nullable_string"
+    )]
+    billing_portal_url: Option<Option<String>>,
 }
 
 async fn update(
@@ -262,6 +283,17 @@ async fn update(
             ));
         }
     }
+    let billing_portal_url = match &body.billing_portal_url {
+        Some(url) => Some(
+            orbitid_identity::billing::validate_billing_portal_url(
+                &state,
+                url.as_deref(),
+                "billing_portal_url",
+            )
+            .await?,
+        ),
+        None => None,
+    };
     let resolved_slug = match slug {
         Some(requested) => Some(
             resolve_slug(
@@ -303,8 +335,8 @@ async fn update(
         let next_slug = resolved_slug.as_deref().or(current.slug.as_deref());
         let result = sqlx::query(
             "UPDATE organizations SET name = $1, slug = $2, max_allowed_memberships = $3, \
-             admin_delete_enabled = $4, public_metadata = $5, private_metadata = $6, updated_at = $7 \
-             WHERE id = $8",
+             admin_delete_enabled = $4, public_metadata = $5, private_metadata = $6, updated_at = $7, \
+             billing_portal_url = $9 WHERE id = $8",
         )
         .bind(name.as_deref().unwrap_or(&current.name))
         .bind(next_slug)
@@ -320,6 +352,11 @@ async fn update(
         .bind(sqlx::types::Json(private))
         .bind(now())
         .bind(&current.id)
+        .bind(
+            billing_portal_url
+                .clone()
+                .unwrap_or_else(|| current.billing_portal_url.clone()),
+        )
         .execute(&mut *tx)
         .await;
         if let Err(error) = result {

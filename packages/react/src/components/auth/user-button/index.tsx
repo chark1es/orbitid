@@ -1,4 +1,4 @@
-import { Children, isValidElement, useState, type ReactNode } from "react";
+import { Children, Fragment, isValidElement, useState, type ReactNode } from "react";
 import {
   Avatar,
   AvatarFallback,
@@ -25,13 +25,14 @@ import { ComponentRoot } from "../_shared/component-root";
 import { useAuthRuntime } from "../_shared/w6";
 import type { UserButtonProps } from "../_shared/types";
 import { UserProfile } from "../user-profile";
+import { flattenChildren } from "../../../lib/profile-pages";
 import { UserVerificationModal } from "../user-verification-modal";
 
 export interface UserButtonActionProps {
   label: string;
   labelIcon?: ReactNode;
   onClick?: () => void;
-  /** Opens the manage-account screen. */
+  /** Opens the manage-account screen at this page (`"billing"`, `"security"`, a custom page's `url`, …). */
   open?: string;
   children?: ReactNode;
 }
@@ -72,6 +73,7 @@ function UserButtonInner(props: UserButtonProps) {
   const portalClass = usePortalClass();
   const user = currentUser(orbit);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [profilePage, setProfilePage] = useState<string | undefined>(undefined);
   const sessions = runtime.client?.sessions ?? [];
   const activeSessionId = runtime.session?.id ?? runtime.client?.last_active_session_id ?? null;
   const multiSession = !runtime.environment.singleSessionMode && sessions.length > 1;
@@ -87,7 +89,7 @@ function UserButtonInner(props: UserButtonProps) {
             key={key}
             onSelect={() => {
               if (item.onClick) item.onClick();
-              else if (item.open) openProfile();
+              else if (item.open) openProfile(item.open);
             }}
           >
             {item.labelIcon}
@@ -108,7 +110,9 @@ function UserButtonInner(props: UserButtonProps) {
         );
         return;
       }
-      if (node.type === UserButtonMenuItems) {
+      // Profile pages and links belong to the account screen, not the menu.
+      if (node.type === UserProfile.Page || node.type === UserProfile.Link) return;
+      if (node.type === UserButtonMenuItems || node.type === Fragment) {
         Children.forEach((node.props as { children?: ReactNode }).children, (child, index) => {
           renderItem(child, `${key}-${index}`);
         });
@@ -120,13 +124,23 @@ function UserButtonInner(props: UserButtonProps) {
     return rendered;
   })();
 
-  const openProfile = () => {
+  const openProfile = (page?: string) => {
     if (props.userProfileMode === "navigation") {
-      runtime.navigate(props.userProfileUrl ?? "/user-profile");
+      const base = props.userProfileUrl ?? "/user-profile";
+      runtime.navigate(page && page !== "profile" ? `${base.replace(/\/$/, "")}/${page}` : base);
       return;
     }
+    setProfilePage(page);
     setProfileOpen(true);
   };
+
+  // `<UserButton.UserProfilePage>` / `.UserProfileLink` children customize the account screen it opens.
+  // Read like `<UserProfile>` reads its own children (fragments flattened), then keyed for the array.
+  const profileChildren = Children.toArray(
+    flattenChildren(props.children).filter(
+      (child) => child.type === UserProfile.Page || child.type === UserProfile.Link,
+    ),
+  );
 
   const handleSignOut = async () => {
     await signOut(runtime, {
@@ -160,8 +174,12 @@ function UserButtonInner(props: UserButtonProps) {
       {...props.userProfileProps}
       routing="virtual"
       __modal
+      defaultPage={profilePage ?? props.userProfileProps?.defaultPage}
       appearance={{ ...props.appearance, ...props.userProfileProps?.appearance }}
-    />
+    >
+      {props.userProfileProps?.children}
+      {profileChildren}
+    </UserProfile>
   );
 
   if (!runtime.loaded) return <Skeleton className="size-8 rounded-full" aria-label={t("common.loading")} />;
@@ -199,7 +217,7 @@ function UserButtonInner(props: UserButtonProps) {
             </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={openProfile} {...ep("userButtonPopoverActionButton", "gap-2")}>
+          <DropdownMenuItem onSelect={() => openProfile()} {...ep("userButtonPopoverActionButton", "gap-2")}>
             <SettingsIcon className="size-4" aria-hidden="true" />
             {t("userButton.manageAccount")}
           </DropdownMenuItem>
@@ -297,4 +315,8 @@ export const UserButton = Object.assign(UserButtonBase, {
   MenuItems: UserButtonMenuItems,
   Action,
   Link,
+  /** A `<UserProfile.Page>` for the account screen the button opens. */
+  UserProfilePage: UserProfile.Page,
+  /** A `<UserProfile.Link>` for the account screen the button opens. */
+  UserProfileLink: UserProfile.Link,
 });

@@ -1,4 +1,4 @@
-import { useContext, useMemo, useState } from "react";
+import { useContext, useMemo, useState, type ReactNode } from "react";
 import {
   Badge,
   Button,
@@ -63,19 +63,29 @@ export interface OrganizationSwitcherProps extends CommonOrgProps {
   /** Navigation-mode destination for "Manage organization". */
   organizationProfileUrl?: string;
   skipInvitationScreen?: boolean;
+  /**
+   * `<OrganizationSwitcher.OrganizationProfilePage>` / `.OrganizationProfileLink` elements, passed to the profile
+   * the switcher opens in modal mode (the same elements `<OrganizationProfile>` takes as children).
+   */
+  children?: ReactNode;
 }
 
 /**
  * Active organization trigger with a popover listing the user's memberships, pending
  * invitations, suggestions, the personal account and the create/manage actions.
  */
-export function OrganizationSwitcher(props: OrganizationSwitcherProps) {
+function OrganizationSwitcherRoot(props: OrganizationSwitcherProps) {
   return (
     <OrgRoot appearance={props.appearance} className={cn("w-auto min-w-0 max-w-full", props.className)} whenDisabled="hidden">
       <OrganizationSwitcherView {...props} />
     </OrgRoot>
   );
 }
+
+export const OrganizationSwitcher = Object.assign(OrganizationSwitcherRoot, {
+  OrganizationProfilePage: OrganizationProfile.Page,
+  OrganizationProfileLink: OrganizationProfile.Link,
+});
 
 function OrganizationSwitcherView({
   hidePersonal,
@@ -88,6 +98,7 @@ function OrganizationSwitcherView({
   createOrganizationUrl,
   organizationProfileUrl,
   skipInvitationScreen,
+  children,
 }: OrganizationSwitcherProps) {
   const portalClass = usePortalClass();
   const ep = useElementProps();
@@ -426,7 +437,9 @@ function OrganizationSwitcherView({
             routing="virtual"
             afterLeaveOrganizationUrl={afterLeaveOrganizationUrl}
             onLeaveOrganization={() => setProfileOpen(false)}
-          />
+          >
+            {children}
+          </OrganizationProfile>
         </DialogContent>
       </Dialog>
     </>

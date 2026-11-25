@@ -153,6 +153,54 @@ async fn authorize(
         )
     };
 
+    // A signed-in non-member of an organization's application is refused before
+    // any further validation, so the answer does not reveal the application's
+    // scopes or PKCE policy to them. Requests that may still switch accounts
+    // (`prompt=login`/`select_account`, or a `login_hint` naming a different
+    // existing account) are checked after sign-in instead, below; a hint that
+    // names the caller or no one cannot switch accounts and gets no exception.
+    let caller = resolve_caller(&state, &headers).await?;
+    let caller_id = caller.as_ref().and_then(|caller| caller.user_id.clone());
+    let prompts_switch = get("prompt").is_some_and(|prompt| {
+        prompt
+            .split_whitespace()
+            .any(|value| value == "login" || value == "select_account")
+    });
+    // Resolved once for a signed-in caller and reused by the hint check below.
+    let hinted_user = match (
+        caller_id.as_deref(),
+        get("login_hint").filter(|hint| !hint.is_empty()),
+    ) {
+        (Some(_), Some(hint)) => get_user_by_identifier(&state, &hint)
+            .await?
+            .map(|(hinted, _)| hinted),
+        _ => None,
+    };
+    let hint_switches = match (caller_id.as_deref(), hinted_user.as_ref()) {
+        (Some(caller_id), Some(hinted)) => hinted.id != caller_id,
+        _ => false,
+    };
+    let may_switch_account = prompts_switch || hint_switches;
+    if let Some(user_id) = caller
+        .as_ref()
+        .and_then(|caller| caller.user_id.as_deref())
+        .filter(|_| !may_switch_account)
+    {
+        if !orbitid_identity::app_access::user_may_use_application(
+            &state.pool,
+            &app_row.id,
+            app_row.organization_id.as_deref(),
+            user_id,
+        )
+        .await?
+        {
+            return Ok(fail(
+                "access_denied",
+                "The user is not allowed to use this application",
+            ));
+        }
+    }
+
     if get("response_type").unwrap_or_default() != "code" {
         return Ok(fail(
             "unsupported_response_type",
@@ -211,7 +259,6 @@ async fn authorize(
         }
     }
 
-    let caller = resolve_caller(&state, &headers).await?;
     let login_hint = get("login_hint");
 
     let reauthenticate = has_prompt("login") || has_prompt("select_account");
@@ -241,7 +288,7 @@ async fn authorize(
     // A hint that names a different account means the current session is not
     // the one the client wants.
     if let Some(hint) = login_hint.as_deref().filter(|value| !value.is_empty()) {
-        if let Some((hinted, _)) = get_user_by_identifier(&state, hint).await? {
+        if let Some(hinted) = hinted_user.as_ref() {
             if hinted.id != user_id {
                 if has_prompt("none") {
                     return Ok(fail(
@@ -278,6 +325,25 @@ async fn authorize(
                 has_prompt("select_account"),
             )));
         }
+    }
+
+    // Organization-owned applications: only members of the owning organization
+    // and users an operator granted access may continue. The client already
+    // proved it is registered (client_id + redirect_uri), so `access_denied` to
+    // its redirect URI reveals nothing new. The token endpoint re-checks under
+    // locks; this is the early refusal.
+    if !orbitid_identity::app_access::user_may_use_application(
+        &state.pool,
+        &app_row.id,
+        app_row.organization_id.as_deref(),
+        &user_id,
+    )
+    .await?
+    {
+        return Ok(fail(
+            "access_denied",
+            "The user is not allowed to use this application",
+        ));
     }
 
     let needs_consent = app_row.consent_screen_enabled

@@ -37,7 +37,7 @@ async fn system_rbac_seed_is_idempotent() {
             .await
             .unwrap()
     );
-    assert_eq!(SYSTEM_PERMISSIONS.len(), 7);
+    assert_eq!(SYSTEM_PERMISSIONS.len(), 8);
     assert_eq!(SYSTEM_ROLES.len(), 4);
     for key in ["app:sys_owner", "app:sys_admin"] {
         assert_eq!(
@@ -58,6 +58,7 @@ async fn system_rbac_seed_is_idempotent() {
             .await
             .unwrap(),
         vec![
+            "org:sys_billing:manage",
             "org:sys_domains:manage",
             "org:sys_domains:read",
             "org:sys_memberships:manage",
@@ -82,6 +83,31 @@ async fn system_rbac_seed_is_idempotent() {
     assert_eq!(json.scope, "organization");
     assert!(json.is_system);
     assert!(json.permissions.iter().any(|p| p.key == PROFILE_MANAGE));
+}
+
+/// An install seeded before `org:sys_billing:manage` existed gets the permission,
+/// and its admin role gets it, on the next boot; members never do.
+#[tokio::test]
+async fn billing_permission_reaches_existing_installs_on_the_next_seed() {
+    let app = seed_state().await;
+    let state = app.state();
+    sqlx::query("DELETE FROM permissions WHERE key = 'org:sys_billing:manage'")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    let without = orbitid_identity::rbac::permissions_for_role(state, "org:admin")
+        .await
+        .unwrap();
+    assert!(!without.iter().any(|key| key == "org:sys_billing:manage"));
+    orbitid_identity::orgs::seed_rbac(state).await.unwrap();
+    let with = orbitid_identity::rbac::permissions_for_role(state, "org:admin")
+        .await
+        .unwrap();
+    assert!(with.iter().any(|key| key == "org:sys_billing:manage"));
+    let member = orbitid_identity::rbac::permissions_for_role(state, "org:member")
+        .await
+        .unwrap();
+    assert!(!member.iter().any(|key| key == "org:sys_billing:manage"));
 }
 
 async fn grant_role(state: &orbitid_core::AppState, key: &str, permission: &str) {

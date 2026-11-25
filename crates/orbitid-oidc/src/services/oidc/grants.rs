@@ -17,6 +17,35 @@ pub async fn find_grant_by_token(state: &AppState, token: &str) -> Result<Option
     )
 }
 
+/// A grant plus the two application columns the bearer-token paths need, read
+/// in one statement.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct GrantWithApplication {
+    #[sqlx(flatten)]
+    pub grant: OauthGrantRow,
+    /// The application's `client_id` (the audience of a JWT access token).
+    pub application_client_id: String,
+    /// The application's owning organization; `None` is instance-wide.
+    pub application_organization_id: Option<String>,
+}
+
+/// [`find_grant_by_token`] joined with its application, so userinfo needs no
+/// second read for the JWT audience or the access rule.
+pub async fn find_grant_with_application_by_token(
+    state: &AppState,
+    token: &str,
+) -> Result<Option<GrantWithApplication>> {
+    Ok(sqlx::query_as::<_, GrantWithApplication>(
+        "SELECT g.*, a.client_id AS application_client_id, \
+         a.organization_id AS application_organization_id \
+         FROM oauth_grants g JOIN oauth_applications a ON a.id = g.application_id \
+         WHERE g.token_hash = $1",
+    )
+    .bind(sha256(token))
+    .fetch_optional(&state.pool)
+    .await?)
+}
+
 pub async fn find_grant_by_id(state: &AppState, id: &str) -> Result<Option<OauthGrantRow>> {
     Ok(
         sqlx::query_as::<_, OauthGrantRow>("SELECT * FROM oauth_grants WHERE id = $1")

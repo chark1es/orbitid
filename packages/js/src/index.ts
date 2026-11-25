@@ -28,7 +28,7 @@ export {
   type AttemptVerificationParams,
   type AuthenticateWithRedirectParams as SignUpAuthenticateWithRedirectParams,
 } from "./resources/sign-up";
-export { User, type UpdateUserParams } from "./resources/user";
+export { User, type UpdateUserParams, type UserOAuthApplication } from "./resources/user";
 export { EmailAddress, PhoneNumber, type PhoneNumberParams } from "./resources/contact";
 export {
   ExternalAccount,
@@ -43,6 +43,7 @@ export {
 export {
   Organization,
   OrganizationMembership,
+  type OrganizationBilling,
   type UpdateOrganizationParams,
 } from "./resources/organization";
 export { OrganizationInvitation } from "./resources/organization-invitation";

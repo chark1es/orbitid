@@ -360,6 +360,26 @@ async fn validate_header(
     Ok(())
 }
 
+/// Foreign keys a later migration added, as `(child, parent, marker)`. An
+/// export that does not list `marker` (a table the same migration created) was
+/// written before the edge existed, so its order never had to respect it. The
+/// edge's column was added nullable and such an export carries no value for
+/// it, so inserting the child first cannot violate the key.
+const EDGES_ADDED_LATER: [(&str, &str, &str); 1] = [(
+    "oauth_applications",
+    "organizations",
+    "oauth_application_access_grants",
+)];
+
+/// Whether `child → parent` is an edge the export predates.
+fn edge_predates_export(child: &str, parent: &str, listed: &HashSet<&str>) -> bool {
+    EDGES_ADDED_LATER
+        .iter()
+        .any(|(edge_child, edge_parent, marker)| {
+            *edge_child == child && *edge_parent == parent && !listed.contains(marker)
+        })
+}
+
 /// Checks the header's table order against the *actual* foreign keys.
 ///
 /// Any valid topological order is acceptable: two exporters with different
@@ -378,6 +398,7 @@ fn assert_dependency_order(
         .map(|(index, table)| (table.as_str(), index))
         .collect();
     let known: HashSet<&str> = all.iter().map(String::as_str).collect();
+    let listed: HashSet<&str> = tables.iter().map(String::as_str).collect();
     for (index, table) in tables.iter().enumerate() {
         let Some(parents) = dependencies.get(table) else {
             continue;
@@ -387,7 +408,10 @@ fn assert_dependency_order(
             // whole table is written in statements whose immediate foreign-key
             // check runs at the end of each statement, so it needs no table
             // ordering.
-            if parent == table || !known.contains(parent.as_str()) {
+            if parent == table
+                || !known.contains(parent.as_str())
+                || edge_predates_export(table, parent, &listed)
+            {
                 continue;
             }
             let Some(parent_index) = position.get(parent.as_str()).copied() else {
@@ -411,8 +435,10 @@ async fn occupied_tables(
 ) -> TransferResult<Vec<(String, i64)>> {
     let mut occupied = Vec::new();
     for table in all {
-        if BOOTSTRAP_TABLES.contains(&table.as_str()) || RUST_ONLY_TABLES.contains(&table.as_str())
-        {
+        // `uploads` is filled separately (`orbitid import-uploads`); every other
+        // table this port added, `oauth_application_access_grants` included,
+        // counts, so a populated target gets this message, not a key conflict.
+        if BOOTSTRAP_TABLES.contains(&table.as_str()) || table == "uploads" {
             continue;
         }
         let rows = count_rows_in(tx, table).await?;

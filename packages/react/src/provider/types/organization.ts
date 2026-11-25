@@ -8,6 +8,13 @@ import type {
   ProfileImageParams,
 } from "./user";
 
+/** `organization.getBilling()`: the operator-configured external billing portal. */
+export interface OrganizationBillingResource {
+  organizationId?: string;
+  portalUrl?: string | null;
+  portal_url?: string | null;
+}
+
 export interface OrganizationResource {
   id: string;
   name: string;
@@ -44,6 +51,8 @@ export interface OrganizationResource {
   getMembershipRequests(): Promise<OrganizationMembershipRequestResource[]>;
   requestMembership(): Promise<OrganizationMembershipRequestResource>;
   getRoles(params?: PaginationQuery): Promise<RoleResource[]>;
+  /** `GET /v1/client/organizations/:id/billing`; needs `org:sys_billing:manage` (absent in older SDK builds). */
+  getBilling?(): Promise<OrganizationBillingResource>;
   /** `GET|POST /v1/client/organizations/:id/api_keys` (absent in older SDK builds). */
   apiKeys?: {
     list(params?: PaginationQuery): Promise<PaginatedResult<ApiKeyResource>>;
