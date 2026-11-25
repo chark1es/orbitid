@@ -254,6 +254,13 @@ session is not ended. An access JWT that was already issued stays valid until it
 `exp`; the refresh token is revoked immediately, so the RP cannot mint another and must re-authorize to observe
 the new membership state.
 
+## Organization-owned applications
+
+An application with `organization_id` set is limited to that organization's members and to users an operator
+granted access (`/v1/oauth_applications/:id/access_grants`). Anyone else gets `access_denied` from `/oauth/authorize`
+and `invalid_grant` from `/oauth/token`; applications without an owner stay open to every user. Losing access
+revokes the user's codes and tokens for the application. See [APP_ACCESS.md](APP_ACCESS.md).
+
 ## RP-initiated logout
 
 Send the browser to `/oauth/end_session` with:

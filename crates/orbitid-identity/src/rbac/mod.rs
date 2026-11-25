@@ -17,6 +17,8 @@ pub const MEMBERSHIPS_READ: &str = "org:sys_memberships:read";
 pub const MEMBERSHIPS_MANAGE: &str = "org:sys_memberships:manage";
 pub const DOMAINS_READ: &str = "org:sys_domains:read";
 pub const DOMAINS_MANAGE: &str = "org:sys_domains:manage";
+/// Open the organization's billing page and its external billing portal.
+pub const BILLING_MANAGE: &str = "org:sys_billing:manage";
 /// Instance permission that opens the admin console for a signed-in user.
 /// Any instance role may carry it; the seeded Owner and Admin roles do.
 pub const DASHBOARD_ACCESS: &str = "app:sys_dashboard:access";
@@ -34,6 +36,7 @@ pub mod permissions {
     pub const MEMBERSHIPS_MANAGE: &str = super::MEMBERSHIPS_MANAGE;
     pub const DOMAINS_READ: &str = super::DOMAINS_READ;
     pub const DOMAINS_MANAGE: &str = super::DOMAINS_MANAGE;
+    pub const BILLING_MANAGE: &str = super::BILLING_MANAGE;
 }
 
 pub const ADMIN_ROLE_KEY: &str = "org:admin";
@@ -94,6 +97,11 @@ pub const SYSTEM_PERMISSIONS: &[SystemPermission] = &[
         description: "Add, verify, update and remove organization domains.",
     },
     SystemPermission {
+        key: BILLING_MANAGE,
+        name: "Manage organization billing",
+        description: "Open the organization's billing page and its billing portal.",
+    },
+    SystemPermission {
         key: DASHBOARD_ACCESS,
         name: "Open the admin console",
         description: "Sign in to this instance's dashboard and manage it with full access.",
@@ -107,6 +115,7 @@ const ADMIN_PERMISSIONS: &[&str] = &[
     MEMBERSHIPS_MANAGE,
     DOMAINS_READ,
     DOMAINS_MANAGE,
+    BILLING_MANAGE,
 ];
 const MEMBER_PERMISSIONS: &[&str] = &[MEMBERSHIPS_READ, DOMAINS_READ];
 const CONSOLE_PERMISSIONS: &[&str] = &[DASHBOARD_ACCESS];

@@ -41,3 +41,7 @@ export {
 } from "./routing";
 export { useLoadingStatus, type LoadingStatus, type RunOptions, type UseLoadingStatusReturn } from "./useLoadingStatus";
 export { useCountdown, type UseCountdownOptions, type UseCountdownReturn } from "./useCountdown";
+export {
+  type ProfileLinkProps,
+  type ProfilePageProps,
+} from "./profile-pages";

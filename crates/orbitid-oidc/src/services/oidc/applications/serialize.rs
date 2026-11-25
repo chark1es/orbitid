@@ -39,6 +39,8 @@ pub fn serialize_application(
         refresh_token_lifetime_seconds: row.refresh_token_lifetime_seconds,
         id_token_lifetime_seconds: row.id_token_lifetime_seconds,
         groups_claim: row.groups_claim.clone(),
+        organization_id: row.organization_id.clone(),
+        billing_portal_url: row.billing_portal_url.clone(),
         created_at: row.created_at,
         updated_at: row.updated_at,
     }
@@ -93,6 +95,10 @@ pub struct CreateApplicationInput {
     pub refresh_token_lifetime_seconds: Option<i64>,
     pub id_token_lifetime_seconds: Option<i64>,
     pub groups_claim: Option<String>,
+    /// Owning organization; `None` creates an instance-wide application.
+    pub organization_id: Option<String>,
+    /// External billing portal, already validated (`validate_billing_portal_url`).
+    pub billing_portal_url: Option<String>,
 }
 
 pub fn clamp_lifetime(value: i64, bounds: (i64, i64)) -> i64 {
@@ -154,16 +160,46 @@ pub async fn create_application(
             Some(mode) if valid_groups_claim(&mode) => mode,
             _ => DEFAULT_OAUTH_GROUPS_CLAIM.to_string(),
         },
+        organization_id: input.organization_id,
         created_at: now,
         updated_at: now,
+        billing_portal_url: input.billing_portal_url,
     };
-    insert_application(&state.pool, &row).await?;
+    let mut tx = state.pool.begin().await?;
+    let outcome = async {
+        if let Some(organization_id) = row.organization_id.as_deref() {
+            // Rank 8 before the application row: the insert's foreign key
+            // key-shares the organization anyway; taking it first turns a
+            // missing organization into a 422 instead of a constraint error.
+            key_share_owner_on(&mut tx, organization_id).await?;
+        }
+        insert_application_on(&mut tx, &row).await
+    }
+    .await;
+    orbitid_core::db::finish_transaction(tx, outcome).await?;
     Ok((row, client_secret))
 }
 
-async fn insert_application(pool: &sqlx::PgPool, row: &ApplicationRow) -> Result<()> {
-    let mut conn = pool.acquire().await?;
-    insert_application_on(&mut conn, row).await
+/// `FOR KEY SHARE` on the organization an application is assigned to (rank 8).
+/// Holding it keeps the organization from being deleted until the assignment
+/// commits; organization deletion then sees the application and refuses.
+pub(super) async fn key_share_owner_on(
+    conn: &mut PgConnection,
+    organization_id: &str,
+) -> Result<()> {
+    let found: Option<String> =
+        sqlx::query_scalar("SELECT id FROM organizations WHERE id = $1 FOR KEY SHARE")
+            .bind(organization_id)
+            .fetch_optional(&mut *conn)
+            .await?;
+    if found.is_none() {
+        return Err(OrbitError::unprocessable(
+            error_codes::FORM_PARAM_VALUE_INVALID,
+            "organization_id does not name an existing organization",
+        )
+        .with_meta(serde_json::json!({ "param_name": "organization_id" })));
+    }
+    Ok(())
 }
 
 pub(super) async fn insert_application_on(
@@ -174,8 +210,8 @@ pub(super) async fn insert_application_on(
         "INSERT INTO oauth_applications (id, name, client_id, client_secret_hash, is_public, \
          redirect_uris, post_logout_redirect_uris, scopes, consent_screen_enabled, pkce_required, \
          access_token_lifetime_seconds, refresh_token_lifetime_seconds, id_token_lifetime_seconds, \
-         groups_claim, created_at, updated_at) \
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)",
+         groups_claim, organization_id, created_at, updated_at, billing_portal_url) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)",
     )
     .bind(&row.id)
     .bind(&row.name)
@@ -191,8 +227,10 @@ pub(super) async fn insert_application_on(
     .bind(row.refresh_token_lifetime_seconds)
     .bind(row.id_token_lifetime_seconds)
     .bind(&row.groups_claim)
+    .bind(&row.organization_id)
     .bind(row.created_at)
     .bind(row.updated_at)
+    .bind(&row.billing_portal_url)
     .execute(&mut *conn)
     .await?;
     Ok(())

@@ -1,4 +1,4 @@
-import { AlertCircleIcon, LockIcon } from "lucide-react";
+import { AlertCircleIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@orbitid/ui";
 import { cn } from "@orbitid/ui";
 import { useElementClasses } from "./appearance";
@@ -39,19 +39,5 @@ export function FormError({ message, title, className, onRetry }: FormErrorProps
         ) : null}
       </AlertDescription>
     </Alert>
-  );
-}
-
-export function SecuredByOrbitID({ className }: { className?: string }) {
-  const { environment, t } = useAuthRuntime();
-  if (!environment.app.branded) return null;
-  return (
-    <p
-      data-orbit-element="footer"
-      className={cn("flex items-center justify-center gap-1.5 text-xs text-muted-foreground", className)}
-    >
-      <LockIcon className="size-3" aria-hidden="true" />
-      {t("footer.securedBy")}
-    </p>
   );
 }

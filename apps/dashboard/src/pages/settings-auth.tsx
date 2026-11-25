@@ -407,7 +407,7 @@ export default function Page() {
         </div>
         <SwitchRow
           label="Enumeration protection"
-          description="Return generic responses for unknown identifiers so attackers cannot probe accounts."
+          description="Sign-in answers an unknown email or phone as if the account existed, so nobody can probe which accounts exist. Off shows “couldn’t find your account” instead."
           checked={settings.security.enumerationProtection}
           onCheckedChange={(enumerationProtection) => editor.patch({ security: { enumerationProtection } })}
         />

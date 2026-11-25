@@ -205,6 +205,7 @@ const baseStrings = {
 
     // organizations
     organization_not_found: "Organization not found.",
+    organization_has_applications: "This organization owns OAuth applications. Reassign or delete them first.",
     organization_slug_taken: "This slug is already taken.",
     organization_membership_quota_exceeded: "You have reached the maximum number of organizations.",
     organizations_disabled: "Organizations are disabled for this application.",

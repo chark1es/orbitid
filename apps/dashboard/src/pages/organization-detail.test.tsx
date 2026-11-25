@@ -50,6 +50,26 @@ describe("organization detail page", () => {
     expect(await screen.findByText("No members yet")).toBeTruthy();
   });
 
+  it("lists the organization's own OAuth applications", async () => {
+    const calls = mockApi({
+      handle: (call) => {
+        if (call.url.endsWith("/v1/organizations/org_1")) return json(ORG);
+        if (call.url.includes("/v1/oauth_applications")) {
+          return json({
+            data: [{ object: "oauth_application", id: "oa_1", name: "Acme Wiki", client_id: "client_wiki", public: false, organization_id: "org_1", created_at: 1 }],
+            total_count: 1,
+          });
+        }
+        return undefined;
+      },
+    });
+    renderPage(detailPage(), ["/organizations/org_1?tab=applications"]);
+
+    expect(await screen.findByText("Acme Wiki")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Manage OAuth applications" })).toBeTruthy();
+    expect(calls.some((call) => call.url.includes("/v1/oauth_applications?organization_id=org_1"))).toBe(true);
+  });
+
   it("shows a not-found error with a way back", async () => {
     mockApi({
       handle: (call) =>

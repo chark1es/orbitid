@@ -238,7 +238,7 @@ export const instanceSettingsSchema = z.object({
     captchaSecret: z.string().default(""),
     captchaSiteKey: z.string().default(""),
     rateLimitEnabled: z.boolean().default(true),
-    enumerationProtection: z.boolean().default(false),
+    enumerationProtection: z.boolean().default(true),
     testingTokensEnabled: z.boolean().default(true),
   }).prefault({}),
   branding: z.object({

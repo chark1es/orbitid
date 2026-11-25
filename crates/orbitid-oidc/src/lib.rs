@@ -12,7 +12,9 @@
 //!    `require_secret_key`, exactly like the TypeScript router (the server's
 //!    `BACKEND_PREFIXES` does not include it).
 //!  - [`backend_router`] holds the routes the TypeScript app mounts in its
-//!    `backend` group: `/v1/api_keys…` and `/v1/m2m…`. The server wraps it with
+//!    `backend` group: `/v1/api_keys…` and `/v1/m2m…`, plus the OAuth
+//!    application access grants (`/v1/oauth_applications/{id}/access_grants…`,
+//!    `/v1/users/{id}/oauth_application_access_grants`). The server wraps it with
 //!    `orbitid_core::http::require_secret_key`; this crate does not repeat that
 //!    layer.
 //!  - [`oidc_cors`] is the `oidcCors` middleware (`modules/oidc/shared.ts`):
@@ -46,10 +48,12 @@ pub fn router() -> Router<AppState> {
         .merge(routes::m2m_oauth::router())
 }
 
-/// Backend API routes (`/v1/api_keys`, `/v1/m2m`), without the auth layer.
+/// Backend API routes (`/v1/api_keys`, `/v1/m2m`, OAuth application access
+/// grants), without the auth layer.
 pub fn backend_router() -> Router<AppState> {
     Router::new()
         .merge(routes::api_keys::backend_router())
+        .merge(routes::access_grants::backend_router())
         .merge(routes::m2m::backend_router())
 }
 

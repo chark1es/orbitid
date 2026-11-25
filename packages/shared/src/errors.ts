@@ -68,6 +68,7 @@ export const ErrorCodes = {
   org_role_not_found: "org_role_not_found",
   last_admin_cannot_leave: "organization_minimum_permissions_needed",
   org_permission_required: "org_permission_required",
+  organization_has_applications: "organization_has_applications",
   // webauthn / mfa
   webauthn_not_supported: "webauthn_not_supported",
   passkey_registration_failure: "passkey_registration_failure",

@@ -16,6 +16,7 @@ import { Page as PageLayout } from "../components/shared/page";
 import { useBreadcrumbLabel } from "../components/layout/breadcrumb-label";
 import { UserRowActions } from "../components/users/user-row-actions";
 import { UserRolesTab } from "../components/users/user-roles-tab";
+import { UserAppAccessTab } from "../components/users/user-app-access-tab";
 import { UserProfileTab } from "../components/users/user-profile-tab";
 import { UserIdentifiersTab } from "../components/users/user-identifiers-tab";
 import { UserSecurityTab } from "../components/users/user-security-tab";
@@ -34,6 +35,7 @@ const TABS = [
   { value: "devices", label: "Trusted devices" },
   { value: "organizations", label: "Organizations" },
   { value: "roles", label: "Roles" },
+  { value: "app-access", label: "App access" },
   { value: "metadata", label: "Metadata" },
   { value: "activity", label: "Activity" },
   { value: "danger", label: "Danger zone" },
@@ -48,7 +50,8 @@ export default function UserDetailPage() {
   const queryClient = useQueryClient();
 
   const showOrganizations = useShowOrganizations();
-  const tabs = showOrganizations ? TABS : TABS.filter((entry) => entry.value !== "organizations");
+  // Organization tabs disappear while organizations are off (no organization can own an application then either).
+  const tabs = showOrganizations ? TABS : TABS.filter((entry) => entry.value !== "organizations" && entry.value !== "app-access");
   const tabParam = searchParams.get("tab") as TabValue | null;
   const tab: TabValue = tabs.some((entry) => entry.value === tabParam) ? (tabParam as TabValue) : "profile";
 
@@ -197,6 +200,11 @@ export default function UserDetailPage() {
           </TabsContent>
         ) : null}
         <TabsContent value="roles"><UserRolesTab user={user} /></TabsContent>
+        {showOrganizations ? (
+          <TabsContent value="app-access">
+            <UserAppAccessTab user={user} />
+          </TabsContent>
+        ) : null}
         <TabsContent value="metadata">
           <UserMetadataTab key={`metadata-${user.updated_at}`} user={user} onUpdated={refresh} />
         </TabsContent>

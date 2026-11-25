@@ -22,7 +22,7 @@ const ORG = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
-function renderTab() {
+function renderTab(org: OrganizationJSON = ORG) {
   const calls = mockApi({
     handle: (call: ApiCall) => {
       if (call.url.endsWith("/v1/organizations/org_1") && call.method !== "GET") return json({});
@@ -32,7 +32,7 @@ function renderTab() {
   const onChanged = vi.fn();
   renderPage(
     <Routes>
-      <Route path="/organizations/:id" element={<OrganizationSettingsTab org={ORG} onChanged={onChanged} />} />
+      <Route path="/organizations/:id" element={<OrganizationSettingsTab org={org} onChanged={onChanged} />} />
       <Route path="/organizations" element={<p>Organization list</p>} />
     </Routes>,
     ["/organizations/org_1"],
@@ -76,5 +76,43 @@ describe("organization settings tab", () => {
       expect(calls.some((call) => call.method === "DELETE" && call.url.endsWith("/v1/organizations/org_1"))).toBe(true);
     });
     expect(await screen.findByText("Organization list")).toBeTruthy();
+  });
+
+  it("sets the billing portal URL, and sends it only when it changed", async () => {
+    const { calls } = renderTab();
+    fireEvent.change(screen.getByLabelText("Billing portal URL"), { target: { value: " https://pay.example.com/acme " } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => {
+      const patch = calls.find((call) => call.method === "PATCH" && call.url.endsWith("/v1/organizations/org_1"));
+      expect(patch?.body).toMatchObject({ billing_portal_url: "https://pay.example.com/acme" });
+    });
+  });
+
+  it("clears a configured billing portal with null", async () => {
+    const { calls } = renderTab({ ...ORG, billing_portal_url: "https://pay.example.com/acme" } as OrganizationJSON);
+    const input = screen.getByLabelText("Billing portal URL") as HTMLInputElement;
+    expect(input.value).toBe("https://pay.example.com/acme");
+    fireEvent.change(input, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => {
+      const patch = calls.find((call) => call.method === "PATCH" && call.url.endsWith("/v1/organizations/org_1"));
+      expect(patch?.body).toMatchObject({ billing_portal_url: null });
+    });
+  });
+
+  it("refuses a billing portal that is not https", () => {
+    const { calls } = renderTab();
+    fireEvent.change(screen.getByLabelText("Billing portal URL"), { target: { value: "http://pay.example.com" } });
+    expect(screen.getByText("The billing portal URL must start with https://.")).toBeTruthy();
+    const save = screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    fireEvent.click(save);
+    expect(calls.some((call) => call.method === "PATCH")).toBe(false);
+  });
+
+  it("does not treat whitespace in an empty billing field as a change", () => {
+    renderTab();
+    fireEvent.change(screen.getByLabelText("Billing portal URL"), { target: { value: "   " } });
+    expect((screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

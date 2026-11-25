@@ -14,6 +14,7 @@ import { signUpUrlFor } from "../flow";
 import { useAuthRuntime, type TranslateFn } from "../../_shared/w6";
 import { FormError } from "../../_shared/form-error";
 import { ProviderIcon } from "../../_shared/provider-icon";
+import { LastUsedBadge } from "../../_shared/last-used-badge";
 import type { EnvironmentView } from "../../_shared/environment";
 import { LinkButton, identifierAutoComplete, identifierInputType, identifierLabel, type StepProps } from "./shared";
 
@@ -24,6 +25,7 @@ export function ChooseStrategyStep({ flow, props }: StepProps) {
   const factors = factorsOf(flow.signIn, "first");
 
   const options = buildStrategyOptions(factors, environment, t);
+  const lastUsedStrategy = orbit.lastUsedStrategy ?? null;
   // The identifier is what selects the account. An instance that signs in only through social connections or
   // passkeys has no identifier to ask for, and those methods already sit on the first screen.
   const needsIdentifier = !flow.signIn && environment.identifiers.length > 0;
@@ -83,6 +85,9 @@ export function ChooseStrategyStep({ flow, props }: StepProps) {
             <span className="truncate">{option.label}</span>
             {option.description ? (
               <span className="ms-auto truncate text-xs text-muted-foreground">{option.description}</span>
+            ) : null}
+            {option.strategy === lastUsedStrategy ? (
+              <LastUsedBadge testId={`strategy-last-used-${option.strategy}`} className={option.description ? undefined : "ms-auto"} />
             ) : null}
           </Button>
         ))}

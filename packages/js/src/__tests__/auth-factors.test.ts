@@ -54,6 +54,15 @@ describe("trusted devices, email second factor and guest accounts", () => {
         };
       }
       if (key === "DELETE /v1/client/me/trusted_devices/tdev_1") return { body: { response: { object: "trusted_device", id: "tdev_1", deleted: true } } };
+      if (key === "GET /v1/client/me/oauth_applications") {
+        return {
+          body: {
+            response: [
+              { object: "user_oauth_application", id: "oa_1", name: "Billing", client_id: "oa_c1", organization_id: "org_1", organization: { id: "org_1", name: "Acme", slug: "acme" }, access: "membership", billing_portal_url: "https://pay.example.com/oa_1", created_at: 1 },
+            ],
+          },
+        };
+      }
       if (key === "POST /v1/client/sign_ups") {
         const signUp = signUpJSON({ status: "complete", created_session_id: "sess_1", created_user_id: "user_1" });
         const client = clientJSON({ sign_up: signUp, sessions: [{ ...session, user }], last_active_session_id: "sess_1" });
@@ -120,6 +129,25 @@ describe("trusted devices, email second factor and guest accounts", () => {
     expect(JSON.stringify(devices[0])).not.toContain("token");
     await devices[0]!.revoke();
     expect(api.lastCall("DELETE", "/v1/client/me/trusted_devices/tdev_1")).toBeDefined();
+    orbit.dispose();
+  });
+
+  it("lists the OAuth applications the user may use", async () => {
+    const { orbit } = setup();
+    await orbit.load();
+    const applications = await orbit.user!.getOAuthApplications();
+    expect(applications).toEqual([
+      {
+        id: "oa_1",
+        name: "Billing",
+        clientId: "oa_c1",
+        organizationId: "org_1",
+        organization: { id: "org_1", name: "Acme", slug: "acme" },
+        access: "membership",
+        billingPortalUrl: "https://pay.example.com/oa_1",
+        createdAt: 1,
+      },
+    ]);
     orbit.dispose();
   });
 

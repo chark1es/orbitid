@@ -104,6 +104,19 @@ pub struct SignInState {
     pub action_complete_redirect_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub azp: Option<String>,
+    /// Set when the identifier matched no account and enumeration protection answered with a stand-in.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decoy: Option<DecoyState>,
+}
+
+/// The made-up channel ids a decoy sign-in shows, kept so every read of it returns the same ones.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct DecoyState {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phone_id: Option<String>,
 }
 
 impl std::fmt::Debug for SignInState {
@@ -121,6 +134,7 @@ impl std::fmt::Debug for SignInState {
                 &self.action_complete_redirect_url,
             )
             .field("azp", &self.azp)
+            .field("decoy", &self.decoy.is_some())
             .finish()
     }
 }

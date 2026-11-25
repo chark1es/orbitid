@@ -193,6 +193,17 @@
   text-box-edge: cap alphabetic;
 }
 
+/**
+ * Truncated text clips sideways only. Controls set `leading-none`, which a truncated label inherits:
+ * its box is then exactly one em tall and Hanken Grotesk's descenders hang below it, so the stock
+ * `overflow: hidden` cut the bottom off "g", "y" and "p" in names, nav items and menus. Merged after
+ * Tailwind's own `truncate`, so it overrides only the overflow axes.
+ */
+@utility truncate {
+  overflow-x: clip;
+  overflow-y: visible;
+}
+
 @layer base {
   /* Icons are one family at one weight: 1.5px, everywhere. Size utilities still set width/height. */
   svg.lucide {

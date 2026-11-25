@@ -9,6 +9,7 @@ import type {
   M2MToken,
   M2MTokenVerification,
   OAuthApplication,
+  OAuthApplicationAccessGrant,
   SigningKey,
   Stats,
   TestingToken,
@@ -116,13 +117,23 @@ export function createM2MApi(http: BackendHttp) {
 
 export function createOAuthApplicationsApi(http: BackendHttp) {
   return {
-    getOAuthApplicationList(params: ListParams = {}) {
-      return list<OAuthApplication>(http, "/v1/oauth_applications", { limit: params.limit, offset: params.offset });
+    /**
+     * `organizationId` filters by owner: an organization id lists that organization's applications, `null` lists the
+     * instance-wide ones, and leaving it out lists every application.
+     */
+    getOAuthApplicationList(params: ListParams & { organizationId?: string | null } = {}) {
+      return list<OAuthApplication>(http, "/v1/oauth_applications", {
+        limit: params.limit,
+        offset: params.offset,
+        organization_id: params.organizationId === null ? "null" : params.organizationId,
+      });
     },
     getOAuthApplication(applicationId: string) {
       return http.get<OAuthApplication>(`/v1/oauth_applications/${applicationId}`);
     },
-    createOAuthApplication(params: { name: string; redirectUris: string[]; scopes?: string; public?: boolean; consentScreenEnabled?: boolean; pkceRequired?: boolean }) {
+    /** `organizationId` makes the application organization-owned: only its members and granted users may use it. */
+    /** `billingPortalUrl` (an absolute https URL) is shown to the application's users on their account page. */
+    createOAuthApplication(params: { name: string; redirectUris: string[]; scopes?: string; public?: boolean; consentScreenEnabled?: boolean; pkceRequired?: boolean; organizationId?: string; billingPortalUrl?: string | null }) {
       return http.post<OAuthApplication>("/v1/oauth_applications", { body: params });
     },
     updateOAuthApplication(applicationId: string, params: Record<string, unknown>) {
@@ -133,6 +144,24 @@ export function createOAuthApplicationsApi(http: BackendHttp) {
     },
     rotateOAuthApplicationSecret(applicationId: string) {
       return http.post<OAuthApplication>(`/v1/oauth_applications/${applicationId}/rotate_secret`);
+    },
+    /** Users granted access to an organization-owned application without being members of its organization. */
+    getOAuthApplicationAccessGrantList(applicationId: string, params: ListParams = {}) {
+      return list<OAuthApplicationAccessGrant>(http, `/v1/oauth_applications/${applicationId}/access_grants`, { limit: params.limit, offset: params.offset });
+    },
+    /** Grants one user access to one organization-owned application. Idempotent. */
+    createOAuthApplicationAccessGrant(applicationId: string, params: { userId: string }) {
+      return http.post<OAuthApplicationAccessGrant>(`/v1/oauth_applications/${applicationId}/access_grants`, { body: params });
+    },
+    /** Removes the grant and revokes the user's tokens for the application unless they are a member of its organization. */
+    deleteOAuthApplicationAccessGrant(applicationId: string, userId: string) {
+      return http.delete<{ object: "oauth_application_access_grant"; applicationId: string; userId: string; deleted: boolean }>(
+        `/v1/oauth_applications/${applicationId}/access_grants/${userId}`,
+      );
+    },
+    /** The organization-owned applications one user was granted access to. */
+    getUserOAuthApplicationAccessGrantList(userId: string, params: ListParams = {}) {
+      return list<OAuthApplicationAccessGrant>(http, `/v1/users/${userId}/oauth_application_access_grants`, { limit: params.limit, offset: params.offset });
     },
   };
 }

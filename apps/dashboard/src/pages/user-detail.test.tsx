@@ -321,6 +321,7 @@ describe("user detail: organizations tab", () => {
 
     expect(await screen.findByRole("heading", { name: "Ada Lovelace" })).toBeTruthy();
     expect(screen.queryByRole("tab", { name: "Organizations" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "App access" })).toBeNull();
     expect(await screen.findByLabelText("First name")).toBeTruthy();
   });
 
@@ -329,6 +330,7 @@ describe("user detail: organizations tab", () => {
     renderDetail();
 
     expect(await screen.findByRole("tab", { name: "Organizations" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "App access" })).toBeTruthy();
   });
 });
 

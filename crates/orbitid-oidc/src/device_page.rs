@@ -18,6 +18,9 @@ pub enum DevicePageState {
     Expired,
     AlreadyDecided,
     SignInRequired,
+    /// Signed in, but the account may not use this organization-owned
+    /// application: no application details are shown.
+    NotAllowed,
     Consent,
 }
 
@@ -36,6 +39,8 @@ pub struct DevicePageInput {
 pub enum DeviceResultState {
     Approved,
     Denied,
+    /// The signed-in user may not use this organization-owned application.
+    NotAllowed,
     TooManyAttempts,
     CrossSite,
 }
@@ -118,6 +123,11 @@ pub fn device_page_html(input: &DevicePageInput, product: &str) -> String {
 {sign_in_link}\n{}",
             code_form(input.code.as_deref())
         ),
+        DevicePageState::NotAllowed => format!(
+            "{intro}<p class=\"error\">Your account does not have access to the application behind this code. \
+Ask an administrator for access. To use a different account, sign out, sign in with it and open this page again.</p>\
+{sign_in_link}"
+        ),
         DevicePageState::Consent => {
             let described: Vec<(String, String)> = match &input.scopes_with_descriptions {
                 Some(described) => described.clone(),
@@ -159,6 +169,12 @@ You can close this window.</p>",
         DeviceResultState::Denied => "<h1>Request denied</h1><p>The device was not given access. \
 You can close this window.</p>"
             .to_string(),
+        DeviceResultState::NotAllowed => {
+            "<h1>Access not allowed</h1><p>Your account does not have \
+access to this application, so the device was not connected. Ask an administrator for access. \
+You can close this window.</p>"
+                .to_string()
+        }
         DeviceResultState::TooManyAttempts => {
             "<h1>Too many attempts</h1><p>That code is no longer \
 valid. Start again from your device to get a new one.</p>"

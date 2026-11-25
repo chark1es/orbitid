@@ -250,6 +250,68 @@ describe("createOrbitIdClient", () => {
     expect(removed.deleted).toBe(true);
   });
 
+  it("filters OAuth applications by owner and manages access grants", async () => {
+    const grant = { object: "oauth_application_access_grant", application_id: "oa_1", user_id: "user_2", created_at: 5 };
+    const { orbit, backend } = client((call) => {
+      const key = `${call.method} ${call.path}`;
+      if (key === "GET /v1/oauth_applications") return { body: { data: [{ object: "oauth_application", id: "oa_1", organization_id: "org_1" }], total_count: 1 } };
+      if (key === "POST /v1/oauth_applications") return { status: 201, body: { object: "oauth_application", id: "oa_2", organization_id: "org_1" } };
+      if (key === "GET /v1/oauth_applications/oa_1/access_grants") return { body: { data: [grant], total_count: 1 } };
+      if (key === "POST /v1/oauth_applications/oa_1/access_grants") return { status: 201, body: grant };
+      if (key === "DELETE /v1/oauth_applications/oa_1/access_grants/user_2") {
+        return { body: { object: "oauth_application_access_grant", application_id: "oa_1", user_id: "user_2", deleted: true } };
+      }
+      if (key === "GET /v1/users/user_2/oauth_application_access_grants") return { body: { data: [grant], total_count: 1 } };
+      return { status: 404, body: { errors: [{ code: "resource_not_found", message: key }] } };
+    });
+
+    const owned = await orbit.oauthApplications.getOAuthApplicationList({ organizationId: "org_1" });
+    expect(owned.data[0]?.organizationId).toBe("org_1");
+    expect(backend.last("GET", "/v1/oauth_applications")?.query).toContain("organization_id=org_1");
+    await orbit.oauthApplications.getOAuthApplicationList({ organizationId: null });
+    expect(backend.last("GET", "/v1/oauth_applications")?.query).toContain("organization_id=null");
+
+    await orbit.oauthApplications.createOAuthApplication({ name: "Acme", redirectUris: ["https://acme.test/cb"], organizationId: "org_1" });
+    expect(backend.last("POST", "/v1/oauth_applications")?.body).toMatchObject({ organization_id: "org_1" });
+
+    const grants = await orbit.oauthApplications.getOAuthApplicationAccessGrantList("oa_1");
+    expect(grants.data[0]?.userId).toBe("user_2");
+    const created = await orbit.oauthApplications.createOAuthApplicationAccessGrant("oa_1", { userId: "user_2" });
+    expect(created.applicationId).toBe("oa_1");
+    expect(backend.last("POST", "/v1/oauth_applications/oa_1/access_grants")?.body).toEqual({ user_id: "user_2" });
+    const forUser = await orbit.oauthApplications.getUserOAuthApplicationAccessGrantList("user_2");
+    expect(forUser.totalCount).toBe(1);
+    const removed = await orbit.oauthApplications.deleteOAuthApplicationAccessGrant("oa_1", "user_2");
+    expect(removed.deleted).toBe(true);
+  });
+
+  it("sets billing portal URLs on organizations and OAuth applications", async () => {
+    const { orbit, backend } = client((call) => {
+      const key = `${call.method} ${call.path}`;
+      if (key === "PATCH /v1/organizations/org_1") {
+        return { body: { object: "organization", id: "org_1", billing_portal_url: "https://pay.example.com/acme" } };
+      }
+      if (key === "POST /v1/oauth_applications") {
+        return { status: 201, body: { object: "oauth_application", id: "oa_2", billing_portal_url: "https://pay.example.com/app" } };
+      }
+      return { status: 404, body: { errors: [{ code: "resource_not_found", message: key }] } };
+    });
+
+    const organization = await orbit.organizations.updateOrganization("org_1", { billingPortalUrl: "https://pay.example.com/acme" });
+    expect(organization.billingPortalUrl).toBe("https://pay.example.com/acme");
+    expect(backend.last("PATCH", "/v1/organizations/org_1")?.body).toEqual({ billing_portal_url: "https://pay.example.com/acme" });
+    await orbit.organizations.updateOrganization("org_1", { billingPortalUrl: null });
+    expect(backend.last("PATCH", "/v1/organizations/org_1")?.body).toEqual({ billing_portal_url: null });
+
+    const application = await orbit.oauthApplications.createOAuthApplication({
+      name: "Acme",
+      redirectUris: ["https://acme.test/cb"],
+      billingPortalUrl: "https://pay.example.com/app",
+    });
+    expect(application.billingPortalUrl).toBe("https://pay.example.com/app");
+    expect(backend.last("POST", "/v1/oauth_applications")?.body).toMatchObject({ billing_portal_url: "https://pay.example.com/app" });
+  });
+
   it("rotates the signing key and configures custom JWT template signing", async () => {
     const { orbit, backend } = client((call) => {
       const key = `${call.method} ${call.path}`;

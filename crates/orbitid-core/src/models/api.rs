@@ -62,8 +62,13 @@ pub struct OauthApplicationRow {
     pub refresh_token_lifetime_seconds: i64,
     pub id_token_lifetime_seconds: i64,
     pub groups_claim: String,
+    /// Owning organization; `None` is an instance-wide application (migration 0019).
+    pub organization_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Operator-configured external billing portal (migration 0021).
+    #[sqlx(default)]
+    pub billing_portal_url: Option<String>,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]

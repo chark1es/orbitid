@@ -4,6 +4,7 @@ import type {
   OrganizationInvitationJSON,
   OrganizationJSON,
   OrganizationMembershipJSON,
+  OrganizationBillingJSON,
   OrganizationMembershipRequestJSON,
   RoleJSON,
 } from "@orbitid/shared";
@@ -16,6 +17,13 @@ import { OrganizationInvitation } from "./organization-invitation";
 import { OrganizationMembershipRequest } from "./organization-membership-request";
 import { mapOrganizationPublicUserData, type OrganizationPublicUserData } from "./organization-shared";
 import { Role } from "./permission";
+
+/** An organization's billing settings, from {@link Organization.getBilling}. */
+export interface OrganizationBilling {
+  organizationId: string;
+  /** The operator-configured external billing portal, or `null`. */
+  portalUrl: string | null;
+}
 
 export interface UpdateOrganizationParams {
   name?: string;
@@ -176,6 +184,12 @@ export class Organization {
 
   async getRoles(): Promise<Role[]> {
     return fetchList(this.fapi, `/v1/client/organizations/${this.id}/roles`, {}, (item) => Role.fromJSON(item as RoleJSON));
+  }
+
+  /** The organization's billing portal. Requires the `org:sys_billing:manage` permission. */
+  async getBilling(): Promise<OrganizationBilling> {
+    const json = await fetchData<OrganizationBillingJSON>(this.fapi, "GET", `/v1/client/organizations/${this.id}/billing`);
+    return { organizationId: json.organization_id, portalUrl: json.portal_url ?? null };
   }
 }
 

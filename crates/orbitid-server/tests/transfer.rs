@@ -965,3 +965,152 @@ async fn copy_never_writes_to_its_source() {
     assert!(error.contains("orbitid migrate"), "{error}");
     assert_eq!(schema_fingerprint(&source.pool).await, behind);
 }
+
+/// Turns a migrated database back into the shape migration 0019 found: no
+/// `oauth_applications.organization_id` (so no edge to `organizations`) and
+/// no access-grant table. Its export is what a build before 0019 writes.
+async fn revert_application_ownership(database_url: &str) {
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect(database_url)
+        .await
+        .expect("raw pool");
+    for statement in [
+        "DROP TABLE oauth_application_access_grants",
+        "ALTER TABLE oauth_applications DROP COLUMN organization_id",
+    ] {
+        sqlx::query(statement)
+            .execute(&pool)
+            .await
+            .expect("revert 0019");
+    }
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn an_export_from_before_application_ownership_imports() {
+    let source_db = EphemeralDb::create().await.expect("source db");
+    let target_db = EphemeralDb::create().await.expect("target db");
+    let source = state(&source_db.url).await;
+    let target = state(&target_db.url).await;
+    let owner =
+        orbitid_identity::testing::create_test_user(&source, "pre19@transfer.test", "Sup3rSecret!")
+            .await
+            .expect("user");
+    orbitid_identity::testing::create_test_organization(&source, "Pre 19", None, &owner.user.id)
+        .await
+        .expect("organization");
+    sqlx::query(
+        "INSERT INTO oauth_applications (id, name, client_id, redirect_uris, created_at, updated_at) \
+         VALUES ('oa_pre19', 'Pre 19', 'client_pre19', '[]'::jsonb, 1, 1)",
+    )
+    .execute(&source.pool)
+    .await
+    .expect("application");
+    revert_application_ownership(&source_db.url).await;
+
+    let exported = temp_file();
+    let exported_text = exported.to_string_lossy().to_string();
+    export_database(&source, &exported_text, &|_| {})
+        .await
+        .expect("export");
+    let mut order = exported_table_order(&exported);
+    assert!(!order
+        .iter()
+        .any(|table| table == "oauth_application_access_grants"));
+    // Before 0019 `oauth_applications` references nothing, so an exporter may
+    // list it anywhere before its own children; the tie-break follows the
+    // source's catalog order, which differs between databases. Put it first:
+    // still a valid order for that schema, and the one the new edge to
+    // `organizations` would otherwise refuse.
+    let application = order
+        .iter()
+        .position(|table| table == "oauth_applications")
+        .expect("oauth_applications");
+    order.remove(application);
+    order.insert(0, "oauth_applications".to_string());
+    let mut document = read_export(&exported);
+    document.header["tables"] = serde_json::json!(order);
+    let rank = |row: &Value| {
+        let table = row["t"].as_str().unwrap_or_default();
+        order
+            .iter()
+            .position(|name| name == table)
+            .unwrap_or(usize::MAX)
+    };
+    document.rows.sort_by_key(rank);
+    write_export(&document, &exported);
+
+    let imported = import_database(&target, &exported_text, false, false, &|_| {})
+        .await
+        .expect("a pre-0019 export imports into a 0019 database");
+    assert!(imported.ok);
+    let owner_column: Option<Option<String>> =
+        sqlx::query_scalar("SELECT organization_id FROM oauth_applications WHERE id = 'oa_pre19'")
+            .fetch_optional(&target.pool)
+            .await
+            .expect("read application");
+    assert_eq!(
+        owner_column,
+        Some(None),
+        "old applications stay instance-wide"
+    );
+
+    // A target holding access grants is "occupied" like any other data.
+    let user_id: String = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
+        .fetch_one(&target.pool)
+        .await
+        .expect("imported user");
+    sqlx::query(
+        "INSERT INTO oauth_application_access_grants (application_id, user_id, created_at) \
+         VALUES ('oa_pre19', $1, 1)",
+    )
+    .bind(&user_id)
+    .execute(&target.pool)
+    .await
+    .expect("grant");
+    let error = import_database(&target, &exported_text, false, false, &|_| {})
+        .await
+        .expect_err("a populated target is refused");
+    assert!(
+        error.contains("oauth_application_access_grants (1)"),
+        "{error}"
+    );
+
+    let _ = tokio::fs::remove_file(&exported).await;
+}
+
+#[tokio::test]
+async fn a_current_export_must_list_organizations_before_their_applications() {
+    let source_db = EphemeralDb::create().await.expect("source db");
+    let target_db = EphemeralDb::create().await.expect("target db");
+    let source = state(&source_db.url).await;
+    let target = state(&target_db.url).await;
+    let exported = temp_file();
+    let exported_text = exported.to_string_lossy().to_string();
+    export_database(&source, &exported_text, &|_| {})
+        .await
+        .expect("export");
+    let mut order = exported_table_order(&exported);
+    assert!(order
+        .iter()
+        .any(|table| table == "oauth_application_access_grants"));
+    let application = order
+        .iter()
+        .position(|table| table == "oauth_applications")
+        .expect("oauth_applications");
+    order.remove(application);
+    order.insert(0, "oauth_applications".to_string());
+    let mut document = read_export(&exported);
+    document.header["tables"] = serde_json::json!(order);
+    write_export(&document, &exported);
+
+    let error = import_database(&target, &exported_text, false, false, &|_| {})
+        .await
+        .expect_err("the edge applies once the export knows about it");
+    assert!(
+        error.contains("The export lists oauth_applications before organizations"),
+        "{error}"
+    );
+    let _ = tokio::fs::remove_file(&exported).await;
+}

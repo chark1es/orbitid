@@ -253,6 +253,10 @@ pub struct OauthApplicationJson {
     pub refresh_token_lifetime_seconds: i64,
     pub id_token_lifetime_seconds: i64,
     pub groups_claim: String,
+    /// The owning organization, or `null` for an instance-wide application.
+    pub organization_id: Option<String>,
+    /// External billing portal for the application's users, or `null`.
+    pub billing_portal_url: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -281,10 +285,52 @@ impl std::fmt::Debug for OauthApplicationJson {
             )
             .field("id_token_lifetime_seconds", &self.id_token_lifetime_seconds)
             .field("groups_claim", &self.groups_claim)
+            .field("organization_id", &self.organization_id)
+            .field("billing_portal_url", &self.billing_portal_url)
             .field("created_at", &self.created_at)
             .field("updated_at", &self.updated_at)
             .finish()
     }
+}
+
+/// The owning organization of an application in [`UserOauthApplicationJson`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UserOauthApplicationOrganizationJson {
+    pub id: String,
+    pub name: String,
+    pub slug: Option<String>,
+}
+
+/// An OAuth application the signed-in user may use
+/// (`GET /v1/client/me/oauth_applications`). Only fields that are safe to show
+/// the user: no secrets, redirect URIs or token settings.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UserOauthApplicationJson {
+    /// Always `"user_oauth_application"`.
+    pub object: String,
+    pub id: String,
+    pub name: String,
+    pub client_id: String,
+    /// `null` for an instance-wide application.
+    pub organization_id: Option<String>,
+    pub organization: Option<UserOauthApplicationOrganizationJson>,
+    /// Why the user may use it: `instance` (instance-wide), `membership`
+    /// (member of the owning organization) or `grant` (operator access grant).
+    pub access: String,
+    /// The application's external billing portal, or `null`.
+    pub billing_portal_url: Option<String>,
+    pub created_at: i64,
+}
+
+/// An organization's billing settings as its billing managers see them
+/// (`GET /v1/client/organizations/{id}/billing`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OrganizationBillingJson {
+    /// Always `"organization_billing"`.
+    pub object: String,
+    pub organization_id: String,
+    /// The operator-configured external billing portal, or `null`.
+    pub portal_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
