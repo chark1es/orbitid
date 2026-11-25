@@ -1,8 +1,14 @@
+import type { CSSProperties } from "react";
 import { cn } from "@orbitid/ui/lib/utils";
+import type { ElementSlotResolver, ElementSlotStyle } from "@orbitid/ui";
 import { defaultTheme } from "./themes";
+import { elementClassName } from "./elements";
+import { cssVariablesFrom, normalizeVariables } from "./variables";
+import { devWarn } from "./warn";
 import type {
   Appearance,
   AppearanceElement,
+  AppearanceElements,
   AppearanceLayout,
   AppearanceVariables,
   BaseTheme,
@@ -10,143 +16,226 @@ import type {
   ResolvedAppearance,
 } from "./types";
 
-interface VariableMapping {
-  /** Token names that receive the value, in order. */
-  targets: string[];
-  /** Token that receives a legible on-color, computed from `targets[0]`. */
-  foreground?: string;
+export {
+  cssVariablesFrom,
+  contrastForeground,
+  normalizeVariables,
+  LIGHT_FOREGROUND,
+  DARK_FOREGROUND,
+  VARIABLE_ALIASES,
+  VARIABLE_MAP,
+} from "./variables";
+
+interface FlatElement {
+  classNames: string[];
+  style?: CSSProperties;
+  /** `undefined` when no override says either way; otherwise the last explicit value. */
+  unstyled?: boolean;
 }
 
-const VARIABLE_MAP: Record<string, VariableMapping> = {
-  colorPrimary: { targets: ["--primary", "--orbitid-color-primary"], foreground: "--primary-foreground" },
-  colorBackground: { targets: ["--background", "--orbitid-color-background"] },
-  colorText: { targets: ["--foreground", "--orbitid-color-text"] },
-  colorDanger: { targets: ["--destructive", "--orbitid-color-danger"] },
-  colorBorder: { targets: ["--border", "--orbitid-color-border"] },
-  colorRing: { targets: ["--ring", "--orbitid-color-ring"] },
-  colorInputBackground: { targets: ["--orbitid-color-input-background"] },
-  colorInputText: { targets: ["--orbitid-color-input-text"] },
-  colorMuted: { targets: ["--muted", "--orbitid-color-muted"] },
-  colorTextSecondary: { targets: ["--orbitid-color-text-secondary"] },
-  colorSuccess: { targets: ["--orbitid-color-success"] },
-  colorWarning: { targets: ["--orbitid-color-warning"] },
-  colorNeutral: { targets: ["--orbitid-color-neutral"] },
-  colorShadow: { targets: ["--orbitid-color-shadow"] },
-  borderRadius: { targets: ["--radius", "--orbitid-border-radius"] },
-  fontFamily: { targets: ["--font-sans", "--orbitid-font-family"] },
-  fontFamilyButtons: { targets: ["--orbitid-font-family-buttons"] },
-  fontSize: { targets: ["--orbitid-font-size"] },
-  fontWeight: { targets: ["--orbitid-font-weight"] },
-  fontWeightBold: { targets: ["--orbitid-font-weight-bold"] },
-  spacingUnit: { targets: ["--orbitid-spacing-unit"] },
-};
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
-const kebab = (value: string) => value.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
-
-/** Relative luminance of `#rgb` / `#rrggbb` colors; `null` for anything else. */
-function luminance(color: string): number | null {
-  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(color.trim());
-  if (!hex) return null;
-  let digits = hex[1]!;
-  if (digits.length === 3) digits = digits.split("").map((d) => d + d).join("");
-  const [r, g, b] = [0, 2, 4].map((i) => {
-    const channel = parseInt(digits.slice(i, i + 2), 16) / 255;
-    return channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
-  }) as [number, number, number];
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
-
-/** Black or white text for `color`, whichever reads better. */
-export const LIGHT_FOREGROUND = "oklch(0.985 0 0)";
-
-export function contrastForeground(color: string): string | undefined {
-  const l = luminance(color);
-  if (l === null) return undefined;
-  // Equal contrast against the dark and light foregrounds sits near a relative luminance of 0.18.
-  return l > 0.18 ? "oklch(0.145 0 0)" : LIGHT_FOREGROUND;
-}
-
-/** Tokens → CSS custom properties. Unknown tokens become `--orbitid-<kebab-key>`. */
-export function cssVariablesFrom(variables: AppearanceVariables = {}): Record<string, string> {
-  const css: Record<string, string> = {};
-  for (const [key, value] of Object.entries(variables)) {
-    if (value === undefined || value === null || value === "") continue;
-    const mapping = VARIABLE_MAP[key];
-    const cssValue = String(value);
-    if (!mapping) {
-      css[`--orbitid-${kebab(key)}`] = cssValue;
-      continue;
+/** Flatten any override shape (string, object, function, list) into classes, style and the unstyled flag. */
+export function flattenElement(override: AppearanceElement | undefined): FlatElement {
+  const flat: FlatElement = { classNames: [] };
+  const visit = (value: unknown) => {
+    if (!value) return;
+    if (typeof value === "string") {
+      flat.classNames.push(value);
+    } else if (typeof value === "function") {
+      let result: unknown;
+      try {
+        result = (value as () => unknown)();
+      } catch (error) {
+        // A throwing override must not take the whole form down.
+        devWarn(`An appearance.elements function threw and was ignored: ${error instanceof Error ? error.message : String(error)}`);
+        result = undefined;
+      }
+      visit(result);
+    } else if (Array.isArray(value)) {
+      for (const entry of value) visit(entry);
+    } else if (isObject(value)) {
+      if (typeof value.className === "string" && value.className) flat.classNames.push(value.className);
+      if (isObject(value.style)) flat.style = { ...flat.style, ...(value.style as CSSProperties) };
+      if (typeof value.unstyled === "boolean") flat.unstyled = value.unstyled;
     }
-    for (const target of mapping.targets) css[target] = cssValue;
-    if (mapping.foreground) {
-      const foreground = contrastForeground(cssValue);
-      if (foreground) css[mapping.foreground] = foreground;
-    }
-  }
-  return css;
+  };
+  visit(override);
+  return flat;
 }
 
-/** Flatten a user override (`string`, `{ className }`, or function) into a class string. */
+/** Component classes followed by the override's classes (tailwind-merge keeps the last conflict, so yours win). */
 export function resolveElementClass(override: AppearanceElement | undefined, ...classes: ClassValue[]): string {
-  let userClass = "";
-  if (typeof override === "string") {
-    userClass = override;
-  } else if (typeof override === "function") {
-    try {
-      const result = override();
-      if (typeof result === "string") userClass = result;
-      else if (result && typeof result === "object") userClass = result.className ?? "";
-    } catch {
-      // A throwing override must not take the whole form down.
-      userClass = "";
-    }
-  } else if (override) {
-    userClass = override.className ?? "";
-  }
-  // User overrides win over component defaults (tailwind-merge keeps the last conflict).
-  return cn(...classes, userClass);
+  const flat = flattenElement(override);
+  return cn(...(flat.unstyled === true ? [] : classes), ...flat.classNames);
 }
 
-/** Scheme classes a base theme declares; read by `useThemeScope()`, never put on `rootClassName`. */
+/** Append `next` to an element override, keeping earlier layers first. */
+function appendElement(current: AppearanceElement | undefined, next: AppearanceElement | undefined): AppearanceElement | undefined {
+  if (next === undefined || next === null || next === "") return current;
+  if (current === undefined) return next;
+  return [current, next];
+}
+
+function mergeElements(target: Record<string, AppearanceElement>, source: unknown) {
+  if (!isObject(source)) return;
+  for (const [key, value] of Object.entries(source)) {
+    const merged = appendElement(target[key], value as AppearanceElement);
+    if (merged !== undefined) target[key] = merged;
+  }
+}
+
 const SCHEME_CLASSES = new Set(["dark", "light"]);
 
 /**
- * Merge `appearance` over its base theme(s): theme variables/layout/elements first,
- * then the explicit `appearance` prop. Later entries win.
+ * The scheme a theme forces (`dark` or `light`, the last one in its classes), or `null` when it forces none. The one
+ * rule both the resolver and the components' scheme pick use, so the scheme and the kept tokens always agree.
  */
-export function resolveAppearance(appearance: Appearance = {}): ResolvedAppearance {
-  const configured = appearance.baseTheme;
-  const themes = configured === undefined ? [] : Array.isArray(configured) ? configured : [configured];
-  const activeThemes = themes.length > 0 ? themes : [defaultTheme];
+export function schemeOf(theme: BaseTheme): "dark" | "light" | null {
+  if (theme.classNames !== undefined && !Array.isArray(theme.classNames)) {
+    devWarn(`appearance.baseTheme "${theme.name ?? "?"}" has classNames that is not an array. It was ignored.`);
+  }
+  const names = Array.isArray(theme.classNames) ? theme.classNames : [];
+  let scheme: "dark" | "light" | null = null;
+  for (const entry of names) {
+    if (typeof entry !== "string") continue;
+    for (const name of entry.split(/\s+/)) if (name === "dark" || name === "light") scheme = name;
+  }
+  return scheme;
+}
 
+/**
+ * The themes a layer sets, or `null` when it sets none. Falsy and non-object entries are dropped (a string is a
+ * common mistake, so it gets a warning); a layer whose entries are all invalid counts as not setting themes.
+ */
+function themesOf(appearance: Appearance): BaseTheme[] | null {
+  const configured = (appearance as { baseTheme?: unknown }).baseTheme;
+  if (configured === undefined || configured === null) return null;
+  const entries = Array.isArray(configured) ? configured : [configured];
+  const themes: BaseTheme[] = [];
+  for (const entry of entries) {
+    if (typeof entry === "string") {
+      devWarn(`appearance.baseTheme takes theme objects (import { dark } from "@orbitid/react"), not the string "${entry}". It was ignored.`);
+    } else if (isObject(entry)) {
+      themes.push(entry as unknown as BaseTheme);
+    }
+  }
+  if (Array.isArray(configured) && configured.length === 0) return [];
+  return themes.length > 0 ? themes : null;
+}
+
+const objectOrEmpty = <T,>(value: unknown): T => (isObject(value) ? (value as T) : ({} as T));
+
+/**
+ * Merge appearance layers into one resolved appearance. Precedence, lowest first, is fixed:
+ *
+ * 1. `@orbitid/ui` defaults (the stylesheet; not represented here);
+ * 2. instance branding (see `useBrandingStyle()`);
+ * 3. the base themes of the **last** layer that sets `baseTheme` (a component's `baseTheme` replaces the provider's,
+ *    so the scheme and the theme's variables always come from the same themes);
+ * 4. each layer's own `variables`, `layout` and `elements`, provider first, then each component.
+ *
+ * Variables and layout keys replace earlier values; older variable names are normalized per layer before merging.
+ * Element overrides accumulate: every layer's classes are kept, earliest first, and styles merge in the same order,
+ * so a later layer wins any conflict without erasing the rest.
+ */
+export function resolveAppearanceLayers(layers: readonly (Appearance | undefined | null)[]): ResolvedAppearance {
+  const present = layers.filter((layer): layer is Appearance => isObject(layer));
   const variables: AppearanceVariables = {};
   const layout: AppearanceLayout = {};
   const elements: Record<string, AppearanceElement> = {};
-  const classNames: string[] = ["orbitid-root"];
+  const explicitVariables: AppearanceVariables = {};
+  const explicitLayout: AppearanceLayout = {};
+  const explicitElements: Record<string, AppearanceElement> = {};
+  const themeClassNames: string[] = ["orbitid-root"];
+  let unstyled = false;
 
-  const mergeTheme = (theme: BaseTheme) => {
-    Object.assign(variables, theme.variables);
-    Object.assign(layout, theme.layout);
-    Object.assign(elements, theme.elements);
-    // `dark`/`light` stay out of `rootClassName`: it also lands on the provider wrapper around the host's own app,
-    // where `.light` would reset the host's `:root` tokens. Components take the scheme from `useThemeScope()` instead,
-    // which reads it from `themes`.
-    // An entry may hold several classes ("dark brand"), so filter class by class.
-    classNames.push(...(theme.classNames ?? []).flatMap((entry) => entry.split(/\s+/)).filter((name) => name && !SCHEME_CLASSES.has(name)));
+  let configuredThemes: BaseTheme[] | null = null;
+  for (const layer of present) configuredThemes = themesOf(layer) ?? configuredThemes;
+  const activeThemes = configuredThemes && configuredThemes.length > 0 ? configuredThemes : [defaultTheme];
+
+  // In `[dark, light]` the scheme ends up light, so the earlier `dark` preset's tokens must not be written either:
+  // a scheme theme's variables apply only when it forces the final scheme. Same-scheme themes (`[myDark, dark]`)
+  // still merge in order.
+  const finalScheme = activeThemes.reduce<"dark" | "light" | null>((last, theme) => schemeOf(theme) ?? last, null);
+  activeThemes.forEach((theme) => {
+    const scheme = schemeOf(theme);
+    if (scheme === null || scheme === finalScheme) {
+      Object.assign(variables, normalizeVariables(objectOrEmpty(theme.variables)));
+    }
+    Object.assign(layout, objectOrEmpty(theme.layout));
+    mergeElements(elements, theme.elements);
+    // `dark`/`light` never become classes here: components read the scheme through `useThemeScope()`.
+    const names = Array.isArray(theme.classNames) ? theme.classNames.filter((name) => typeof name === "string") : [];
+    themeClassNames.push(...names.flatMap((entry) => entry.split(/\s+/)).filter((name) => name && !SCHEME_CLASSES.has(name)));
+  });
+
+  for (const layer of present) {
+    const own = normalizeVariables(objectOrEmpty(layer.variables));
+    Object.assign(variables, own);
+    Object.assign(explicitVariables, own);
+    Object.assign(layout, objectOrEmpty(layer.layout));
+    Object.assign(explicitLayout, objectOrEmpty(layer.layout));
+    mergeElements(elements, layer.elements);
+    mergeElements(explicitElements, layer.elements);
+    if (typeof layer.unstyled === "boolean") unstyled = layer.unstyled;
+  }
+
+  const appearance: Appearance = {
+    ...(configuredThemes ? { baseTheme: configuredThemes } : {}),
+    variables: explicitVariables,
+    layout: explicitLayout,
+    elements: explicitElements,
+    ...(present.some((layer) => typeof layer.unstyled === "boolean") ? { unstyled } : {}),
   };
-  activeThemes.forEach(mergeTheme);
-  Object.assign(variables, appearance.variables);
-  Object.assign(layout, appearance.layout);
-  Object.assign(elements, appearance.elements);
 
   return {
     appearance,
+    layers: present,
     theme: activeThemes[activeThemes.length - 1]!,
     themes: activeThemes,
     variables,
     layout,
-    elements: elements as ResolvedAppearance["elements"],
+    elements: elements as AppearanceElements,
+    unstyled,
     cssVariables: cssVariablesFrom(variables),
-    rootClassName: resolveElementClass(elements.rootBox, ...classNames),
+    themeClassNames,
+    rootClassName: resolveElementClass(elements.rootBox, ...themeClassNames),
+  };
+}
+
+/** One appearance, resolved on its own (the provider's). */
+export function resolveAppearance(appearance: Appearance = {}): ResolvedAppearance {
+  return resolveAppearanceLayers([appearance]);
+}
+
+/** A component's `appearance` prop as a new layer over the appearance in scope. */
+export function extendAppearance(parent: ResolvedAppearance, appearance: Appearance | undefined | null): ResolvedAppearance {
+  if (!isObject(appearance)) return parent;
+  return resolveAppearanceLayers([...parent.layers, appearance]);
+}
+
+/**
+ * Element resolver for `ElementSlotProvider`: for each key, the stable `orbitid-<key>` class then every override
+ * layer, in key order. `unstyled` starts from the global setting; each key's explicit `unstyled` (true or false)
+ * replaces it, the most specific key last.
+ */
+export function createElementResolver(resolved: Pick<ResolvedAppearance, "elements" | "unstyled">): ElementSlotResolver {
+  return (keys) => {
+    const classNames: string[] = [];
+    let style: CSSProperties | undefined;
+    let unstyled = resolved.unstyled;
+    for (const key of keys) {
+      classNames.push(elementClassName(key));
+      const flat = flattenElement(resolved.elements[key]);
+      classNames.push(...flat.classNames);
+      if (flat.style) style = { ...style, ...flat.style };
+      if (flat.unstyled !== undefined) unstyled = flat.unstyled;
+    }
+    const result: ElementSlotStyle = { className: classNames.join(" ") };
+    if (style) result.style = style;
+    if (unstyled) result.unstyled = true;
+    return result;
   };
 }

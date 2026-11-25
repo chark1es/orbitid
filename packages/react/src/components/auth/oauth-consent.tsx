@@ -10,7 +10,7 @@ import {
 } from "@orbitid/ui";
 import { LockIcon, ShieldCheckIcon } from "lucide-react";
 import { apiOrigin, currentUser, displayName, errorMessage, initials, primaryIdentifier, toAuthError } from "./_shared/api";
-import { AuthAppearanceScope, useElementClasses } from "./_shared/appearance";
+import { AuthAppearanceScope, useComponentElements } from "./_shared/appearance";
 import { AuthCard } from "./_shared/auth-card";
 import { FormError } from "./_shared/form-error";
 import { isRecord } from "./_shared/guards";
@@ -94,7 +94,7 @@ async function consentRequest<T>(
 function OAuthConsentInner(props: OAuthConsentProps) {
   const runtime = useAuthRuntime();
   const { orbit, environment, t, navigate } = runtime;
-  const { el } = useElementClasses();
+  const { ep } = useComponentElements();
   const query = useMemo(() => {
     if (typeof window === "undefined") return new URLSearchParams();
     return new URLSearchParams(window.location.search);
@@ -251,7 +251,7 @@ function OAuthConsentInner(props: OAuthConsentProps) {
           <Button
             type="button"
             disabled={busy || !info}
-            className={cn("flex-1 gap-2", el("formButtonPrimary"))}
+            {...ep("formButtonPrimary", "flex-1 gap-2")}
             onClick={() => void decide(true)}
           >
             <LockIcon className="size-4" aria-hidden="true" />

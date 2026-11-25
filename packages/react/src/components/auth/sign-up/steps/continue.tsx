@@ -3,7 +3,7 @@ import { Button, Input, cn } from "@orbitid/ui";
 import { ArrowLeftIcon, CheckCircle2Icon, Loader2Icon } from "lucide-react";
 import { useAuthRuntime } from "../../_shared/w6";
 import type { TranslationKey } from "../../../../localization";
-import { useElementClasses } from "../../_shared/appearance";
+import { useComponentElements } from "../../_shared/appearance";
 import { Field } from "../../_shared/field";
 import { FormError } from "../../_shared/form-error";
 import { passwordMeetsPolicy } from "../../_shared/password-field";
@@ -22,7 +22,7 @@ const FIELD_LABELS: Record<string, TranslationKey> = {
 export function ContinueStep({ flow }: SignUpStepProps) {
   const runtime = useAuthRuntime();
   const { t, environment } = runtime;
-  const { el } = useElementClasses();
+  const { ep } = useComponentElements();
   const missing = flow.signUp?.missing_fields ?? [];
   const fields = missing.filter((field) => field !== "legal_accepted" && FIELD_LABELS[field]);
 
@@ -65,7 +65,7 @@ export function ContinueStep({ flow }: SignUpStepProps) {
   return (
     <div className="flex flex-col gap-4">
       <FormError message={flow.error} />
-      <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
+      <form onSubmit={submit} {...ep("form", "flex flex-col gap-4")} noValidate>
         {fields.map((field) =>
           field === "password" ? (
             <Field
@@ -81,7 +81,7 @@ export function ContinueStep({ flow }: SignUpStepProps) {
                   type="password"
                   autoComplete="new-password"
                   disabled={flow.busy}
-                  className={cn(el("formFieldInput"))}
+                  {...ep("formFieldInput")}
                 />
               )}
             </Field>
@@ -105,7 +105,7 @@ export function ContinueStep({ flow }: SignUpStepProps) {
                   {...controller}
                   type={field === "email_address" ? "email" : "text"}
                   disabled={flow.busy}
-                  className={cn(el("formFieldInput"))}
+                  {...ep("formFieldInput")}
                 />
               )}
             </Field>
@@ -114,7 +114,7 @@ export function ContinueStep({ flow }: SignUpStepProps) {
         {fields.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t("signUp.continue.subtitle")}</p>
         ) : null}
-        <Button type="submit" disabled={flow.busy} className={cn("w-full", el("formButtonPrimary"))}>
+        <Button type="submit" disabled={flow.busy} {...ep("formButtonPrimary", "w-full")}>
           {flow.busy ? <Loader2Icon className="size-4 animate-spin" aria-hidden="true" /> : null}
           {t("signUp.continue.action")}
         </Button>

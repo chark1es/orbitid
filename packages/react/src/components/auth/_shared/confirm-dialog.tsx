@@ -10,7 +10,7 @@ import {
   AlertDialogTitle,
 } from "@orbitid/ui";
 import { buttonVariants, cn } from "@orbitid/ui";
-import { useThemeScope } from "./appearance";
+import { usePortalClass } from "./appearance";
 import { useAuthRuntime } from "./w6";
 
 export interface ConfirmDialogProps {
@@ -38,10 +38,10 @@ export function ConfirmDialog({
 }: ConfirmDialogProps) {
   const { t } = useAuthRuntime();
   // Portaled to <body>: carry the component's scheme so the dialog matches the card that opened it.
-  const { className: themeClass } = useThemeScope();
+  const portalClass = usePortalClass();
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent className={themeClass}>
+      <AlertDialogContent className={portalClass()}>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           {description ? <AlertDialogDescription>{description}</AlertDialogDescription> : null}

@@ -2,8 +2,10 @@
 
 import * as React from "react"
 import { cn } from "../../lib/utils"
+import { useElementSlot } from "../../lib/element-slots"
 
-function Table({ className, ...props }: React.ComponentProps<"table">) {
+function Table({ className, style, ...props }: React.ComponentProps<"table">) {
+  const slot = useElementSlot(["table"], "w-full caption-bottom border-collapse text-sm", className, style, props)
   return (
     <div
       data-slot="table-container"
@@ -11,28 +13,33 @@ function Table({ className, ...props }: React.ComponentProps<"table">) {
     >
       <table
         data-slot="table"
-        className={cn("w-full caption-bottom border-collapse text-sm", className)}
+        className={slot.className}
+        style={slot.style}
         {...props}
       />
     </div>
   )
 }
 
-function TableHeader({ className, ...props }: React.ComponentProps<"thead">) {
+function TableHeader({ className, style, ...props }: React.ComponentProps<"thead">) {
+  const slot = useElementSlot(["tableHeader"], "[&_tr]:border-b [&_tr]:border-border", className, style, props)
   return (
     <thead
       data-slot="table-header"
-      className={cn("[&_tr]:border-b [&_tr]:border-border", className)}
+      className={slot.className}
+      style={slot.style}
       {...props}
     />
   )
 }
 
-function TableBody({ className, ...props }: React.ComponentProps<"tbody">) {
+function TableBody({ className, style, ...props }: React.ComponentProps<"tbody">) {
+  const slot = useElementSlot(["tableBody"], "[&_tr:last-child]:border-0", className, style, props)
   return (
     <tbody
       data-slot="table-body"
-      className={cn("[&_tr:last-child]:border-0", className)}
+      className={slot.className}
+      style={slot.style}
       {...props}
     />
   )
@@ -51,40 +58,37 @@ function TableFooter({ className, ...props }: React.ComponentProps<"tfoot">) {
   )
 }
 
-function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
+function TableRow({ className, style, ...props }: React.ComponentProps<"tr">) {
+  const slot = useElementSlot(["tableRow"], "border-b border-border transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted data-[state=selected]:hover:bg-muted/80", className, style, props)
   return (
     <tr
       data-slot="table-row"
-      className={cn(
-        "border-b border-border transition-colors hover:bg-muted/60 data-[state=selected]:bg-muted data-[state=selected]:hover:bg-muted/80",
-        className
-      )}
+      className={slot.className}
+      style={slot.style}
       {...props}
     />
   )
 }
 
-function TableHead({ className, ...props }: React.ComponentProps<"th">) {
+function TableHead({ className, style, ...props }: React.ComponentProps<"th">) {
+  const slot = useElementSlot(["tableHead"], "h-9 px-3 text-left align-middle text-xs font-medium whitespace-nowrap text-muted-foreground [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:align-middle", className, style, props)
   return (
     <th
       data-slot="table-head"
-      className={cn(
-        "h-9 px-2 text-left align-middle text-xs font-semibold tracking-[0.04em] whitespace-nowrap text-muted-foreground uppercase [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:align-middle",
-        className
-      )}
+      className={slot.className}
+      style={slot.style}
       {...props}
     />
   )
 }
 
-function TableCell({ className, ...props }: React.ComponentProps<"td">) {
+function TableCell({ className, style, ...props }: React.ComponentProps<"td">) {
+  const slot = useElementSlot(["tableCell"], "px-3 py-2.5 align-middle leading-5 whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:align-middle", className, style, props)
   return (
     <td
       data-slot="table-cell"
-      className={cn(
-        "px-2 py-2.5 align-middle leading-5 whitespace-nowrap [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:align-middle",
-        className
-      )}
+      className={slot.className}
+      style={slot.style}
       {...props}
     />
   )

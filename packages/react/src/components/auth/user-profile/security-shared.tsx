@@ -1,4 +1,6 @@
+import type { ReactNode } from "react";
 import type { OrbitUser } from "../_shared/w6";
+import { useElementProps } from "../../../appearance";
 
 export interface SectionProps {
   user: OrbitUser;
@@ -11,10 +13,26 @@ export interface SectionProps {
 export function SectionHeader({ title, description }: { title: string; description: string }) {
   return (
     <div>
-      <h2 className="text-sm font-semibold">{title}</h2>
+      <ProfileSectionTitle>{title}</ProfileSectionTitle>
       <p className="text-xs text-muted-foreground">{description}</p>
     </div>
   );
+}
+
+/** One section of a profile page (`profileSection`). */
+export function ProfileSection({ id, className, children }: { id: string; className?: string; children: ReactNode }) {
+  const ep = useElementProps();
+  return (
+    <section {...ep("profileSection", className)} data-orbit-section={id}>
+      {children}
+    </section>
+  );
+}
+
+/** A section's title (`profileSectionTitle`). */
+export function ProfileSectionTitle({ children }: { children: ReactNode }) {
+  const ep = useElementProps();
+  return <h2 {...ep("profileSectionTitle", "text-sm font-heading")}>{children}</h2>;
 }
 
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Button, cn } from "@orbitid/ui";
-import { useElementClasses } from "./appearance";
+import { useComponentElements } from "./appearance";
 import { useAuthRuntime } from "./w6";
 
 export interface ResendButtonProps {
@@ -23,7 +23,7 @@ export function ResendButton({
   onError,
 }: ResendButtonProps) {
   const { t } = useAuthRuntime();
-  const { el } = useElementClasses();
+  const { ep } = useComponentElements();
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [busy, setBusy] = useState(false);
   const countingDown = secondsLeft > 0;
@@ -57,11 +57,7 @@ export function ResendButton({
         size="sm"
         disabled={unavailable}
         onClick={handleClick}
-        className={cn(
-          "h-auto min-h-6 px-0 py-1 text-sm font-medium text-muted-foreground hover:text-foreground",
-          el("formResendCodeLink"),
-          className,
-        )}
+        {...ep("formResendCodeLink", "h-auto min-h-6 px-0 py-1 text-sm font-medium text-muted-foreground hover:text-foreground", className)}
       >
         {secondsLeft > 0 ? t("signIn.emailCode.resendIn", { seconds: secondsLeft }) : label ?? t("common.resend")}
       </Button>

@@ -99,7 +99,7 @@ export function RuledTable({ children, className }: { children: React.ReactNode;
                     <dl className="mt-2.5 grid grid-cols-[minmax(0,1fr)] gap-1 border-t border-border pt-2">
                       {row.fields.map((field, fieldIndex) => (
                         <div key={fieldIndex} className="flex min-w-0 items-baseline justify-between gap-4">
-                          <dt className="text-[0.6875rem] font-medium tracking-[0.04em] text-muted-foreground uppercase">
+                          <dt className="text-[0.6875rem] font-medium text-muted-foreground">
                             {field.label}
                           </dt>
                           <dd className="min-w-0 overflow-hidden text-right break-words [&_.font-data]:break-all [&_span]:align-baseline">{stackedCell(field.cell)}</dd>
@@ -121,7 +121,7 @@ export function RuledTable({ children, className }: { children: React.ReactNode;
       <Table
         className={cn(
           "[&_thead_tr]:border-border [&_thead_tr:hover]:bg-transparent",
-          "[&_th]:h-9 [&_th]:text-[0.75rem] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-[0.04em] [&_th]:text-muted-foreground",
+          "[&_th]:h-9 [&_th]:text-[0.75rem] [&_th]:font-medium [&_th]:text-muted-foreground",
           "[&_td]:h-10 [&_td]:py-0 [&_tbody_tr]:border-border [&_tbody_tr:hover]:bg-muted/40",
         )}
       >

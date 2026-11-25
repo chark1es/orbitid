@@ -16,7 +16,7 @@ import { ConfirmDialog } from "../_shared/confirm-dialog";
 import { PasswordField } from "../_shared/password-field";
 import { useReverification } from "../../../hooks";
 import { useAuthRuntime } from "../_shared/w6";
-import { SectionHeader, formatDate, type SectionProps } from "./security-shared";
+import { SectionHeader, formatDate, type SectionProps, ProfileSection } from "./security-shared";
 import { usePortalClass } from "../_shared/appearance";
 
 export function PasswordSection({ user, refresh, onError, onNotice }: SectionProps) {
@@ -74,7 +74,7 @@ export function PasswordSection({ user, refresh, onError, onNotice }: SectionPro
   };
 
   return (
-    <section className="flex flex-col gap-4" data-orbit-section="password">
+    <ProfileSection id="password" className="flex flex-col gap-4">
       <SectionHeader
         title={t("userProfile.password.title")}
         description={editing ? t("userProfile.password.description") : t("userProfile.password.descriptionNone")}
@@ -147,7 +147,7 @@ export function PasswordSection({ user, refresh, onError, onNotice }: SectionPro
           autoComplete="current-password"
         />
       </ConfirmDialog>
-    </section>
+    </ProfileSection>
   );
 }
 
@@ -207,7 +207,7 @@ export function PasskeysSection({ user, refresh, onError, onNotice }: SectionPro
   };
 
   return (
-    <section className="flex flex-col gap-3" data-orbit-section="passkeys">
+    <ProfileSection id="passkeys" className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-2">
         <SectionHeader title={t("userProfile.passkeys.title")} description={t("userProfile.passkeys.description")} />
         <Button type="button" variant="outline" size="sm" className="gap-1.5" disabled={busy || !supported} onClick={() => void add()}>
@@ -287,6 +287,6 @@ export function PasskeysSection({ user, refresh, onError, onNotice }: SectionPro
         destructive
         onConfirm={remove}
       />
-    </section>
+    </ProfileSection>
   );
 }

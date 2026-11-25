@@ -1,10 +1,12 @@
-import { cn } from "../../lib/utils"
+import { useElementSlot } from "../../lib/element-slots"
 
-function Skeleton({ className, ...props }: React.ComponentProps<"div">) {
+function Skeleton({ className, style, ...props }: React.ComponentProps<"div">) {
+  const slot = useElementSlot(["skeleton"], "animate-pulse rounded-md bg-accent", className, style, props)
   return (
     <div
       data-slot="skeleton"
-      className={cn("animate-pulse rounded-md bg-accent", className)}
+      className={slot.className}
+      style={slot.style}
       {...props}
     />
   )

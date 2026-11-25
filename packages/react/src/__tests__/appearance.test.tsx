@@ -14,7 +14,7 @@ describe("appearance", () => {
     });
 
     expect(resolved.rootClassName).toContain("orbitid-root");
-    // The scheme comes from `useThemeScope()`; `rootClassName` also lands on the wrapper around the host's app.
+    // The scheme comes from `useThemeScope()`; scheme classes never appear in the resolved class names.
     expect(resolved.rootClassName.split(" ")).not.toContain("dark");
     expect(resolved.themes).toContain(dark);
     expect(resolved.variables.colorBackground).toBe(dark.variables?.colorBackground);
@@ -63,7 +63,7 @@ describe("appearance", () => {
     ).toBe("fallback");
   });
 
-  it("applies appearance to the provider wrapper and elements", () => {
+  it("keeps appearance off the provider wrapper around the host app, but applies it to elements", () => {
     function Probe() {
       const { layout } = useAppearance();
       const card = useElementClasses("card");
@@ -80,7 +80,7 @@ describe("appearance", () => {
           baseTheme: dark,
           layout: { socialButtonsVariant: "blockButton" },
           elements: { card: "p-2", rootBox: "my-root" },
-          variables: { colorPrimary: "#00ff00" },
+          variables: { colorPrimary: "#00ff00", spacingUnit: "0.5rem" },
         },
       },
     });
@@ -89,11 +89,10 @@ describe("appearance", () => {
     expect(card.className).toBe("p-2");
     expect(card.textContent).toBe("blockButton");
 
+    // The host's own markup: no variables, no rootBox, no scheme class.
     const root = card.parentElement!;
-    expect(root.className).toContain("orbitid-root");
-    expect(root.className).toContain("my-root");
-    expect(root.classList.contains("dark")).toBe(false);
+    expect(root.className).toBe("orbitid-root");
+    expect(root.getAttribute("style")).toBeNull();
     expect(root.getAttribute("data-orbitid-theme")).toBe("dark");
-    expect(root.getAttribute("style")).toContain("--primary: #00ff00");
   });
 });

@@ -1,6 +1,6 @@
 import { useId } from "react";
-import { InputOTP, InputOTPGroup, InputOTPSeparator, InputOTPSlot, Label, cn } from "@orbitid/ui";
-import { useElementClasses } from "./appearance";
+import { InputOTP, InputOTPGroup, InputOTPSeparator, InputOTPSlot, Label } from "@orbitid/ui";
+import { useComponentElements } from "./appearance";
 import { useAuthRuntime } from "./w6";
 
 export interface OtpFieldProps {
@@ -35,7 +35,7 @@ export function OtpField({
   grouped = true,
 }: OtpFieldProps) {
   const { t } = useAuthRuntime();
-  const { el } = useElementClasses();
+  const { ep } = useComponentElements();
   const generatedId = useId();
   const inputId = id ?? generatedId;
   const errorId = `${inputId}-error`;
@@ -51,9 +51,9 @@ export function OtpField({
   const secondHalf = slots.slice(splitIndex);
 
   return (
-    <div className={cn("flex flex-col gap-2", el("formField"), className)}>
+    <div {...ep(["formField", "otpCodeField"], "flex flex-col gap-2", className)}>
       {label ? (
-        <Label htmlFor={inputId} className={cn("text-sm font-medium", el("formFieldLabel"))}>
+        <Label htmlFor={inputId} {...ep("formFieldLabel", "text-sm font-medium")}>
           {label}
         </Label>
       ) : null}
@@ -71,14 +71,15 @@ export function OtpField({
         aria-label={label ?? t("formFieldLabel__code")}
         aria-invalid={Boolean(error)}
         aria-describedby={error ? errorId : undefined}
-        containerClassName={cn("justify-center", el("formFieldInputGroup"))}
+        containerElement="formFieldInputGroup"
+        containerClassName="justify-center"
       >
         <InputOTPGroup>
           {firstHalf.map((index) => (
             <InputOTPSlot
               key={index}
               index={index}
-              className={cn("size-10 text-base", el("otpCodeFieldInput"))}
+              {...ep("otpCodeFieldInput", "size-10 text-base")}
             />
           ))}
         </InputOTPGroup>
@@ -89,14 +90,14 @@ export function OtpField({
               <InputOTPSlot
                 key={index}
                 index={index}
-                className={cn("size-10 text-base", el("otpCodeFieldInput"))}
+                {...ep("otpCodeFieldInput", "size-10 text-base")}
               />
             ))}
           </InputOTPGroup>
         ) : null}
       </InputOTP>
       {error ? (
-        <p id={errorId} role="alert" className={cn("text-center text-xs text-destructive", el("formFieldErrorText"))}>
+        <p id={errorId} role="alert" {...ep("formFieldErrorText", "text-center text-xs text-destructive")}>
           {error}
         </p>
       ) : null}

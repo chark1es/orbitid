@@ -1,22 +1,23 @@
 import * as React from "react"
 import { cn } from "../../lib/utils"
+import { useElementSlot } from "../../lib/element-slots"
 import { Switch as SwitchPrimitive } from "radix-ui"
 
 function Switch({
   className,
+  style,
   size = "default",
   ...props
 }: React.ComponentProps<typeof SwitchPrimitive.Root> & {
   size?: "sm" | "default"
 }) {
+  const slot = useElementSlot(["switch"], "peer group/switch inline-flex shrink-0 items-center rounded-full border border-transparent p-px transition-all outline-none disabled:cursor-not-allowed disabled:opacity-50 data-[size=default]:h-5 data-[size=default]:w-9 data-[size=sm]:h-4 data-[size=sm]:w-7 data-[state=checked]:bg-primary data-[state=unchecked]:bg-input", className, style, props)
   return (
     <SwitchPrimitive.Root
       data-slot="switch"
       data-size={size}
-      className={cn(
-        "peer group/switch inline-flex shrink-0 items-center rounded-full border border-transparent p-px transition-all outline-none disabled:cursor-not-allowed disabled:opacity-50 data-[size=default]:h-5 data-[size=default]:w-9 data-[size=sm]:h-4 data-[size=sm]:w-7 data-[state=checked]:bg-primary data-[state=unchecked]:bg-input",
-        className
-      )}
+      className={slot.className}
+      style={slot.style}
       {...props}
     >
       <SwitchPrimitive.Thumb

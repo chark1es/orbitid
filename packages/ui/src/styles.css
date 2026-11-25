@@ -17,103 +17,108 @@
   }
 }
 
-/* Timetable palette. Warm paper ground, ink type, one signal red, charcoal rail. */
-/* `.light` lets a light surface sit inside a dark page (the dashboard's branding preview). */
+/*
+ * Calm neutral palette. A near-white ground with white cards on it, ink type, hairline borders with soft layered
+ * shadows, one signal red kept for danger and the active item. Every value a prebuilt component reads is a custom
+ * property, so `appearance.variables` can re-scope it on a component root without touching the host page.
+ * `.light` lets a light surface sit inside a dark page (the dashboard's branding preview).
+ */
 :root,
 .light {
-  --radius: 4px;
-  --background: oklch(0.975 0.006 85);
-  --foreground: oklch(0.2 0.01 60);
-  --card: oklch(0.992 0.004 85);
-  --card-foreground: oklch(0.2 0.01 60);
-  --popover: oklch(0.992 0.004 85);
-  --popover-foreground: oklch(0.2 0.01 60);
-  --primary: oklch(0.2 0.01 60);
-  --primary-foreground: oklch(0.975 0.006 85);
-  --secondary: oklch(0.945 0.006 85);
-  --secondary-foreground: oklch(0.2 0.01 60);
-  --muted: oklch(0.945 0.006 85);
-  --muted-foreground: oklch(0.46 0.012 70);
-  --accent: oklch(0.93 0.008 85);
-  --accent-foreground: oklch(0.2 0.01 60);
-  --destructive: oklch(0.57 0.235 28);
+  --radius: 0.5rem;
+  --background: oklch(0.985 0.002 85);
+  --foreground: oklch(0.21 0.006 60);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.21 0.006 60);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.21 0.006 60);
+  --primary: oklch(0.21 0.006 60);
+  --primary-foreground: oklch(0.985 0.002 85);
+  --secondary: oklch(0.965 0.002 85);
+  --secondary-foreground: oklch(0.21 0.006 60);
+  --muted: oklch(0.965 0.002 85);
+  --muted-foreground: oklch(0.5 0.008 70);
+  --accent: oklch(0.955 0.003 85);
+  --accent-foreground: oklch(0.21 0.006 60);
+  --destructive: oklch(0.56 0.22 28);
   --destructive-foreground: oklch(0.995 0.002 85);
   --signal: oklch(0.57 0.235 28);
-  --go: oklch(0.49 0.12 150);
-  --caution: oklch(0.49 0.1 80);
-  --info: oklch(0.55 0.12 245);
-  --border: oklch(0.88 0.008 85);
-  --input: oklch(0.61 0.008 85);
-  --ring: oklch(0.57 0.235 28);
-  --rail: oklch(0.2 0.008 60);
-  --rail-foreground: oklch(0.93 0.006 85);
-  --rail-muted: oklch(0.72 0.006 85);
-  --rail-hover: oklch(0.27 0.008 60);
-  --rail-border: oklch(0.3 0.008 60);
-  --chart-1: oklch(0.2 0.01 60);
+  --go: oklch(0.5 0.12 150);
+  --caution: oklch(0.52 0.11 75);
+  --info: oklch(0.52 0.13 250);
+  --border: oklch(0.91 0.003 85);
+  /* Input borders keep 3:1 against a white card (WCAG 1.4.11); every other border is a hairline. */
+  --input: oklch(0.63 0.004 85);
+  --ring: oklch(0.52 0.01 60);
+  --rail: oklch(0.21 0.006 60);
+  --rail-foreground: oklch(0.95 0.003 85);
+  --rail-muted: oklch(0.74 0.004 85);
+  --rail-hover: oklch(0.28 0.006 60);
+  --rail-border: oklch(0.31 0.006 60);
+  --chart-1: oklch(0.21 0.006 60);
   --chart-2: oklch(0.57 0.235 28);
-  --chart-3: oklch(0.46 0.012 70);
-  --chart-4: oklch(0.55 0.12 245);
+  --chart-3: oklch(0.5 0.008 70);
+  --chart-4: oklch(0.52 0.13 250);
   --chart-5: oklch(0.65 0.12 80);
-  --sidebar: oklch(0.2 0.008 60);
-  --sidebar-foreground: oklch(0.93 0.006 85);
-  --sidebar-primary: oklch(0.57 0.235 28);
-  --sidebar-primary-foreground: oklch(0.995 0.002 85);
-  --sidebar-accent: oklch(0.27 0.008 60);
-  --sidebar-accent-foreground: oklch(0.93 0.006 85);
-  --sidebar-border: oklch(0.3 0.008 60);
-  --sidebar-ring: oklch(0.68 0.2 27);
-  /* Overlay scrim and shadow inks: warm ink in light, deeper charcoal in dark so overlays still lift. */
-  --scrim: oklch(0.2 0.01 60 / 0.38);
-  --shadow-ink-strong: oklch(0.2 0.01 60 / 0.3);
-  --shadow-ink-soft: oklch(0.2 0.01 60 / 0.14);
+  --sidebar: oklch(0.975 0.002 85);
+  --sidebar-foreground: oklch(0.36 0.006 60);
+  --sidebar-primary: oklch(1 0 0);
+  --sidebar-primary-foreground: oklch(0.21 0.006 60);
+  --sidebar-accent: oklch(0.945 0.003 85);
+  --sidebar-accent-foreground: oklch(0.21 0.006 60);
+  --sidebar-border: oklch(0.91 0.003 85);
+  --sidebar-ring: oklch(0.52 0.01 60);
+  /* Overlay scrim and shadow ink. `--shadow-strength` scales every elevation at once (0 turns shadows off). */
+  --scrim: oklch(0.21 0.006 60 / 0.32);
+  --shadow-color: oklch(0.21 0.01 60);
+  --shadow-strength: 1;
 }
 
 .dark {
-  --background: oklch(0.17 0.008 60);
-  --foreground: oklch(0.94 0.006 85);
-  --card: oklch(0.21 0.008 60);
-  --card-foreground: oklch(0.94 0.006 85);
-  --popover: oklch(0.225 0.008 60);
-  --popover-foreground: oklch(0.94 0.006 85);
-  --primary: oklch(0.94 0.006 85);
-  --primary-foreground: oklch(0.17 0.008 60);
-  --secondary: oklch(0.25 0.008 60);
-  --secondary-foreground: oklch(0.94 0.006 85);
-  --muted: oklch(0.25 0.008 60);
-  --muted-foreground: oklch(0.72 0.008 85);
-  --accent: oklch(0.27 0.008 60);
-  --accent-foreground: oklch(0.94 0.006 85);
-  --destructive: oklch(0.68 0.2 27);
-  --destructive-foreground: oklch(0.17 0.008 60);
+  --background: oklch(0.165 0.004 60);
+  --foreground: oklch(0.95 0.003 85);
+  --card: oklch(0.2 0.004 60);
+  --card-foreground: oklch(0.95 0.003 85);
+  --popover: oklch(0.215 0.004 60);
+  --popover-foreground: oklch(0.95 0.003 85);
+  --primary: oklch(0.95 0.003 85);
+  --primary-foreground: oklch(0.18 0.004 60);
+  --secondary: oklch(0.25 0.004 60);
+  --secondary-foreground: oklch(0.95 0.003 85);
+  --muted: oklch(0.24 0.004 60);
+  --muted-foreground: oklch(0.72 0.005 85);
+  --accent: oklch(0.26 0.004 60);
+  --accent-foreground: oklch(0.95 0.003 85);
+  --destructive: oklch(0.68 0.19 27);
+  --destructive-foreground: oklch(0.17 0.004 60);
   --signal: oklch(0.68 0.2 27);
-  --go: oklch(0.72 0.15 150);
-  --caution: oklch(0.8 0.14 80);
-  --info: oklch(0.72 0.12 245);
-  --border: oklch(0.32 0.01 60);
-  --input: oklch(0.56 0.01 60);
-  --ring: oklch(0.68 0.2 27);
-  --rail: oklch(0.145 0.008 60);
-  --rail-foreground: oklch(0.93 0.006 85);
-  --rail-muted: oklch(0.68 0.006 85);
-  --rail-hover: oklch(0.22 0.008 60);
-  --rail-border: oklch(0.27 0.008 60);
-  --chart-1: oklch(0.94 0.006 85);
+  --go: oklch(0.74 0.14 150);
+  --caution: oklch(0.8 0.13 80);
+  --info: oklch(0.74 0.11 250);
+  --border: oklch(0.285 0.004 60);
+  --input: oklch(0.55 0.005 60);
+  --ring: oklch(0.74 0.006 85);
+  --rail: oklch(0.12 0.004 60);
+  --rail-foreground: oklch(0.93 0.003 85);
+  --rail-muted: oklch(0.68 0.004 85);
+  --rail-hover: oklch(0.22 0.004 60);
+  --rail-border: oklch(0.27 0.004 60);
+  --chart-1: oklch(0.95 0.003 85);
   --chart-2: oklch(0.68 0.2 27);
-  --chart-3: oklch(0.72 0.008 85);
-  --chart-4: oklch(0.72 0.12 245);
-  --chart-5: oklch(0.8 0.14 80);
-  --sidebar: oklch(0.145 0.008 60);
-  --sidebar-foreground: oklch(0.93 0.006 85);
-  --sidebar-primary: oklch(0.68 0.2 27);
-  --sidebar-primary-foreground: oklch(0.17 0.008 60);
-  --sidebar-accent: oklch(0.22 0.008 60);
-  --sidebar-accent-foreground: oklch(0.93 0.006 85);
-  --sidebar-border: oklch(0.27 0.008 60);
-  --sidebar-ring: oklch(0.68 0.2 27);
-  --scrim: oklch(0.09 0.006 60 / 0.62);
-  --shadow-ink-strong: oklch(0.05 0.005 60 / 0.6);
-  --shadow-ink-soft: oklch(0.05 0.005 60 / 0.35);
+  --chart-3: oklch(0.72 0.005 85);
+  --chart-4: oklch(0.74 0.11 250);
+  --chart-5: oklch(0.8 0.13 80);
+  --sidebar: oklch(0.145 0.004 60);
+  --sidebar-foreground: oklch(0.78 0.004 85);
+  --sidebar-primary: oklch(0.225 0.004 60);
+  --sidebar-primary-foreground: oklch(0.96 0.003 85);
+  --sidebar-accent: oklch(0.205 0.004 60);
+  --sidebar-accent-foreground: oklch(0.95 0.003 85);
+  --sidebar-border: oklch(0.25 0.004 60);
+  --sidebar-ring: oklch(0.74 0.006 85);
+  --scrim: oklch(0.08 0.004 60 / 0.6);
+  --shadow-color: oklch(0.04 0.003 60);
+  --shadow-strength: 2.6;
 }
 
 @theme inline {
@@ -157,20 +162,42 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-scrim: var(--scrim);
+  /*
+   * Inline so each utility reads the variable where it is used: a component root that sets `--radius`,
+   * `--shadow-strength` or `--font-scale` re-scales everything inside it, and nothing outside.
+   */
+  --radius-xs: calc(var(--radius) * 0.5);
+  --radius-sm: calc(var(--radius) * 0.75);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) * 1.25);
+  --radius-xl: calc(var(--radius) * 1.5);
+  --radius-2xl: calc(var(--radius) * 2);
+  --text-2xs: calc(0.6875rem * var(--font-scale, 1));
+  --text-2xs--line-height: 1.4;
+  --text-xs: calc(0.75rem * var(--font-scale, 1));
+  --text-sm: calc(0.875rem * var(--font-scale, 1));
+  --text-base: calc(1rem * var(--font-scale, 1));
+  --text-lg: calc(1.125rem * var(--font-scale, 1));
+  --text-xl: calc(1.25rem * var(--font-scale, 1));
+  --text-2xl: calc(1.5rem * var(--font-scale, 1));
+  /* Elevation: a hairline-tight contact shadow under a soft ambient one. Never a glow. */
+  --shadow-xs: 0 1px 2px 0 color-mix(in oklab, var(--shadow-color) calc(5% * var(--shadow-strength)), transparent);
+  --shadow-sm:
+    0 1px 2px -1px color-mix(in oklab, var(--shadow-color) calc(8% * var(--shadow-strength)), transparent),
+    0 1px 3px 0 color-mix(in oklab, var(--shadow-color) calc(6% * var(--shadow-strength)), transparent);
+  --shadow-card:
+    0 1px 2px 0 color-mix(in oklab, var(--shadow-color) calc(5% * var(--shadow-strength)), transparent),
+    0 8px 24px -12px color-mix(in oklab, var(--shadow-color) calc(14% * var(--shadow-strength)), transparent);
+  --shadow-overlay:
+    0 2px 6px -3px color-mix(in oklab, var(--shadow-color) calc(12% * var(--shadow-strength)), transparent),
+    0 16px 36px -16px color-mix(in oklab, var(--shadow-color) calc(26% * var(--shadow-strength)), transparent);
 }
 
 @theme {
   --font-sans: "Hanken Grotesk Variable", "Helvetica Neue", Arial, sans-serif;
   --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
   /* Headings and figures share one weight. `font-heading` is the only heading weight in the product. */
-  --font-weight-heading: 650;
-  --radius-xs: 3px;
-  --radius-sm: 3px;
-  --radius-md: 4px;
-  --radius-lg: 6px;
-  --radius-xl: 6px;
-  --shadow-overlay:
-    0 16px 36px -16px var(--shadow-ink-strong), 0 2px 6px -3px var(--shadow-ink-soft);
+  --font-weight-heading: 620;
   /* Motion: overlays enter on a quick decelerating curve and leave faster than they came. */
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in-quick: cubic-bezier(0.4, 0, 1, 1);
@@ -249,7 +276,7 @@
   h4,
   h5,
   h6 {
-    font-weight: 650;
+    font-weight: 620;
     letter-spacing: -0.015em;
     line-height: 1.2;
     text-wrap: balance;
@@ -312,6 +339,30 @@
 
   [data-slot="sidebar-content"]::-webkit-scrollbar-thumb:hover {
     background-color: var(--rail-muted);
+  }
+
+  /*
+   * Prebuilt SDK components. `appearance.variables.fontFamily` sets `--font-sans` on the component root, and buttons
+   * can take their own family. Kept in the base layer so a utility class still wins.
+   */
+  .orbitid-component {
+    font-family: var(--font-sans);
+    color: var(--foreground);
+  }
+
+  .orbitid-component .orbitid-button {
+    font-family: var(--orbitid-font-family-buttons, inherit);
+  }
+
+  /* `appearance.layout.animations: false`: no transitions or entrance animations inside the component. */
+  .orbitid-motion-off,
+  .orbitid-motion-off * {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .orbitid-motion-off .animate-spin {
+    animation: spin 1s linear infinite !important;
   }
 
   @media (prefers-reduced-motion: reduce) {

@@ -243,7 +243,6 @@ export const instanceSettingsSchema = z.object({
   }).prefault({}),
   branding: z.object({
     primaryColor: z.string().default("#2b2522"),
-    showPoweredBy: z.boolean().default(true),
     theme: z.enum(["light", "dark", "system"]).default("system"),
   }).prefault({}),
 });

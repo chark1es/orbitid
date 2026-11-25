@@ -1,8 +1,9 @@
+import { ProfileSection, ProfileSectionTitle } from "./security-shared";
 import { useState } from "react";
 import { Badge, Button, Separator, cn } from "@orbitid/ui";
 import { MailIcon, PhoneIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { currentUser, findEmail, findPhone, reloadOrbit } from "../_shared/api";
-import { useElementClasses } from "../_shared/appearance";
+import { useComponentElements } from "../_shared/appearance";
 import { ConfirmDialog } from "../_shared/confirm-dialog";
 import { FormError } from "../_shared/form-error";
 import { ProviderIcon } from "../_shared/provider-icon";
@@ -26,7 +27,7 @@ import { ConnectAccountDialog, EnterpriseAccountsSection } from "./connect-accou
 export function ProfilePage() {
   const runtime = useAuthRuntime();
   const { orbit, t, environment } = runtime;
-  const { el } = useElementClasses();
+  const { ep } = useComponentElements();
   const user = currentUser(orbit);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -75,25 +76,25 @@ export function ProfilePage() {
         </p>
       ) : null}
 
-      <section className={cn("flex flex-col gap-4", el("profileSection"))} data-orbit-section="profile">
+      <ProfileSection id="profile" className="flex flex-col gap-4">
         <div>
-          <h2 className={cn("text-sm font-semibold", el("profileSectionTitle"))}>{t("userProfile.profile.title")}</h2>
+          <ProfileSectionTitle>{t("userProfile.profile.title")}</ProfileSectionTitle>
           <p className="text-xs text-muted-foreground">{t("userProfile.profile.description")}</p>
         </div>
         <ProfileImageEditor user={user} onChanged={refresh} onError={(caught) => setError(messageFor(t, caught))} />
         <Separator />
         <ProfileForm user={user} onSaved={() => void runAction(async () => undefined, t("userProfile.profile.saved"))} onError={(caught) => setError(messageFor(t, caught))} />
-      </section>
+      </ProfileSection>
 
       <Separator />
 
-      <section className="flex flex-col gap-3" data-orbit-section="emails">
+      <ProfileSection id="emails" className="flex flex-col gap-3">
         <div className="flex items-start justify-between gap-2">
           <div>
-            <h2 className="text-sm font-semibold">{t("userProfile.emailAddresses.title")}</h2>
+            <ProfileSectionTitle>{t("userProfile.emailAddresses.title")}</ProfileSectionTitle>
             <p className="text-xs text-muted-foreground">{t("userProfile.emailAddresses.description")}</p>
           </div>
-          <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={() => setEmailDialog({ open: true })}>
+          <Button type="button" variant="outline" size="sm" {...ep("profileSectionPrimaryButton", "gap-1.5")} onClick={() => setEmailDialog({ open: true })}>
             <PlusIcon className="size-4" aria-hidden="true" />
             {t("userProfile.emailAddresses.add")}
           </Button>
@@ -141,16 +142,16 @@ export function ProfilePage() {
             );
           })}
         </ul>
-      </section>
+      </ProfileSection>
 
-      <section className="flex flex-col gap-3" data-orbit-section="phones">
+      <ProfileSection id="phones" className="flex flex-col gap-3">
         <div className="flex items-start justify-between gap-2">
           <div>
-            <h2 className="text-sm font-semibold">{t("userProfile.phoneNumbers.title")}</h2>
+            <ProfileSectionTitle>{t("userProfile.phoneNumbers.title")}</ProfileSectionTitle>
             <p className="text-xs text-muted-foreground">{t("userProfile.phoneNumbers.description")}</p>
           </div>
           {environment.attributes.phone_number.enabled ? (
-            <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={() => setPhoneDialog({ open: true })}>
+            <Button type="button" variant="outline" size="sm" {...ep("profileSectionPrimaryButton", "gap-1.5")} onClick={() => setPhoneDialog({ open: true })}>
               <PlusIcon className="size-4" aria-hidden="true" />
               {t("userProfile.phoneNumbers.add")}
             </Button>
@@ -201,11 +202,11 @@ export function ProfilePage() {
             })}
           </ul>
         )}
-      </section>
+      </ProfileSection>
 
-      <section className="flex flex-col gap-3" data-orbit-section="connected-accounts">
+      <ProfileSection id="connected-accounts" className="flex flex-col gap-3">
         <div>
-          <h2 className="text-sm font-semibold">{t("userProfile.connectedAccounts.title")}</h2>
+          <ProfileSectionTitle>{t("userProfile.connectedAccounts.title")}</ProfileSectionTitle>
           <p className="text-xs text-muted-foreground">{t("userProfile.connectedAccounts.description")}</p>
         </div>
         {external_accounts.length === 0 ? (
@@ -260,7 +261,7 @@ export function ProfilePage() {
             ))}
           </div>
         ) : null}
-      </section>
+      </ProfileSection>
 
       <EnterpriseAccountsSection />
 

@@ -6,7 +6,7 @@ import { badgeVariants } from "../ui/badge";
 
 const UI_DIR = join(process.cwd(), "src/components/ui");
 
-/** Overlays are the one place DESIGN.md allows a single soft shadow. */
+/** Overlays are the only primitives that may carry the deep `shadow-overlay` elevation. */
 const OVERLAY_FILES = new Set([
   "alert-dialog",
   "command",
@@ -24,11 +24,12 @@ const primitiveFiles = readdirSync(UI_DIR)
   .map((file) => ({ name: basename(file, ".tsx"), text: readFileSync(join(UI_DIR, file), "utf8") }));
 
 describe("design tokens in UI primitives", () => {
-  it("allows no elevation shadow outside overlays", () => {
+  it("uses only the elevation tokens, never Tailwind's stock or arbitrary shadows", () => {
+    // DESIGN.md: a 1px border plus `shadow-xs` on resting surfaces, `shadow-card` on the auth card,
+    // `shadow-overlay` on overlays. Every one is scaled by `--shadow-strength`.
     for (const file of primitiveFiles) {
-      if (OVERLAY_FILES.has(file.name)) continue;
-      expect(file.text, `${file.name} must not carry a shadow`).not.toMatch(/shadow-(?:xs|sm|md|lg|xl|2xl)\b/);
-      expect(file.text, `${file.name} must not carry a shadow`).not.toMatch(/(?<!overlay-)shadow-(?!none)\w/);
+      expect(file.text, `${file.name} must use an elevation token`).not.toMatch(/\bshadow-(?:md|lg|xl|2xl)\b/);
+      expect(file.text, `${file.name} must use an elevation token`).not.toMatch(/\bshadow-\[/);
     }
   });
 
@@ -48,15 +49,24 @@ describe("design tokens in UI primitives", () => {
     expect(badgeVariants()).not.toContain("rounded-[2px]");
   });
 
-  it("styles controls with the ruled outline, not a shadow", () => {
-    expect(buttonVariants()).not.toMatch(/shadow-(?:xs|sm|md|lg)\b/);
-    expect(badgeVariants()).not.toMatch(/shadow-(?:xs|sm|md|lg)\b/);
+  it("lifts controls by a hairline at most", () => {
+    expect(buttonVariants()).toContain("shadow-xs");
+    expect(buttonVariants()).not.toMatch(/shadow-(?:sm|md|lg|card|overlay)\b/);
+    expect(badgeVariants()).not.toMatch(/\bshadow-/);
   });
 
-  it("declares the signal-red keyboard ring once, so SDK components cannot lose it", () => {
+  it("declares the keyboard ring once, so SDK components cannot lose it", () => {
     const styles = readFileSync(join(process.cwd(), "src/styles.css"), "utf8");
     expect(styles).toMatch(/:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--ring\)/);
-    expect(styles).toMatch(/--ring:\s*oklch\(0\.57 0\.235 28\)/);
+    expect(styles.match(/:focus-visible\s*\{/g)?.length).toBe(2);
+  });
+
+  it("scales every elevation from one strength token", () => {
+    const styles = readFileSync(join(process.cwd(), "src/styles.css"), "utf8");
+    for (const token of ["--shadow-xs", "--shadow-sm", "--shadow-card", "--shadow-overlay"]) {
+      const declaration = styles.slice(styles.indexOf(`${token}:`), styles.indexOf(";", styles.indexOf(`${token}:`)));
+      expect(declaration, token).toContain("var(--shadow-strength)");
+    }
   });
 });
 

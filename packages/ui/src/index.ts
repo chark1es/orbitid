@@ -42,3 +42,15 @@ export * from "./components/activity-board";
 export { OrbitMark, AppIcon, ORBIT_GLYPH, APP_ICON_COLORS, type OrbitScheme } from "./components/orbit-mark";
 export { ThemeProvider, useTheme, initTheme, themeBootstrapScript, type ThemeChoice, type ResolvedTheme } from "./theme-provider";
 export { CONTROL_CENTER, CONTROL_LABEL, CONTROL_RECIPE } from "./lib/control";
+export {
+  ElementSlotProvider,
+  useElementSlot,
+  useElementSlotResolver,
+  mergeElementSlot,
+  themingClasses,
+  slotKeys,
+  slotKeysFor,
+  variantSlot,
+  type ElementSlotResolver,
+  type ElementSlotStyle,
+} from "./lib/element-slots";

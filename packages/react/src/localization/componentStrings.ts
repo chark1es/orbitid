@@ -53,10 +53,9 @@ export const componentStrings = {
     internalError: "Something went wrong. Please try again.",
   },
   footer: {
-    securedBy: "Secured by OrbitID",
-    poweredBy: "Powered by OrbitID",
     terms: "Terms",
     privacy: "Privacy",
+    help: "Help",
   },
   devMode: {
     banner: "Development mode: use test credentials, they will not work in production.",

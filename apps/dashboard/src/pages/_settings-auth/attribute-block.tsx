@@ -74,7 +74,7 @@ export function AttributeBlock({
       </div>
       {showVerification && verificationOptions?.length ? (
         <fieldset className="space-y-1 border-t border-border pt-3">
-          <legend className="text-xs font-medium uppercase tracking-[0.04em] text-muted-foreground">Verification methods</legend>
+          <legend className="text-xs font-medium text-muted-foreground">Verification methods</legend>
           <div className="grid gap-x-8 gap-y-1 sm:grid-cols-2">
             {verificationOptions.map((option) => (
               <CheckboxRow
