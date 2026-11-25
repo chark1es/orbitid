@@ -20,7 +20,14 @@ export interface AppForm {
   refreshTokenLifetimeSeconds: number;
   idTokenLifetimeSeconds: number;
   groupsClaim: GroupsClaimMode;
+  /** Owning organization id; empty for an instance-wide application. */
+  organizationId: string;
+  /** The owner when the sheet opened, so the form can warn before access narrows. */
+  originalOrganizationId: string;
 }
+
+/** Select value standing for "no owning organization" (Radix Select items cannot use an empty value). */
+export const INSTANCE_WIDE = "__instance__";
 
 export const EMPTY_FORM: AppForm = {
   name: "",
@@ -35,6 +42,8 @@ export const EMPTY_FORM: AppForm = {
   refreshTokenLifetimeSeconds: 2_592_000,
   idTokenLifetimeSeconds: 3600,
   groupsClaim: DEFAULT_OAUTH_GROUPS_CLAIM,
+  organizationId: "",
+  originalOrganizationId: "",
 };
 
 export function numberFrom(value: string): number {

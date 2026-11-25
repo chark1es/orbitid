@@ -3,9 +3,10 @@ import { Eye, Pencil, Plus, Trash2 } from "lucide-react";
 import { formatDate } from "../_config/settings";
 import { EmptyState, RuledTable, TableSkeleton } from "../_config/ui";
 import type { OAuthAppsController } from "./use-oauth-apps";
+import { ownerLabel } from "../../lib/app-ownership";
 
 export function ApplicationsTable({ ctl }: { ctl: OAuthAppsController }) {
-  const { setDetail, setSelected, query, applications, openCreate, openEdit } = ctl;
+  const { setDetail, setSelected, query, applications, organizations, openCreate, openEdit } = ctl;
 
   return (
     <>
@@ -27,6 +28,7 @@ export function ApplicationsTable({ ctl }: { ctl: OAuthAppsController }) {
           <TableHeader>
             <TableRow>
               <TableHead>Application</TableHead>
+              <TableHead className="hidden sm:table-cell">Owner</TableHead>
               <TableHead className="hidden xl:table-cell">Client ID</TableHead>
               <TableHead className="hidden md:table-cell">Type</TableHead>
               <TableHead className="hidden text-right lg:table-cell">Redirect URIs</TableHead>
@@ -40,6 +42,14 @@ export function ApplicationsTable({ ctl }: { ctl: OAuthAppsController }) {
               <TableRow key={application.id}>
                 <TableCell className="text-sm font-medium">
                   <span className="block max-w-[32ch] truncate" title={application.name}>{application.name}</span>
+                </TableCell>
+                <TableCell className="hidden text-xs sm:table-cell">
+                  <span
+                    className={application.organization_id ? "block max-w-[24ch] truncate" : "text-muted-foreground"}
+                    title={ownerLabel(application.organization_id, organizations)}
+                  >
+                    {ownerLabel(application.organization_id, organizations)}
+                  </span>
                 </TableCell>
                 <TableCell className="hidden xl:table-cell">
                   <code className="block max-w-[18rem] truncate font-data text-xs" title={application.client_id}>{application.client_id}</code>

@@ -12,6 +12,7 @@ import type {
   JwtTemplateJSON,
   M2MMachineJSON,
   M2MTokenJSON,
+  OAuthApplicationAccessGrantJSON,
   OAuthApplicationJSON,
   OrganizationDomainJSON,
   OrganizationInvitationJSON,
@@ -62,6 +63,7 @@ export type M2MMachine = Camelize<M2MMachineJSON>;
 export type M2MToken = Camelize<M2MTokenJSON>;
 export type M2MTokenVerification = M2MToken & { valid: boolean; machine: M2MMachine };
 export type OAuthApplication = Camelize<OAuthApplicationJSON>;
+export type OAuthApplicationAccessGrant = Camelize<OAuthApplicationAccessGrantJSON>;
 export type EnterpriseConnection = Camelize<EnterpriseConnectionJSON>;
 export type AuditLog = Camelize<AuditLogJSON>;
 export type DeletedObject = Camelize<DeletedObjectJSON>;

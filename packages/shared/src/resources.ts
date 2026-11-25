@@ -342,7 +342,16 @@ export interface OAuthApplicationJSON {
   consent_screen_enabled: boolean; pkce_required: boolean;
   access_token_lifetime_seconds: number; refresh_token_lifetime_seconds: number; id_token_lifetime_seconds: number;
   groups_claim: "none" | "organizations" | "roles" | "all";
+  /** Owning organization. `null` is an instance-wide application any user may sign in to. */
+  organization_id: string | null;
   created_at: number; updated_at: number;
+}
+/**
+ * Lets one user use one organization-owned OAuth application without being a member of the owning organization.
+ * Operators manage these through the Backend API only.
+ */
+export interface OAuthApplicationAccessGrantJSON {
+  object: "oauth_application_access_grant"; application_id: string; user_id: string; created_at: number;
 }
 export interface EnterpriseConnectionJSON {
   object: "enterprise_connection"; id: string; name: string; protocol: "saml" | "oidc"; provider: string; domains: string[]; active: boolean;

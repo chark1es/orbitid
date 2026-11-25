@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { Button, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@orbitid/ui";
 import { Pencil, RotateCw } from "lucide-react";
 import {
@@ -16,10 +17,12 @@ import {
 } from "../_config/ui";
 import type { OAuthAppsController } from "./use-oauth-apps";
 import { EndpointsPanel, IntegrationSnippets } from "./endpoints-panel";
-import { GROUPS_CLAIM_OPTIONS, numberFrom, uniqueScopes, type AppForm } from "./model";
+import { GROUPS_CLAIM_OPTIONS, INSTANCE_WIDE, numberFrom, uniqueScopes, type AppForm } from "./model";
+import { ownerLabel } from "../../lib/app-ownership";
 
 export function ApplicationFormSheet({ ctl }: { ctl: OAuthAppsController }) {
-  const { sheetOpen, setSheetOpen, form, setForm, saving, formErrors, saveApplication } = ctl;
+  const { sheetOpen, setSheetOpen, form, setForm, saving, formErrors, saveApplication, organizations } = ctl;
+  const ownerChanged = Boolean(form.id) && form.organizationId !== form.originalOrganizationId;
   const [attempted, setAttempted] = useState(false);
   useEffect(() => {
     if (!sheetOpen) setAttempted(false);
@@ -68,6 +71,49 @@ export function ApplicationFormSheet({ ctl }: { ctl: OAuthAppsController }) {
             />
           </Field>
         </div>
+        <Field
+          label="Owner"
+          htmlFor="oauth-app-owner"
+          description="Instance-wide applications are open to every user. An organization's application is open to its members and to users you grant access from their user page."
+        >
+          <Select
+            value={form.organizationId || INSTANCE_WIDE}
+            onValueChange={(value) =>
+              setForm((current) => ({ ...current, organizationId: value === INSTANCE_WIDE ? "" : value }))
+            }
+          >
+            <SelectTrigger id="oauth-app-owner" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={INSTANCE_WIDE}>Instance-wide (every user)</SelectItem>
+              {form.organizationId && !organizations.some((organization) => organization.id === form.organizationId) ? (
+                <SelectItem value={form.organizationId}>{form.organizationId}</SelectItem>
+              ) : null}
+              {organizations.map((organization) => (
+                <SelectItem key={organization.id} value={organization.id}>
+                  {organization.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        {ownerChanged && form.organizationId ? (
+          <Notice tone="caution" title="Access narrows when you save">
+            <p>
+              Only members of {ownerLabel(form.organizationId, organizations)} and users granted access can sign in.
+              Everyone else is signed out of this application: their codes and tokens for it are revoked.
+            </p>
+          </Notice>
+        ) : null}
+        {ownerChanged && !form.organizationId ? (
+          <Notice title="Every user will be able to sign in">
+            <p>
+              The application stops being limited to {ownerLabel(form.originalOrganizationId, organizations)}. Its
+              per-user access grants are deleted, since they no longer mean anything.
+            </p>
+          </Notice>
+        ) : null}
         <Field label="Redirect URIs" required description="Exact match. Native apps may use a custom scheme.">
           <StringListEditor
             values={form.redirectUris}
@@ -166,7 +212,7 @@ export function ApplicationFormSheet({ ctl }: { ctl: OAuthAppsController }) {
 }
 
 export function ApplicationDetailSheet({ ctl }: { ctl: OAuthAppsController }) {
-  const { detail, setDetail, rotating, apiBase, issuer, discovery, settings, openEdit, rotateSecret } = ctl;
+  const { detail, setDetail, rotating, apiBase, issuer, discovery, settings, openEdit, rotateSecret, organizations } = ctl;
 
   return (
     <DetailSheet
@@ -207,6 +253,24 @@ export function ApplicationDetailSheet({ ctl }: { ctl: OAuthAppsController }) {
             {detail.pkce_required ? <MetaChip>PKCE required</MetaChip> : null}
             {detail.consent_screen_enabled ? <MetaChip>Consent screen</MetaChip> : <MetaChip>Consent skipped</MetaChip>}
           </div>
+          <p className="text-[0.8125rem] leading-relaxed text-muted-foreground">
+            {detail.organization_id ? (
+              <>
+                Owned by{" "}
+                <Link
+                  to={`/organizations/${detail.organization_id}?tab=applications`}
+                  className="font-medium text-foreground underline-offset-4 hover:underline"
+                >
+                  {ownerLabel(detail.organization_id, organizations)}
+                </Link>
+                . Only its members and users granted access can sign in.
+              </>
+            ) : (
+              <>
+                <span className="font-medium text-foreground">Instance-wide.</span> Every user can sign in.
+              </>
+            )}
+          </p>
           <div className="flex items-center justify-between gap-3 border-y border-border py-2">
             <div className="min-w-0">
               <p className="text-xs font-medium">Client ID</p>

@@ -122,6 +122,9 @@ async fn retry_rotated_refresh(
     Ok(Some(RefreshRetry { successor, token }))
 }
 
+/// `invalid_grant` description when the user may no longer use the application.
+const APPLICATION_ACCESS_DENIED: &str = "The user is not allowed to use this application";
+
 /// Whether a rotation family has been revoked as a whole. A consumed rotation
 /// predecessor is `revoked` too, but it carries `consumed_at`.
 async fn family_is_revoked(conn: &mut sqlx::PgConnection, family: &str) -> Result<bool> {
@@ -169,6 +172,15 @@ async fn issue_token_set_in_live_family(
                 "The organization authority of this grant has changed",
             )
             .into());
+        }
+        if !orbitid_identity::app_access::user_may_use_application_on(
+            &mut tx,
+            &input.application.id,
+            &input.user.id,
+        )
+        .await?
+        {
+            return Err(OAuthError::invalid_grant(APPLICATION_ACCESS_DENIED).into());
         }
         lock_family(&mut tx, family).await?;
         if family_is_revoked(&mut tx, family).await? {
@@ -343,6 +355,18 @@ pub async fn exchange_refresh_token(
                 "The organization authority of this grant has changed",
             )
             .into());
+        }
+        // Organization-owned applications: a removed member or a revoked
+        // access grant stops rotation here even if the revocation of this
+        // family raced the change (user key-share + application `FOR SHARE`).
+        if !orbitid_identity::app_access::user_may_use_application_on(
+            &mut tx,
+            &application.id,
+            &user.id,
+        )
+        .await?
+        {
+            return Err(OAuthError::invalid_grant(APPLICATION_ACCESS_DENIED).into());
         }
         lock_family(&mut tx, &family).await?;
         let updated = sqlx::query_scalar::<_, String>(

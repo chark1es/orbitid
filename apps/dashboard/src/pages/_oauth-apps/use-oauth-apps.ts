@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { OAuthApplicationJSON, PaginatedList } from "@orbitid/shared";
 import { toast } from "sonner";
 import { api, apiAllPages, getApiUrl, useApi } from "../../lib/api";
+import { useAllOrganizations } from "../../lib/app-ownership";
 import { oneTimeSecret, unwrapList } from "../_config/data";
 import { errorMessage, isHttpUrl } from "../_config/settings";
 import { useSettingsEditor } from "../_config/use-settings";
@@ -26,6 +27,7 @@ export function useOAuthApps() {
     queryFn: ({ signal }) => apiAllPages<OAuthApplicationJSON>("/oauth_applications", { signal }),
   });
   const applications = unwrapList<OAuthApplicationJSON>(query.data);
+  const { organizations } = useAllOrganizations();
   const config = useSettingsEditor();
   const settings = config.settings;
   // Endpoints must be the ones clients reach, not the dashboard's dev proxy. Discovery is the provider's own answer.
@@ -67,6 +69,8 @@ export function useOAuthApps() {
       refreshTokenLifetimeSeconds: application.refresh_token_lifetime_seconds,
       idTokenLifetimeSeconds: application.id_token_lifetime_seconds,
       groupsClaim: application.groups_claim,
+      organizationId: application.organization_id ?? "",
+      originalOrganizationId: application.organization_id ?? "",
     });
     setSheetOpen(true);
   };
@@ -117,6 +121,9 @@ export function useOAuthApps() {
         groups_claim: form.groupsClaim,
       };
       if (!form.id) body.public = form.publicClient;
+      // Send the owner only when the operator chose one or changed it (`null` makes it instance-wide), so saving
+      // other fields never overwrites an owner someone else changed meanwhile.
+      if (form.organizationId !== form.originalOrganizationId) body.organization_id = form.organizationId || null;
       const response = await api<unknown>(form.id ? "PATCH" : "POST", form.id ? `/oauth_applications/${form.id}` : "/oauth_applications", body);
       await query.refetch();
       setSheetOpen(false);
@@ -187,6 +194,7 @@ export function useOAuthApps() {
     discovery: discoveryQuery.data ?? null,
     query,
     applications,
+    organizations,
     config,
     settings,
     openCreate,

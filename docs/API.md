@@ -416,6 +416,13 @@ so you can exercise your signature check.
 - **OIDC provider**: publish `/.well-known/openid-configuration` to your clients. Authorization code flow, PKCE
   `S256` for public clients, `id_token` signed by the instance key, `userinfo`, `revoke` and `introspect` behave as
   the standards describe. Manage applications with `/v1/oauth_applications`.
+- **Organization-owned OAuth applications**: set `organization_id` on an OAuth application to limit it to that
+  organization's members. Operators let a non-member use one application with
+  `POST /v1/oauth_applications/:id/access_grants` (`{ "user_id" }`), list them with `GET` on the same path or
+  `GET /v1/users/:id/oauth_application_access_grants`, and remove one with
+  `DELETE /v1/oauth_applications/:id/access_grants/:user_id`, which also revokes that user's tokens for the
+  application. Applications without an owner stay open to every user. See
+  [APP_ACCESS.md](APP_ACCESS.md).
 - **Enterprise SSO**: SAML 2.0 and OIDC connections created with `/v1/enterprise_connections`. Point the identity
   provider at `GET /v1/saml/:id/metadata`, and start a browser flow at `/v1/client/enterprise/start` or
   `/v1/saml/:id/sso`.
