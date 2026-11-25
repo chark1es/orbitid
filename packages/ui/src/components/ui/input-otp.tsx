@@ -1,5 +1,6 @@
 import * as React from "react"
 import { cn } from "../../lib/utils"
+import { useElementSlot } from "../../lib/element-slots"
 import { OTPInput, OTPInputContext } from "input-otp"
 import { MinusIcon } from "lucide-react"
 
@@ -23,11 +24,15 @@ function InputOTP({
   )
 }
 
-function InputOTPGroup({ className, ...props }: React.ComponentProps<"div">) {
+// The group and slots declare no primitive key of their own; a caller's explicit key (`data-orbitid-element`) still
+// gets its className, style and `unstyled` here.
+function InputOTPGroup({ className, style, ...props }: React.ComponentProps<"div">) {
+  const slot = useElementSlot([], "flex items-center", className, style, props)
   return (
     <div
       data-slot="input-otp-group"
-      className={cn("flex items-center", className)}
+      className={slot.className}
+      style={slot.style}
       {...props}
     />
   )
@@ -36,21 +41,27 @@ function InputOTPGroup({ className, ...props }: React.ComponentProps<"div">) {
 function InputOTPSlot({
   index,
   className,
+  style,
   ...props
 }: React.ComponentProps<"div"> & {
   index: number
 }) {
   const inputOTPContext = React.useContext(OTPInputContext)
   const { char, hasFakeCaret, isActive } = inputOTPContext?.slots[index] ?? {}
+  const slot = useElementSlot(
+    [],
+    "relative flex size-[34px] items-center justify-center border-y border-r border-input text-sm transition-colors first:rounded-l-md first:border-l last:rounded-r-md aria-invalid:border-destructive data-[active=true]:z-10 data-[active=true]:border-ring data-[active=true]:aria-invalid:border-destructive",
+    className,
+    style,
+    props
+  )
 
   return (
     <div
       data-slot="input-otp-slot"
       data-active={isActive}
-      className={cn(
-        "relative flex size-[34px] items-center justify-center border-y border-r border-input text-sm transition-colors first:rounded-l-md first:border-l last:rounded-r-md aria-invalid:border-destructive data-[active=true]:z-10 data-[active=true]:border-ring data-[active=true]:aria-invalid:border-destructive",
-        className
-      )}
+      className={slot.className}
+      style={slot.style}
       {...props}
     >
       {char}

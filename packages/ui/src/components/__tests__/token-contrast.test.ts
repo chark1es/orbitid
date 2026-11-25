@@ -48,6 +48,7 @@ const TRANSLUCENT_TEXT = [
   { where: "app-shell.tsx (sidebar host name)", token: "sidebar-foreground", alpha: 85, surface: "sidebar", minimum: 4.5 },
   { where: "sidebar/group.tsx (group labels)", token: "sidebar-foreground", alpha: 80, surface: "sidebar", minimum: 4.5 },
   { where: "data-table.tsx (inactive sort icon, decorative)", token: "muted-foreground", alpha: 50, surface: "background", minimum: 1 },
+  { where: "alert.tsx (destructive alert description)", token: "destructive", alpha: 90, surface: "card", minimum: 4.5 },
 ] as const;
 
 describe("translucent text usages are all listed", () => {
@@ -60,7 +61,10 @@ describe("translucent text usages are all listed", () => {
           if (entry.name !== "__tests__" && entry.name !== "node_modules") walk(new URL(`${entry.name}/`, dir));
         } else if (/\.tsx$/.test(entry.name) && !/\.test\.tsx$/.test(entry.name)) {
           const text = readFileSync(new URL(entry.name, dir), "utf8");
-          for (const match of text.matchAll(/\btext-((?:sidebar-|rail-|card-|muted-)?foreground)\/(\d+)\b/g)) found.add(`${match[1]}/${match[2]}`);
+          // Any color token with an alpha; `text-sm/6` (size/line-height) is skipped because `sm` is not a color token.
+          for (const match of text.matchAll(/\btext-([a-z][a-z0-9-]*)\/(\d+)\b/g)) {
+            if (new RegExp(`--${match[1]}:`).test(light)) found.add(`${match[1]}/${match[2]}`);
+          }
         }
       }
     };

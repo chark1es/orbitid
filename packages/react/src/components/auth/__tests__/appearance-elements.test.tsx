@@ -86,6 +86,16 @@ describe("element key coverage", () => {
     expect([...requested].sort()).toEqual(Object.keys(PRIMITIVE_ELEMENTS).sort());
   });
 
+  it("hands every part the full element props, never just the class string", () => {
+    // `ep(…).className` alone would drop the override's style and `unstyled`.
+    const classOnly: string[] = [];
+    for (const file of sourceFiles(join(reactSrc, "components"))) {
+      for (const match of readFileSync(file, "utf8").matchAll(/\bep\([^()]*(?:\([^()]*\)[^()]*)*\)\.className/g)) classOnly.push(`${file}: ${match[0]}`);
+      for (const match of readFileSync(file, "utf8").matchAll(/\bel\(\s*"\w+"\s*\)/g)) classOnly.push(`${file}: ${match[0]}`);
+    }
+    expect(classOnly).toEqual([]);
+  });
+
   it("uses only text sizes that scale with appearance.variables.fontSize", () => {
     const fixed: string[] = [];
     for (const file of sourceFiles(join(reactSrc, "components"))) {
@@ -136,7 +146,7 @@ describe("elements are applied with className and style", () => {
       "rootBox", "cardBox", "card", "cardHeader", "header", "headerTitle", "headerSubtitle", "logoBox", "logoImage",
       "main", "form", "formField", "formFieldLabel", "label", "formFieldInput", "input", "formButtonPrimary", "button",
       "buttonPrimary", "buttonOutline", "buttonLink", "socialButtons", "socialButtonsBlockButton",
-      "socialButtonsBlockButtonText", "dividerRow", "dividerLine", "dividerText", "separator", "footer", "cardFooter",
+      "socialButtonsBlockButtonText", "socialButtonsProviderIcon", "dividerRow", "dividerLine", "dividerText", "separator", "footer", "cardFooter",
       "footerAction", "footerActionText", "footerActionLink", "formButtonSecondary", "securedBy", "footerPages",
       "footerPagesLink",
     ]) {

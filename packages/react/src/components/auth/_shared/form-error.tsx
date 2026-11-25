@@ -20,7 +20,6 @@ export function FormError({ message, title, className, onRetry }: FormErrorProps
       variant="destructive"
       role="alert"
       aria-live="assertive"
-      data-orbit-element="alert"
       {...ep("alert", "items-start", className)}
     >
       <AlertCircleIcon aria-hidden="true" />
@@ -49,7 +48,6 @@ export function SecuredByOrbitID({ className }: { className?: string }) {
   if (!show) return null;
   return (
     <p
-      data-orbit-element="footer"
       {...ep("securedBy", "flex items-center justify-center gap-1.5 text-xs text-muted-foreground", className)}
     >
       <LockIcon className="size-3" aria-hidden="true" />

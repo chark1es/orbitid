@@ -14,7 +14,7 @@ describe("appearance", () => {
     });
 
     expect(resolved.rootClassName).toContain("orbitid-root");
-    // The scheme comes from `useThemeScope()`; `rootClassName` also lands on the wrapper around the host's app.
+    // The scheme comes from `useThemeScope()`; scheme classes never appear in the resolved class names.
     expect(resolved.rootClassName.split(" ")).not.toContain("dark");
     expect(resolved.themes).toContain(dark);
     expect(resolved.variables.colorBackground).toBe(dark.variables?.colorBackground);

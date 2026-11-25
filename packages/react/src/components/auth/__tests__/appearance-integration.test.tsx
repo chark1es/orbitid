@@ -7,7 +7,12 @@ import { dark, light } from "../../../appearance";
 import { createFakeOrbitID, PK, renderWithProvider } from "../../../__tests__/helpers";
 import { AuthCard } from "../_shared/auth-card";
 import { SignIn } from "../sign-in";
-import { authEnvironment, renderAuth, setupAuth } from "./fake-auth";
+import { authEnvironment, authUser, renderAuth, setupAuth } from "./fake-auth";
+import { ConfirmDialog } from "../_shared/confirm-dialog";
+import { ComponentRoot } from "../_shared/component-root";
+import { OtpField } from "../_shared/otp-field";
+import { ProviderIcon } from "../_shared/provider-icon";
+import { UserVerificationModal } from "../user-verification-modal";
 
 const realMatchMedia = window.matchMedia;
 function osScheme(scheme: "light" | "dark") {
@@ -160,3 +165,90 @@ describe("server rendering", () => {
     container.remove();
   });
 });
+
+describe("pop-ups keep their scheme and variables under unstyled", () => {
+  it.each([
+    ["global unstyled", { unstyled: true }],
+    ["modalContent: { unstyled: true }", { elements: { modalContent: { unstyled: true } } }],
+  ] as const)("%s", (_label, extra) => {
+    osScheme("light");
+    // As inside the user profile: the dialog opens from within a component root.
+    renderAuth(
+      <ComponentRoot component="probe">
+        <ConfirmDialog open onOpenChange={() => {}} title="Remove passkey?" onConfirm={() => {}} />
+      </ComponentRoot>,
+      setupAuth({ signedIn: false }),
+      {
+        appearance: { baseTheme: dark, variables: { colorPrimary: "#2563eb" }, ...extra },
+      },
+    );
+    const dialog = screen.getByRole("alertdialog");
+    const classes = dialog.className.split(" ");
+    expect(classes).toContain("dark");
+    expect(classes).toContain("orbitid-modalContent");
+    const scope = classes.find((name) => name.startsWith("orbitid-scope-"));
+    expect(scope).toBeDefined();
+    expect(document.head.querySelector(`style[data-orbitid-scope="${scope}"]`)?.textContent).toContain("--primary:#2563eb");
+    // OrbitID's own styling classes are gone.
+    expect(classes).not.toContain("bg-popover");
+  });
+});
+
+describe("a standalone <UserVerificationModal/>", () => {
+  it("gets the provider's elements, variables and scheme", async () => {
+    osScheme("light");
+    renderAuth(<UserVerificationModal open />, setupAuth({ user: authUser() }), {
+      appearance: { baseTheme: dark, variables: { colorPrimary: "#2563eb" }, elements: { modalContent: "probe-modal" } },
+    });
+    const dialog = await screen.findByRole("dialog");
+    const classes = dialog.className.split(" ");
+    expect(classes).toEqual(expect.arrayContaining(["probe-modal", "orbitid-modalContent", "dark"]));
+    const scope = classes.find((name) => name.startsWith("orbitid-scope-"))!;
+    expect(document.head.querySelector(`style[data-orbitid-scope="${scope}"]`)?.textContent).toContain("--primary:#2563eb");
+  });
+
+  it("takes its own appearance prop over the provider's", async () => {
+    renderAuth(<UserVerificationModal open appearance={{ elements: { modalContent: "probe-prop" } }} />, setupAuth({ user: authUser() }), {
+      appearance: { elements: { modalContent: "probe-provider" } },
+    });
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.className).toContain("probe-provider");
+    expect(dialog.className).toContain("probe-prop");
+  });
+});
+
+describe("parts that are not plain primitives", () => {
+  it("apply style and unstyled to the OTP group and slots, the provider icon and the logo mark", () => {
+    renderAuth(
+      <AuthCard title="Check your email">
+        <OtpField value="" onChange={() => {}} label="Code" />
+        <ProviderIcon provider="google" {...elementPropsForTest("socialButtonsProviderIcon")} />
+      </AuthCard>,
+      setupAuth({ signedIn: false }),
+      {
+        appearance: {
+          elements: {
+            formFieldInputGroup: { style: { gap: "11px" } },
+            otpCodeFieldInput: { unstyled: true, className: "my-slot" },
+            socialButtonsProviderIcon: { style: { opacity: "0.5" } },
+            logoImage: { unstyled: true, className: "my-logo" },
+          },
+        },
+      },
+    );
+    expect((document.querySelector(".orbitid-formFieldInputGroup") as HTMLElement).style.gap).toBe("11px");
+    const slot = document.querySelector('[data-slot="input-otp-slot"]') as HTMLElement;
+    expect(slot.className).toContain("my-slot");
+    expect(slot.className).not.toContain("size-[34px]");
+    expect(slot.className).not.toContain("size-10");
+    expect((document.querySelector("svg.orbitid-socialButtonsProviderIcon") as SVGElement).style.opacity).toBe("0.5");
+    const logo = document.querySelector("svg.orbitid-logoImage") as SVGElement;
+    expect(logo.getAttribute("class")).toContain("my-logo");
+    expect(logo.getAttribute("class")).not.toMatch(/\bsize-(4|9)\b/);
+  });
+});
+
+/** `ep()` props for a key, the way a component would spread them. */
+function elementPropsForTest(key: string) {
+  return { "data-orbitid-element": key, className: "size-4" };
+}

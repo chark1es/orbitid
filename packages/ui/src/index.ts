@@ -47,6 +47,7 @@ export {
   useElementSlot,
   useElementSlotResolver,
   mergeElementSlot,
+  themingClasses,
   slotKeys,
   slotKeysFor,
   variantSlot,

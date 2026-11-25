@@ -55,8 +55,10 @@ Rules inside that order:
 - **On one DOM node, generic keys come before specific ones.** A sign-in submit button carries `button`, then
   `buttonPrimary`, then `formButtonPrimary`. Style all primary buttons with `buttonPrimary` and still give the
   sign-in submit its own look with `formButtonPrimary`.
-- **The scheme** (light or dark) comes from the last `light`/`dark` base theme across all layers, then the
-  instance's branding theme, then the page (`<html class="dark">`, `data-theme`, `color-scheme`), then the OS.
+- **The scheme** (light or dark) comes from the active base themes (those of the last layer that sets
+  `baseTheme`): the last `light`/`dark` theme among them wins, and in `[dark, light]` the earlier `dark` theme's
+  tokens are dropped too, so scheme and tokens agree. Without one, the instance's branding theme decides, then the
+  page (`<html class="dark">`, `data-theme`, `color-scheme`), then the OS.
 - `unstyled` takes the last value set across layers. An element's own `unstyled` (true or false) beats it.
 - **Bad input does not crash.** `null` or `undefined` layers, themes and parts are skipped. A string `baseTheme`
   (`"dark"` instead of the `dark` object) is ignored with a development warning.
@@ -81,6 +83,11 @@ appearance={{ baseTheme: [dark, soft] }} // several merge in order
 | `soft` | Rounder corners (0.875rem), lighter borders, gentler shadows, block social buttons. |
 | `contrast` | Strong borders and focus ring, square-ish corners, no shadows, darker secondary text. |
 | `flat` | No elevation at all: hairlines only. Good inside a page that already draws a card. |
+
+`dark` also writes its tokens inline on the component root (card, text, primary, borders…). It therefore overrides
+an app's own `.dark { --card: … }` customizations, and its primary color sits above the instance's brand color in
+the precedence; only your own `variables` override it. To keep your own dark tokens, leave `baseTheme` unset and
+mark the page dark instead, or set the colors you want in `variables`.
 
 All three non-scheme presets work in light and dark. A theme of your own is a plain object:
 

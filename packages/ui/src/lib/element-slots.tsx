@@ -48,6 +48,21 @@ export function slotKeys(slots: readonly SlotKey[], explicit?: string): string[]
   return keys
 }
 
+/**
+ * Classes that carry theming context rather than styling: the scheme class (`dark`/`light`) and OrbitID's scope
+ * classes (`orbitid-component`, `orbitid-motion-off`, `orbitid-scope-*`). Pop-ups receive them through `className`
+ * (they render outside their component's root), so they survive `unstyled`.
+ */
+const THEMING_CLASS = /^(?:dark|light|orbitid-component|orbitid-motion-off|orbitid-scope-[\w-]+)$/
+
+/** The theming classes in a class list, in order. */
+export function themingClasses(...classes: Parameters<typeof cn>): string {
+  return cn(...classes)
+    .split(/\s+/)
+    .filter((name) => THEMING_CLASS.test(name))
+    .join(" ")
+}
+
 /** Pure merge used by {@link useElementSlot}; exported for tests and for non-hook callers. */
 export function mergeElementSlot(
   resolver: ElementSlotResolver | null,
@@ -56,8 +71,14 @@ export function mergeElementSlot(
   props: SlotInput,
 ): { className: string; style?: React.CSSProperties } {
   if (!resolver) return { className: cn(base, props.className), style: props.style }
-  const resolved = resolver(slotKeys(slots, props["data-orbitid-element"]))
-  const className = resolved.unstyled ? cn(resolved.className) : cn(base, props.className, resolved.className)
+  const keys = slotKeys(slots, props["data-orbitid-element"])
+  // A part with no key (a keyless use of a key-optional primitive) keeps its own classes.
+  if (keys.length === 0) return { className: cn(base, props.className), style: props.style }
+  const resolved = resolver(keys)
+  // `unstyled` drops the primitive's recipe and the caller's styling classes, never the theming context.
+  const className = resolved.unstyled
+    ? cn(themingClasses(base, props.className), resolved.className)
+    : cn(base, props.className, resolved.className)
   const style = resolved.style ? { ...props.style, ...resolved.style } : props.style
   return { className, style }
 }

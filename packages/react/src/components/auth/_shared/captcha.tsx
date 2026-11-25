@@ -111,7 +111,7 @@ export function CaptchaWidget({ siteKey, provider, onToken, theme: themeProp, cl
   if (!resolvedSiteKey || resolvedProvider === "none") return null;
   if (failed) {
     return (
-      <p role="alert" className={cn("text-xs text-destructive", className)} data-orbit-element="captcha">
+      <p role="alert" className={cn("text-xs text-destructive", className)}>
         Captcha could not be loaded. Reload the page.
       </p>
     );
@@ -119,7 +119,6 @@ export function CaptchaWidget({ siteKey, provider, onToken, theme: themeProp, cl
   return (
     <div
       ref={container}
-      data-orbit-element="captcha"
       data-testid="captcha-widget"
       {...ep("captcha", "flex min-h-[65px] w-full justify-center", className)}
     />

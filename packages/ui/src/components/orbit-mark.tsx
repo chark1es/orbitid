@@ -1,5 +1,6 @@
 import type * as React from "react"
 import { cn } from "../lib/utils"
+import { useElementSlot } from "../lib/element-slots"
 
 /**
  * The OrbitID mascot: a blob with two eyes, wrapped by a ring. It comes in two drawings, one per scheme, traced from
@@ -43,13 +44,15 @@ export function OrbitMark({
   scheme?: OrbitScheme
   "data-orbitid-element"?: string
 }) {
+  // No primitive key: a caller's explicit key (`logoImage` in the auth card) gets className, style and `unstyled`.
+  const slot = useElementSlot([], "size-4 shrink-0", className, style, { "data-orbitid-element": element })
   return (
     <svg
       viewBox="0 0 64 64"
       role={title ? "img" : undefined}
       aria-hidden={title ? undefined : true}
-      className={cn("size-4 shrink-0", className)}
-      style={style}
+      className={slot.className}
+      style={slot.style}
       data-orbitid-element={element}
     >
       {title ? <title>{title}</title> : null}

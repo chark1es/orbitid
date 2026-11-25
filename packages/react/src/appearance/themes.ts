@@ -10,9 +10,9 @@ export const defaultTheme: BaseTheme = {
 };
 
 /**
- * Light scheme. Its `light` class marks the scheme rather than landing on `rootClassName`: components add `.light`
- * (which `@orbitid/ui/styles.css` gives the light tokens) only inside a dark page, so a light page's own `:root`
- * tokens are left alone.
+ * Light scheme. Its `light` class marks the scheme rather than landing in the class names: a component adds `.light`
+ * (which `@orbitid/ui/styles.css` gives the light tokens) to its own root only where the inherited tokens would be
+ * dark (a dark page, or an unmarked page on a dark OS), so a light page's own `:root` tokens are left alone.
  */
 export const light: BaseTheme = {
   name: "light",

@@ -44,7 +44,6 @@ export function SocialButtons({
           role="group"
           aria-label={t("common.continue")}
           {...ep("socialButtons", "grid grid-cols-[repeat(auto-fit,minmax(3rem,1fr))] gap-2", className)}
-          data-orbit-element="socialButtons"
         >
           {providers.map((provider) => {
             const lastUsed = lastUsedStrategy === provider.strategy || lastUsedStrategy === provider.id;
@@ -64,7 +63,7 @@ export function SocialButtons({
                     {provider.logoUrl ? (
                       <img src={provider.logoUrl} alt="" {...ep("socialButtonsProviderIcon", "size-4 shrink-0 rounded-sm object-contain")} />
                     ) : (
-                      <ProviderIcon provider={provider.id} className={ep("socialButtonsProviderIcon", "size-4").className} />
+                      <ProviderIcon provider={provider.id} {...ep("socialButtonsProviderIcon", "size-4")} />
                     )}
                     {lastUsed ? (
                       <span
@@ -109,7 +108,7 @@ export function SocialButtons({
             {provider.logoUrl ? (
               <img src={provider.logoUrl} alt="" {...ep("socialButtonsProviderIcon", "size-4 shrink-0 rounded-sm object-contain")} />
             ) : (
-              <ProviderIcon provider={provider.id} className={ep("socialButtonsProviderIcon", "size-4").className} />
+              <ProviderIcon provider={provider.id} {...ep("socialButtonsProviderIcon", "size-4")} />
             )}
             <span {...ep("socialButtonsBlockButtonText", "min-w-0 truncate")}>
               {t("signIn.chooseStrategy.oauth", { provider: provider.name })}

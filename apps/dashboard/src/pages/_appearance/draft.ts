@@ -20,7 +20,6 @@ export interface AppearanceDraft {
   fontSize: string;
   spacingUnit: string;
   shadowStrength: string;
-  colorBackground: string;
 }
 
 export const DEFAULT_DRAFT: AppearanceDraft = {
@@ -30,14 +29,12 @@ export const DEFAULT_DRAFT: AppearanceDraft = {
   fontSize: "",
   spacingUnit: "",
   shadowStrength: "",
-  colorBackground: "",
 };
 
 /** Only the values the operator changed, so the snippet stays short and the defaults keep following releases. */
 export function draftVariables(draft: AppearanceDraft, primaryColor?: string): AppearanceVariables {
   const variables: AppearanceVariables = {};
   if (primaryColor) variables.colorPrimary = primaryColor;
-  if (draft.colorBackground) variables.colorBackground = draft.colorBackground;
   if (draft.borderRadius) variables.borderRadius = draft.borderRadius;
   if (FONTS[draft.font].value) variables.fontFamily = FONTS[draft.font].value;
   if (draft.fontSize) variables.fontSize = draft.fontSize;

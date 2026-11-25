@@ -147,3 +147,30 @@ describe("element overrides", () => {
     expect(resolveAppearance({ baseTheme: light }).cssVariables).toEqual({});
   });
 });
+
+describe("scheme presets inside one theme array", () => {
+  it("drop an earlier scheme preset's tokens when a later one changes the scheme", () => {
+    const resolved = resolveAppearance({ baseTheme: [dark, light] });
+    expect(resolved.cssVariables).toEqual({});
+    const soft = { name: "brand", classNames: ["brand"], variables: { borderRadius: "2px" } };
+    const mixed = resolveAppearance({ baseTheme: [dark, soft, light] });
+    expect(mixed.cssVariables).toEqual({ "--radius": "2px", "--orbitid-border-radius": "2px" });
+    // The last scheme preset still writes its own tokens.
+    expect(resolveAppearance({ baseTheme: [light, dark] }).cssVariables["--card"]).toBe(dark.variables!.colorBackground);
+  });
+});
+
+describe("undefined values", () => {
+  it("do not erase an alias in the same layer or an earlier layer's value", () => {
+    expect(cssVariablesFrom({ colorText: "#ff0000", colorForeground: undefined })["--foreground"]).toBe("#ff0000");
+    const resolved = resolveAppearanceLayers([{ variables: { colorPrimary: "#ff0000" } }, { variables: { colorPrimary: undefined } }]);
+    expect(resolved.cssVariables["--primary"]).toBe("#ff0000");
+  });
+});
+
+describe("fontSize out of range", () => {
+  it.each(["0px", "-2px", "0rem"])("warns about %s", (value) => {
+    expect(cssVariablesFrom({ fontSize: value })["--font-scale"]).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("positive size"));
+  });
+});

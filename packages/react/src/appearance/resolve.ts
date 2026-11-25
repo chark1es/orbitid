@@ -88,6 +88,12 @@ function mergeElements(target: Record<string, AppearanceElement>, source: unknow
 
 const SCHEME_CLASSES = new Set(["dark", "light"]);
 
+/** A theme that forces the scheme (its classes include `dark` or `light`). */
+function isSchemeTheme(theme: BaseTheme): boolean {
+  const names = Array.isArray(theme.classNames) ? theme.classNames : [];
+  return names.some((entry) => typeof entry === "string" && entry.split(/\s+/).some((name) => SCHEME_CLASSES.has(name)));
+}
+
 /**
  * The themes a layer sets, or `null` when it sets none. Falsy and non-object entries are dropped (a string is a
  * common mistake, so it gets a warning); a layer whose entries are all invalid counts as not setting themes.
@@ -138,14 +144,19 @@ export function resolveAppearanceLayers(layers: readonly (Appearance | undefined
   for (const layer of present) configuredThemes = themesOf(layer) ?? configuredThemes;
   const activeThemes = configuredThemes && configuredThemes.length > 0 ? configuredThemes : [defaultTheme];
 
-  for (const theme of activeThemes) {
-    Object.assign(variables, normalizeVariables(objectOrEmpty(theme.variables)));
+  // In `[dark, light]` the scheme ends up light, so the earlier `dark` preset's tokens must not be written either:
+  // a scheme preset's variables only apply when no later scheme preset overrides it.
+  const lastScheme = activeThemes.reduce((last, theme, index) => (isSchemeTheme(theme) ? index : last), -1);
+  activeThemes.forEach((theme, index) => {
+    if (!(isSchemeTheme(theme) && index < lastScheme)) {
+      Object.assign(variables, normalizeVariables(objectOrEmpty(theme.variables)));
+    }
     Object.assign(layout, objectOrEmpty(theme.layout));
     mergeElements(elements, theme.elements);
     // `dark`/`light` never become classes here: components read the scheme through `useThemeScope()`.
     const names = Array.isArray(theme.classNames) ? theme.classNames.filter((name) => typeof name === "string") : [];
     themeClassNames.push(...names.flatMap((entry) => entry.split(/\s+/)).filter((name) => name && !SCHEME_CLASSES.has(name)));
-  }
+  });
 
   for (const layer of present) {
     const own = normalizeVariables(objectOrEmpty(layer.variables));

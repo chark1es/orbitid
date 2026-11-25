@@ -47,35 +47,16 @@ export function useAuthAppearance(): ResolvedAppearance {
 }
 
 export interface ElementClasses {
-  /** Classes only. Prefer `ep`, which also applies `style`, `unstyled` and the stable class. */
-  el: (name: ElementKey) => string | undefined;
   /** `ep(key, ...classes)` → `{ className, style, "data-orbitid-element" }`. */
   ep: ElementPropsFn;
   appearance: ResolvedAppearance;
-  primaryColor: string;
-  cssVariables: Record<string, string>;
-  rootClassName: string;
 }
 
 /** Element helpers for the component in scope. */
 export function useComponentElements(): ElementClasses {
   const appearance = useAppearance();
-  const runtime = useAuthRuntime();
   const ep = useElementProps();
-  const primaryColor =
-    (typeof appearance.variables.colorPrimary === "string" && appearance.variables.colorPrimary) ||
-    runtime.environment.app.primaryColor;
-  return useMemo(
-    () => ({
-      el: (name: ElementKey) => appearance.getElementClass(name),
-      ep,
-      appearance,
-      primaryColor,
-      cssVariables: appearance.cssVariables,
-      rootClassName: appearance.rootClassName,
-    }),
-    [appearance, primaryColor, ep],
-  );
+  return useMemo(() => ({ ep, appearance }), [appearance, ep]);
 }
 
 export type ResolvedTheme = "light" | "dark";

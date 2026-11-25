@@ -14,13 +14,16 @@ const BASE_FONT_SIZE_PX = 14;
 
 /** `15px` → `--font-scale: 1.0714`; rem is read at 16px. Other units cannot scale the components, so they warn. */
 function fontScale(value: string): Record<string, string> {
-  const match = /^(\d*\.?\d+)(px|rem)$/.exec(value.trim());
+  const match = /^(-?\d*\.?\d+)(px|rem)$/.exec(value.trim());
   if (!match) {
     devWarn(`appearance.variables.fontSize only scales text when given in px or rem; "${value}" was ignored.`);
     return {};
   }
   const px = Number(match[1]) * (match[2] === "rem" ? 16 : 1);
-  if (!Number.isFinite(px) || px <= 0) return {};
+  if (!Number.isFinite(px) || px <= 0) {
+    devWarn(`appearance.variables.fontSize must be a positive size; "${value}" was ignored.`);
+    return {};
+  }
   return { "--font-scale": String(Math.round((px / BASE_FONT_SIZE_PX) * 10000) / 10000) };
 }
 
@@ -39,6 +42,8 @@ export const VARIABLE_ALIASES: Readonly<Record<string, string>> = {
 export function normalizeVariables(variables: AppearanceVariables): AppearanceVariables {
   const normalized: AppearanceVariables = {};
   for (const [key, value] of Object.entries(variables)) {
+    // `undefined` means "not set": it must not erase an alias in the same layer or a value from an earlier one.
+    if (value === undefined) continue;
     const canonical = VARIABLE_ALIASES[key];
     if (canonical === undefined) normalized[key] = value;
     else if (variables[canonical] === undefined) normalized[canonical] = value;

@@ -41,17 +41,12 @@ export interface ComponentRootProps {
   [aria: `aria-${string}`]: string | undefined;
 }
 
-/**
- * The outermost element of a prebuilt component. It carries, in order: the scheme class, the instance branding, the
- * resolved `appearance.variables`, the theme class names, `elements.rootBox` and the motion setting. Content the
- * component portals under `<body>` gets the same custom properties through a scope class whose rule lives in `<head>`
- * (see `usePortalClass`).
- */
-export function ComponentRoot({ component, element, className, style, children, ...data }: ComponentRootProps) {
+/** Everything a component scope needs: resolver, scheme, variables, and the class its pop-ups carry. */
+function useScopeValues() {
   const appearance = useAppearance();
   const { theme, className: themeClass } = useThemeScope();
   const branding = useBrandingStyle(theme);
-  // Normally `AuthAppearanceScope` already installed the resolver; a root rendered on its own installs one.
+  // Normally `AuthAppearanceScope` already installed the resolver; a scope rendered on its own installs one.
   const inherited = useElementSlotResolver();
   const resolver = useMemo(() => inherited ?? createElementResolver(appearance), [inherited, appearance]);
   const rawId = useId();
@@ -60,13 +55,37 @@ export function ComponentRoot({ component, element, className, style, children, 
   const variables = useMemo(() => ({ ...branding, ...appearance.cssVariables }), [branding, appearance.cssVariables]);
   const declarations = useMemo(() => scopeDeclarations(variables), [variables]);
   useScopeRule(scopeClass, declarations);
-  // The component's layout classes go through `rootBox`, so `rootBox: { unstyled: true }` can drop them. The scheme
-  // class, `orbitid-root`/`orbitid-component`, theme class names and the motion switch always stay.
-  const root = elementProps(resolver, element ? ["rootBox", element] : ["rootBox"], [className]);
   const scope = useMemo(
     () => ({ portalClassName: cn(declarations ? scopeClass : null, "orbitid-component", motionOff) }),
     [declarations, scopeClass, motionOff],
   );
+  return { appearance, theme, themeClass, resolver, motionOff, variables, scope };
+}
+
+/**
+ * A component scope without an element of its own, for components that only portal (a standalone
+ * `<UserVerificationModal/>`): their pop-ups get the element resolver, scheme and variables a root would give them.
+ */
+export function ComponentScope({ children }: { children: ReactNode }) {
+  const { resolver, scope } = useScopeValues();
+  return (
+    <ElementSlotProvider value={resolver}>
+      <ComponentScopeContext.Provider value={scope}>{children}</ComponentScopeContext.Provider>
+    </ElementSlotProvider>
+  );
+}
+
+/**
+ * The outermost element of a prebuilt component. It carries, in order: the scheme class, the instance branding, the
+ * resolved `appearance.variables`, the theme class names, `elements.rootBox` and the motion setting. Content the
+ * component portals under `<body>` gets the same custom properties through a scope class whose rule lives in `<head>`
+ * (see `usePortalClass`).
+ */
+export function ComponentRoot({ component, element, className, style, children, ...data }: ComponentRootProps) {
+  const { appearance, theme, themeClass, resolver, motionOff, variables, scope } = useScopeValues();
+  // The component's layout classes go through `rootBox`, so `rootBox: { unstyled: true }` can drop them. The scheme
+  // class, `orbitid-root`/`orbitid-component`, theme class names and the motion switch always stay.
+  const root = elementProps(resolver, element ? ["rootBox", element] : ["rootBox"], [className]);
 
   return (
     <ElementSlotProvider value={resolver}>
