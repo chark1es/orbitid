@@ -133,6 +133,21 @@ pub async fn attempt(
             }
         }
     }
+    if strategy != "passkey" && crate::signin::decoy::is_decoy(&row) {
+        if let Some(error) = crate::signin::decoy::attempt(
+            &state,
+            &row,
+            &strategy,
+            body.password.as_deref(),
+            body.code.as_deref(),
+        )
+        .await?
+        {
+            return Err(error);
+        }
+        let fresh = reload(&state, &row.id).await?;
+        return respond_sign_in(&state, &client, azp.as_deref(), &fresh, cookies).await;
+    }
     let existing_user = match &row.user_id {
         Some(user_id) => get_user_by_id(&state, user_id).await?,
         None => None,

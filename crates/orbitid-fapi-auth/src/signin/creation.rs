@@ -294,6 +294,26 @@ pub async fn create(
             crate::signin::helpers::spend_password_check(None, Some(password)).await;
         }
         if state.settings.get().security.enumeration_protection {
+            // Answer like an account that exists: a password sent along fails as a wrong one would.
+            if body
+                .password
+                .as_deref()
+                .is_some_and(|value| !value.is_empty())
+                && body
+                    .strategy
+                    .as_deref()
+                    .is_none_or(|strategy| strategy == "password")
+            {
+                return Err(crate::signin::decoy::password_incorrect(&row));
+            }
+            crate::signin::decoy::start(
+                &state,
+                &row,
+                &identifier,
+                state_json,
+                body.strategy.as_deref(),
+            )
+            .await?;
             row = reload(&state, &id).await?;
             return respond_sign_in(&state, &client, azp.as_deref(), &row, cookies).await;
         }

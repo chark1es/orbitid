@@ -3,6 +3,7 @@ import type { SocialProviderView } from "./environment";
 import { ProviderIcon } from "./provider-icon";
 import { useComponentElements, usePortalClass } from "./appearance";
 import { useAuthRuntime } from "./w6";
+import { LastUsedBadge } from "./last-used-badge";
 
 export interface SocialButtonsProps {
   providers: SocialProviderView[];
@@ -115,11 +116,7 @@ export function SocialButtons({
             </span>
             {lastUsed ? (
               <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center">
-                <span
-                  {...ep("lastUsedBadge", "rounded-sm border border-border bg-card px-1.5 py-0.5 text-2xs leading-none font-medium text-muted-foreground control-optical")}
-                >
-                  {t("signIn.lastUsed")}
-                </span>
+                <LastUsedBadge />
               </span>
             ) : null}
           </Button>

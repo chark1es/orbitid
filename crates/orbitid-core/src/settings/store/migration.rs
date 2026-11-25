@@ -5,7 +5,7 @@ use crate::settings::types::InstanceSettings;
 use sqlx::PgConnection;
 
 pub const SETTINGS_VERSION_KEY: &str = "__settingsVersion";
-pub const CURRENT_SETTINGS_VERSION: i64 = 2;
+pub const CURRENT_SETTINGS_VERSION: i64 = 3;
 const OLD_DEFAULT_LIFETIME_SECONDS: i64 = 7 * 24 * 60 * 60;
 const OLD_DEFAULT_GUEST_RETENTION_SECONDS: i64 = 30 * 24 * 60 * 60;
 pub(super) const SETTINGS_CHANNEL: &str = "orbitid_settings";
@@ -73,31 +73,47 @@ pub fn migrate_stored_settings(raw: Value) -> MigratedSettings {
 
     let mut migrated = clean;
     let mut lifetime_converted = false;
-    if let Some(Value::Object(session)) = migrated.get_mut("session") {
-        if session.get("lifetimeSeconds").and_then(Value::as_i64)
-            == Some(OLD_DEFAULT_LIFETIME_SECONDS)
-        {
-            session.insert("lifetimeSeconds".into(), Value::from(0));
-            lifetime_converted = true;
+    // Version 1 → 2.
+    if version < 2 {
+        if let Some(Value::Object(session)) = migrated.get_mut("session") {
+            if session.get("lifetimeSeconds").and_then(Value::as_i64)
+                == Some(OLD_DEFAULT_LIFETIME_SECONDS)
+            {
+                session.insert("lifetimeSeconds".into(), Value::from(0));
+                lifetime_converted = true;
+            }
+            if session.get("multiSession").and_then(Value::as_bool) == Some(false) {
+                session.insert("multiSession".into(), Value::Bool(true));
+            }
         }
-        if session.get("multiSession").and_then(Value::as_bool) == Some(false) {
-            session.insert("multiSession".into(), Value::Bool(true));
+        if let Some(Value::Object(password)) = migrated.get_mut("password") {
+            if password
+                .get("signOutOfOtherSessionsOnChange")
+                .and_then(Value::as_bool)
+                == Some(true)
+            {
+                password.insert("signOutOfOtherSessionsOnChange".into(), Value::Bool(false));
+            }
+        }
+        if let Some(Value::Object(anonymous)) = migrated.get_mut("anonymous") {
+            if anonymous.get("retentionSeconds").and_then(Value::as_i64)
+                == Some(OLD_DEFAULT_GUEST_RETENTION_SECONDS)
+            {
+                anonymous.insert("retentionSeconds".into(), Value::from(0));
+            }
         }
     }
-    if let Some(Value::Object(password)) = migrated.get_mut("password") {
-        if password
-            .get("signOutOfOtherSessionsOnChange")
-            .and_then(Value::as_bool)
-            == Some(true)
-        {
-            password.insert("signOutOfOtherSessionsOnChange".into(), Value::Bool(false));
-        }
-    }
-    if let Some(Value::Object(anonymous)) = migrated.get_mut("anonymous") {
-        if anonymous.get("retentionSeconds").and_then(Value::as_i64)
-            == Some(OLD_DEFAULT_GUEST_RETENTION_SECONDS)
-        {
-            anonymous.insert("retentionSeconds".into(), Value::from(0));
+    // Version 2 → 3: enumeration protection became the default. Off was the old default, so only an instance
+    // still on it converts; turning it off again afterwards sticks.
+    if version < 3 {
+        if let Some(Value::Object(security)) = migrated.get_mut("security") {
+            if security
+                .get("enumerationProtection")
+                .and_then(Value::as_bool)
+                == Some(false)
+            {
+                security.insert("enumerationProtection".into(), Value::Bool(true));
+            }
         }
     }
     if let Value::Object(map) = &mut migrated {

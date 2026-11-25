@@ -4,6 +4,7 @@
 pub mod complete;
 pub mod core;
 pub mod creation;
+pub mod decoy;
 pub mod first_attempt;
 pub mod first_prepare;
 pub mod helpers;

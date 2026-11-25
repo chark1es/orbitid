@@ -9,6 +9,8 @@ export interface FieldProps<TFieldValues extends FieldValues> {
   label: string;
   description?: string;
   required?: boolean;
+  /** Shown at the end of the label row, e.g. a "Last used" badge. */
+  labelAccessory?: ReactNode;
   className?: string;
   children: (
     field: ControllerRenderProps<TFieldValues, FieldPath<TFieldValues>> & {
@@ -26,6 +28,7 @@ export function Field<TFieldValues extends FieldValues>({
   label,
   description,
   required,
+  labelAccessory,
   className,
   children,
 }: FieldProps<TFieldValues>) {
@@ -41,16 +44,26 @@ export function Field<TFieldValues extends FieldValues>({
       render={({ field, fieldState }) => {
         const hasError = Boolean(fieldState.error?.message);
         const describedBy = [description ? descriptionId : null, hasError ? errorId : null].filter(Boolean).join(" ");
+        const labelElement = (
+          <Label htmlFor={inputId} {...ep("formFieldLabel", "text-sm font-medium")}>
+            {label}
+            {required ? (
+              <span aria-hidden="true" className="text-destructive">
+                *
+              </span>
+            ) : null}
+          </Label>
+        );
         return (
           <div {...ep("formField", "grid gap-1.5", className)}>
-            <Label htmlFor={inputId} {...ep("formFieldLabel", "text-sm font-medium")}>
-              {label}
-              {required ? (
-                <span aria-hidden="true" className="text-destructive">
-                  *
-                </span>
-              ) : null}
-            </Label>
+            {labelAccessory ? (
+              <div className="flex items-center justify-between gap-2">
+                {labelElement}
+                {labelAccessory}
+              </div>
+            ) : (
+              labelElement
+            )}
             {children({
               ...field,
               id: inputId,

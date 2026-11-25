@@ -94,7 +94,7 @@ export const COMPONENT_ELEMENTS = {
   socialButtonsBlockButtonText: "Label inside a full-width social button.",
   socialButtonsIconButton: "Icon-only social button.",
   socialButtonsProviderIcon: "Provider logo inside a social button.",
-  lastUsedBadge: "\"Last used\" marker on a social button.",
+  lastUsedBadge: "\"Last used\" marker on the sign-in method used last.",
   dividerRow: "The \"or\" divider row.",
   dividerLine: "Lines on each side of the divider.",
   dividerText: "The divider's text.",

@@ -91,6 +91,11 @@ async fn wrong_password_is_a_form_error_and_records_an_attempt() {
 #[tokio::test]
 async fn unknown_identifier_returns_two_error_items() {
     let h = harness().await;
+    h.state()
+        .settings
+        .update(serde_json::json!({ "security": { "enumerationProtection": false } }))
+        .await
+        .unwrap();
     let response = h
         .client
         .post(
@@ -106,24 +111,157 @@ async fn unknown_identifier_returns_two_error_items() {
     assert_eq!(errors[0]["code"], "form_identifier_not_found");
 }
 
-#[tokio::test]
-async fn enumeration_protection_returns_an_empty_sign_in() {
-    let h = harness().await;
-    h.state()
-        .settings
-        .update(serde_json::json!({ "security": { "enumerationProtection": true } }))
-        .await
-        .unwrap();
+/// Creates a sign-in for `identifier` on a fresh client and returns its response body.
+async fn start_sign_in(h: &common::Harness, identifier: &str) -> serde_json::Value {
     let response = h
         .client
         .post(
             "/v1/client/sign_ins",
-            Some(serde_json::json!({ "identifier": "nobody@example.com" })),
+            Some(serde_json::json!({ "identifier": identifier })),
             &[],
         )
         .await;
-    assert_eq!(response.status, StatusCode::OK);
-    assert_eq!(response.value()["response"]["status"], "needs_identifier");
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    response.value()["response"].clone()
+}
+
+fn strategies(sign_in: &serde_json::Value) -> Vec<String> {
+    sign_in["supported_first_factors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|factor| factor["strategy"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[tokio::test]
+async fn enumeration_protection_is_on_by_default() {
+    let h = harness().await;
+    assert!(h.state().settings.get().security.enumeration_protection);
+}
+
+#[tokio::test]
+async fn enumeration_protection_answers_an_unknown_identifier_like_an_account() {
+    let h = harness().await;
+    seed_user(&h, "real@example.com", "Sup3r-secret!").await;
+
+    // One sign-in per client at a time: each is attempted before the next starts.
+    let attempt = |id: String, password: &'static str| {
+        let client = &h.client;
+        async move {
+            client
+                .post(
+                    &format!("/v1/client/sign_ins/{id}/attempt_first_factor"),
+                    Some(serde_json::json!({ "strategy": "password", "password": password })),
+                    &[],
+                )
+                .await
+        }
+    };
+    let real = start_sign_in(&h, "real@example.com").await;
+    let wrong = attempt(real["id"].as_str().unwrap().to_string(), "not-it-at-all").await;
+    let decoy = start_sign_in(&h, "nobody@example.com").await;
+    assert_eq!(decoy["status"], "needs_first_factor");
+    assert_eq!(decoy["status"], real["status"]);
+    assert_eq!(strategies(&decoy), strategies(&real));
+    assert!(strategies(&decoy).contains(&"password".to_string()));
+    assert_eq!(
+        decoy["supported_first_factors"][0]["safe_identifier"],
+        "n*****@example.com"
+    );
+    // A real account's name is not shown before the first factor either.
+    assert!(real["user_data"].is_null());
+    assert!(decoy["user_data"].is_null());
+    assert_eq!(decoy["identifier"], "nobody@example.com");
+
+    // A password fails exactly as a wrong one on a real account does.
+    let decoy_attempt = attempt(decoy["id"].as_str().unwrap().to_string(), "Sup3r-secret!").await;
+    assert_eq!(decoy_attempt.status, wrong.status);
+    assert_eq!(decoy_attempt.status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (wrong, decoy_attempt) = (wrong.value(), decoy_attempt.value());
+    assert_eq!(
+        decoy_attempt["errors"][0]["code"],
+        "form_password_incorrect"
+    );
+    assert_eq!(
+        decoy_attempt["errors"][0]["code"],
+        wrong["errors"][0]["code"]
+    );
+    assert_eq!(
+        decoy_attempt["errors"][0]["message"],
+        wrong["errors"][0]["message"]
+    );
+
+    // Identifier and password in one request: the same refusal.
+    let combined = h
+        .client
+        .post(
+            "/v1/client/sign_ins",
+            Some(serde_json::json!({ "identifier": "nobody@example.com", "password": "Sup3r-secret!" })),
+            &[],
+        )
+        .await;
+    assert_eq!(combined.status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        combined.value()["errors"][0]["code"],
+        "form_password_incorrect"
+    );
+}
+
+#[tokio::test]
+async fn enumeration_protection_issues_a_code_it_never_sends_or_accepts() {
+    let h = harness().await;
+    let decoy = start_sign_in(&h, "nobody@example.com").await;
+    let id = decoy["id"].as_str().unwrap().to_string();
+    let email_id = decoy["supported_first_factors"][0]["email_address_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(email_id.starts_with("idn_e"));
+
+    let prepared = h
+        .client
+        .post(
+            &format!("/v1/client/sign_ins/{id}/prepare_first_factor"),
+            Some(serde_json::json!({ "strategy": "email_code", "email_address_id": email_id })),
+            &[],
+        )
+        .await;
+    assert_eq!(prepared.status, StatusCode::OK, "{}", prepared.text());
+    let prepared = prepared.value()["response"].clone();
+    assert_eq!(
+        prepared["first_factor_verification"]["strategy"],
+        "email_code"
+    );
+    assert_eq!(
+        prepared["first_factor_verification"]["status"],
+        "unverified"
+    );
+    assert!(prepared["first_factor_verification"]["expire_at"].is_number());
+    // The same made-up email id on every read.
+    assert_eq!(
+        prepared["supported_first_factors"][0]["email_address_id"],
+        email_id
+    );
+
+    assert!(
+        orbitid_platform::mail::get_mail_outbox(h.state()).is_empty(),
+        "a decoy sends no email"
+    );
+
+    // Not even the fixed testing code signs in.
+    for code in ["424242", "000000"] {
+        let attempt = h
+            .client
+            .post(
+                &format!("/v1/client/sign_ins/{id}/attempt_first_factor"),
+                Some(serde_json::json!({ "strategy": "email_code", "code": code })),
+                &[],
+            )
+            .await;
+        assert_eq!(attempt.status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(attempt.value()["errors"][0]["code"], "form_code_incorrect");
+    }
 }
 
 #[tokio::test]

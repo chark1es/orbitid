@@ -50,7 +50,11 @@ export function SettingsSection({
   const generatedId = React.useId();
   const headingId = id ?? generatedId;
   return (
-    <section aria-labelledby={headingId} className="grid gap-x-10 gap-y-4 border-t border-border pt-6 lg:grid-cols-[220px_minmax(0,1fr)]">
+    <section
+      aria-labelledby={headingId}
+      // Right under the page header, whose own bottom rule already divides the page: no second line.
+      className="grid gap-x-10 gap-y-4 border-t border-border pt-6 lg:grid-cols-[220px_minmax(0,1fr)] [[data-slot=page-header]+&]:border-t-0 [[data-slot=page-header]+&]:pt-0"
+    >
       <div className="space-y-1.5">
         <h2 id={headingId} className="text-[0.9375rem] font-heading tracking-[-0.01em]">
           {title}
