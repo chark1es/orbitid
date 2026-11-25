@@ -17,6 +17,7 @@ explains it, audits every transaction and covers request-level retry.
 | 8 | `organizations` | ascending `id` |
 | 9 | `organization_memberships`, `organization_invitations`, `organization_membership_requests` | ascending `id`; the organization row (rank 8) is always locked before any of these child rows |
 | 10 | `roles`, `role_permissions`, `permissions`, `user_roles` | ascending `id`; within the rank parent before child: role row, then the referenced `permissions` rows (`FOR KEY SHARE`, ascending), then `role_permissions` rows |
+| 10a | `oauth_applications` | [APP_ACCESS.md](APP_ACCESS.md#locking) |
 | 11 | OIDC grant families (advisory), then `oauth_grants` | `pg_advisory_xact_lock`, ascending family name; grant rows only after their family lock |
 | 12 | `uploads` | ascending `file` |
 | 13 | signing-key advisory lock, then `signing_keys` | `keys::ADVISORY_LOCK`; `signing_keys` rows only inside that transaction |
@@ -167,7 +168,8 @@ violation.
 | `organization_domains.organization_id` → `organizations` (8) | FAPI/BAPI domain create | organization `FOR UPDATE`, then duplicate check + insert | OK |
 | `role_permissions.role_id` → `roles`, `.permission_id` → `permissions` (10) | `authorization::replace_role_permissions`, `rbac::roles` (`add_role_permission_on`), `seed_rbac` | role locked first, then every referenced permission `FOR KEY SHARE` (ascending) **before** any `role_permissions` row is deleted or inserted; `delete_permission_on` locks the permission, then its `role_permissions` rows ascending. Replacement versus permission deletion used to cycle (replacer holds the child row and waits for the parent key-share, deleter holds the parent and waits for the child via the cascade). Test: `orbitid-identity/tests/lock_order_rbac.rs`. `seed_rbac` is a startup insert with `ON CONFLICT DO NOTHING` and is not concurrent with deletions | OK (fixed) |
 | `actor_tokens.user_id`, `sign_in_tokens.user_id` → `users` (3) | none in `crates/*/src` | n/a | no writer |
-| `oauth_grants/consents/device_codes.application_id` → `oauth_applications`, `webhook_deliveries.*`, `m2m_tokens.machine_id` | token/consent/device/webhook flows | parents are unranked | no ordering constraint |
+| `*.application_id` → `oauth_applications` (10a) | [APP_ACCESS.md](APP_ACCESS.md#locking) | | OK |
+| `webhook_deliveries.*`, `m2m_tokens.machine_id` | | unranked | OK |
 
 Child `UPDATE`s were checked too: no ranked FK column is updated except
 `external_accounts.user_id` (same user, user already locked) and
@@ -276,7 +278,7 @@ in this pass.
 | `oidc refresh` | user key-share (banned and organization authority re-checked)→family advisory→oauth_grants | OK (fixed) |
 | `oidc consent` (`record_consent_on` + code issue) | user key-share→consent row→grant insert | OK (fixed) |
 | `oidc device` (approval, token poll) | user key-share (the poll re-checks the authority)→device row→grant inserts | OK (fixed) |
-| `oidc revocation`, `applications`, `api_keys` | advisory→oauth_grants / one table | OK |
+| `oidc revocation`, `api_keys` | advisory→oauth_grants / one table | OK |
 | `credentials::keys` | signing-key advisory→signing_keys | OK |
 | `core::settings` | instance only | OK |
 | `platform webhooks` | `FOR UPDATE SKIP LOCKED` claim, deliveries | OK |

@@ -17,10 +17,13 @@ use orbitid_core::error::{error_codes, OrbitError};
 use orbitid_core::http::{OrbitJson, PaginationQuery};
 use orbitid_core::state::AppState;
 
+use orbitid_platform::audit::{audit, AuditInput};
+
 use crate::services::oidc::applications::{
-    create_application, delete_application, list_applications, require_application,
-    rotate_client_secret, serialize_application, update_application, valid_groups_claim,
-    CreateApplicationInput, UpdateApplicationInput,
+    count_applications_owned, create_application, delete_application, list_applications_owned,
+    require_application, rotate_client_secret, serialize_application,
+    update_application_with_effects, valid_groups_claim, CreateApplicationInput, OwnerFilter,
+    UpdateApplicationInput,
 };
 use crate::services::oidc::shared::{
     LIFETIME_BOUNDS_ACCESS, LIFETIME_BOUNDS_ID, LIFETIME_BOUNDS_REFRESH,
@@ -104,6 +107,30 @@ fn check_lifetime(value: Option<i64>, bounds: (i64, i64), param: &str) -> Result
     Ok(())
 }
 
+/// `organization_id` must be a non-empty id when present.
+fn check_owner(value: Option<&str>) -> Result<(), OrbitError> {
+    if value.is_some_and(|id| id.trim().is_empty()) {
+        return Err(unprocessable(
+            "organization_id",
+            "organization_id must be an organization id or null",
+        ));
+    }
+    Ok(())
+}
+
+/// `string | null | absent` for PATCH: absent is `None`, `null` is
+/// `Some(None)` (make the application instance-wide).
+fn nullable_string<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    match serde_json::Value::deserialize(deserializer)? {
+        serde_json::Value::Null => Ok(Some(None)),
+        serde_json::Value::String(text) => Ok(Some(Some(text))),
+        _ => Err(serde::de::Error::custom("expected a string or null")),
+    }
+}
+
 fn check_groups_claim(value: Option<&String>) -> Result<(), OrbitError> {
     if let Some(value) = value {
         if !valid_groups_claim(value) {
@@ -139,6 +166,8 @@ struct CreateApplicationBody {
     id_token_lifetime_seconds: Option<i64>,
     #[serde(default)]
     groups_claim: Option<String>,
+    #[serde(default)]
+    organization_id: Option<String>,
 }
 
 async fn create(
@@ -168,6 +197,7 @@ async fn create(
         "id_token_lifetime_seconds",
     )?;
     check_groups_claim(body.groups_claim.as_ref())?;
+    check_owner(body.organization_id.as_deref())?;
     let (row, client_secret) = create_application(
         &state,
         CreateApplicationInput {
@@ -182,9 +212,13 @@ async fn create(
             refresh_token_lifetime_seconds: body.refresh_token_lifetime_seconds,
             id_token_lifetime_seconds: body.id_token_lifetime_seconds,
             groups_claim: body.groups_claim,
+            organization_id: body.organization_id,
         },
     )
     .await?;
+    if let Some(organization_id) = row.organization_id.as_deref() {
+        audit_owner_change(&state, &row.id, None, Some(organization_id), 0).await;
+    }
     Ok((
         StatusCode::CREATED,
         Json(serialize_application(&row, client_secret.as_deref())),
@@ -196,9 +230,24 @@ async fn list(
     State(state): State<AppState>,
     _guard: SecretKeyGuard,
     page: PaginationQuery,
+    uri: axum::http::Uri,
 ) -> Result<Response, OrbitError> {
-    let rows = list_applications(&state, page.limit, page.offset).await?;
-    let total = crate::services::oidc::applications::count_applications(&state).await?;
+    // `organization_id=org_…` lists one organization's applications,
+    // `organization_id=null` the instance-wide ones.
+    let query = crate::web::query_map(uri.query());
+    let owner = match query.get("organization_id").map(String::as_str) {
+        None => OwnerFilter::Any,
+        Some("null") => OwnerFilter::InstanceWide,
+        Some("") => {
+            return Err(unprocessable(
+                "organization_id",
+                "organization_id must not be empty",
+            ))
+        }
+        Some(id) => OwnerFilter::Organization(id),
+    };
+    let rows = list_applications_owned(&state, owner, page.limit, page.offset).await?;
+    let total = count_applications_owned(&state, owner).await?;
     Ok(Json(json!({
         "data": rows.iter().map(|row| serialize_application(row, None)).collect::<Vec<_>>(),
         "total_count": total,
@@ -237,6 +286,8 @@ struct UpdateApplicationBody {
     id_token_lifetime_seconds: Option<i64>,
     #[serde(default)]
     groups_claim: Option<String>,
+    #[serde(default, deserialize_with = "nullable_string")]
+    organization_id: Option<Option<String>>,
 }
 
 async fn update(
@@ -255,7 +306,8 @@ async fn update(
         && body.access_token_lifetime_seconds.is_none()
         && body.refresh_token_lifetime_seconds.is_none()
         && body.id_token_lifetime_seconds.is_none()
-        && body.groups_claim.is_none();
+        && body.groups_claim.is_none()
+        && body.organization_id.is_none();
     if empty {
         return Err(unprocessable("body", "at least one field is required"));
     }
@@ -283,7 +335,12 @@ async fn update(
         "id_token_lifetime_seconds",
     )?;
     check_groups_claim(body.groups_claim.as_ref())?;
-    let updated = update_application(
+    check_owner(
+        body.organization_id
+            .as_ref()
+            .and_then(|owner| owner.as_deref()),
+    )?;
+    let (updated, effects) = update_application_with_effects(
         &state,
         &row,
         UpdateApplicationInput {
@@ -297,9 +354,20 @@ async fn update(
             refresh_token_lifetime_seconds: body.refresh_token_lifetime_seconds,
             id_token_lifetime_seconds: body.id_token_lifetime_seconds,
             groups_claim: body.groups_claim,
+            organization_id: body.organization_id,
         },
     )
     .await?;
+    if let Some((previous, owner)) = &effects.owner_change {
+        audit_owner_change(
+            &state,
+            &updated.id,
+            previous.as_deref(),
+            owner.as_deref(),
+            effects.revoked_grants,
+        )
+        .await;
+    }
     Ok(Json(serialize_application(&updated, None)).into_response())
 }
 
@@ -326,4 +394,27 @@ async fn rotate_secret(
     let row = require_application(&state, &id).await?;
     let (updated, client_secret) = rotate_client_secret(&state, &row).await?;
     Ok(Json(serialize_application(&updated, Some(&client_secret))).into_response())
+}
+
+/// Audit entry for an application's owning organization being set or changed.
+async fn audit_owner_change(
+    state: &AppState,
+    application_id: &str,
+    previous: Option<&str>,
+    organization_id: Option<&str>,
+    revoked_grants: u64,
+) {
+    audit(
+        state,
+        AuditInput::new("oauth_application.organization_changed")
+            .actor(orbitid_identity::admin::AUDIT_ACTOR)
+            .target_type("oauth_application")
+            .target_id(application_id)
+            .metadata(json!({
+                "previous_organization_id": previous,
+                "organization_id": organization_id,
+                "revoked_grants": revoked_grants,
+            })),
+    )
+    .await;
 }

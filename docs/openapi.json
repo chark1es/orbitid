@@ -3730,7 +3730,7 @@
         ],
         "summary": "Approve or deny a device code",
         "operationId": "decideDeviceAuthorization",
-        "description": "The signed-in user approves or denies the device that showed `user_code`. A code that expired answers 410; one already decided answers 409.",
+        "description": "The signed-in user approves or denies the device that showed `user_code`. A code that expired answers 410; one already decided answers 409. Approving an organization-owned application the user may not use answers `403 not_allowed_access` and denies the code (the device's next poll gets `access_denied`).",
         "security": [
           {
             "ClientCookie": []
@@ -6588,7 +6588,7 @@
         ],
         "summary": "Delete an organization",
         "operationId": "deleteOrganizationFrontend",
-        "description": "Requires `org:sys_profile:delete`, and the organization must allow admin deletion.",
+        "description": "Requires `org:sys_profile:delete`, and the organization must allow admin deletion. An organization that owns OAuth applications cannot be deleted (`409 organization_has_applications`): reassign or delete them first.",
         "security": [
           {
             "ClientCookie": []
@@ -6654,6 +6654,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           }
         }
       }
@@ -8606,7 +8609,7 @@
         ],
         "summary": "Delete an organization",
         "operationId": "deleteOrganization",
-        "description": "Deletes the organization with its memberships, invitations and domains.",
+        "description": "Deletes the organization with its memberships, invitations and domains. An organization that owns OAuth applications cannot be deleted (`409 organization_has_applications`): reassign or delete them first.",
         "security": [
           {
             "SecretKey": []
@@ -8658,6 +8661,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           }
         }
       }
@@ -18947,7 +18953,7 @@
         ],
         "summary": "Authorization endpoint",
         "operationId": "authorize",
-        "description": "Standard authorization code flow. PKCE (`S256`) is required for public clients and optional for confidential clients unless the application sets `pkce_required`. Without a session the browser is sent to the app's sign-in page and brought back; with consent enabled the consent screen data comes from `/oauth/consent_info`. Ends in a redirect or, with `response_mode=form_post`, a self-submitting form carrying `code` and `state` (or `error`).",
+        "description": "Standard authorization code flow. PKCE (`S256`) is required for public clients and optional for confidential clients unless the application sets `pkce_required`. Without a session the browser is sent to the app's sign-in page and brought back; with consent enabled the consent screen data comes from `/oauth/consent_info`. Ends in a redirect or, with `response_mode=form_post`, a self-submitting form carrying `code` and `state` (or `error`). An organization-owned application (`organization_id` set) is refused to a signed-in user who is neither a member of that organization nor granted access: the browser returns to the client's redirect URI with `error=access_denied`.",
         "security": [],
         "parameters": [
           {
@@ -19092,7 +19098,7 @@
         ],
         "summary": "Read consent screen data",
         "operationId": "getConsentInfo",
-        "description": "Application name, requested scopes and descriptions for the consent screen.",
+        "description": "Application name, requested scopes and descriptions for the consent screen. An organization-owned application the caller may not use answers `404`, exactly like an unknown `client_id`.",
         "security": [
           {
             "ClientCookie": []
@@ -19207,7 +19213,7 @@
         ],
         "summary": "Submit the consent decision",
         "operationId": "submitConsent",
-        "description": "Records the grant for this user and application and returns where to send the browser next.",
+        "description": "Records the grant for this user and application and returns where to send the browser next. A user who may not use an organization-owned application gets a `redirect_url` carrying `error=access_denied` and no code.",
         "security": [
           {
             "ClientCookie": []
@@ -19322,7 +19328,7 @@
         ],
         "summary": "Token endpoint",
         "operationId": "token",
-        "description": "Exchanges an authorization code or a refresh token for an access token, and (with the `openid` scope) an id_token. Confidential clients authenticate with HTTP Basic (`client_id:client_secret`, encoded or raw) or with `client_id` and `client_secret` in the body. Refresh tokens rotate; a just-rotated token can be retried inside the grace window without revoking the grant. Errors use the OAuth error shape, not the OrbitID error envelope.",
+        "description": "Exchanges an authorization code or a refresh token for an access token, and (with the `openid` scope) an id_token. Confidential clients authenticate with HTTP Basic (`client_id:client_secret`, encoded or raw) or with `client_id` and `client_secret` in the body. Refresh tokens rotate; a just-rotated token can be retried inside the grace window without revoking the grant. Errors use the OAuth error shape, not the OrbitID error envelope. For an organization-owned application, every grant type that issues user tokens (`authorization_code`, `refresh_token`, device code) re-checks that the user is still a member of the owning organization or holds an access grant; otherwise `invalid_grant` (device polling: `access_denied`).",
         "security": [],
         "requestBody": {
           "required": true,
@@ -20031,6 +20037,15 @@
           },
           {
             "$ref": "#/components/parameters/OrderBy"
+          },
+          {
+            "name": "organization_id",
+            "in": "query",
+            "required": false,
+            "description": "Only the applications this organization owns, or `null` for only the instance-wide ones.",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -20052,6 +20067,9 @@
           },
           "429": {
             "$ref": "#/components/responses/TooManyRequests"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
           }
         }
       },
@@ -20129,6 +20147,10 @@
                       "all"
                     ],
                     "description": "What the groups claim contains."
+                  },
+                  "organization_id": {
+                    "type": "string",
+                    "description": "Owning organization id. Leave it out for an instance-wide application (any user may sign in). An unknown id is `422`."
                   }
                 },
                 "required": [
@@ -20278,6 +20300,13 @@
                       "roles",
                       "all"
                     ]
+                  },
+                  "organization_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Owning organization id, or `null` to make the application instance-wide. Assigning or changing the owner revokes, in the same transaction, the codes and tokens of users the new owner does not entitle (neither members nor granted access)."
                   }
                 }
               }
@@ -21030,6 +21059,264 @@
           },
           "422": {
             "$ref": "#/components/responses/UnprocessableEntity"
+          }
+        }
+      }
+    },
+    "/v1/oauth_applications/{id}/access_grants": {
+      "get": {
+        "tags": [
+          "OAuth/OIDC"
+        ],
+        "summary": "List an application's access grants",
+        "operationId": "listOAuthApplicationAccessGrants",
+        "description": "Users who may use this organization-owned application without being members of its organization. Members never need a grant.",
+        "security": [
+          {
+            "SecretKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "OAuth application id (`oa_…`).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Offset"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthApplicationAccessGrantList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "OAuth/OIDC"
+        ],
+        "summary": "Grant a user access to an application",
+        "operationId": "createOAuthApplicationAccessGrant",
+        "description": "Lets the user obtain codes and tokens for this organization-owned application although they are not a member of its organization. Idempotent: `201` when created, `200` when the grant already existed. A grant on an instance-wide application has no effect until the application gets an owner. Recorded in the audit log as `oauth_application_access_grant.created`.",
+        "security": [
+          {
+            "SecretKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "OAuth application id (`oa_…`).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "user_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "user_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthApplicationAccessGrant"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "The grant already existed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthApplicationAccessGrant"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          }
+        }
+      }
+    },
+    "/v1/oauth_applications/{id}/access_grants/{user_id}": {
+      "delete": {
+        "tags": [
+          "OAuth/OIDC"
+        ],
+        "summary": "Revoke a user's access to an application",
+        "operationId": "deleteOAuthApplicationAccessGrant",
+        "description": "Removes the grant and, in the same transaction, revokes the user's authorization codes, access tokens and refresh tokens for this application unless they are still entitled (a member of the owning organization, or the application is instance-wide). Recorded in the audit log as `oauth_application_access_grant.deleted`.",
+        "security": [
+          {
+            "SecretKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "OAuth application id (`oa_…`).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "description": "User id (`user_…`).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "const": "oauth_application_access_grant"
+                    },
+                    "application_id": {
+                      "type": "string"
+                    },
+                    "user_id": {
+                      "type": "string"
+                    },
+                    "deleted": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "object",
+                    "application_id",
+                    "user_id",
+                    "deleted"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/users/{id}/oauth_application_access_grants": {
+      "get": {
+        "tags": [
+          "Users (backend)"
+        ],
+        "summary": "List a user's application access grants",
+        "operationId": "listUserOAuthApplicationAccessGrants",
+        "description": "The organization-owned OAuth applications this user was granted access to without being a member of their organization.",
+        "security": [
+          {
+            "SecretKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "User id (`user_…`).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Offset"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthApplicationAccessGrantList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -23600,6 +23887,13 @@
             ],
             "description": "What the `groups` claim contains."
           },
+          "organization_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Owning organization (`org_…`). `null` is an instance-wide application any user may sign in to. When set, only the organization's members and users with an access grant may obtain codes or tokens; everyone else gets `access_denied` from `/oauth/authorize` and `invalid_grant` from `/oauth/token`."
+          },
           "created_at": {
             "type": "integer",
             "description": "Epoch milliseconds."
@@ -23624,6 +23918,7 @@
           "refresh_token_lifetime_seconds",
           "id_token_lifetime_seconds",
           "groups_claim",
+          "organization_id",
           "created_at",
           "updated_at"
         ]
@@ -25921,6 +26216,49 @@
           "console_unclaimed"
         ],
         "description": "Everything the dashboard needs to choose its first screen, in one answer."
+      },
+      "OAuthApplicationAccessGrant": {
+        "type": "object",
+        "description": "Lets one user use one organization-owned OAuth application without being a member of the owning organization. Managed through the Backend API only.",
+        "properties": {
+          "object": {
+            "const": "oauth_application_access_grant"
+          },
+          "application_id": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "integer",
+            "description": "Epoch milliseconds."
+          }
+        },
+        "required": [
+          "object",
+          "application_id",
+          "user_id",
+          "created_at"
+        ]
+      },
+      "OAuthApplicationAccessGrantList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OAuthApplicationAccessGrant"
+            }
+          },
+          "total_count": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total_count"
+        ]
       }
     },
     "responses": {

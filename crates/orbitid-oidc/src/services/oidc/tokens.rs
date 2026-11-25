@@ -233,6 +233,18 @@ pub async fn exchange_authorization_code_with_hooks(
         if !authority_unchanged_on(&mut tx, state, &user.id, &authority).await? {
             return Ok(Claim::AuthorityChanged);
         }
+        // Organization-owned applications: re-checked under the user key-share
+        // and the application `FOR SHARE`, so a membership removal, an access
+        // revocation or an owner change since the code was issued wins.
+        if !orbitid_identity::app_access::user_may_use_application_on(
+            &mut tx,
+            &input.application.id,
+            &user.id,
+        )
+        .await?
+        {
+            return Ok(Claim::AccessDenied);
+        }
         let claimed = sqlx::query_scalar::<_, String>(
             "UPDATE oauth_grants SET revoked = true, family_id = $3 \
              WHERE id = $1 AND revoked = false AND expires_at > $2 RETURNING id",
@@ -269,6 +281,12 @@ pub async fn exchange_authorization_code_with_hooks(
                 "The organization authority of this grant has changed",
             ));
         }
+        Ok(Claim::AccessDenied) => {
+            tx.rollback().await.ok();
+            return Err(OAuthError::invalid_grant(
+                "The user is not allowed to use this application",
+            ));
+        }
         Ok(Claim::Replay) => {
             tx.rollback().await.ok();
             false
@@ -300,6 +318,7 @@ enum Claim {
     Replay,
     UserBlocked,
     AuthorityChanged,
+    AccessDenied,
 }
 
 /// Revokes the token family the first exchange of `code_id` recorded, if any.
@@ -366,6 +385,18 @@ pub async fn access_grant_from_token(
             "invalid_token",
             "The session that authorized this access token has ended",
         ));
+    }
+    // Losing access to an organization-owned application ends its tokens
+    // here too, even if the revocation of this row raced the change.
+    if !orbitid_identity::app_access::user_may_use_application_id(
+        &state.pool,
+        &row.application_id,
+        &row.user_id,
+    )
+    .await
+    .map_err(internal_oauth_error)?
+    {
+        return Err(invalid());
     }
     Ok((row, user))
 }
@@ -457,6 +488,16 @@ pub async fn introspect_token(
         return Ok(inactive());
     };
     if !authorizing_session_active(state, row.session_id.as_deref()).await? {
+        return Ok(inactive());
+    }
+    if !orbitid_identity::app_access::user_may_use_application(
+        &state.pool,
+        &application.id,
+        application.organization_id.as_deref(),
+        &row.user_id,
+    )
+    .await?
+    {
         return Ok(inactive());
     }
     let email = primary_email(state, &user).await?;

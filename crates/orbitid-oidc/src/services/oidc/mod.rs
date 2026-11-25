@@ -1,6 +1,7 @@
 //! OIDC/OAuth2 provider service, ported from `services/oidc.ts` and the
 //! cohesive modules under `services/oidc/`.
 
+pub mod access_grants;
 pub mod applications;
 pub mod claims;
 pub mod consent;

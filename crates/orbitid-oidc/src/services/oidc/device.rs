@@ -342,6 +342,20 @@ pub async fn poll_device_code_with_hooks(
             "The organization authority of this grant has changed",
         ));
     }
+    // The approver lost access to this organization-owned application after
+    // approving (membership removed, access grant revoked, owner changed).
+    if !orbitid_identity::app_access::user_may_use_application_on(
+        &mut tx,
+        &application.id,
+        &user.id,
+    )
+    .await?
+    {
+        return Ok(pending(
+            "access_denied",
+            "The user is not allowed to use this application",
+        ));
+    }
     let claimed = sqlx::query_scalar::<_, String>(
         "UPDATE device_codes SET status = 'consumed', last_polled_at = $2 \
          WHERE id = $1 AND status = 'approved' RETURNING id",
@@ -427,6 +441,35 @@ pub async fn decide_device_code(
                 ))
             }
             Some(_) => {}
+        }
+        // A user who may not use this organization-owned application cannot
+        // approve it: the request is answered as denied (the device's next
+        // poll gets `access_denied`), and the caller learns why. Checked under
+        // the application `FOR SHARE`, before the device row (application
+        // deletion locks the application first and cascades into it).
+        if !orbitid_identity::app_access::user_may_use_application_on(
+            &mut tx,
+            &application.id,
+            input.user_id,
+        )
+        .await?
+        {
+            let denied = sqlx::query_scalar::<_, String>(
+                "UPDATE device_codes SET status = 'denied' \
+                 WHERE id = $1 AND status = 'pending' AND expires_at > $2 RETURNING id",
+            )
+            .bind(&row.id)
+            .bind(now())
+            .fetch_optional(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            return Ok(DeviceDecision::Rejected {
+                reason: if denied.is_some() {
+                    "access_denied"
+                } else {
+                    "already_decided"
+                },
+            });
         }
     }
     let claimed = sqlx::query_scalar::<_, String>(

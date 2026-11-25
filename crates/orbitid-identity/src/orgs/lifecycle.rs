@@ -166,6 +166,13 @@ pub async fn on_user_deleted_on(
             }
         }
         if remaining.is_empty() {
+            // An organization that owns OAuth applications outlives its last
+            // member: deleting it would have to delete or widen those
+            // applications (the foreign key refuses either). The row is locked
+            // above, so no application can be assigned to it meanwhile.
+            if crate::app_access::organization_owns_applications_on(conn, &org_id).await? {
+                continue;
+            }
             let payload = serialize_organization_on(conn, &org, true, true).await?;
             sqlx::query("DELETE FROM organizations WHERE id = $1")
                 .bind(&org_id)
@@ -274,6 +281,15 @@ pub async fn delete_organization_on(
     else {
         return Ok(None);
     };
+    // Owned OAuth applications must be reassigned or deleted first. Assigning
+    // an application key-shares the organization row, so with the row held
+    // `FOR UPDATE` this answer cannot go stale before the delete.
+    if crate::app_access::organization_owns_applications_on(conn, org_id).await? {
+        return Err(OrbitError::conflict(
+            error_codes::ORGANIZATION_HAS_APPLICATIONS,
+            "This organization owns OAuth applications. Reassign or delete them before deleting the organization.",
+        ));
+    }
     let payload = serde_json::to_value(serialize_organization_on(conn, &org, true, true).await?)
         .unwrap_or_default();
     let member_ids: Vec<String> = sqlx::query_scalar(

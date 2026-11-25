@@ -13,6 +13,7 @@
 pub mod admin;
 pub mod anonymous;
 pub mod api_keys;
+pub mod app_access;
 pub mod authorization;
 pub mod caller;
 pub mod client_auth;

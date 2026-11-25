@@ -36,6 +36,8 @@ pub struct DevicePageInput {
 pub enum DeviceResultState {
     Approved,
     Denied,
+    /// The signed-in user may not use this organization-owned application.
+    NotAllowed,
     TooManyAttempts,
     CrossSite,
 }
@@ -159,6 +161,12 @@ You can close this window.</p>",
         DeviceResultState::Denied => "<h1>Request denied</h1><p>The device was not given access. \
 You can close this window.</p>"
             .to_string(),
+        DeviceResultState::NotAllowed => {
+            "<h1>Access not allowed</h1><p>Your account does not have \
+access to this application, so the device was not connected. Ask an administrator for access. \
+You can close this window.</p>"
+                .to_string()
+        }
         DeviceResultState::TooManyAttempts => {
             "<h1>Too many attempts</h1><p>That code is no longer \
 valid. Start again from your device to get a new one.</p>"

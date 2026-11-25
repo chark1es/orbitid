@@ -280,6 +280,25 @@ async fn authorize(
         }
     }
 
+    // Organization-owned applications: only members of the owning organization
+    // and users an operator granted access may continue. The client already
+    // proved it is registered (client_id + redirect_uri), so `access_denied` to
+    // its redirect URI reveals nothing new. The token endpoint re-checks under
+    // locks; this is the early refusal.
+    if !orbitid_identity::app_access::user_may_use_application(
+        &state.pool,
+        &app_row.id,
+        app_row.organization_id.as_deref(),
+        &user_id,
+    )
+    .await?
+    {
+        return Ok(fail(
+            "access_denied",
+            "The user is not allowed to use this application",
+        ));
+    }
+
     let needs_consent = app_row.consent_screen_enabled
         && (has_prompt("consent") || !has_consent(&state, &app_row.id, &user_id, &scopes).await?);
     if needs_consent && has_prompt("none") {

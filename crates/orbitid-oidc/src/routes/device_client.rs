@@ -172,6 +172,11 @@ async fn client_device_approve(
                 "That code is not valid",
             )
             .into()),
+            "access_denied" => Err(OrbitError::forbidden(
+                error_codes::NOT_ALLOWED_ACCESS,
+                "Your account does not have access to this application",
+            )
+            .into()),
             "expired" => Err(OrbitError::new(
                 StatusCode::GONE,
                 error_codes::VERIFICATION_EXPIRED,

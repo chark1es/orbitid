@@ -62,6 +62,8 @@ pub struct OauthApplicationRow {
     pub refresh_token_lifetime_seconds: i64,
     pub id_token_lifetime_seconds: i64,
     pub groups_claim: String,
+    /// Owning organization; `None` is an instance-wide application (migration 0019).
+    pub organization_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }

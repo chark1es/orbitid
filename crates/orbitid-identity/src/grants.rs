@@ -229,5 +229,9 @@ pub async fn revoke_organization_authority_grants_for_users_on(
     .bind(&application_ids)
     .execute(&mut *conn)
     .await?;
+    // A removed member also loses the organization's own applications (unless
+    // an operator granted them access to one explicitly). Every caller runs this
+    // after the membership change, under the same user locks.
+    crate::app_access::revoke_unentitled_application_grants_on(conn, user_ids, None).await?;
     Ok(())
 }

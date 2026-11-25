@@ -85,6 +85,7 @@ pub mod error_codes {
         ORG_ROLE_NOT_FOUND => "org_role_not_found",
         LAST_ADMIN_CANNOT_LEAVE => "organization_minimum_permissions_needed",
         ORG_PERMISSION_REQUIRED => "org_permission_required",
+        ORGANIZATION_HAS_APPLICATIONS => "organization_has_applications",
         WEBAUTHN_NOT_SUPPORTED => "webauthn_not_supported",
         PASSKEY_REGISTRATION_FAILURE => "passkey_registration_failure",
         PASSKEY_AUTHENTICATION_FAILURE => "passkey_authentication_failure",

@@ -246,6 +246,8 @@ pub struct OauthApplicationJson {
     pub refresh_token_lifetime_seconds: i64,
     pub id_token_lifetime_seconds: i64,
     pub groups_claim: String,
+    /// The owning organization, or `null` for an instance-wide application.
+    pub organization_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -274,6 +276,7 @@ impl std::fmt::Debug for OauthApplicationJson {
             )
             .field("id_token_lifetime_seconds", &self.id_token_lifetime_seconds)
             .field("groups_claim", &self.groups_claim)
+            .field("organization_id", &self.organization_id)
             .field("created_at", &self.created_at)
             .field("updated_at", &self.updated_at)
             .finish()

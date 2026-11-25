@@ -1,6 +1,7 @@
 //! HTTP routes for the OIDC surface, mirroring `modules/oidc.ts`,
 //! `modules/oidc/*`, `modules/api-keys.ts` and `modules/m2m.ts`.
 
+pub mod access_grants;
 pub mod api_keys;
 pub mod api_keys_frontend;
 pub mod applications;

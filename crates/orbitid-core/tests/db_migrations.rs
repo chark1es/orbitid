@@ -405,7 +405,7 @@ async fn concurrent_starts_on_a_fresh_database_all_succeed() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(versions, 18);
+    assert_eq!(versions, 19);
     pool.close().await;
 }
 

@@ -417,6 +417,17 @@ async fn device_decision(
                 ("referrer-policy", "no-referrer"),
             ],
         )),
+        DeviceDecision::Rejected {
+            reason: "access_denied",
+        } => Ok(super::html_with_headers(
+            device_result_html(DeviceResultState::NotAllowed, None, &product_name(&state)),
+            StatusCode::FORBIDDEN,
+            &[
+                ("content-security-policy", DEVICE_PAGE_CSP),
+                ("cache-control", "no-store"),
+                ("referrer-policy", "no-referrer"),
+            ],
+        )),
         DeviceDecision::Rejected { .. } => {
             let input = device_state(&state, &headers, Some(&raw_code)).await?;
             Ok(render_page(&state, &input))

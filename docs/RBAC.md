@@ -11,6 +11,10 @@ for a role's scope — there is no column that can drift from it.
 Both are ordinary custom roles created through the Backend API; `org:sys_*` and `app:sys_*` are reserved for seeded
 entries, and the two system roles `org:admin` / `org:member` cannot be edited, deleted, or assigned as instance roles.
 
+Which OAuth applications a user may sign in to is a separate rule, not a role or permission: an application owned
+by an organization is open to that organization's members and to users an operator granted access to it. See
+[APP_ACCESS.md](APP_ACCESS.md).
+
 ## Creating roles and permissions
 
 ```http
