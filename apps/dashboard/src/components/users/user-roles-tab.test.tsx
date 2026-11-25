@@ -66,7 +66,8 @@ it("says console access is kept and offers to clear custom roles when no default
   setup(assignment(["app:sys_owner"], "default", null));
   renderPage(<UserRolesTab user={{ id: "user_1", roles: ["app:sys_owner"] } as UserJSON} />);
   expect(await screen.findByText("No default set")).toBeTruthy();
-  expect(screen.getByText(/Console access \(system role\) is kept either way/)).toBeTruthy();
+  expect(screen.getByText(/resetting keeps it/)).toBeTruthy();
+  expect(screen.queryByText(/stop following the default/)).toBeNull();
   expect(screen.queryByText("Inherited from default")).toBeNull();
 });
 
@@ -74,4 +75,16 @@ it("labels reset as clearing custom roles when no default is set", async () => {
   setup(assignment(["app:support"], "assigned", null));
   renderPage(<UserRolesTab user={{ id: "user_1", roles: ["app:support"] } as UserJSON} />);
   expect(await screen.findByRole("button", { name: "Clear custom roles" })).toBeTruthy();
+});
+
+it("treats a configured default the user does not hold as no default", async () => {
+  setup(assignment([], "default", "app:gone"));
+  renderPage(<UserRolesTab user={{ id: "user_1", roles: [] as string[] } as UserJSON} />);
+  expect(await screen.findByText("No default set")).toBeTruthy();
+});
+
+it("says when an assignment holds only a system role", async () => {
+  setup(assignment(["app:sys_admin"], "assigned", "app:member"));
+  renderPage(<UserRolesTab user={{ id: "user_1", roles: ["app:sys_admin"] } as UserJSON} />);
+  expect(await screen.findByText(/only a system role \(console access\), no custom roles/)).toBeTruthy();
 });

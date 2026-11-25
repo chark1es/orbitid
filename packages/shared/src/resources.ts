@@ -96,7 +96,10 @@ export interface UserJSON {
   delete_self_enabled: boolean;
   create_organization_enabled: boolean;
   create_organizations_limit: number | null;
-  /** Instance-wide role keys assigned by an operator (`app:...`); never modifiable by the user. */
+  /**
+   * Effective instance-wide role keys (`app:...`): system grants plus the operator-assigned roles or, when none are
+   * assigned, the instance default role. Never modifiable by the user.
+   */
   roles: string[];
   /** Permissions granted by those instance roles. */
   role_permissions: string[];

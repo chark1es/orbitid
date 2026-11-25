@@ -12719,7 +12719,7 @@
         ],
         "summary": "Read a user's instance roles",
         "operationId": "listUserRoles",
-        "description": "The user's effective instance-wide (`app:...`) roles: the assigned roles, or the instance default role (`roles.defaultRole`) when nothing is assigned. `source` says which. They travel in the session token as `roles` and `role_permissions`, independent of `org_role`.",
+        "description": "The user's effective instance-wide (`app:...`) roles: their system grants (`app:sys_owner`, `app:sys_admin`) plus either the assigned custom roles or, when none are assigned, the instance default role (`roles.defaultRole`). `source` says which. They travel in the session token as `roles` and `role_permissions`, independent of `org_role`.",
         "security": [
           {
             "SecretKey": []
@@ -21660,7 +21660,7 @@
             "type": "array",
             "items": {
               "type": "string",
-              "description": "Instance-wide role keys assigned by an operator (`app:...`). Never editable by the user."
+              "description": "Effective instance-wide role keys (`app:...`): system grants plus the operator-assigned roles or, when none are assigned, the instance default role. Never editable by the user."
             }
           },
           "role_permissions": {

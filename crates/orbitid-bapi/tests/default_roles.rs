@@ -224,6 +224,8 @@ async fn explicit_assignments_win_and_reset_returns_to_the_default() {
     // Unknown users are a 404, not a silent no-op.
     let missing = harness.delete("/v1/users/user_missing/roles").await;
     assert_eq!(missing.status, StatusCode::NOT_FOUND);
+    let missing = harness.get("/v1/users/user_missing/roles").await;
+    assert_eq!(missing.status, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
@@ -434,12 +436,15 @@ async fn batched_claims_match_for_mixed_users() {
     // A console holder with no custom rows: the system grant never decides
     // the source, so they follow the default on top of it.
     let console_only = create_user(&harness, "batch-console@example.com").await;
-    harness
+    let pinned = harness
         .put(
             &format!("/v1/users/{console_only}/roles"),
             json!({ "roles": ["app:sys_admin"] }),
         )
         .await;
+    // A PUT naming only a system grant still records an explicit assignment.
+    assert_eq!(pinned.value()["source"], "assigned");
+    assert_eq!(pinned.value()["roles"], json!(["app:sys_admin"]));
     let reset = harness
         .delete(&format!("/v1/users/{console_only}/roles"))
         .await;
