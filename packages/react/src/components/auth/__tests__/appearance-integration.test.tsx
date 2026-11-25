@@ -266,3 +266,12 @@ describe("malformed theme class names", () => {
     expect(cardRoot()).not.toBeNull();
   });
 });
+
+describe("one scheme rule", () => {
+  it("renders the scheme the resolver keeps tokens for when a theme lists both schemes", () => {
+    const both = { name: "both", classNames: ["dark", "light"] };
+    renderAuth(<AuthCard title="Sign in"><p>body</p></AuthCard>, setupAuth({ signedIn: false }), { appearance: { baseTheme: [dark, both] } });
+    expect(cardRoot().className).not.toMatch(/(^|\s)dark(\s|$)/);
+    expect(cardRoot().style.getPropertyValue("--card")).toBe("");
+  });
+});

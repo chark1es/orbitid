@@ -15,6 +15,7 @@ import {
   type ElementPropsFn,
   type ResolvedAppearance,
 } from "../../../appearance";
+import { schemeOf } from "../../../appearance/resolve";
 import { useAuthRuntime } from "./w6";
 import {
   pageSchemeSnapshot,
@@ -75,14 +76,11 @@ export interface ThemeScope {
 
 /** The last `dark`/`light` class among the configured base themes, so `[dark, myBrandTheme]` stays dark. */
 function forcedTheme(themes: readonly BaseTheme[]): ResolvedTheme | null {
+  // Same rule as the resolver: the last scheme class wins, within a theme and across themes.
   for (let index = themes.length - 1; index >= 0; index -= 1) {
-    // An entry may hold several classes ("dark brand").
-    const entries = themes[index]?.classNames;
-    const classNames = (Array.isArray(entries) ? entries : [])
-      .filter((entry): entry is string => typeof entry === "string")
-      .flatMap((entry) => entry.split(/\s+/));
-    if (classNames.includes("dark")) return "dark";
-    if (classNames.includes("light")) return "light";
+    const theme = themes[index];
+    const scheme = theme ? schemeOf(theme) : null;
+    if (scheme) return scheme;
   }
   return null;
 }

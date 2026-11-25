@@ -170,6 +170,11 @@ describe("scheme presets inside one theme array", () => {
     expect(resolveAppearance({ baseTheme: [myDark, dark] }).cssVariables["--radius"]).toBe("9px");
   });
 
+  it("warn when classNames is not an array", () => {
+    resolveAppearance({ baseTheme: { name: "x", classNames: "dark" } as unknown as BaseTheme });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("not an array"));
+  });
+
   it("tolerate non-string class names when picking the scheme", () => {
     const broken = { name: "x", classNames: [null, 3, "dark"] } as unknown as BaseTheme;
     expect(() => resolveAppearance({ baseTheme: broken })).not.toThrow();

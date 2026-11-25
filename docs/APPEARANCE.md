@@ -57,7 +57,8 @@ Rules inside that order:
   sign-in submit its own look with `formButtonPrimary`.
 - **The scheme** (light or dark) comes from the active base themes (those of the last layer that sets
   `baseTheme`): the last `light`/`dark` theme among them wins, and in `[dark, light]` the earlier `dark` theme's
-  tokens are dropped too, so scheme and tokens agree. Without one, the instance's branding theme decides, then the
+  variables are dropped too, so scheme and tokens agree. That drops all of that theme's variables, typography,
+  radius and spacing included; put scheme-independent values in a theme without `dark`/`light`, or in `variables`. Without one, the instance's branding theme decides, then the
   page (`<html class="dark">`, `data-theme`, `color-scheme`), then the OS.
 - `unstyled` takes the last value set across layers. An element's own `unstyled` (true or false) beats it.
 - **Bad input does not crash.** `null` or `undefined` layers, themes and parts are skipped. A string `baseTheme`
@@ -189,7 +190,8 @@ appearance={{
 - A function that throws is ignored (with a development warning), so one bad override cannot break the form.
 - Every element also gets a stable class per key, `orbitid-<key>` (for example `orbitid-button
   orbitid-buttonPrimary orbitid-formButtonPrimary` on the sign-in submit), so plain CSS can target it. Parts named
-  with a component key also carry `data-orbitid-element="<key>"`.
+  with a component key also carry `data-orbitid-element="<key>"`, except `formFieldInputGroup`: the one-time code
+  library renders that row itself, so target it with `.orbitid-formFieldInputGroup`.
 
 There are two kinds of keys.
 
@@ -289,7 +291,7 @@ keys.
 | `formField` | One label + input + message group. |
 | `formFieldLabel` | Field label. |
 | `formFieldInput` | Field input (text, password, phone, select). |
-| `formFieldInputGroup` | The row that holds the one-time code slot groups. Takes classes and `unstyled`; a `style` override does not reach it. |
+| `formFieldInputGroup` | The row that holds the one-time code slot groups. Takes classes and `unstyled`; a `style` override does not reach it, and it has no `data-orbitid-element` attribute (use `.orbitid-formFieldInputGroup`). |
 | `formFieldInputShowPasswordButton` | Show/hide password toggle. |
 | `formFieldHintText` | Helper text under a field. |
 | `formFieldErrorText` | Validation message under a field. |

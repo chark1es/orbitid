@@ -88,13 +88,19 @@ function mergeElements(target: Record<string, AppearanceElement>, source: unknow
 
 const SCHEME_CLASSES = new Set(["dark", "light"]);
 
-/** The scheme a theme forces (`dark` or `light`, the last one in its classes), or `null` when it forces none. */
-function schemeOf(theme: BaseTheme): string | null {
+/**
+ * The scheme a theme forces (`dark` or `light`, the last one in its classes), or `null` when it forces none. The one
+ * rule both the resolver and the components' scheme pick use, so the scheme and the kept tokens always agree.
+ */
+export function schemeOf(theme: BaseTheme): "dark" | "light" | null {
+  if (theme.classNames !== undefined && !Array.isArray(theme.classNames)) {
+    devWarn(`appearance.baseTheme "${theme.name ?? "?"}" has classNames that is not an array. It was ignored.`);
+  }
   const names = Array.isArray(theme.classNames) ? theme.classNames : [];
-  let scheme: string | null = null;
+  let scheme: "dark" | "light" | null = null;
   for (const entry of names) {
     if (typeof entry !== "string") continue;
-    for (const name of entry.split(/\s+/)) if (SCHEME_CLASSES.has(name)) scheme = name;
+    for (const name of entry.split(/\s+/)) if (name === "dark" || name === "light") scheme = name;
   }
   return scheme;
 }
@@ -152,7 +158,7 @@ export function resolveAppearanceLayers(layers: readonly (Appearance | undefined
   // In `[dark, light]` the scheme ends up light, so the earlier `dark` preset's tokens must not be written either:
   // a scheme theme's variables apply only when it forces the final scheme. Same-scheme themes (`[myDark, dark]`)
   // still merge in order.
-  const finalScheme = activeThemes.reduce<string | null>((last, theme) => schemeOf(theme) ?? last, null);
+  const finalScheme = activeThemes.reduce<"dark" | "light" | null>((last, theme) => schemeOf(theme) ?? last, null);
   activeThemes.forEach((theme) => {
     const scheme = schemeOf(theme);
     if (scheme === null || scheme === finalScheme) {
