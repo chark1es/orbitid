@@ -79,6 +79,19 @@ describe("OAuth application billing portal", () => {
     });
   });
 
+  it("leaves the portal out of a save that did not change it", async () => {
+    const calls = mock();
+    renderPage(<Page />);
+    const { sheet } = await openEdit();
+    fireEvent.change(within(sheet).getByLabelText(/Application name/), { target: { value: "Renamed" } });
+    fireEvent.click(within(sheet).getByRole("button", { name: /Save changes/ }));
+    await waitFor(() => {
+      const patch = calls.find((call) => call.method === "PATCH");
+      expect(patch?.body?.name).toBe("Renamed");
+      expect(patch?.body).not.toHaveProperty("billing_portal_url");
+    });
+  });
+
   it("refuses a portal that is not https before sending anything", async () => {
     const calls = mock();
     renderPage(<Page />);
