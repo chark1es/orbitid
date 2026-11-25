@@ -35,35 +35,42 @@ function toAccountApplication(resource: UserOAuthApplicationResource): AccountAp
   };
 }
 
+const NO_APPLICATIONS: UserApplications = { applications: [], loaded: true };
+const APPLICATIONS_LOADING: UserApplications = { applications: [], loaded: false };
+
 /**
  * The OAuth applications the signed-in user may use (`user.getOAuthApplications()`). A failed read, or an SDK
  * build without the method, is an empty list: the Apps and Billing pages then stay hidden.
  */
 export function useUserApplications(orbit: OrbitInstance, userId: string | null): UserApplications {
-  const [state, setState] = useState<UserApplications>({ applications: [], loaded: false });
+  // Tagged with the user it was read for and only returned for that user, so after a session switch the previous
+  // account's applications never render, not even for the frame before the effect runs.
+  const [state, setState] = useState<{ userId: string | null; result: UserApplications }>({
+    userId: null,
+    result: APPLICATIONS_LOADING,
+  });
+  const unavailable = !userId || !orbit.user || typeof orbit.user.getOAuthApplications !== "function";
   useEffect(() => {
-    let cancelled = false;
     const user = orbit.user;
     const read = user?.getOAuthApplications;
-    if (!userId || !user || typeof read !== "function") {
-      setState({ applications: [], loaded: true });
-      return;
-    }
-    // A session switch must never show the previous account's applications while the new list loads.
-    setState({ applications: [], loaded: false });
+    if (!userId || !user || typeof read !== "function") return;
+    let cancelled = false;
     read
       .call(user)
       .then((list) => {
-        if (!cancelled) setState({ applications: (Array.isArray(list) ? list : []).map(toAccountApplication), loaded: true });
+        if (!cancelled) {
+          setState({ userId, result: { applications: (Array.isArray(list) ? list : []).map(toAccountApplication), loaded: true } });
+        }
       })
       .catch(() => {
-        if (!cancelled) setState({ applications: [], loaded: true });
+        if (!cancelled) setState({ userId, result: NO_APPLICATIONS });
       });
     return () => {
       cancelled = true;
     };
-  }, [orbit, userId]);
-  return state;
+  }, [orbit, userId, unavailable]);
+  if (unavailable) return NO_APPLICATIONS;
+  return state.userId === userId ? state.result : APPLICATIONS_LOADING;
 }
 
 function BillingLink({ url, label }: { url: string; label: string }) {

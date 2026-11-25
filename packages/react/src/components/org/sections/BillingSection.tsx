@@ -25,12 +25,14 @@ export function useOrganizationBilling(
   enabled: boolean,
 ): OrganizationBillingState {
   const instance = useOrbitID();
-  const [state, setState] = useState<OrganizationBillingState>(IDLE);
+  // The result is tagged with the organization it belongs to and only returned for that organization, so after a
+  // switch the previous organization's portal never renders, not even for the frame before the effect runs.
+  const [state, setState] = useState<{ organizationId: string | null; billing: OrganizationBillingState }>({
+    organizationId: null,
+    billing: IDLE,
+  });
   const organizationId = organization?.id ?? null;
   useEffect(() => {
-    // Every change of organization starts from "not loaded": the previous organization's portal must never show,
-    // even for the length of one request, after a switch.
-    setState(IDLE);
     if (!organization || !enabled) return;
     let cancelled = false;
     const read: Promise<OrganizationBillingResource> =
@@ -43,17 +45,20 @@ export function useOrganizationBilling(
     read
       .then((billing) => {
         if (cancelled) return;
-        setState({ portalUrl: safeHttpsUrl(billing?.portalUrl ?? billing?.portal_url), loaded: true, failed: false });
+        setState({
+          organizationId: organization.id,
+          billing: { portalUrl: safeHttpsUrl(billing?.portalUrl ?? billing?.portal_url), loaded: true, failed: false },
+        });
       })
       .catch(() => {
-        if (!cancelled) setState({ portalUrl: null, loaded: true, failed: true });
+        if (!cancelled) setState({ organizationId: organization.id, billing: { portalUrl: null, loaded: true, failed: true } });
       });
     return () => {
       cancelled = true;
     };
     // The organization object changes identity on every SDK emit; its id is what matters.
   }, [organizationId, enabled, instance]);
-  return state;
+  return enabled && organizationId !== null && state.organizationId === organizationId ? state.billing : IDLE;
 }
 
 /** The built-in organization Billing page: a link out to the operator-configured billing portal. */
