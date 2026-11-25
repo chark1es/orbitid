@@ -8446,6 +8446,14 @@
                   "private_metadata": {
                     "type": "object",
                     "additionalProperties": {}
+                  },
+                  "billing_portal_url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "uri",
+                    "description": "External billing portal: an absolute `https` URL (at most 2048 characters, no embedded credentials, no private or loopback IP address unless private networks are allowed). OrbitID does not process payments; the prebuilt account components link here. `null` or `\"\"` clears it; omit it to leave it unchanged. Anything else answers `422 form_param_format_invalid` with `meta.param_name = \"billing_portal_url\"`."
                   }
                 },
                 "required": [
@@ -8569,6 +8577,14 @@
                   },
                   "admin_delete_enabled": {
                     "type": "boolean"
+                  },
+                  "billing_portal_url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "uri",
+                    "description": "External billing portal: an absolute `https` URL (at most 2048 characters, no embedded credentials, no private or loopback IP address unless private networks are allowed). OrbitID does not process payments; the prebuilt account components link here. `null` or `\"\"` clears it; omit it to leave it unchanged. Anything else answers `422 form_param_format_invalid` with `meta.param_name = \"billing_portal_url\"`."
                   }
                 }
               }
@@ -20151,6 +20167,14 @@
                   "organization_id": {
                     "type": "string",
                     "description": "Owning organization id. Leave it out for an instance-wide application (any user may sign in). An unknown id is `422`."
+                  },
+                  "billing_portal_url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "uri",
+                    "description": "External billing portal: an absolute `https` URL (at most 2048 characters, no embedded credentials, no private or loopback IP address unless private networks are allowed). OrbitID does not process payments; the prebuilt account components link here. `null` or `\"\"` clears it; omit it to leave it unchanged. Anything else answers `422 form_param_format_invalid` with `meta.param_name = \"billing_portal_url\"`."
                   }
                 },
                 "required": [
@@ -20307,6 +20331,14 @@
                       "null"
                     ],
                     "description": "Owning organization id, or `null` to make the application instance-wide. Assigning or changing the owner revokes, in the same transaction, the codes and tokens of users the new owner does not entitle (neither members nor granted access). Making it instance-wide deletes its access grants. Leave the field out to keep the current owner."
+                  },
+                  "billing_portal_url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "uri",
+                    "description": "External billing portal: an absolute `https` URL (at most 2048 characters, no embedded credentials, no private or loopback IP address unless private networks are allowed). OrbitID does not process payments; the prebuilt account components link here. `null` or `\"\"` clears it; omit it to leave it unchanged. Anything else answers `422 form_param_format_invalid` with `meta.param_name = \"billing_portal_url\"`."
                   }
                 }
               }
@@ -21314,6 +21346,117 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/v1/client/me/oauth_applications": {
+      "get": {
+        "tags": [
+          "Users (frontend)"
+        ],
+        "summary": "List the OAuth applications I can use",
+        "operationId": "listMyOAuthApplications",
+        "description": "The applications the signed-in user may obtain tokens for, by the same rule the OAuth endpoints enforce (see APP_ACCESS.md): instance-wide applications, applications owned by an organization the user belongs to, and applications an operator granted them. Sorted by name, at most 500. A pending session (two-factor setup required) gets `403 session_pending`.",
+        "security": [
+          {
+            "ClientCookie": []
+          },
+          {
+            "SessionToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "response": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/UserOAuthApplication"
+                      }
+                    }
+                  },
+                  "required": [
+                    "response"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/v1/client/organizations/{id}/billing": {
+      "get": {
+        "tags": [
+          "Organizations"
+        ],
+        "summary": "Read the organization's billing portal",
+        "operationId": "getOrganizationBilling",
+        "description": "The operator-configured external billing portal. Requires the `org:sys_billing:manage` permission (seeded on `org:admin`): a member without it gets `403 org_permission_required`, a non-member `404 not_a_member_in_organization`.",
+        "security": [
+          {
+            "ClientCookie": []
+          },
+          {
+            "SessionToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Organization id (`org_…`).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "response": {
+                      "$ref": "#/components/schemas/OrganizationBilling"
+                    }
+                  },
+                  "required": [
+                    "response"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -22659,6 +22802,14 @@
           "updated_at": {
             "type": "integer",
             "description": "Epoch milliseconds."
+          },
+          "billing_portal_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "description": "Backend API only: the operator-configured external billing portal, or `null`. The Frontend API omits it; billing managers read it from `GET /v1/client/organizations/{id}/billing`."
           }
         },
         "required": [
@@ -23894,6 +24045,14 @@
             ],
             "description": "Owning organization (`org_…`). `null` is an instance-wide application any user may sign in to. When set, only the organization's members and users with an access grant may obtain codes or tokens; everyone else gets `access_denied` from `/oauth/authorize` and `invalid_grant` from `/oauth/token`."
           },
+          "billing_portal_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "description": "External billing portal for the application's users, or `null`. Listed to every user who may use the application on `GET /v1/client/me/oauth_applications`."
+          },
           "created_at": {
             "type": "integer",
             "description": "Epoch milliseconds."
@@ -23919,6 +24078,7 @@
           "id_token_lifetime_seconds",
           "groups_claim",
           "organization_id",
+          "billing_portal_url",
           "created_at",
           "updated_at"
         ]
@@ -26258,6 +26418,112 @@
         "required": [
           "data",
           "total_count"
+        ]
+      },
+      "OrganizationBilling": {
+        "type": "object",
+        "description": "An organization's billing settings as its billing managers see them. OrbitID stores no plans or invoices.",
+        "properties": {
+          "object": {
+            "const": "organization_billing"
+          },
+          "organization_id": {
+            "type": "string"
+          },
+          "portal_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "description": "The operator-configured external billing portal (an `https` URL), or `null`."
+          }
+        },
+        "required": [
+          "object",
+          "organization_id",
+          "portal_url"
+        ]
+      },
+      "UserOAuthApplication": {
+        "type": "object",
+        "description": "An OAuth application the signed-in user may use. Carries no secrets, redirect URIs or token settings.",
+        "properties": {
+          "object": {
+            "const": "user_oauth_application"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "organization_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Owning organization, or `null` for an instance-wide application."
+          },
+          "organization": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "slug": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "slug"
+            ]
+          },
+          "access": {
+            "type": "string",
+            "enum": [
+              "instance",
+              "membership",
+              "grant"
+            ],
+            "description": "Why the user may use it: instance-wide, membership in the owning organization, or an operator access grant."
+          },
+          "billing_portal_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "created_at": {
+            "type": "integer",
+            "description": "Epoch milliseconds."
+          }
+        },
+        "required": [
+          "object",
+          "id",
+          "name",
+          "client_id",
+          "organization_id",
+          "organization",
+          "access",
+          "billing_portal_url",
+          "created_at"
         ]
       }
     },

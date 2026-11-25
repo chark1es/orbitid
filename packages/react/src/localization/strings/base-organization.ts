@@ -72,6 +72,14 @@ export const baseOrganizationStrings = {
       domains: "Domains",
       membershipRequests: "Requests",
       apiKeys: "API keys",
+      billing: "Billing",
+    },
+    billing: {
+      title: "Billing",
+      description: "Manage this organization's billing.",
+      manage: "Manage billing",
+      notConfigured: "Billing is not set up for this organization.",
+      loadFailed: "Billing details could not be loaded.",
     },
     start: {
       headerTitle__general: "General",

@@ -8,6 +8,7 @@ import type {
   PhoneNumberJSON,
   SessionJSON,
   UserJSON,
+  UserOAuthApplicationJSON,
 } from "@orbitid/shared";
 import { startRegistration, type PublicKeyCredentialCreationOptionsJSON } from "@simplewebauthn/browser";
 import type { FapiClient } from "../fapi";
@@ -34,6 +35,34 @@ import { UserOrganizationInvitation as UserOrganizationInvitationClass } from ".
 import type { UserOrganizationInvitation, UserOrganizationInvitationWireJSON } from "./organization-user-invitation";
 import { Session } from "./session";
 import type { TokenCache } from "../token-cache";
+
+/** An OAuth application the signed-in user may use, from {@link User.getOAuthApplications}. */
+export interface UserOAuthApplication {
+  id: string;
+  name: string;
+  clientId: string;
+  /** `null` for an instance-wide application. */
+  organizationId: string | null;
+  organization: { id: string; name: string; slug: string | null } | null;
+  /** Why the user may use it: instance-wide, organization membership, or an operator access grant. */
+  access: "instance" | "membership" | "grant";
+  /** The operator-configured external billing portal, or `null`. */
+  billingPortalUrl: string | null;
+  createdAt: number;
+}
+
+function toUserOAuthApplication(json: UserOAuthApplicationJSON): UserOAuthApplication {
+  return {
+    id: json.id,
+    name: json.name,
+    clientId: json.client_id,
+    organizationId: json.organization_id ?? null,
+    organization: json.organization ?? null,
+    access: json.access,
+    billingPortalUrl: json.billing_portal_url ?? null,
+    createdAt: json.created_at,
+  };
+}
 
 export interface UpdateUserParams {
   firstName?: string | null;
@@ -315,6 +344,15 @@ export class User {
   /** Revokes one remembered browser; its cookie stops working for the second factor. */
   async revokeTrustedDevice(deviceId: string): Promise<void> {
     await this.fapi.del(`/v1/client/me/trusted_devices/${deviceId}`);
+  }
+
+  /**
+   * The OAuth applications this user may use (instance-wide, owned by an organization they belong to, or granted
+   * to them by an operator), sorted by name.
+   */
+  async getOAuthApplications(): Promise<UserOAuthApplication[]> {
+    const data = await fetchData<unknown>(this.fapi, "GET", "/v1/client/me/oauth_applications");
+    return toList(data, (item) => toUserOAuthApplication(item as UserOAuthApplicationJSON));
   }
 
   async leaveOrganization(organizationId: string): Promise<void> {

@@ -8,6 +8,7 @@ export const ADMIN_PERMISSIONS = [
   "org:sys_memberships:manage",
   "org:sys_domains:read",
   "org:sys_domains:manage",
+  "org:sys_billing:manage",
 ];
 
 export const MEMBER_PERMISSIONS = ["org:sys_memberships:read", "org:sys_domains:read"];

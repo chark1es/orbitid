@@ -13,6 +13,7 @@ use orbitid_core::models::{ClientRow, SessionRow, UserRow};
 use orbitid_core::state::AppState;
 use orbitid_identity::client_auth::{get_or_create_client, require_active_user};
 
+pub mod applications;
 pub mod external;
 pub mod identifiers;
 pub mod mfa;
@@ -171,6 +172,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/v1/client/me/trusted_devices",
             get(sessions::list_trusted_devices),
+        )
+        .route(
+            "/v1/client/me/oauth_applications",
+            get(applications::list_oauth_applications),
         )
         .route(
             "/v1/client/me/trusted_devices/{id}",

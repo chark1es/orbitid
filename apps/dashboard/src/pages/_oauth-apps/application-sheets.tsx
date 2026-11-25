@@ -114,6 +114,21 @@ export function ApplicationFormSheet({ ctl }: { ctl: OAuthAppsController }) {
             </p>
           </Notice>
         ) : null}
+        <Field
+          label="Billing portal URL"
+          htmlFor="oauth-app-billing-portal"
+          description="Optional. Users who can sign in to this application get a Manage billing link to it on their account page. Must be https."
+        >
+          <Input
+            id="oauth-app-billing-portal"
+            type="url"
+            inputMode="url"
+            value={form.billingPortalUrl}
+            onChange={(event) => setForm((current) => ({ ...current, billingPortalUrl: event.target.value }))}
+            placeholder="https://billing.example.com/portal"
+            className="font-data text-xs"
+          />
+        </Field>
         <Field label="Redirect URIs" required description="Exact match. Native apps may use a custom scheme.">
           <StringListEditor
             values={form.redirectUris}

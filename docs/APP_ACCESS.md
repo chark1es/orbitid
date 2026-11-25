@@ -30,6 +30,9 @@ The token endpoint re-checks the rule inside its issuing transaction (under the 
 a code issued just before access was lost cannot be exchanged, and a refresh token stops rotating even if the change
 and the refresh raced.
 
+Signed-in users can see which applications they may use with `GET /v1/client/me/oauth_applications`, which applies
+the same rule. `<UserProfile>` shows the list on its **Apps** page (see [ACCOUNT_PAGES.md](ACCOUNT_PAGES.md)).
+
 ## Granting access across organizations
 
 Access grants are operator-only (secret key or dashboard session); there is no Frontend API for them.

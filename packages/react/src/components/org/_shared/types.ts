@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { Appearance } from "../../../appearance";
+import type { ProfileLinkProps, ProfilePageProps } from "../../../lib/profile-pages";
 
 export type { Appearance };
 
@@ -18,19 +19,8 @@ export interface RoleOption {
   name: string;
 }
 
-export interface OrgProfileCustomPageProps {
-  /** Navigation label. */
-  label: string;
-  /** Section slug used in the URL (`#/team`). */
-  url: string;
-  /** Optional icon shown next to the label. */
-  labelIcon?: ReactNode;
-  children?: ReactNode;
-}
+/** `<OrganizationProfile.Page>`: a custom page, or a reference to a built-in page (see `ProfilePageProps`). */
+export type OrgProfileCustomPageProps = ProfilePageProps;
 
-export interface OrgProfileCustomLinkProps {
-  label: string;
-  /** Absolute or relative href rendered in the navbar. */
-  url: string;
-  labelIcon?: ReactNode;
-}
+/** `<OrganizationProfile.Link>`: an external entry in the navigation. */
+export type OrgProfileCustomLinkProps = ProfileLinkProps;

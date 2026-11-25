@@ -11,6 +11,7 @@ export const ORG_PERMISSIONS = {
   membershipsManage: "org:sys_memberships:manage",
   domainsRead: "org:sys_domains:read",
   domainsManage: "org:sys_domains:manage",
+  billingManage: "org:sys_billing:manage",
 } as const;
 
 const SYSTEM_PERMISSIONS: readonly string[] = Object.values(ORG_PERMISSIONS);

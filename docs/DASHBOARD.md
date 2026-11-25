@@ -121,7 +121,7 @@ serves both). Set `ORBITID_DEV_API_URL` to a non-default port only together with
 | `/` | Overview | Instance stats, the sign-up chart and the live activity board. Shows the publishable key and database; secret keys stay out of the dashboard. |
 | `/users` | Users | Server-side search, filters, sorting and pagination; bulk actions. |
 | `/users/:id` | User detail | Profile, identifiers (read-only: passwords, MFA and identifiers are the user's to change), metadata, sessions, organizations, instance roles, cross-organization application access, ban/lock, delete. |
-| `/organizations`, `/organizations/:id` | Organizations | Members, invitations, domains (including enrollment mode and affiliation-code verification), the OAuth applications the organization owns, membership requests and roles. |
+| `/organizations`, `/organizations/:id` | Organizations | Members, invitations, domains (including enrollment mode and affiliation-code verification), the OAuth applications the organization owns, membership requests and roles. The **Settings** tab sets the organization's billing portal URL. |
 | `/sessions` | Sessions | Every session on the instance, with a revoke action. |
 | `/invitations`, `/waitlist` | Invitations, Waitlist | Instance-level invitations and the waitlist. |
 | `/restrictions` | Restrictions | Allowlist and blocklist entries, sign-up restrictions. |
@@ -136,7 +136,7 @@ serves both). Set `ORBITID_DEV_API_URL` to a non-default port only together with
 | `/connect` | Connect your app | Copy-ready environment blocks for a new application, per framework, plus a setup check. |
 | `/api-keys` | API keys | Issue, verify and revoke API keys. |
 | `/m2m` | M2M | Machines and machine tokens. |
-| `/oauth-apps` | OAuth apps | OrbitID as an OIDC provider: instance provider options (token format, device grant), per-app endpoints and each app's owner (instance-wide or one organization). |
+| `/oauth-apps` | OAuth apps | OrbitID as an OIDC provider: instance provider options (token format, device grant), per-app endpoints, each app's owner (instance-wide or one organization) and its billing portal URL. |
 | `/enterprise-sso` | Enterprise SSO | SAML 2.0 and OIDC connections routed by email domain. |
 | `/webhooks` | Webhooks | Endpoints, delivery log, retry, test event and signing secret. |
 | `/audit-logs` | Audit logs | Every recorded operator and server action. |

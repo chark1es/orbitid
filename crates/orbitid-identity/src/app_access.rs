@@ -161,3 +161,87 @@ pub async fn organization_owns_applications_on(
     .fetch_one(&mut *conn)
     .await?)
 }
+
+/// Most applications [`applications_for_user`] returns. The account page lists
+/// them without paging; an instance with more instance-wide applications than
+/// this is not a realistic account-page case.
+pub const MAX_LISTED_APPLICATIONS: i64 = 500;
+
+/// The OAuth applications `user_id` may use, by the same predicate the issuers
+/// check, sorted by name. Read-only and unlocked: it backs the account page,
+/// never a grant decision.
+pub async fn applications_for_user(
+    pool: &sqlx::PgPool,
+    user_id: &str,
+) -> Result<Vec<orbitid_core::resources::UserOauthApplicationJson>> {
+    use orbitid_core::resources::{UserOauthApplicationJson, UserOauthApplicationOrganizationJson};
+
+    type Row = (
+        String,         // id
+        String,         // name
+        String,         // client_id
+        Option<String>, // organization_id
+        Option<String>, // billing_portal_url
+        i64,            // created_at
+        Option<String>, // organization name
+        Option<String>, // organization slug
+        bool,           // member of the owning organization
+    );
+    let rows: Vec<Row> = sqlx::query_as(&format!(
+        "SELECT a.id, a.name, a.client_id, a.organization_id, a.billing_portal_url, a.created_at, \
+                o.name, o.slug, \
+                EXISTS (SELECT 1 FROM organization_memberships m \
+                        WHERE m.organization_id = a.organization_id AND m.user_id = $1) \
+         FROM oauth_applications a \
+         LEFT JOIN organizations o ON o.id = a.organization_id \
+         WHERE {} \
+         ORDER BY lower(a.name), a.id \
+         LIMIT $2",
+        entitled("$1")
+    ))
+    .bind(user_id)
+    .bind(MAX_LISTED_APPLICATIONS)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(
+            |(
+                id,
+                name,
+                client_id,
+                organization_id,
+                billing,
+                created_at,
+                org_name,
+                org_slug,
+                member,
+            )| {
+                let access = match (&organization_id, member) {
+                    (None, _) => "instance",
+                    (Some(_), true) => "membership",
+                    (Some(_), false) => "grant",
+                };
+                let organization =
+                    organization_id
+                        .as_ref()
+                        .map(|org_id| UserOauthApplicationOrganizationJson {
+                            id: org_id.clone(),
+                            name: org_name.clone().unwrap_or_default(),
+                            slug: org_slug.clone(),
+                        });
+                UserOauthApplicationJson {
+                    object: "user_oauth_application".into(),
+                    id,
+                    name,
+                    client_id,
+                    organization_id,
+                    organization,
+                    access: access.into(),
+                    billing_portal_url: billing,
+                    created_at,
+                }
+            },
+        )
+        .collect())
+}

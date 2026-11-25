@@ -14,6 +14,7 @@ use orbitid_identity::caller::{resolve_caller, try_resolve_caller, Caller};
 use orbitid_identity::org_shared::{org_access, ListParams, OrgAccess};
 use serde_json::{json, Value};
 
+pub mod billing;
 pub mod current_user;
 pub mod domains;
 pub mod invitations;
@@ -124,6 +125,8 @@ pub fn router() -> Router<AppState> {
         )
         // roles
         .route("/v1/client/organizations/{id}/roles", get(requests::roles))
+        // billing (operator-configured external portal)
+        .route("/v1/client/organizations/{id}/billing", get(billing::get))
 }
 
 // ───────────── shared helpers (`modules/org-client/shared.ts`, `orgs/shared.ts`) ─────────────

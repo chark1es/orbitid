@@ -56,6 +56,20 @@ export function createFakeFetch(
       return respond({ response: memberResource(org, selfMember(org.id)!) });
     }
 
+    const billing = /^\/organizations\/([^/]+)\/billing$/.exec(path);
+    if (method === "GET" && billing) {
+      const org = backend.orgs.find((candidate) => candidate.id === decodeURIComponent(billing[1]!));
+      if (!org) return respond(apiError("organization_not_found"), 404);
+      const member = selfMember(org.id);
+      if (!member) return respond(apiError("not_a_member_in_organization"), 404);
+      if (!(member.permissions ?? []).includes("org:sys_billing:manage")) {
+        return respond(apiError("org_permission_required"), 403);
+      }
+      return respond({
+        response: { object: "organization_billing", organization_id: org.id, portal_url: org.billingPortalUrl ?? null },
+      });
+    }
+
     const apiKeyRevoke = /^\/(?:me|organizations\/([^/]+))\/api_keys\/([^/]+)\/revoke$/.exec(path);
     if (method === "POST" && apiKeyRevoke) {
       const id = decodeURIComponent(apiKeyRevoke[2]!);

@@ -20,6 +20,8 @@ export interface FakeOrg {
   hasImage?: boolean;
   maxAllowedMemberships?: number;
   adminDeleteEnabled?: boolean;
+  /** Operator-configured billing portal served by `GET /organizations/:id/billing`. */
+  billingPortalUrl?: string | null;
 }
 
 export interface FakeMember {

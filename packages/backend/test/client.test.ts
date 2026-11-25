@@ -285,6 +285,33 @@ describe("createOrbitIdClient", () => {
     expect(removed.deleted).toBe(true);
   });
 
+  it("sets billing portal URLs on organizations and OAuth applications", async () => {
+    const { orbit, backend } = client((call) => {
+      const key = `${call.method} ${call.path}`;
+      if (key === "PATCH /v1/organizations/org_1") {
+        return { body: { object: "organization", id: "org_1", billing_portal_url: "https://pay.example.com/acme" } };
+      }
+      if (key === "POST /v1/oauth_applications") {
+        return { status: 201, body: { object: "oauth_application", id: "oa_2", billing_portal_url: "https://pay.example.com/app" } };
+      }
+      return { status: 404, body: { errors: [{ code: "resource_not_found", message: key }] } };
+    });
+
+    const organization = await orbit.organizations.updateOrganization("org_1", { billingPortalUrl: "https://pay.example.com/acme" });
+    expect(organization.billingPortalUrl).toBe("https://pay.example.com/acme");
+    expect(backend.last("PATCH", "/v1/organizations/org_1")?.body).toEqual({ billing_portal_url: "https://pay.example.com/acme" });
+    await orbit.organizations.updateOrganization("org_1", { billingPortalUrl: null });
+    expect(backend.last("PATCH", "/v1/organizations/org_1")?.body).toEqual({ billing_portal_url: null });
+
+    const application = await orbit.oauthApplications.createOAuthApplication({
+      name: "Acme",
+      redirectUris: ["https://acme.test/cb"],
+      billingPortalUrl: "https://pay.example.com/app",
+    });
+    expect(application.billingPortalUrl).toBe("https://pay.example.com/app");
+    expect(backend.last("POST", "/v1/oauth_applications")?.body).toMatchObject({ billing_portal_url: "https://pay.example.com/app" });
+  });
+
   it("rotates the signing key and configures custom JWT template signing", async () => {
     const { orbit, backend } = client((call) => {
       const key = `${call.method} ${call.path}`;

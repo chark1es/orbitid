@@ -214,6 +214,18 @@ export interface OrganizationJSON {
   created_by: string | null;
   created_at: number;
   updated_at: number;
+  /**
+   * Backend API only: the operator-configured external billing portal (`null` when none). Members with
+   * `org:sys_billing:manage` read it from `GET /v1/client/organizations/{id}/billing` instead.
+   */
+  billing_portal_url?: string | null;
+}
+/** `GET /v1/client/organizations/{id}/billing`: what an organization's billing managers see. */
+export interface OrganizationBillingJSON {
+  object: "organization_billing";
+  organization_id: string;
+  /** The operator-configured external billing portal (an https URL), or `null`. */
+  portal_url: string | null;
 }
 export interface OrganizationMembershipJSON {
   object: "organization_membership";
@@ -344,7 +356,24 @@ export interface OAuthApplicationJSON {
   groups_claim: "none" | "organizations" | "roles" | "all";
   /** Owning organization. `null` is an instance-wide application any user may sign in to. */
   organization_id: string | null;
+  /** External billing portal (an https URL) for the application's users, or `null`. */
+  billing_portal_url: string | null;
   created_at: number; updated_at: number;
+}
+/**
+ * An OAuth application the signed-in user may use (`GET /v1/client/me/oauth_applications`), computed with the
+ * application access rule (see docs/APP_ACCESS.md). No secrets or redirect URIs.
+ */
+export interface UserOAuthApplicationJSON {
+  object: "user_oauth_application";
+  id: string; name: string; client_id: string;
+  /** `null` for an instance-wide application. */
+  organization_id: string | null;
+  organization: { id: string; name: string; slug: string | null } | null;
+  /** Why the user may use it. */
+  access: "instance" | "membership" | "grant";
+  billing_portal_url: string | null;
+  created_at: number;
 }
 /**
  * Lets one user use one organization-owned OAuth application without being a member of the owning organization.

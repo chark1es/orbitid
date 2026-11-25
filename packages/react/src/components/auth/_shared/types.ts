@@ -64,7 +64,8 @@ export interface UserButtonProps {
   children?: React.ReactNode;
 }
 
-export const USER_PROFILE_PAGES = ["profile", "security"] as const;
+/** Built-in `<UserProfile>` pages, in their default order. Organizations, Apps, Billing and API keys only show when they apply. */
+export const USER_PROFILE_PAGES = ["profile", "security", "organizations", "apps", "billing", "api-keys"] as const;
 export type UserProfilePageId = (typeof USER_PROFILE_PAGES)[number] | (string & {});
 
 export interface UserProfileProps {
@@ -73,6 +74,10 @@ export interface UserProfileProps {
   appearance?: AuthAppearance;
   /** Page shown initially. Defaults to the first available page. */
   defaultPage?: UserProfilePageId;
+  /**
+   * `<UserProfile.Page>` / `<UserProfile.Link>` elements: custom pages and links, and references to built-in
+   * pages that reorder, hide or fill them (`<UserProfile.Page label="billing">…</UserProfile.Page>`).
+   */
   children?: React.ReactNode;
   /** Wrapper rendered by `<UserButton>` in modal mode. */
   __modal?: boolean;

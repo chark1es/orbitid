@@ -1,4 +1,4 @@
-import { Children, isValidElement, useState, type ReactElement, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Alert, AlertDescription, Badge, Button } from "@orbitid/ui";
 import { useLocalizations } from "../../localization";
 import { useRouter } from "../../lib/routing";
@@ -7,6 +7,13 @@ import { OrgAvatar } from "./_shared/OrgAvatar";
 import { OrgRoot } from "./_shared/OrgRoot";
 import { PermissionGate } from "./_shared/PermissionGate";
 import { MembersSection } from "./sections/MembersSection";
+import { BillingSection, useOrganizationBilling } from "./sections/BillingSection";
+import {
+  normalizePageSlug,
+  parseProfileChildren,
+  resolveProfileNav,
+  type BuiltInProfilePage,
+} from "../../lib/profile-pages";
 import { useDebouncedValue, useOrganizationRoles, useOrgScope, useSelfUser } from "./_shared/hooks";
 import { ORG_PERMISSIONS, roleLabel } from "./_shared/utils";
 import type {
@@ -22,25 +29,17 @@ export interface OrganizationProfileProps extends CommonOrgProps {
   /** Base path used by `routing="path"`/`"hash"`. */
   path?: string;
   afterLeaveOrganizationUrl?: string;
-  /** Custom `<OrganizationProfile.Page>` / `.Link` elements. */
+  /**
+   * `<OrganizationProfile.Page>` / `.Link` elements: custom pages and links, and references to built-in pages
+   * (`general`, `members`, `billing`, `api-keys`) that reorder, hide or fill them.
+   */
   children?: ReactNode;
   /** Internal: modal hosts close their dialog when the user leaves or deletes the organization. */
   onLeaveOrganization?: () => void;
 }
 
-interface OrgProfileNavSection {
-  slug: string;
-  label: string;
-  labelIcon?: ReactNode;
-  content: ReactNode;
-}
-
-const BUILT_IN_SLUGS = ["general", "members", "api-keys"];
-
-function normalizeSlug(value: string): string {
-  const slug = value.replace(/^\/+/, "").replace(/\/+$/, "");
-  return slug.length > 0 ? slug : BUILT_IN_SLUGS[0]!;
-}
+/** Built-in organization profile pages, in their default order. Billing and API keys only show when they apply. */
+export const ORGANIZATION_PROFILE_PAGES = ["general", "members", "billing", "api-keys"] as const;
 
 function OrganizationProfilePage(_props: OrgProfileCustomPageProps) {
   return null;
@@ -52,7 +51,7 @@ function OrganizationProfileLink(_props: OrgProfileCustomLinkProps) {
 
 /**
  * Full organization profile: general settings (name/slug/logo, domains, danger zone), members
- * (members / invitations / requests) and API keys, with `Page`/`Link` nav customization.
+ * (members / invitations / requests), billing and API keys, with `Page`/`Link` nav customization.
  */
 function OrganizationProfileRoot(props: OrganizationProfileProps) {
   return (
@@ -83,13 +82,16 @@ function OrganizationProfileView({
   const self = useSelfUser();
   const { roles } = useOrganizationRoles(organization, Boolean(organization));
 
-  const customPages = Children.toArray(children).filter(
-    (child): child is ReactElement<OrgProfileCustomPageProps> =>
-      isValidElement(child) && child.type === OrganizationProfilePage,
+  const parsed = parseProfileChildren(
+    children,
+    OrganizationProfilePage,
+    OrganizationProfileLink,
+    ORGANIZATION_PROFILE_PAGES,
   );
-  const customLinks = Children.toArray(children).filter(
-    (child): child is ReactElement<OrgProfileCustomLinkProps> =>
-      isValidElement(child) && child.type === OrganizationProfileLink,
+  const canManageBilling = can(ORG_PERMISSIONS.billingManage);
+  const billing = useOrganizationBilling(
+    organization,
+    canManageBilling && !parsed.hidden.has("billing") && !parsed.overridden.has("billing"),
   );
 
   const canManageMembers = can(ORG_PERMISSIONS.membershipsManage);
@@ -114,9 +116,9 @@ function OrganizationProfileView({
     );
   }
 
-  const sections: OrgProfileNavSection[] = [
+  const sections: BuiltInProfilePage[] = [
     {
-      slug: "general",
+      id: "general",
       label: t("organizationProfile.navbar.general"),
       content: (
         <GeneralSection
@@ -133,7 +135,7 @@ function OrganizationProfileView({
       ),
     },
     {
-      slug: "members",
+      id: "members",
       label: t("organizationProfile.navbar.members"),
       content: (
         <MembersSection
@@ -149,9 +151,23 @@ function OrganizationProfileView({
     },
   ];
 
+  // Billing is for members holding `org:sys_billing:manage`, custom billing content included. It shows when the
+  // developer supplied that content or the operator configured a billing portal for the organization.
+  if (canManageBilling && (parsed.customContent.has("billing") || billing.portalUrl || billing.failed)) {
+    sections.push({
+      id: "billing",
+      label: t("organizationProfile.navbar.billing"),
+      content: (
+        <PermissionGate membership={membership} permission={ORG_PERMISSIONS.billingManage}>
+          <BillingSection billing={billing} />
+        </PermissionGate>
+      ),
+    });
+  }
+
   if (canManageProfile) {
     sections.push({
-      slug: "api-keys",
+      id: "api-keys",
       label: t("organizationProfile.navbar.apiKeys"),
       content: (
         <PermissionGate membership={membership} permission={ORG_PERMISSIONS.profileManage}>
@@ -161,20 +177,11 @@ function OrganizationProfileView({
     });
   }
 
-  for (const page of customPages) {
-    const slug = normalizeSlug(page.props.url);
-    if (sections.some((section) => section.slug === slug)) continue;
-    sections.push({
-      slug,
-      label: page.props.label,
-      labelIcon: page.props.labelIcon,
-      content: page.props.children,
-    });
-  }
-
-  const currentSlug = normalizeSlug(router.path);
-  const activeSection =
-    sections.find((section) => section.slug === currentSlug) ?? sections[0]!;
+  const nav = resolveProfileNav(sections, parsed);
+  const pages = nav.filter((entry) => entry.type === "page");
+  const currentSlug = normalizePageSlug(router.path);
+  // A page that is not (or not yet) available falls back to the first page.
+  const activeSection = pages.find((section) => section.id === currentSlug) ?? pages[0]!;
 
   return (
     <div className="flex flex-col gap-6">
@@ -203,31 +210,33 @@ function OrganizationProfileView({
           aria-label={t("organizationProfile.navbar.title")}
           className="flex flex-row gap-1 overflow-x-auto pb-1 md:w-44 md:flex-col md:overflow-visible md:pb-0"
         >
-          {sections.map((section) => {
-            const active = section.slug === activeSection.slug;
+          {nav.map((entry) => {
+            if (entry.type === "link") {
+              return (
+                <Button key={entry.id} asChild variant="ghost" size="sm" className="justify-start">
+                  <a href={entry.url}>
+                    {entry.icon}
+                    {entry.label}
+                  </a>
+                </Button>
+              );
+            }
+            const active = entry.id === activeSection.id;
             return (
               <Button
-                key={section.slug}
+                key={entry.id}
                 type="button"
                 variant={active ? "secondary" : "ghost"}
                 size="sm"
                 className="justify-start whitespace-nowrap"
                 aria-current={active ? "page" : undefined}
-                onClick={() => router.navigate(`/${section.slug}`)}
+                onClick={() => router.navigate(`/${entry.id}`)}
               >
-                {section.labelIcon}
-                {section.label}
+                {entry.icon}
+                {entry.label}
               </Button>
             );
           })}
-          {customLinks.map((link) => (
-            <Button key={link.props.url} asChild variant="ghost" size="sm" className="justify-start">
-              <a href={link.props.url}>
-                {link.props.labelIcon}
-                {link.props.label}
-              </a>
-            </Button>
-          ))}
         </nav>
 
         <div className="min-w-0 flex-1">{activeSection.content}</div>

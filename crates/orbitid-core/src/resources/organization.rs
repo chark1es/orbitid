@@ -21,6 +21,11 @@ pub struct OrganizationJson {
     pub created_by: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Backend API only: the operator-configured billing portal (`null` when
+    /// none). The Frontend API omits it; members with `org:sys_billing:manage`
+    /// read it from `GET /v1/client/organizations/{id}/billing`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub billing_portal_url: Option<Option<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

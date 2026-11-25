@@ -87,6 +87,21 @@ export interface BackupCodeResource {
 }
 
 /** A browser remembered for skipping the second factor (`GET /v1/client/me/trusted_devices`). */
+/** An OAuth application the signed-in user may use (`user.getOAuthApplications()`). */
+export interface UserOAuthApplicationResource {
+  id: string;
+  name: string;
+  clientId?: string;
+  client_id?: string;
+  organizationId?: string | null;
+  organization_id?: string | null;
+  organization?: { id: string; name: string; slug?: string | null } | null;
+  /** `instance` (instance-wide), `membership` (member of the owning organization) or `grant` (operator grant). */
+  access: "instance" | "membership" | "grant";
+  billingPortalUrl?: string | null;
+  billing_portal_url?: string | null;
+}
+
 export interface TrustedDeviceResource {
   id: string;
   userId?: string;
@@ -223,6 +238,8 @@ export interface UserResource {
   revokeSession(sessionId: string): Promise<void>;
   getTrustedDevices?(): Promise<TrustedDeviceResource[]>;
   revokeTrustedDevice?(deviceId: string): Promise<void>;
+  /** `GET /v1/client/me/oauth_applications` (absent in older SDK builds). */
+  getOAuthApplications?(): Promise<UserOAuthApplicationResource[]>;
   leaveOrganization(organizationId: string): Promise<void>;
   getOrganizationMemberships(params?: PaginationQuery): Promise<PaginatedResult<OrganizationMembershipResource>>;
   getOrganizationInvitations(): Promise<UserOrganizationInvitationResource[]>;

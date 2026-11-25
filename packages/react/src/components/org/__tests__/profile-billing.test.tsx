@@ -1,0 +1,160 @@
+import { beforeEach, describe, expect, test } from "vitest";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { resetVirtualRouter } from "../../../lib/routing";
+import { OrganizationProfile } from "../OrganizationProfile";
+import { OrganizationSwitcher } from "../OrganizationSwitcher";
+import { createFakeInstance, renderWithOrbit } from "./harness";
+
+beforeEach(() => {
+  resetVirtualRouter();
+});
+
+type Fake = ReturnType<typeof createFakeInstance>;
+
+function withPortal(fake: Fake, url: string | null) {
+  fake.backend.orgs[0]!.billingPortalUrl = url;
+}
+
+function selfAs(fake: Fake, role: string, permissions: string[]) {
+  const org = fake.backend.orgs[0]!;
+  const self = fake.backend.members[org.id]!.find((member) => member.userId === fake.backend.self.id)!;
+  self.role = role;
+  self.permissions = permissions;
+}
+
+const nav = () => screen.getByRole("navigation", { name: "Organization" });
+const navLabels = () => within(nav()).getAllByRole("button").map((button) => button.textContent);
+const billingCalls = (fake: Fake) => fake.backend.calls.fetch.filter((call) => call.path.endsWith("/billing"));
+
+describe("<OrganizationProfile /> billing", () => {
+  test("billing managers get a Billing page linking to the configured portal", async () => {
+    const fake = createFakeInstance();
+    withPortal(fake, "https://billing.example.com/acme");
+    renderWithOrbit(<OrganizationProfile routing="virtual" />, fake);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Billing" }));
+    const link = await screen.findByRole("link", { name: /Manage billing/ });
+    expect(link.getAttribute("href")).toBe("https://billing.example.com/acme");
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toContain("noopener");
+    expect(navLabels()).toEqual(["General", "Members", "Billing", "API keys"]);
+  });
+
+  test("there is no Billing page when nothing is configured and no content is supplied", async () => {
+    const fake = createFakeInstance();
+    renderWithOrbit(<OrganizationProfile routing="virtual" />, fake);
+    await screen.findByLabelText("Organization name");
+    await waitFor(() => expect(billingCalls(fake)).toHaveLength(1));
+    expect(screen.queryByRole("button", { name: "Billing" })).toBeNull();
+  });
+
+  test("members without org:sys_billing:manage never see billing, custom content included", async () => {
+    const fake = createFakeInstance();
+    withPortal(fake, "https://billing.example.com/acme");
+    selfAs(fake, "org:member", ["org:sys_memberships:read", "org:sys_domains:read"]);
+    renderWithOrbit(
+      <OrganizationProfile routing="virtual">
+        <OrganizationProfile.Page label="billing">
+          <p>Our plans</p>
+        </OrganizationProfile.Page>
+      </OrganizationProfile>,
+      fake,
+    );
+    await screen.findByLabelText("Organization name");
+    expect(screen.queryByRole("button", { name: "Billing" })).toBeNull();
+    expect(screen.queryByText("Our plans")).toBeNull();
+    // No request that the server would refuse anyway.
+    expect(billingCalls(fake)).toHaveLength(0);
+  });
+
+  test("a custom role holding only the billing permission gets the page", async () => {
+    const fake = createFakeInstance();
+    withPortal(fake, "https://billing.example.com/acme");
+    selfAs(fake, "org:billing", ["org:sys_billing:manage"]);
+    renderWithOrbit(<OrganizationProfile routing="virtual" />, fake);
+    fireEvent.click(await screen.findByRole("button", { name: "Billing" }));
+    expect(await screen.findByRole("link", { name: /Manage billing/ })).toBeTruthy();
+  });
+
+  test("developer content replaces the built-in billing page and keeps its gate", async () => {
+    const fake = createFakeInstance();
+    renderWithOrbit(
+      <OrganizationProfile routing="virtual">
+        <OrganizationProfile.Page label="billing">
+          <p>Our plans</p>
+        </OrganizationProfile.Page>
+      </OrganizationProfile>,
+      fake,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Billing" }));
+    expect(await screen.findByText("Our plans")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /Manage billing/ })).toBeNull();
+  });
+
+  test("a portal URL that is not https is never rendered as a link", async () => {
+    const fake = createFakeInstance();
+    withPortal(fake, "javascript:alert(1)");
+    renderWithOrbit(<OrganizationProfile routing="virtual" />, fake);
+    await screen.findByLabelText("Organization name");
+    await waitFor(() => expect(billingCalls(fake)).toHaveLength(1));
+    expect(screen.queryByRole("button", { name: "Billing" })).toBeNull();
+    expect(document.querySelector('a[href^="javascript"]')).toBeNull();
+  });
+});
+
+describe("<OrganizationProfile /> page customization", () => {
+  test("reorders and hides built-in pages, with custom pages and links in the order written", async () => {
+    const fake = createFakeInstance();
+    withPortal(fake, "https://billing.example.com/acme");
+    renderWithOrbit(
+      <OrganizationProfile routing="virtual">
+        <OrganizationProfile.Page label="members" />
+        <OrganizationProfile.Page label="Team" url="team">
+          <p>Custom team page</p>
+        </OrganizationProfile.Page>
+        <OrganizationProfile.Link label="Docs" url="https://docs.example.com" />
+        <OrganizationProfile.Page label="general" />
+        <OrganizationProfile.Page label="api-keys" hidden />
+      </OrganizationProfile>,
+      fake,
+    );
+    await screen.findByRole("button", { name: "Billing" });
+    const entries = Array.from(nav().querySelectorAll("button, a")).map((entry) => entry.textContent);
+    // Billing is not mentioned, so it keeps its default place ahead of the written order.
+    expect(entries).toEqual(["Billing", "Members", "Team", "Docs", "General"]);
+    expect(screen.queryByRole("button", { name: "API keys" })).toBeNull();
+  });
+
+  test("a custom page at a built-in slug overrides that page", async () => {
+    const fake = createFakeInstance();
+    selfAs(fake, "org:member", ["org:sys_memberships:read", "org:sys_domains:read"]);
+    renderWithOrbit(
+      <OrganizationProfile routing="virtual">
+        <OrganizationProfile.Page label="Plans" url="billing">
+          <p>Plans page</p>
+        </OrganizationProfile.Page>
+      </OrganizationProfile>,
+      fake,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Plans" }));
+    expect(await screen.findByText("Plans page")).toBeTruthy();
+    expect(billingCalls(fake)).toHaveLength(0);
+  });
+
+  test("OrganizationSwitcher passes profile pages to the profile it opens", async () => {
+    const fake = createFakeInstance();
+    renderWithOrbit(
+      <OrganizationSwitcher>
+        <OrganizationSwitcher.OrganizationProfilePage label="Team" url="team">
+          <p>Custom team page</p>
+        </OrganizationSwitcher.OrganizationProfilePage>
+      </OrganizationSwitcher>,
+      fake,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Open organization switcher" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Manage organization" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(await within(dialog).findByRole("button", { name: "Team" }));
+    expect(await within(dialog).findByText("Custom team page")).toBeTruthy();
+  });
+});
