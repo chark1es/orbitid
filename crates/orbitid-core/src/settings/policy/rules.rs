@@ -139,6 +139,29 @@ fn assert_organization_role_settings(settings: &InstanceSettings) -> Result<(), 
     Ok(())
 }
 
+/// `roles.defaultRole` is `null` or a custom instance role key. Organization
+/// keys would leak into `roles` and grant nothing; the seeded `app:sys_*` roles
+/// open the admin console, so making one the default would hand the console to
+/// every account. Existence is checked by the Backend API handler.
+fn assert_instance_role_settings(settings: &InstanceSettings) -> Result<(), OrbitError> {
+    let Some(key) = settings.roles.default_role.as_deref() else {
+        return Ok(());
+    };
+    if !key.starts_with("app:") {
+        return Err(invalid(
+            "roles.defaultRole",
+            format!("roles.defaultRole must be an instance role key (\"app:...\") or null, not \"{key}\"."),
+        ));
+    }
+    if key.starts_with("app:sys_") {
+        return Err(invalid(
+            "roles.defaultRole",
+            format!("roles.defaultRole cannot be the system role \"{key}\"; system roles open the admin console and are assigned one account at a time."),
+        ));
+    }
+    Ok(())
+}
+
 /// Disabled features are locked: their sub-switches are forced off.
 pub fn normalize_settings(settings: &mut InstanceSettings) {
     if !settings.organizations.enabled {
@@ -190,6 +213,7 @@ pub fn assert_settings_usable(
     assert_password_policy(settings)?;
     assert_session_policy(settings)?;
     assert_organization_role_settings(settings)?;
+    assert_instance_role_settings(settings)?;
     assert_production_delivery(settings, node_env, env)
 }
 
@@ -213,6 +237,20 @@ mod tests {
     #[test]
     fn default_settings_are_usable() {
         assert_ok(&mut settings());
+    }
+
+    #[test]
+    fn instance_default_role_accepts_only_custom_app_keys() {
+        let mut s = settings();
+        s.roles.default_role = Some("app:member".into());
+        assert_ok(&mut s);
+        for refused in ["org:member", "app:sys_admin", "app:sys_owner", ""] {
+            let mut s = settings();
+            s.roles.default_role = Some(refused.into());
+            let error = assert_settings_usable(&mut s, "test", &DeliveryEnvironment::default())
+                .unwrap_err();
+            assert_eq!(error.meta.unwrap()["param_name"], "roles.defaultRole");
+        }
     }
 
     #[test]

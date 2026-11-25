@@ -392,12 +392,15 @@ pub async fn is_admin_role_on(conn: &mut sqlx::PgConnection, role_key: &str) -> 
     let Some(role) = role_by_key_on(conn, role_key).await? else {
         return Ok(false);
     };
-    Ok(permissions_for_role_ids_on(conn, &[role.id])
-        .await?
-        .remove(role_key)
-        .unwrap_or_default()
-        .iter()
-        .any(|permission| permission == MEMBERSHIPS_MANAGE))
+    // The map is keyed by role id, not key.
+    Ok(
+        permissions_for_role_ids_on(conn, std::slice::from_ref(&role.id))
+            .await?
+            .remove(&role.id)
+            .unwrap_or_default()
+            .iter()
+            .any(|permission| permission == MEMBERSHIPS_MANAGE),
+    )
 }
 
 pub async fn admin_memberships(

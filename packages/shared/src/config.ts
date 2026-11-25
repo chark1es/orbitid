@@ -193,6 +193,15 @@ export const instanceSettingsSchema = z.object({
     adminDeleteEnabled: z.boolean().default(true),
     maxCreatedOrganizationsPerUser: z.number().nullable().default(null),
   }).prefault({}),
+  /** Instance (`app:`) role defaults. See docs/RBAC.md. */
+  roles: z.object({
+    /**
+     * The `app:` role every non-guest user without an explicit instance-role assignment holds. `null` (default)
+     * grants nothing. Resolved when roles are read, so a change applies to every inheriting user at their next
+     * token. System (`app:sys_*`) and `org:` keys are refused.
+     */
+    defaultRole: z.string().nullable().default(null),
+  }).prefault({}),
   userSettings: z.object({
     deleteSelfEnabled: z.boolean().default(true),
     createOrganizationEnabled: z.boolean().default(true),

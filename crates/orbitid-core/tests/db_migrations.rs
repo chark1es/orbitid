@@ -292,8 +292,7 @@ async fn existing_drizzle_database_is_baselined() {
             .unwrap();
     assert_eq!(
         versions,
-        // 0020 belongs to a parallel change (default roles); 0021 is the billing portal URLs.
-        vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21]
+        vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
     );
     assert!(tables(&pool)
         .await
@@ -419,7 +418,7 @@ async fn concurrent_starts_on_a_fresh_database_all_succeed() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(versions, 20);
+    assert_eq!(versions, 21);
     pool.close().await;
 }
 

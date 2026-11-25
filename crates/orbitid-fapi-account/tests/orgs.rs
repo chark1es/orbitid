@@ -1585,3 +1585,54 @@ async fn my_invitations_support_limit_offset_and_total_count() {
         assert!(ids.iter().any(|id| row["id"] == id.as_str()));
     }
 }
+
+/// The last admin may move to another role that still manages memberships:
+/// the organization keeps an admin. (`is_admin_role_on` used to look the
+/// permissions up by role key in a map keyed by role id, so every target role
+/// counted as non-admin and the change was refused.)
+#[tokio::test]
+async fn the_last_admin_can_switch_to_another_admin_role() {
+    let h = harness().await;
+    enable_organizations(&h).await;
+    {
+        let mut tx = h.state().pool.begin().await.expect("tx");
+        orbitid_identity::rbac::create_role_on(
+            &mut tx,
+            h.state(),
+            &orbitid_identity::rbac::CreateRoleInput {
+                key: "org:owner".into(),
+                name: "Owner".into(),
+                description: None,
+                is_creator_eligible: true,
+                permission_keys: vec![
+                    "org:sys_memberships:manage".into(),
+                    "org:sys_memberships:read".into(),
+                ],
+            },
+        )
+        .await
+        .expect("role");
+        tx.commit().await.expect("commit");
+    }
+    let owner = h.signed_in("switch-owner@acme.test", "Sup3r-secret!").await;
+    let org = create_org(&owner.client, "Switch", None).await;
+    let org_id = org["id"].as_str().expect("id").to_string();
+    let path = format!(
+        "/v1/client/organizations/{org_id}/memberships/{}",
+        owner.user_id
+    );
+
+    let switched = owner
+        .client
+        .request("PATCH", &path, Some(json!({ "role": "org:owner" })), &[])
+        .await;
+    assert_status(&switched, StatusCode::OK);
+    assert_eq!(switched.value()["response"]["role"], "org:owner");
+
+    // Moving to a role without membership management is still refused.
+    let demote = owner
+        .client
+        .request("PATCH", &path, Some(json!({ "role": "org:member" })), &[])
+        .await;
+    assert_eq!(demote.status, StatusCode::FORBIDDEN);
+}

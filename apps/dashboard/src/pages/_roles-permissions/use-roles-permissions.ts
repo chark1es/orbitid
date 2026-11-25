@@ -3,6 +3,7 @@ import type { PaginatedList, PermissionJSON, RoleJSON } from "@orbitid/shared";
 import { toast } from "sonner";
 import { useShowOrganizations } from "../../lib/features";
 import { api, useApi } from "../../lib/api";
+import { useInstance } from "../../lib/instance";
 import { unwrapList } from "../_config/data";
 import { errorMessage, permissionFeature, permissionKeyError, roleKeyError } from "../_config/settings";
 import {
@@ -21,6 +22,10 @@ export function useRolesPermissions() {
   const rolesQuery = useApi<PaginatedList<RoleJSON>>(["roles", scope], `/roles?limit=100&query=${encodeURIComponent(prefix)}`);
   const permissionsQuery = useApi<PaginatedList<PermissionJSON>>(["permissions", scope], `/permissions?limit=100&query=${encodeURIComponent(prefix)}`);
   const roles = unwrapList<RoleJSON>(rolesQuery.data).filter((role) => role.key.startsWith(prefix));
+  const instance = useInstance();
+  // The role new users hold in this scope: the instance default (`roles.defaultRole`, may be none) or the
+  // organization member default (`organizations.defaultRole`).
+  const defaultRoleKey = scope === "app" ? instance.data?.roles?.defaultRole ?? null : instance.data?.organizations?.defaultRole ?? null;
   const permissions = unwrapList<PermissionJSON>(permissionsQuery.data).filter((permission) => permission.key.startsWith(prefix));
   const [roleOpen, setRoleOpen] = useState(false);
   const [roleForm, setRoleForm] = useState<RoleForm>(EMPTY_ROLE);
@@ -170,6 +175,8 @@ export function useRolesPermissions() {
     roles,
     permissions,
     roleGroups,
+    defaultRoleKey,
+    instanceLoading: instance.isLoading,
     openCreateRole,
     openEditRole,
     openCreatePermission,

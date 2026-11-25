@@ -7,6 +7,7 @@ import { ConfirmDialog } from "../components/shared/confirm-dialog";
 import { useRolesPermissions } from "./_roles-permissions/use-roles-permissions";
 import { RolesPermissionsTabs } from "./_roles-permissions/roles-permissions-tabs";
 import { RoleSheet, PermissionSheet } from "./_roles-permissions/role-permission-sheets";
+import { DefaultRoleField } from "./_roles-permissions/default-role-field";
 
 export default function Page() {
   const ctl = useRolesPermissions();
@@ -26,6 +27,9 @@ export default function Page() {
     openCreateRole,
     openCreatePermission,
     confirmDelete,
+    roles,
+    defaultRoleKey,
+    instanceLoading,
   } = ctl;
 
   return (
@@ -51,6 +55,8 @@ export default function Page() {
           {showOrganizations ? <option value="org">Organization</option> : null}
         </select>
       </Field>
+
+      {scope === "app" ? <DefaultRoleField roles={roles} current={defaultRoleKey} loading={rolesQuery.isLoading || instanceLoading} /> : null}
 
       {rolesQuery.error ? <ErrorAlert error={errorMessage(rolesQuery.error)} onRetry={() => void rolesQuery.refetch()} /> : null}
       {permissionsQuery.error ? <ErrorAlert error={errorMessage(permissionsQuery.error)} onRetry={() => void permissionsQuery.refetch()} /> : null}

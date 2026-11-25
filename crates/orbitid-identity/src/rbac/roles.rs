@@ -257,6 +257,16 @@ pub async fn assert_role_deletable_on(
             ),
         ));
     }
+    if role_scope(&role.key) == "instance"
+        && state.settings.get().roles.default_role.as_deref() == Some(role.key.as_str())
+    {
+        // Deleting it would silently strip the role from every user who
+        // inherits it; the operator picks another default (or none) first.
+        return Err(OrbitError::forbidden(
+            error_codes::NOT_ALLOWED_ACCESS,
+            "Role is the instance default role and cannot be deleted. Choose another default role, or none, first.",
+        ));
+    }
     if role_scope(&role.key) == "organization" {
         let assigned = role_usage_count_on(conn, &role.key).await?;
         if assigned > 0 {

@@ -7,12 +7,15 @@ use axum::Router;
 use orbitid_core::error::{error_codes, OrbitError, Result};
 use orbitid_core::http::OrbitJson;
 use orbitid_core::models::OrganizationMembershipRow;
+use orbitid_core::resources::UserRolesJson;
 use orbitid_core::state::AppState;
 use orbitid_identity::serializers::{
     serialize_memberships, serialize_trusted_device, UserSerializeOptions,
 };
 use orbitid_identity::trusted_devices::{list_trusted_devices, revoke_trusted_device};
-use orbitid_identity::user_roles::{role_claims_for_user, set_user_roles_on};
+use orbitid_identity::user_roles::{
+    configured_default_role, reset_user_roles_on, role_claims_for_user, set_user_roles_on,
+};
 use orbitid_platform::audit::{audit, AuditInput};
 use serde::Deserialize;
 use serde_json::json;
@@ -24,7 +27,10 @@ use crate::shared::{
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/v1/users/{id}/roles", get(read_roles).put(update_roles))
+        .route(
+            "/v1/users/{id}/roles",
+            get(read_roles).put(update_roles).delete(reset_roles),
+        )
         .route("/v1/users/{id}/organization_memberships", get(memberships))
         .route("/v1/users/{id}/trusted_devices", get(trusted_devices))
         .route(
@@ -33,15 +39,62 @@ pub fn routes() -> Router<AppState> {
         )
 }
 
+/// `UserRolesJSON`: the effective roles, where they come from, and the
+/// configured instance default for reference.
+async fn user_roles_json(state: &AppState, user_id: &str) -> Result<serde_json::Value> {
+    let claims = role_claims_for_user(state, user_id).await?;
+    to_value(UserRolesJson {
+        object: "user_roles".into(),
+        user_id: user_id.to_string(),
+        roles: claims.roles,
+        role_permissions: claims.permissions,
+        source: claims.source.as_str().into(),
+        default_role: configured_default_role(state),
+    })
+}
+
 async fn read_roles(State(state): State<AppState>, Path(id): Path<String>) -> Result<Response> {
     let user = get_user_or_throw(&state, &id).await?;
-    let claims = role_claims_for_user(&state, &user.id).await?;
-    Ok(json_response(json!({
-        "object": "user_roles",
-        "user_id": user.id,
-        "roles": claims.roles,
-        "role_permissions": claims.permissions,
-    })))
+    Ok(json_response(user_roles_json(&state, &user.id).await?))
+}
+
+/// Drops the explicit assignment so the user inherits the instance default
+/// role again (`source: "default"`).
+async fn reset_roles(State(state): State<AppState>, Path(id): Path<String>) -> Result<Response> {
+    let existing = get_user_or_throw(&state, &id).await?;
+    {
+        let mut tx = state.pool.begin().await?;
+        reset_user_roles_on(&mut tx, &existing.id).await?;
+        let user = orbitid_identity::users::require_user_on(&mut tx, &existing.id).await?;
+        let value = to_value(
+            orbitid_identity::serializers::serialize_user_on(
+                &mut tx,
+                &state,
+                &user,
+                UserSerializeOptions { backend: true },
+            )
+            .await?,
+        )?;
+        orbitid_platform::webhooks::emit_event_on(&mut tx, "user.updated", value).await?;
+        tx.commit().await?;
+    }
+    // Safety net: reset keeps `app:sys_*` rows, so this should find nothing to
+    // revoke. It stays so a future change to reset can't leave a console
+    // session alive without console access.
+    orbitid_identity::operator_session::revoke_console_sessions_without_access(
+        &state,
+        &existing.id,
+    )
+    .await?;
+    audit(
+        &state,
+        AuditInput::new("user.roles.reset")
+            .actor(orbitid_identity::admin::AUDIT_ACTOR)
+            .target_type("user")
+            .target_id(existing.id.clone()),
+    )
+    .await;
+    Ok(json_response(user_roles_json(&state, &existing.id).await?))
 }
 
 #[derive(Debug, Deserialize)]
@@ -94,13 +147,7 @@ async fn update_roles(
             .metadata(json!({ "roles": roles })),
     )
     .await;
-    let claims = role_claims_for_user(&state, &existing.id).await?;
-    Ok(json_response(json!({
-        "object": "user_roles",
-        "user_id": existing.id,
-        "roles": claims.roles,
-        "role_permissions": claims.permissions,
-    })))
+    Ok(json_response(user_roles_json(&state, &existing.id).await?))
 }
 
 async fn memberships(

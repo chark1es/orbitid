@@ -185,7 +185,7 @@ async fn user_json_for_on(
     if !with_user {
         return Ok(None);
     }
-    let claims = crate::user_roles::role_claims_for_user_on(conn, &user.id).await?;
+    let claims = crate::user_roles::role_claims_for_user_on(conn, state, &user.id).await?;
     Ok(Some(user_json(
         state,
         user,

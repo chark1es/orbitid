@@ -60,12 +60,20 @@ pub async fn mutate_authorization(
 
 /// Convenience for `INSERT ... SELECT ... FROM unnest($2::text[])`: replaces
 /// every grant row of one parent with `values` in a single statement.
+///
+/// This is an explicit assignment: it also sets `users.instance_roles_assigned`,
+/// so an empty set means "no instance roles", not "inherit the default". The
+/// caller holds the user row lock (rank 3).
 pub async fn replace_user_roles(
     conn: &mut PgConnection,
     user_id: &str,
     role_keys: &[String],
     now: i64,
 ) -> Result<()> {
+    sqlx::query("UPDATE users SET instance_roles_assigned = true WHERE id = $1")
+        .bind(user_id)
+        .execute(&mut *conn)
+        .await?;
     sqlx::query("DELETE FROM user_roles WHERE user_id = $1")
         .bind(user_id)
         .execute(&mut *conn)

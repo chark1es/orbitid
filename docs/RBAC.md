@@ -65,27 +65,88 @@ Instance roles are assigned only by an operator:
 
 ```http
 GET /v1/users/{id}/roles
-{ "object": "user_roles", "user_id": "user_…", "roles": ["app:support"], "role_permissions": ["app:reports:read"] }
+{ "object": "user_roles", "user_id": "user_…", "roles": ["app:support"], "role_permissions": ["app:reports:read"],
+  "source": "assigned", "default_role": "app:member" }
 
 PUT /v1/users/{id}/roles
-{ "roles": ["app:support"] }        # replaces the whole set; [] clears it
+{ "roles": ["app:support"] }        # replaces the whole set; [] means "no instance roles"
+
+DELETE /v1/users/{id}/roles         # drops the assignment: the user inherits the default role again
 ```
 
 Rules that make this safe:
 
-- The route lives on the Backend API (secret key or same-origin dashboard session). The Frontend API has no route that
+- The routes live on the Backend API (secret key or same-origin dashboard session). The Frontend API has no route that
   writes `user_roles`.
 - Nothing a signed-in user can write reaches these rows: not `PATCH /v1/client/me`, not metadata, not the request body
   of any client call.
-- Only `app:` keys that exist and are not system roles are accepted; anything else is a `422` and leaves the existing
-  assignment untouched.
-- A `PUT` revokes the user's sessions, preventing further token refresh until the user signs in again.
-  `POST /v1/sessions/{id}/revoke` is the equivalent for a single session.
+- Only `app:` keys that exist are accepted, including the seeded `app:sys_owner` / `app:sys_admin` console grants;
+  anything else (an `org:` key, a missing role) is a `422` and leaves the existing assignment untouched.
+- `PUT` replaces the whole set, system grants included: `PUT { "roles": [] }` also removes console access. `DELETE`
+  (reset) never does; see below. Any `PUT`, even one naming only a system grant, records an explicit assignment, so
+  `PUT { "roles": ["app:sys_admin"] }` leaves the user with no custom roles and the default no longer applies. To add
+  console access while keeping the default, include the default role in the set, or use `orbitid owner` for Owner.
+- A change does not end the user's sessions. The next minted token carries the new roles; a token already issued keeps
+  its claims until it expires. `POST /v1/sessions/{id}/revoke` ends a session when you need the change at once. A
+  change that removes the user's console access (`app:sys_owner` / `app:sys_admin`) ends their console sessions.
 
-Offline JWT verification cannot discover a database revocation: a previously issued token remains valid until its
+Offline JWT verification cannot discover a database change: a previously issued token remains valid until its
 `exp` (60 seconds by default). Applications needing immediate revocation must check session status online in
 addition to verifying the signature and expiry. Changing a role's permission set affects future token mints; it
 does not rewrite tokens already issued.
+
+## Default instance role
+
+An operator can choose one instance role that every user holds unless they are assigned roles explicitly. It is the
+instance setting `roles.defaultRole` (`null` by default, which is also what an upgraded install starts with, so nothing
+changes until you pick one):
+
+```http
+PATCH /v1/instance
+{ "roles": { "defaultRole": "app:member" } }    # or null for no default
+```
+
+A user's **effective** instance roles are their system grants (`app:sys_owner`, `app:sys_admin`, which open the
+console) plus custom roles from exactly one source, reported as `source` by `GET /v1/users/{id}/roles`:
+
+| Source | When | Custom roles |
+| --- | --- | --- |
+| `assigned` | The user has custom (non-`app:sys_*`) `user_roles` rows, or an operator set their roles with `PUT` (even to `[]`) | The assigned roles. The default plays no part. |
+| `default` | No custom roles were assigned, or the assignment was dropped with `DELETE /v1/users/{id}/roles` | The default role, or none when no default is set |
+
+- **System grants are additive.** They are always part of the effective roles and never decide the source, so an owner
+  who follows the default holds `app:sys_owner` *and* the default role. First-run owner setup and `orbitid owner
+  <email>` both add the Owner role this way, without pinning the account's custom roles.
+- **Reset keeps console access.** `DELETE /v1/users/{id}/roles` removes only custom rows and the explicit marker, so
+  resetting the only owner never leaves the console unclaimed.
+
+- **Explicit assignments always win.** Assigning roles replaces the default rather than adding to it. To give a user the
+  default *and* another role, assign both.
+- **"No roles" is different from "use the default".** `PUT { "roles": [] }` records an explicit empty assignment
+  (`users.instance_roles_assigned`), so the user holds nothing even when a default is set. `DELETE` clears that marker
+  and the user inherits the default again.
+- **Resolved when read, never copied.** The default is not written into `user_roles`. Changing or clearing it applies to
+  every inheriting user at their next token mint, and every reader agrees: session tokens, JWT templates (the reserved
+  `roles` / `role_permissions` claims), `UserJSON.roles`, `SessionJSON.user`, OIDC `groups` (ID token and userinfo) and
+  every SDK `has()` that reads those claims.
+- **Guests do not inherit it.** An anonymous (guest) user holds no instance roles unless one is assigned. When the guest
+  becomes a full account, the default applies from the next token on. A guest still reports `source: "default"` while
+  holding nothing from it. (`GET /v1/users/{id}/roles` answers `404` for an unknown id.)
+- **Only custom instance roles.** The default must be an existing `app:` role. `org:` keys are refused because they would
+  leak into `roles`, and the seeded `app:sys_owner` / `app:sys_admin` are refused because they open the admin console;
+  console access is never inherited. All refusals are `422` with `meta.param_name = "roles.defaultRole"`.
+- **The default role cannot be deleted.** `DELETE /v1/roles/{id}` answers `403 not_allowed_access` while the role is
+  the default; choose another default (or none) first.
+- **A dangling default grants nothing.** The setting can still name a role that no longer exists: a delete racing the
+  setting change, a replica that has not seen the new settings yet, or an import. Such a default grants nothing. But
+  the setting names a *key*, so re-creating a role with that key grants it again, immediately, to every user who
+  follows the default.
+- **No marker before this setting.** Before it existed, `PUT { "roles": [] }` did not record an explicit assignment.
+  Users cleared that way look like users who were never assigned, so they inherit a default once you set one. The same
+  holds for an export taken before this change and imported later. It also covers users whose only rows before the
+  upgrade were system grants (for example `PUT { "roles": ["app:sys_admin"] }` meaning "console admin, no app roles"):
+  system grants never decide the source, so they inherit the default too. Re-save such users with `PUT` if they must
+  keep holding no custom roles.
 
 ## Claims and `has()`
 
@@ -101,8 +162,8 @@ The session JWT (and `UserJSON`) carries the instance roles as top-level claims:
 }
 ```
 
-`roles` and `role_permissions` are recomputed from the database on every mint, so a role change applies at the next
-token refresh. They are in the reserved-claims list: neither `settings.session.customClaims` nor a JWT template can set
+`roles` and `role_permissions` are the user's effective instance roles (the default role included, see above),
+recomputed from the database on every mint, so a role change applies at the next token refresh. They are in the reserved-claims list: neither `settings.session.customClaims` nor a JWT template can set
 them (a template that tries answers `422`).
 
 Server-side and in the SDKs, `has()` accepts either namespace:
@@ -125,15 +186,15 @@ organization".
 
 ## For the dashboard
 
-- Read: `GET /v1/users/{id}/roles` → `{ object: "user_roles", user_id, roles, role_permissions }`.
+- Read: `GET /v1/users/{id}/roles` → `{ object: "user_roles", user_id, roles, role_permissions, source, default_role }`.
+  `source` is `"assigned"` or `"default"`; `default_role` is the configured instance default (or `null`).
 - Write: `PUT /v1/users/{id}/roles` with `{ roles: string[] }`; it returns the same object and the *effective* set
-  (a key that no longer exists is dropped).
+  (a key that no longer exists is dropped). `DELETE /v1/users/{id}/roles` resets the user to the default.
 - The role picker should list `GET /v1/roles?limit=100` and filter `scope === "instance"`; organization roles belong in
   the membership editor instead.
-- After a successful `PUT`, re-read the user (`GET /v1/users/{id}`) and expect the sessions to be gone: show that the
-  user must sign in again.
-- `UserJSON.roles` / `UserJSON.role_permissions` are available on every user object, so a table can show the instance
-  roles without a second request.
+- The roles page sets `roles.defaultRole` through `PATCH /v1/instance` and marks the default role in the list.
+- `UserJSON.roles` / `UserJSON.role_permissions` are the effective roles on every user object, so a table can show the
+  instance roles without a second request. Use `GET /v1/users/{id}/roles` when you need to know where they come from.
 - Historical `SessionJSON.actor` is still present (null for every new session); it is display-only and cannot be set.
 
 ## Validation and errors
@@ -151,7 +212,9 @@ wildcard) and are never parsed into SQL or a route, so a hyphen is only a charac
 | Instance role on a membership/invitation | `422 form_param_value_invalid`, `meta.param_name = "role"` |
 | Instance role that does not exist, or a system role | `422` (`org_role_not_found` / `form_param_value_invalid`) |
 | `organizations.creatorRole` / `defaultRole` naming a missing or `app:` role | `422` (`org_role_not_found` / `form_param_format_invalid`), `meta.param_name = "organizations.creatorRole"` |
-| Delete a role that is assigned (membership or `user_roles`) or is the creator/default role | `403 not_allowed_access` |
+| `roles.defaultRole` naming an `org:` key or an `app:sys_*` role | `422 form_param_format_invalid`, `meta.param_name = "roles.defaultRole"` |
+| `roles.defaultRole` naming a missing role | `422 org_role_not_found`, `meta.param_name = "roles.defaultRole"` |
+| Delete a role that is assigned (membership or `user_roles`), the organization creator/default role, or the instance default role | `403 not_allowed_access` |
 | Edit or delete a system role/permission | `403 not_allowed_access` |
 
 Organization roles and instance roles are managed by the same endpoints; both keep working while

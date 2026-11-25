@@ -380,6 +380,21 @@ describe("createOrbitIdClient", () => {
     expect(apiError.hasCode("form_password_incorrect")).toBe(true);
   });
 
+  it("reads, assigns and resets a user's instance roles with their source", async () => {
+    const { orbit, backend } = client((call) => {
+      const key = `${call.method} ${call.path}`;
+      const body = (roles: string[], source: string) => ({ object: "user_roles", user_id: "user_1", roles, role_permissions: [], source, default_role: "app:member" });
+      if (key === "GET /v1/users/user_1/roles" || key === "DELETE /v1/users/user_1/roles") return { body: body(["app:member"], "default") };
+      if (key === "PUT /v1/users/user_1/roles") return { body: body([], "assigned") };
+      return { status: 404, body: { errors: [{ code: "resource_not_found", message: key }] } };
+    });
+    expect(await orbit.users.getUserRoles("user_1")).toMatchObject({ roles: ["app:member"], source: "default", defaultRole: "app:member" });
+    expect((await orbit.users.setUserRoles("user_1", [])).source).toBe("assigned");
+    expect(backend.last("PUT", "/v1/users/user_1/roles")?.body).toEqual({ roles: [] });
+    expect(await orbit.users.resetUserRoles("user_1")).toMatchObject({ roles: ["app:member"], source: "default" });
+    expect(backend.last("DELETE", "/v1/users/user_1/roles")).toBeTruthy();
+  });
+
   it("maps role, permission, bulk-invitation and api-key payloads", async () => {
     const { orbit, backend } = client((call) => {
       const key = `${call.method} ${call.path}`;

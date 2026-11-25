@@ -75,6 +75,18 @@ impl Default for OidcProviderSettings {
     }
 }
 
+/// Instance-role defaults (`app:` roles, `docs/RBAC.md`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RolesSettings {
+    /// The `app:` role every non-guest user without an explicit instance-role
+    /// assignment effectively holds. `None` (the default) grants nothing, which
+    /// is the behaviour of installs from before this setting existed. Resolved
+    /// when roles are read, never copied into `user_roles`, so a change applies
+    /// to every inheriting user at their next token mint.
+    pub default_role: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct OrganizationsSettings {
