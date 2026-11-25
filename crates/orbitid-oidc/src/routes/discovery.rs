@@ -154,16 +154,28 @@ async fn authorize(
     };
 
     // A signed-in non-member of an organization's application is refused before
-    // any further validation, so the answer never reveals the application's
-    // scopes or PKCE policy. Requests that may still switch accounts
-    // (`prompt=login`/`select_account`, a `login_hint`) are checked after
-    // sign-in instead, below.
+    // any further validation, so the answer does not reveal the application's
+    // scopes or PKCE policy to them. Requests that may still switch accounts
+    // (`prompt=login`/`select_account`, or a `login_hint` naming a different
+    // existing account) are checked after sign-in instead, below; a hint that
+    // names the caller or no one cannot switch accounts and gets no exception.
     let caller = resolve_caller(&state, &headers).await?;
-    let may_switch_account = get("prompt").is_some_and(|prompt| {
+    let caller_id = caller.as_ref().and_then(|caller| caller.user_id.clone());
+    let prompts_switch = get("prompt").is_some_and(|prompt| {
         prompt
             .split_whitespace()
             .any(|value| value == "login" || value == "select_account")
-    }) || get("login_hint").is_some_and(|hint| !hint.is_empty());
+    });
+    let hint_switches = match (
+        caller_id.as_deref(),
+        get("login_hint").filter(|hint| !hint.is_empty()),
+    ) {
+        (Some(caller_id), Some(hint)) => get_user_by_identifier(&state, &hint)
+            .await?
+            .is_some_and(|(hinted, _)| hinted.id != caller_id),
+        _ => false,
+    };
+    let may_switch_account = prompts_switch || hint_switches;
     if let Some(user_id) = caller
         .as_ref()
         .and_then(|caller| caller.user_id.as_deref())

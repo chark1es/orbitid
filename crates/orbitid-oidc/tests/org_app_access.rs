@@ -571,6 +571,19 @@ async fn device_flow_refuses_non_members_and_members_who_leave() {
     let refused = approve(&outsider, user_code).await;
     assert_eq!(refused.status, StatusCode::FORBIDDEN, "{}", refused.text());
     assert_eq!(refused.value()["errors"][0]["code"], "not_allowed_access");
+    // Denying is refused the same way: no application details, and the code is
+    // not cancelled for the person it was meant for.
+    let denied = outsider
+        .client
+        .post(
+            "/v1/client/oauth/device/approve",
+            Some(json!({ "user_code": user_code, "action": "deny" })),
+            &[],
+        )
+        .await;
+    assert_eq!(denied.status, StatusCode::FORBIDDEN, "{}", denied.text());
+    assert_eq!(denied.value()["errors"][0]["code"], "not_allowed_access");
+    assert!(!denied.text().contains("Test App"));
     let pending = poll(&h, &app, started["device_code"].as_str().unwrap()).await;
     assert_eq!(pending.value()["error"], "authorization_pending");
     let member_page = send(
@@ -911,6 +924,24 @@ async fn a_non_member_learns_nothing_about_the_applications_configuration() {
     )
     .await;
     assert_eq!(query["error"], "access_denied");
+    // A login hint naming the caller (or no one) cannot switch accounts, so it
+    // gets no exception from the early refusal.
+    for hint in ["outsider@other.test", "nobody@nowhere.test"] {
+        let hinted = authorize(
+            &h,
+            &outsider,
+            &[
+                ("client_id", app["client_id"].as_str().unwrap()),
+                ("redirect_uri", REDIRECT_URI),
+                ("response_type", "code"),
+                ("scope", "openid admin:everything"),
+                ("state", "s1"),
+                ("login_hint", hint),
+            ],
+        )
+        .await;
+        assert_eq!(hinted["error"], "access_denied", "{hint}");
+    }
     let member_query = authorize(
         &h,
         &owner,

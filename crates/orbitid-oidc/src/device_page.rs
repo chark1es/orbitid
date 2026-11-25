@@ -125,7 +125,7 @@ pub fn device_page_html(input: &DevicePageInput, product: &str) -> String {
         ),
         DevicePageState::NotAllowed => format!(
             "{intro}<p class=\"error\">Your account does not have access to the application behind this code. \
-Ask an administrator for access, or sign in with an account that has it.</p>\
+Ask an administrator for access. To use a different account, sign out, sign in with it and open this page again.</p>\
 {sign_in_link}"
         ),
         DevicePageState::Consent => {

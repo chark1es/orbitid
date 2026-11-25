@@ -18,11 +18,11 @@ Everyone else is refused wherever a grant or token would be issued:
 
 | Where | What a refused user gets |
 |---|---|
-| `GET /oauth/authorize` | redirect to the client with `error=access_denied`, right after `client_id`, `redirect_uri` and `response_mode` are checked, so the answer reveals nothing about the application's scopes or PKCE policy. A request that may still switch accounts (`prompt=login`/`select_account`, a `login_hint`) is checked after sign-in instead |
+| `GET /oauth/authorize` | redirect to the client with `error=access_denied`, right after `client_id`, `redirect_uri` and `response_mode` are checked, so a signed-in non-member learns nothing about the application's scopes or PKCE policy. A request that may still switch accounts (`prompt=login`/`select_account`, or a `login_hint` naming a different existing account) is checked after sign-in instead; such requests, like signed-out ones, can still see scope and PKCE errors first |
 | `GET /oauth/consent_info` | `404 resource_not_found`, the same answer as an unknown `client_id` |
 | `POST /oauth/consent` | a `redirect_url` carrying `error=access_denied` and no code (checked before the scopes) |
 | `GET /oauth/device`, `GET /v1/client/oauth/device` | a "no access" page / `403 not_allowed_access`, without the application's name or scopes |
-| device approval (`POST /oauth/device`, `POST /v1/client/oauth/device/approve`) | `403 not_allowed_access`. The code stays `pending`, so the person the request was meant for can still approve it |
+| device approval or denial (`POST /oauth/device`, `POST /v1/client/oauth/device/approve`) | `403 not_allowed_access` for either action, with no application details. The code stays `pending`, so the person the request was meant for can still decide, within the code's attempt budget (every lookup or decision on a code counts, and the code is burned after ten) |
 | `POST /oauth/token` (`authorization_code`, `refresh_token`) | `invalid_grant`, "The user is not allowed to use this application" |
 | `GET /oauth/userinfo`, `POST /oauth/introspect` | `401 invalid_token` / `{ "active": false }` |
 
@@ -76,7 +76,9 @@ changes must take effect quickly. The user's browser session is never ended by t
 
 An organization that owns applications cannot be deleted (`409 organization_has_applications`): reassign or delete
 its applications first. If its last member's account is deleted, the organization is kept so the applications keep
-their owner.
+their owner. It is kept as it was, pending invitations and verified enrollment domains included, so whoever joins it
+later (by invitation, domain enrollment or an operator) gains its applications; revoke invitations or remove domains
+if it should stay closed.
 
 ## Locking
 
@@ -106,5 +108,9 @@ error maps to a retryable `409 transaction_conflict`, and the request-level retr
 leave/remove routes, none of which is on its excluded-path list. Neither transaction commits partially. Consent
 takes the user key-share, then the application, then the consent row. An organization that owns applications cannot
 be deleted, and user deletion keeps such an organization when its last member goes; both check with the
-organization row locked, and assigning an owner key-shares it, so no assignment can slip in between.
+organization row locked, and assigning an owner key-shares it, so no assignment can slip in between. The
+auto-consent path of `GET /oauth/authorize` inserts an authorization code with no explicit locks; its foreign-key
+key-shares are compatible with every application lock taken elsewhere except the owner `UPDATE`, which the insert
+then waits for, and the code exchange re-checks under locks. A future path that holds a user lock and then takes the
+application `FOR UPDATE` must account for that insert.
 Tests: `crates/orbitid-oidc/tests/org_app_access.rs`.
