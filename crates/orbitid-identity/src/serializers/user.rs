@@ -398,7 +398,7 @@ pub async fn serialize_user_on(
     opts: UserSerializeOptions,
 ) -> Result<UserJson> {
     let relations = load_user_relations_on(conn, user).await?;
-    let claims = crate::user_roles::role_claims_for_user_on(conn, &user.id).await?;
+    let claims = crate::user_roles::role_claims_for_user_on(conn, state, &user.id).await?;
     Ok(user_json(
         state,
         user,

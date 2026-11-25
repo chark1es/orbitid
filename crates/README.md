@@ -250,7 +250,7 @@ calls `_on` and commits. HTTP crates compose these inside one transaction. The f
   `revoke_grants_for_session_on`, `revoke_grants_for_sessions_on`, `revoke_grants_for_user_on`,
   `revoke_organization_authority_grants_on`, `revoke_api_keys_for_subject_on`
   (`orbitid-credentials`: `add_passkey_on`, `delete_passkey_on`, `disable_totp_on`).
-- roles: `set_user_roles_on`; `create_role_on`, `update_role_on`, `delete_role_on`,
+- roles: `set_user_roles_on`, `reset_user_roles_on`; `create_role_on`, `update_role_on`, `delete_role_on`,
   `set_role_permissions_on`, `add_role_permission_on`, `remove_role_permission_on`,
   `create_permission_on`, `update_permission_on`, `delete_permission_on`,
   `assert_role_deletable_on`.

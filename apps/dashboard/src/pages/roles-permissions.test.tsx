@@ -42,3 +42,41 @@ describe("role scopes", () => {
     expect(screen.queryByText("app:support")).toBeNull();
   });
 });
+
+describe("instance default role", () => {
+  function setupDefault(defaultRole: string | null) {
+    return mockApi({ instance: instanceBody((settings) => { settings.roles.defaultRole = defaultRole; }), handle: (call) => {
+      if (call.method === "PATCH" && call.url.includes("/v1/instance")) {
+        return Response.json(instanceBody((settings) => { settings.roles.defaultRole = (call.body?.roles as { defaultRole: string | null }).defaultRole; }));
+      }
+      if (call.method !== "GET") return;
+      if (call.url.includes("/v1/roles")) return Response.json({ data: [role("app:support"), role("app:member"), { ...role("app:sys_admin"), is_system: true }], total_count: 3 });
+      if (call.url.includes("/v1/permissions")) return Response.json({ data: [], total_count: 0 });
+    } });
+  }
+
+  it("marks the default role, keeps it from being deleted, and never offers a system role as the default", async () => {
+    setupDefault("app:member");
+    renderPage(<Page />);
+    await screen.findByText("app:support");
+    expect(await screen.findByText("Default")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Delete APP:MEMBER" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Delete APP:SUPPORT" }).hasAttribute("disabled")).toBe(false);
+    expect(screen.getByRole("button", { name: "Save default" }).hasAttribute("disabled")).toBe(true);
+    const { defaultRoleOptions } = await import("./_roles-permissions/default-role-field");
+    expect(defaultRoleOptions([role("app:support"), role("app:sys_admin"), role("org:auditor")]).map((item) => item.key)).toEqual(["app:support"]);
+  });
+
+  it("saves a new default through the instance settings", async () => {
+    const calls = setupDefault(null);
+    renderPage(<Page />);
+    await screen.findByText("app:support");
+    expect(screen.queryByText("Default")).toBeNull();
+    const trigger = screen.getByLabelText("Default role");
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("option", { name: /app:support/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Save default" }));
+    await waitFor(() => expect(calls.find((call) => call.method === "PATCH")?.body).toEqual({ roles: { defaultRole: "app:support" } }));
+    expect(await screen.findByText("Default")).toBeTruthy();
+  });
+});

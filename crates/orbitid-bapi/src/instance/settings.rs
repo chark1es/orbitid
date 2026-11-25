@@ -197,6 +197,60 @@ async fn assert_organization_roles(state: &AppState, patch: &Map<String, Value>)
     Ok(())
 }
 
+/// `roles.defaultRole` must be `null` or name an existing custom instance
+/// role. The scope/system checks also run in the settings policy; repeated here
+/// because this handler queries the database first.
+async fn assert_instance_default_role(state: &AppState, patch: &Map<String, Value>) -> Result<()> {
+    let Some(roles) = patch.get("roles") else {
+        return Ok(());
+    };
+    let Some(roles) = roles.as_object() else {
+        return Err(invalid_param("roles", "roles must be an object".into()));
+    };
+    let Some(value) = roles.get("defaultRole") else {
+        return Ok(());
+    };
+    if value.is_null() {
+        return Ok(());
+    }
+    let Some(key) = value.as_str().filter(|key| !key.is_empty()) else {
+        return Err(invalid_param(
+            "roles.defaultRole",
+            "roles.defaultRole must be an instance role key or null".into(),
+        ));
+    };
+    if !key.starts_with(orbitid_identity::rbac::INSTANCE_KEY_PREFIX) {
+        return Err(invalid_param(
+            "roles.defaultRole",
+            format!(
+                "roles.defaultRole must be an instance role key (\"app:...\") or null, not \"{key}\"."
+            ),
+        ));
+    }
+    if key.starts_with(orbitid_identity::rbac::RESERVED_INSTANCE_KEY_PREFIX) {
+        return Err(invalid_param(
+            "roles.defaultRole",
+            format!(
+                "roles.defaultRole cannot be the system role \"{key}\"; system roles open the admin console and are assigned one account at a time."
+            ),
+        ));
+    }
+    let exists: Option<String> = sqlx::query_scalar("SELECT id FROM roles WHERE key = $1")
+        .bind(key)
+        .fetch_optional(&state.pool)
+        .await?;
+    if exists.is_none() {
+        return Err(OrbitError::unprocessable(
+            error_codes::ORG_ROLE_NOT_FOUND,
+            format!(
+                "roles.defaultRole names \"{key}\", which does not exist. Create the role first."
+            ),
+        )
+        .with_meta(json!({ "param_name": "roles.defaultRole" })));
+    }
+    Ok(())
+}
+
 pub(super) async fn update(
     State(state): State<AppState>,
     OrbitJson(body): OrbitJson<Value>,
@@ -211,6 +265,7 @@ pub(super) async fn update(
     assert_instance_urls(patch_object)?;
     assert_email_settings(patch_object)?;
     assert_organization_roles(&state, patch_object).await?;
+    assert_instance_default_role(&state, patch_object).await?;
     state.settings.update(patch.clone()).await?;
     audit(
         &state,

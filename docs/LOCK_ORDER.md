@@ -239,7 +239,7 @@ in this pass.
 | `orgs::add_membership_on` | requires `MembershipWriteLock`: user key-share→organization `FOR UPDATE`→membership→event | OK (fixed) |
 | `rbac::roles` / `custom_permissions` / `orgs::mod` | roles/permissions (ordered) | OK |
 | `rbac::is_last_admin_on` | memberships (ordered)→roles/permissions reads | OK |
-| `user_roles::set_user_roles_on` | user (`lock_user_on`)→user_roles | OK (fixed) |
+| `user_roles::{set,reset}_user_roles_on` | user (`lock_user_on`)→user_roles | OK (fixed) |
 | `grants::revoke_grants_for_*` | family advisory (sorted)→oauth_grants | OK |
 | `grants::revoke_organization_authority_grants*` | caller's user `FOR UPDATE` (rank 3)→oauth_grants; no family locks | OK (fixed) |
 | `verifications::*` | verifications only | OK |

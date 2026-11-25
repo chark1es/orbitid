@@ -28,6 +28,7 @@ export function RolesPermissionsTabs({ ctl }: { ctl: RolesPermissionsController 
     permissions,
     openEditRole,
     openEditPermission,
+    defaultRoleKey,
   } = ctl;
 
   return (
@@ -60,6 +61,7 @@ export function RolesPermissionsTabs({ ctl }: { ctl: RolesPermissionsController 
             <TableBody>
               {roles.map((role) => {
                 const system = isSystemRole(role as RoleJSON & { is_system?: boolean });
+                const isDefault = role.key === defaultRoleKey;
                 return (
                   <TableRow key={role.id}>
                     <TableCell>
@@ -69,6 +71,7 @@ export function RolesPermissionsTabs({ ctl }: { ctl: RolesPermissionsController 
                           <code className="font-data text-xs text-muted-foreground">{role.key}</code>
                         </div>
                         {system ? <MetaChip>System</MetaChip> : null}
+                        {isDefault ? <MetaChip>Default</MetaChip> : null}
                       </div>
                     </TableCell>
                     <TableCell className="text-right font-data text-xs">{rolePermissionKeys(role).length}</TableCell>
@@ -84,9 +87,9 @@ export function RolesPermissionsTabs({ ctl }: { ctl: RolesPermissionsController 
                           variant="ghost"
                           size="icon-sm"
                           className="text-destructive"
-                          disabled={system}
+                          disabled={system || isDefault}
                           onClick={() => setDeleteRole(role)}
-                          title="Delete">
+                          title={isDefault ? "This is the default role. Choose another default before deleting it." : "Delete"}>
                           <Trash2 className="size-4" aria-hidden />
                           <span className="sr-only">Delete {role.name}</span>
                         </Button>

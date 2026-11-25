@@ -126,7 +126,8 @@ pub enum OwnerGrant {
     AlreadyOwner(UserRow),
 }
 
-/// Adds the Owner role to an existing account, keeping its other roles. The
+/// Adds the Owner role to an existing account, keeping its other effective
+/// roles (an inherited instance default becomes an explicit assignment). The
 /// account is named by user id or by a *verified* email address, so an
 /// unverified address someone else added cannot be promoted.
 ///
@@ -173,11 +174,11 @@ pub async fn grant_owner(state: &AppState, account: &str) -> Result<OwnerGrant> 
             ),
         ));
     }
-    let mut roles: Vec<String> =
-        sqlx::query_scalar("SELECT role_key FROM user_roles WHERE user_id = $1 ORDER BY role_key")
-            .bind(&user.id)
-            .fetch_all(&mut *tx)
-            .await?;
+    // The effective set, so an account inheriting the instance default keeps
+    // that role once the Owner role makes its assignment explicit.
+    let mut roles = crate::user_roles::role_claims_for_user_on(&mut tx, state, &user.id)
+        .await?
+        .roles;
     if roles.iter().any(|role| role == OWNER_ROLE_KEY) {
         tx.rollback().await?;
         return Ok(OwnerGrant::AlreadyOwner(user));

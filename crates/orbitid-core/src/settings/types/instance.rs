@@ -75,6 +75,7 @@ pub struct InstanceSettings {
     pub anonymous: AnonymousSettings,
     pub oidc_provider: OidcProviderSettings,
     pub organizations: OrganizationsSettings,
+    pub roles: RolesSettings,
     pub user_settings: UserSettings,
     pub email: EmailSettings,
     pub sms: SmsSettings,
@@ -129,6 +130,7 @@ mod tests {
         assert_eq!(settings.session.token_lifetime_seconds, 60);
         assert_eq!(settings.session.lifetime_seconds, 0);
         assert_eq!(settings.organizations.creator_role, "org:admin");
+        assert_eq!(settings.roles.default_role, None);
         assert_eq!(settings.email.provider, EmailProvider::Auto);
         assert_eq!(settings.email.from, "OrbitID <no-reply@localhost>");
     }
@@ -141,6 +143,7 @@ mod tests {
             .unwrap());
         assert_eq!(value["oidcProvider"]["accessTokenFormat"], "opaque");
         assert!(value["organizations"]["maxCreatedOrganizationsPerUser"].is_null());
+        assert!(value["roles"]["defaultRole"].is_null());
         assert_eq!(value["email"]["codeLength"], 6);
     }
 

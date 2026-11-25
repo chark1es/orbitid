@@ -1,33 +1,75 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@orbitid/ui";
-import type { PaginatedList, RoleJSON, UserJSON } from "@orbitid/shared";
+import type { PaginatedList, RoleJSON, UserJSON, UserRolesJSON } from "@orbitid/shared";
 import { toast } from "sonner";
 import { useApi, useApiMutation } from "../../lib/api";
 import { unwrapList } from "../../pages/_config/data";
-import { CheckboxRow, ErrorAlert, TableSkeleton } from "../../pages/_config/ui";
+import { CheckboxRow, ErrorAlert, MetaChip, TableSkeleton } from "../../pages/_config/ui";
 import { errorMessage } from "../../lib/errors";
 import { Section } from "../shared/section";
+
+const sameSet = (a: string[], b: string[]) => [...a].sort().join("\n") === [...b].sort().join("\n");
+
+/** Where the effective roles come from, in words. */
+function sourceText(assignment: UserRolesJSON): string {
+  if (assignment.source === "assigned") {
+    return assignment.roles.length === 0
+      ? "Assigned: this user explicitly has no instance roles, so the default role does not apply."
+      : "Assigned by an operator. The default role does not apply.";
+  }
+  return assignment.default_role
+    ? "Inherited from the default role. Assigning roles here replaces it."
+    : "No roles are assigned and no default role is set.";
+}
 
 /** Instance roles are assigned through an operator-only endpoint, never through editable metadata. */
 export function UserRolesTab({ user }: { user: UserJSON }) {
   const query = useApi<PaginatedList<RoleJSON>>(["roles", "instance"], "/roles?limit=100&query=app%3A");
+  const assignmentQuery = useApi<UserRolesJSON>(["user", user.id, "roles"], `/users/${user.id}/roles`);
   const roles = unwrapList<RoleJSON>(query.data).filter((role) => role.key.startsWith("app:"));
-  const [selected, setSelected] = useState<string[]>(user.roles ?? []);
-  useEffect(() => { setSelected(user.roles ?? []); }, [user.id, user.roles]);
+  const assignment = assignmentQuery.data;
+  const effective = assignment?.roles ?? user.roles ?? [];
+  const [selected, setSelected] = useState<string[]>(effective);
+  const effectiveKey = effective.join("\n");
+  // Keyed by value: `effective` is a new array on every render.
+  useEffect(() => { setSelected(effectiveKey ? effectiveKey.split("\n") : []); }, [user.id, effectiveKey]);
+  const invalidate = [["user", user.id], ["users"]];
   const save = useApiMutation<{ roles: string[] }>("PUT", `/users/${user.id}/roles`, {
-    invalidate: [["user", user.id], ["users"]],
+    invalidate,
     onSuccess: () => toast.success("Roles updated"),
   });
-  const dirty = [...selected].sort().join("\n") !== [...(user.roles ?? [])].sort().join("\n");
+  const reset = useApiMutation<undefined>("DELETE", `/users/${user.id}/roles`, {
+    invalidate,
+    onSuccess: () => toast.success("Roles reset to the default"),
+  });
+  const pending = save.isPending || reset.isPending;
+  const dirty = !sameSet(selected, effective);
+  const inherited = assignment?.source === "default";
+  const defaultRole = assignment?.default_role ?? null;
+  const loading = query.isLoading || assignmentQuery.isLoading;
+  const error = query.error ?? assignmentQuery.error;
   return <Section title="Instance roles" className="border-t-0 pt-0"
     description="These permissions apply with or without an organization. Organization roles are managed on memberships."
     actions={<Button asChild variant="outline" size="sm"><Link to="/roles">Manage roles</Link></Button>}>
-    {query.isLoading ? <TableSkeleton /> : query.error ? <ErrorAlert error={errorMessage(query.error)} onRetry={() => void query.refetch()} /> : <div className="space-y-4">
-      {roles.length === 0 ? <p className="text-sm text-muted-foreground">Create an instance role before assigning permissions to this user.</p> : roles.map((role) => <CheckboxRow key={role.id} label={role.name} description={role.key} disabled={save.isPending} checked={selected.includes(role.key)}
-        onCheckedChange={(checked) => setSelected((current) => checked ? [...current, role.key] : current.filter((key) => key !== role.key))} />)}
+    {loading ? <TableSkeleton /> : error ? <ErrorAlert error={errorMessage(error)} onRetry={() => { void query.refetch(); void assignmentQuery.refetch(); }} /> : <div className="space-y-4">
+      {assignment ? <div className="flex flex-wrap items-center gap-2 text-sm">
+        <MetaChip>{inherited ? "Inherited from default" : "Assigned"}</MetaChip>
+        <span className="text-muted-foreground">{sourceText(assignment)}</span>
+      </div> : null}
+      {roles.length === 0 ? <p className="text-sm text-muted-foreground">Create an instance role before assigning permissions to this user.</p> : roles.map((role) => {
+        const viaDefault = inherited && role.key === defaultRole && effective.includes(role.key);
+        return <CheckboxRow key={role.id} label={viaDefault ? `${role.name} (default)` : role.name} description={role.key} disabled={pending} checked={selected.includes(role.key)}
+          onCheckedChange={(checked) => setSelected((current) => checked ? [...current, role.key] : current.filter((key) => key !== role.key))} />;
+      })}
       {save.error ? <ErrorAlert error={errorMessage(save.error)} /> : null}
-      <Button disabled={!dirty || save.isPending} onClick={() => save.mutate({ roles: selected })}>{save.isPending ? "Saving…" : "Save roles"}</Button>
+      {reset.error ? <ErrorAlert error={errorMessage(reset.error)} /> : null}
+      <div className="flex flex-wrap gap-2">
+        <Button disabled={!dirty || pending} onClick={() => save.mutate({ roles: selected })}>{save.isPending ? "Saving…" : "Save roles"}</Button>
+        {assignment && !inherited ? <Button variant="outline" disabled={pending} onClick={() => reset.mutate(undefined)}>
+          {reset.isPending ? "Resetting…" : defaultRole ? `Reset to default (${defaultRole})` : "Reset to default"}
+        </Button> : null}
+      </div>
     </div>}
   </Section>;
 }

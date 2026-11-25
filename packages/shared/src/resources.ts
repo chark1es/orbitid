@@ -314,10 +314,21 @@ export interface BlocklistIdentifierJSON { object: "blocklist_identifier"; id: s
 export interface JwtTemplateJSON { object: "jwt_template"; id: string; name: string; claims: Record<string, unknown>; lifetime: number; allowed_clock_skew: number; custom_signing_key: boolean; signing_algorithm: string; /** Verification key for custom-key templates: HS256 secret, or public JWK. */ signing_key?: string | Record<string, unknown>; created_at: number; updated_at: number }
 export interface SignInTokenJSON { object: "sign_in_token"; id: string; user_id: string; status: "pending" | "accepted" | "revoked"; token?: string; url?: string; created_at: number; updated_at: number }
 /**
- * Instance-wide roles of a user (`GET`/`PUT /v1/users/{id}/roles`). Written only by an operator through the
+ * Instance-wide roles of a user (`GET`/`PUT`/`DELETE /v1/users/{id}/roles`). Written only by an operator through the
  * Backend API; the keys travel in the session token as the `roles` and `role_permissions` claims.
+ *
+ * `roles` is the *effective* set. `source` says where it comes from: `"assigned"` when an operator set the user's
+ * roles (possibly to none), `"default"` when the user inherits the instance default role (`roles.defaultRole`,
+ * none when that is unset). `default_role` is the configured instance default, for reference.
  */
-export interface UserRolesJSON { object: "user_roles"; user_id: string; roles: string[]; role_permissions: string[] }
+export interface UserRolesJSON {
+  object: "user_roles";
+  user_id: string;
+  roles: string[];
+  role_permissions: string[];
+  source: "assigned" | "default";
+  default_role: string | null;
+}
 export interface WebhookEndpointJSON { object: "webhook_endpoint"; id: string; url: string; description: string; event_types: string[]; disabled: boolean; secret?: string; created_at: number; updated_at: number }
 export interface WebhookDeliveryJSON { object: "webhook_delivery"; id: string; endpoint_id: string; event_id: string; event_type: string; status: "pending" | "success" | "failed"; attempt: number; response_code: number | null; response_body: string | null; next_attempt_at: number | null; created_at: number }
 export interface ApiKeyJSON { object: "api_key"; id: string; name: string; description: string | null; subject: string; prefix: string; secret?: string; scopes: string[]; claims: Record<string, unknown> | null; revoked: boolean; expiration: number | null; last_used_at: number | null; created_by: string | null; created_at: number; updated_at: number }

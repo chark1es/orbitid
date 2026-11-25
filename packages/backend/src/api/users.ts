@@ -144,11 +144,19 @@ export function createUsersApi(http: BackendHttp) {
     },
     /**
      * Replaces a user's instance-wide (`app:...`) roles. Operator-only, and independent of any organization:
-     * organization roles are assigned through a membership. The user's sessions are revoked so the next token
-     * carries the new `roles` / `role_permissions` claims.
+     * organization roles are assigned through a membership. This is an explicit assignment, so the instance default
+     * role no longer applies (an empty list means "no instance roles"). The next minted token carries the new
+     * `roles` / `role_permissions` claims; tokens already issued keep theirs until they expire.
      */
     setUserRoles(userId: string, roles: string[]) {
       return http.put<UserRoles>(`/v1/users/${userId}/roles`, { body: { roles } });
+    },
+    /**
+     * Drops the user's explicit instance-role assignment so they inherit the instance default role
+     * (`roles.defaultRole`) again. The result has `source: "default"`.
+     */
+    resetUserRoles(userId: string) {
+      return http.delete<UserRoles>(`/v1/users/${userId}/roles`);
     },
     /** Removed: always answers `403 not_allowed_access`. The user reads their own token from their session. */
     getUserOauthAccessToken(params: { userId: string; provider: string }) {

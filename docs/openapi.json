@@ -12717,9 +12717,9 @@
         "tags": [
           "Users (backend)"
         ],
-        "summary": "List a user's instance roles",
+        "summary": "Read a user's instance roles",
         "operationId": "listUserRoles",
-        "description": "Instance-wide (`app:...`) roles assigned to the user. They travel in the session token as `roles` and `role_permissions`, independent of `org_role`.",
+        "description": "The user's effective instance-wide (`app:...`) roles: the assigned roles, or the instance default role (`roles.defaultRole`) when nothing is assigned. `source` says which. They travel in the session token as `roles` and `role_permissions`, independent of `org_role`.",
         "security": [
           {
             "SecretKey": []
@@ -12764,7 +12764,7 @@
         ],
         "summary": "Replace a user's instance roles",
         "operationId": "setUserRoles",
-        "description": "Operator-only. `roles` replaces the whole set; only `app:...` roles that are not system roles are accepted. The user's sessions are revoked so the next token carries the new claims.",
+        "description": "Operator-only. `roles` replaces the whole set; only `app:...` roles that are not system organization roles are accepted. This is an explicit assignment: the instance default role no longer applies, and an empty array means \"no instance roles\". Sessions stay active; the next minted token carries the new claims.",
         "security": [
           {
             "SecretKey": []
@@ -12794,7 +12794,7 @@
                     "items": {
                       "type": "string"
                     },
-                    "description": "Instance role keys (`app:...`). Replaces the whole set; an empty array clears it."
+                    "description": "Instance role keys (`app:...`). Replaces the whole set; an empty array assigns no roles (the default role does not apply)."
                   }
                 },
                 "required": [
@@ -12826,6 +12826,51 @@
           },
           "422": {
             "$ref": "#/components/responses/UnprocessableEntity"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Users (backend)"
+        ],
+        "summary": "Reset a user's instance roles to the default",
+        "operationId": "resetUserRoles",
+        "description": "Operator-only. Drops the user's explicit instance-role assignment, so they inherit the instance default role (`roles.defaultRole`) again. The result has `source: \"default\"`.",
+        "security": [
+          {
+            "SecretKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "User id (`user_…`).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRoles"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -23185,7 +23230,7 @@
             "type": "array",
             "items": {
               "type": "string",
-              "description": "Instance role keys, sorted."
+              "description": "Effective instance role keys, sorted."
             }
           },
           "role_permissions": {
@@ -23194,15 +23239,32 @@
               "type": "string",
               "description": "Union of the permissions those roles grant, sorted."
             }
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "assigned",
+              "default"
+            ],
+            "description": "`assigned`: an operator set the user's roles (possibly to none). `default`: nothing is assigned, so the user holds the instance default role, or nothing when no default is set."
+          },
+          "default_role": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The configured instance default role (`roles.defaultRole`), for reference."
           }
         },
         "required": [
           "object",
           "user_id",
           "roles",
-          "role_permissions"
+          "role_permissions",
+          "source",
+          "default_role"
         ],
-        "description": "The instance-wide roles of a user. Written only by the operator's Backend API call."
+        "description": "The effective instance-wide roles of a user and where they come from. Written only by the operator's Backend API calls."
       },
       "WebhookEndpoint": {
         "type": "object",
@@ -25108,6 +25170,20 @@
               }
             }
           },
+          "roles": {
+            "default": {},
+            "type": "object",
+            "properties": {
+              "defaultRole": {
+                "default": null,
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The `app:` role every non-guest user without an explicit instance-role assignment holds. `null` grants nothing. System (`app:sys_*`) and `org:` keys are refused."
+              }
+            }
+          },
           "userSettings": {
             "default": {},
             "type": "object",
@@ -25279,6 +25355,7 @@
           "anonymous",
           "oidcProvider",
           "organizations",
+          "roles",
           "userSettings",
           "email",
           "sms",
