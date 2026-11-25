@@ -447,7 +447,8 @@ mod tests {
         let legacy = serde_json::json!({
             "session": { "lifetimeSeconds": 604800, "multiSession": false },
             "password": { "signOutOfOtherSessionsOnChange": true },
-            "anonymous": { "retentionSeconds": 2592000 }
+            "anonymous": { "retentionSeconds": 2592000 },
+            "security": { "enumerationProtection": false }
         });
         let migrated = migrate_stored_settings(legacy);
         assert!(migrated.changed);
@@ -459,13 +460,38 @@ mod tests {
             false
         );
         assert_eq!(migrated.settings["anonymous"]["retentionSeconds"], 0);
-        assert_eq!(migrated.settings[SETTINGS_VERSION_KEY], 2);
+        assert_eq!(migrated.settings["security"]["enumerationProtection"], true);
+        assert_eq!(migrated.settings[SETTINGS_VERSION_KEY], 3);
 
         let custom = serde_json::json!({ "session": { "lifetimeSeconds": 3600 } });
         let migrated = migrate_stored_settings(custom);
         assert!(migrated.changed);
         assert!(!migrated.lifetime_converted);
         assert_eq!(migrated.settings["session"]["lifetimeSeconds"], 3600);
+
+        // A version 2 tree only takes the version 3 conversion: a 7-day lifetime chosen since stays.
+        let v2 = serde_json::json!({
+            "__settingsVersion": 2,
+            "session": { "lifetimeSeconds": 604800 },
+            "security": { "enumerationProtection": false }
+        });
+        let migrated = migrate_stored_settings(v2);
+        assert!(migrated.changed);
+        assert!(!migrated.lifetime_converted);
+        assert_eq!(migrated.settings["session"]["lifetimeSeconds"], 604800);
+        assert_eq!(migrated.settings["security"]["enumerationProtection"], true);
+
+        // Switched off again after the migration: left alone.
+        let v3 = serde_json::json!({
+            "__settingsVersion": 3,
+            "security": { "enumerationProtection": false }
+        });
+        let migrated = migrate_stored_settings(v3);
+        assert!(!migrated.changed);
+        assert_eq!(
+            migrated.settings["security"]["enumerationProtection"],
+            false
+        );
     }
 
     #[test]
