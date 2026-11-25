@@ -136,7 +136,7 @@ export default function UserDetailPage() {
               <code className="max-w-[46ch] truncate font-data text-[0.75rem] text-muted-foreground">{user.id}</code>
               <CopyButton value={user.id} label="Copy user ID" size="icon-xs" />
             </div>
-            <dl className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-1 text-xs text-muted-foreground [&_dt]:text-[0.6875rem] [&_dt]:uppercase [&_dt]:tracking-[0.04em]">
+            <dl className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-1 text-xs text-muted-foreground [&_dt]:text-[0.6875rem] [&_dt]:font-medium">
               <div className="flex items-center gap-1.5">
                 <dt>Username</dt>
                 <dd className="font-data text-foreground">{user.username ? `@${user.username}` : "none"}</dd>

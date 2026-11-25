@@ -38,7 +38,7 @@ export interface CreateOrganizationProps extends CommonOrgProps {
 /** Two-step organization creation: details (name/slug/logo) then optional member invites. */
 export function CreateOrganization(props: CreateOrganizationProps) {
   return (
-    <OrgRoot appearance={props.appearance} className={props.className}>
+    <OrgRoot appearance={props.appearance} className={props.className} element="createOrganization">
       <CreateOrganizationView {...props} />
     </OrgRoot>
   );

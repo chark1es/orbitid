@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import AppearancePage from "./settings-appearance";
 import { instanceBody, mockApi, renderPage } from "./_config/__tests__/harness";
+import { DEFAULT_DRAFT, appearanceSnippet, draftVariables } from "./_appearance/draft";
 
 const preview = () => screen.getByTestId("branding-preview");
 
@@ -62,5 +63,59 @@ describe("appearance preview", () => {
 
     await screen.findByTestId("branding-preview");
     expect(preview().dataset.scheme).toBe("dark");
+  });
+});
+
+describe("component theme playground", () => {
+  it("drives the preview with the instance's brand color and starts with an empty snippet", async () => {
+    mockApi({ instance: instanceBody((settings) => {
+      settings.branding.theme = "light";
+      settings.branding.primaryColor = "#2563eb";
+    }) });
+    renderPage(<AppearancePage />);
+
+    await screen.findByTestId("branding-preview");
+    expect(preview().style.getPropertyValue("--primary")).toBe("#2563eb");
+    expect(screen.getByTestId("appearance-snippet").textContent).toContain("const appearance = {}");
+  });
+
+  it("keeps a dark brand color off a dark preview, as the components do", async () => {
+    mockApi({ instance: instanceBody((settings) => {
+      settings.branding.theme = "dark";
+      settings.branding.primaryColor = "#111111";
+    }) });
+    renderPage(<AppearancePage />);
+
+    await screen.findByTestId("branding-preview");
+    expect(preview().style.getPropertyValue("--primary")).toBe("");
+  });
+});
+
+describe("appearance snippet", () => {
+  it("lists only what changed, importing the preset it uses", () => {
+    expect(appearanceSnippet(DEFAULT_DRAFT)).toBe("// Defaults: nothing to configure.\nconst appearance = {};");
+    const snippet = appearanceSnippet({ ...DEFAULT_DRAFT, preset: "soft", borderRadius: "0.75rem", font: "serif", shadowStrength: "0" });
+    expect(snippet).toBe(
+      [
+        'import { soft } from "@orbitid/react";',
+        "",
+        "const appearance = {",
+        "  baseTheme: soft,",
+        "  variables: {",
+        '    borderRadius: "0.75rem",',
+        '    fontFamily: "ui-serif, Georgia, serif",',
+        "    shadowStrength: 0,",
+        "  },",
+        "};",
+      ].join("\n"),
+    );
+  });
+
+  it("maps the draft onto appearance variables", () => {
+    expect(draftVariables({ ...DEFAULT_DRAFT, fontSize: "15px", spacingUnit: "0.28rem" }, "#ff0000")).toEqual({
+      colorPrimary: "#ff0000",
+      fontSize: "15px",
+      spacingUnit: "0.28rem",
+    });
   });
 });

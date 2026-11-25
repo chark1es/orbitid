@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import type { CSSProperties } from "react";
 import { resolveAppearance } from "../appearance/resolve";
 import { canUseDOM } from "../lib/canUseDOM";
 import { enUS } from "../localization/enUS";
@@ -213,9 +212,6 @@ export function OrbitIDProvider(props: OrbitIDProviderProps) {
     [status, retry],
   );
 
-  // CSS custom properties are valid style keys, but `CSSProperties` has no index signature.
-  const rootStyle = resolvedAppearance.cssVariables as CSSProperties;
-
   return (
     <OrbitIDContext.Provider value={instance}>
       <OrbitIDOptionsContext.Provider value={optionsValue}>
@@ -228,11 +224,12 @@ export function OrbitIDProvider(props: OrbitIDProviderProps) {
                     <UserContext.Provider value={snapshot.user}>
                       <OrganizationContext.Provider value={snapshot.organization}>
                         <AuthContext.Provider value={authState}>
-                          <div
-                            className={resolvedAppearance.rootClassName}
-                            style={rootStyle}
-                            data-orbitid-theme={resolvedAppearance.theme.name}
-                          >
+                          {/*
+                           * A plain marker around the host's own app. Appearance variables, theme classes and
+                           * `rootBox` go on each prebuilt component's root instead, so `spacingUnit` or `fontSize`
+                           * never rescales the host page.
+                           */}
+                          <div className="orbitid-root" data-orbitid-theme={resolvedAppearance.theme.name}>
                             {children}
                           </div>
                         </AuthContext.Provider>

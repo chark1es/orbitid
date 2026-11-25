@@ -104,6 +104,7 @@ export function APIKeys(props: APIKeysProps) {
     <OrgRoot
       appearance={props.appearance}
       className={props.className}
+      element="apiKeys"
       requiresOrganizations={props.type === "organization"}
     >
       <APIKeysView {...props} />

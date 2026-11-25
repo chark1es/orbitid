@@ -3,7 +3,7 @@ import { Button, Input, cn } from "@orbitid/ui";
 import { FingerprintIcon, Loader2Icon } from "lucide-react";
 import { signUpUrlFor } from "../flow";
 import { useAuthRuntime } from "../../_shared/w6";
-import { useElementClasses } from "../../_shared/appearance";
+import { useComponentElements } from "../../_shared/appearance";
 import { FormError } from "../../_shared/form-error";
 import { Field } from "../../_shared/field";
 import { SocialButtons } from "../../_shared/social-buttons";
@@ -22,7 +22,7 @@ import {
 export function StartStep({ flow, props }: StepProps) {
   const runtime = useAuthRuntime();
   const { environment, t, navigate, orbit } = runtime;
-  const { el, appearance } = useElementClasses();
+  const { ep, appearance } = useComponentElements();
   const form = useForm<{ identifier: string }>({
     defaultValues: { identifier: flow.identifierDraft },
     mode: "onSubmit",
@@ -71,7 +71,7 @@ export function StartStep({ flow, props }: StepProps) {
         </>
       ) : null}
       {hasIdentifiers ? (
-        <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
+        <form onSubmit={submit} {...ep("form", "flex flex-col gap-4")} noValidate>
           <Field
             control={form.control}
             name="identifier"
@@ -87,11 +87,11 @@ export function StartStep({ flow, props }: StepProps) {
                 placeholder={t("signIn.start.identifierPlaceholder")}
                 autoFocus
                 disabled={flow.busy}
-                className={cn(el("formFieldInput"))}
+                {...ep("formFieldInput")}
               />
             )}
           </Field>
-          <Button type="submit" disabled={flow.busy} className={cn("w-full", el("formButtonPrimary"))}>
+          <Button type="submit" disabled={flow.busy} {...ep("formButtonPrimary", "w-full")}>
             {flow.busy ? <Loader2Icon className="size-4 animate-spin" aria-hidden="true" /> : null}
             {t("signIn.start.actionText")}
           </Button>

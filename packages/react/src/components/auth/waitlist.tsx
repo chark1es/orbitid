@@ -3,7 +3,7 @@ import { useForm } from "react-hook-form";
 import { Button, Input, cn } from "@orbitid/ui";
 import { useAuthRuntime, isRecord } from "./_shared/w6";
 import { apiRequest, errorMessage } from "./_shared/api";
-import { AuthAppearanceScope, useElementClasses } from "./_shared/appearance";
+import { AuthAppearanceScope, useComponentElements } from "./_shared/appearance";
 import { AuthCard } from "./_shared/auth-card";
 import { Field } from "./_shared/field";
 import { FormError } from "./_shared/form-error";
@@ -27,7 +27,7 @@ async function joinWaitlist(orbit: ReturnType<typeof useAuthRuntime>["orbit"], e
 function WaitlistInner({ afterJoinWaitlistUrl, signInUrl }: WaitlistProps) {
   const runtime = useAuthRuntime();
   const { environment, t, navigate, orbit } = runtime;
-  const { el } = useElementClasses();
+  const { ep } = useComponentElements();
   const [joinedEmail, setJoinedEmail] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -79,7 +79,7 @@ function WaitlistInner({ afterJoinWaitlistUrl, signInUrl }: WaitlistProps) {
         subtitle={t("waitlist.subtitle", { applicationName: environment.app.name })}
       >
         <FormError message={error} />
-        <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
+        <form onSubmit={submit} {...ep("form", "flex flex-col gap-4")} noValidate>
           <Field control={form.control} name="emailAddress" label={t("waitlist.emailLabel")} required>
             {(field) => (
               <Input
@@ -89,11 +89,11 @@ function WaitlistInner({ afterJoinWaitlistUrl, signInUrl }: WaitlistProps) {
                 placeholder={t("formFieldPlaceholder__emailAddress")}
                 autoFocus
                 disabled={busy}
-                className={cn(el("formFieldInput"))}
+                {...ep("formFieldInput")}
               />
             )}
           </Field>
-          <Button type="submit" disabled={busy} className={cn("w-full", el("formButtonPrimary"))}>
+          <Button type="submit" disabled={busy} {...ep("formButtonPrimary", "w-full")}>
             {t("waitlist.action")}
           </Button>
         </form>

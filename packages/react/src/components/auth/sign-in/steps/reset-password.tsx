@@ -3,7 +3,7 @@ import { useForm } from "react-hook-form";
 import { Button, Input, Label, Switch, cn } from "@orbitid/ui";
 import { Loader2Icon } from "lucide-react";
 import { useAuthRuntime } from "../../_shared/w6";
-import { useElementClasses } from "../../_shared/appearance";
+import { useComponentElements } from "../../_shared/appearance";
 import { FormError } from "../../_shared/form-error";
 import { Field } from "../../_shared/field";
 import { OtpField } from "../../_shared/otp-field";
@@ -13,7 +13,7 @@ import { LinkButton, factorIdentifier, type StepProps } from "./shared";
 
 export function ForgotPasswordStep({ flow }: StepProps) {
   const { t, environment } = useAuthRuntime();
-  const { el } = useElementClasses();
+  const { ep } = useComponentElements();
   const form = useForm<{ email: string }>({
     defaultValues: { email: flow.identifierDraft },
     mode: "onSubmit",
@@ -45,7 +45,7 @@ export function ForgotPasswordStep({ flow }: StepProps) {
   return (
     <div className="flex flex-col gap-4">
       <FormError message={flow.error} />
-      <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
+      <form onSubmit={submit} {...ep("form", "flex flex-col gap-4")} noValidate>
         <Field control={form.control} name="email" label={t("formFieldLabel__emailAddress")} required>
           {(field) => (
             <Input
@@ -55,11 +55,11 @@ export function ForgotPasswordStep({ flow }: StepProps) {
               placeholder={t("formFieldPlaceholder__emailAddress")}
               autoFocus
               disabled={flow.busy}
-              className={cn(el("formFieldInput"))}
+              {...ep("formFieldInput")}
             />
           )}
         </Field>
-        <Button type="submit" disabled={flow.busy} className={cn("w-full", el("formButtonPrimary"))}>
+        <Button type="submit" disabled={flow.busy} {...ep("formButtonPrimary", "w-full")}>
           {flow.busy ? <Loader2Icon className="size-4 animate-spin" aria-hidden="true" /> : null}
           {t("signIn.forgotPassword.action")}
         </Button>
@@ -73,7 +73,7 @@ export function ForgotPasswordStep({ flow }: StepProps) {
 
 export function ResetPasswordCodeStep({ flow }: StepProps) {
   const { t } = useAuthRuntime();
-  const { el } = useElementClasses();
+  const { ep } = useComponentElements();
   const [code, setCode] = useState("");
   const identifier = factorIdentifier(flow.signIn) || flow.identifier;
 
@@ -96,7 +96,7 @@ export function ResetPasswordCodeStep({ flow }: StepProps) {
       <Button
         type="button"
         disabled={flow.busy || code.length < 6}
-        className={cn("w-full", el("formButtonPrimary"))}
+        {...ep("formButtonPrimary", "w-full")}
         onClick={() => void flow.attemptFirstFactor({ strategy: "reset_password_email_code", code })}
       >
         {flow.busy ? <Loader2Icon className="size-4 animate-spin" aria-hidden="true" /> : null}
@@ -114,7 +114,7 @@ export function ResetPasswordCodeStep({ flow }: StepProps) {
 export function ResetPasswordStep({ flow }: StepProps) {
   const runtime = useAuthRuntime();
   const { t, environment } = runtime;
-  const { el } = useElementClasses();
+  const { ep } = useComponentElements();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [signOutOthers, setSignOutOthers] = useState(true);
@@ -159,7 +159,7 @@ export function ResetPasswordStep({ flow }: StepProps) {
       <Button
         type="button"
         disabled={flow.busy || mismatch || !policyMet}
-        className={cn("w-full", el("formButtonPrimary"))}
+        {...ep("formButtonPrimary", "w-full")}
         onClick={() => void submit()}
       >
         {flow.busy ? <Loader2Icon className="size-4 animate-spin" aria-hidden="true" /> : null}

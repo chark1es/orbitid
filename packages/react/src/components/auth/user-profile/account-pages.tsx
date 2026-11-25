@@ -6,7 +6,7 @@ import { safeHttpsUrl } from "../../../lib/profile-pages";
 import type { UserOAuthApplicationResource } from "../../../provider/types";
 import { OrgAvatar } from "../../org/_shared/OrgAvatar";
 import { roleLabel } from "../../org/_shared/utils";
-import { useElementClasses } from "../_shared/appearance";
+import { useComponentElements } from "../_shared/appearance";
 import { useAuthRuntime, type OrbitInstance } from "../_shared/w6";
 import { SectionHeader } from "./security-shared";
 
@@ -74,9 +74,9 @@ export function useUserApplications(orbit: OrbitInstance, userId: string | null)
 }
 
 function BillingLink({ url, label }: { url: string; label: string }) {
-  const { el } = useElementClasses();
+  const { ep } = useComponentElements();
   return (
-    <Button asChild variant="outline" size="sm" className={cn("shrink-0 gap-1.5", el("billingPortalLink"))}>
+    <Button asChild variant="outline" size="sm" {...ep("billingPortalLink", "shrink-0 gap-1.5")}>
       <a href={url} target="_blank" rel="noopener noreferrer">
         {label}
         <ExternalLinkIcon className="size-3.5" aria-hidden="true" />
@@ -92,7 +92,7 @@ function EmptyState({ text }: { text: string }) {
 /** The organizations the user belongs to, with their role in each. */
 export function OrganizationsPage() {
   const { t } = useAuthRuntime();
-  const { el } = useElementClasses();
+  const { ep } = useComponentElements();
   const { userMemberships } = useOrganizationList({ userMemberships: { pageSize: 50 } });
   const memberships = userMemberships.data;
   return (
@@ -103,7 +103,7 @@ export function OrganizationsPage() {
       ) : memberships.length === 0 ? (
         <EmptyState text={t("userProfile.organizations.empty")} />
       ) : (
-        <ul className={cn("flex flex-col divide-y rounded-md border", el("organizationList"))}>
+        <ul {...ep("organizationList", "flex flex-col divide-y rounded-md border")}>
           {memberships.map((membership) => (
             <li key={membership.id} className="flex items-center gap-3 px-3 py-2.5">
               <OrgAvatar
@@ -130,14 +130,14 @@ function accessLabel(t: ReturnType<typeof useAuthRuntime>["t"], app: AccountAppl
 /** The OAuth applications the user may sign in to, and why. */
 export function ApplicationsPage({ applications }: { applications: AccountApplication[] }) {
   const { t } = useAuthRuntime();
-  const { el } = useElementClasses();
+  const { ep } = useComponentElements();
   return (
     <section className="flex flex-col gap-3" data-orbit-section="apps">
       <SectionHeader title={t("userProfile.apps.title")} description={t("userProfile.apps.description")} />
       {applications.length === 0 ? (
         <EmptyState text={t("userProfile.apps.empty")} />
       ) : (
-        <ul className={cn("flex flex-col divide-y rounded-md border", el("applicationList"))}>
+        <ul {...ep("applicationList", "flex flex-col divide-y rounded-md border")}>
           {applications.map((app) => (
             <li key={app.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5" data-orbit-application={app.id}>
               <div className="flex min-w-0 flex-1 flex-col">
@@ -156,7 +156,7 @@ export function ApplicationsPage({ applications }: { applications: AccountApplic
 /** One billing entry per application that has an operator-configured billing portal. */
 export function BillingPage({ applications }: { applications: AccountApplication[] }) {
   const { t } = useAuthRuntime();
-  const { el } = useElementClasses();
+  const { ep } = useComponentElements();
   const billed = applications.filter((app) => app.billingUrl);
   return (
     <section className="flex flex-col gap-3" data-orbit-section="billing">
@@ -164,7 +164,7 @@ export function BillingPage({ applications }: { applications: AccountApplication
       {billed.length === 0 ? (
         <EmptyState text={t("userProfile.billing.empty")} />
       ) : (
-        <ul className={cn("flex flex-col divide-y rounded-md border", el("billingList"))}>
+        <ul {...ep("billingList", "flex flex-col divide-y rounded-md border")}>
           {billed.map((app) => (
             <li key={app.id} className="flex items-center gap-3 px-3 py-2.5">
               <span className="min-w-0 flex-1 truncate text-sm font-medium">{app.name}</span>

@@ -5,7 +5,7 @@ import { initials } from "./utils";
 export type OrgAvatarSize = "xs" | "sm" | "md" | "lg";
 
 const SIZE_CLASSES: Record<OrgAvatarSize, string> = {
-  xs: "size-6 text-[0.6875rem]",
+  xs: "size-6 text-2xs",
   sm: "size-8 text-xs",
   md: "size-10 text-sm",
   lg: "size-16 text-xl",
@@ -25,6 +25,7 @@ export function OrgAvatar({ name, imageUrl, hasImage, size = "sm", className }: 
   const showImage = Boolean(imageUrl) && hasImage !== false;
   return (
     <Avatar
+      data-orbitid-element="organizationPreview"
       className={cn("shrink-0 rounded-md after:rounded-md", SIZE_CLASSES[size], className)}
       data-testid="org-avatar"
     >

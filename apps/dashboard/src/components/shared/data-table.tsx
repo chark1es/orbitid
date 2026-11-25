@@ -120,14 +120,14 @@ export function DataTable<T>({
             {selectColumn ? (
               <label className="flex items-center gap-2">
                 {selectColumn.header}
-                <span className="text-[0.6875rem] font-medium tracking-[0.04em] text-muted-foreground uppercase">
+                <span className="text-[0.6875rem] font-medium text-muted-foreground">
                   Select all
                 </span>
               </label>
             ) : null}
             {sortableColumns.length > 0 ? (
               <div className="ml-auto flex flex-wrap items-center gap-1">
-                <span className="text-[0.6875rem] font-medium tracking-[0.04em] text-muted-foreground uppercase">
+                <span className="text-[0.6875rem] font-medium text-muted-foreground">
                   Sort
                 </span>
                 <div role="group" aria-label="Sort columns" className="flex flex-wrap items-center gap-1">
@@ -145,7 +145,7 @@ export function DataTable<T>({
                             ? `Sort by ${sortLabel(column)}, sorted ${direction}`
                             : `Sort by ${sortLabel(column)}`
                         }
-                        className="inline-flex min-h-6 items-center gap-1 rounded-[3px] px-1 text-[0.6875rem] font-medium tracking-[0.04em] text-muted-foreground uppercase transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none aria-pressed:text-foreground"
+                        className="inline-flex min-h-6 items-center gap-1 rounded-sm px-1 text-[0.6875rem] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none aria-pressed:text-foreground"
                       >
                         {column.header}
                         <SortIcon active={active} descending={sortDescending} />
@@ -175,8 +175,8 @@ export function DataTable<T>({
           <ul data-slot="data-table-stack" aria-busy="true" className="divide-y divide-border">
             {Array.from({ length: Math.min(loadingRows, 6) }).map((_, index) => (
               <li key={`loading-${index}`} className="space-y-2 px-3 py-3">
-                <div className="h-3 w-2/3 animate-pulse rounded-[3px] bg-muted" />
-                <div className="h-2.5 w-1/2 animate-pulse rounded-[3px] bg-muted" />
+                <div className="h-3 w-2/3 animate-pulse rounded-sm bg-muted" />
+                <div className="h-2.5 w-1/2 animate-pulse rounded-sm bg-muted" />
               </li>
             ))}
           </ul>
@@ -230,7 +230,7 @@ export function DataTable<T>({
                     <dl className="mt-2.5 grid grid-cols-[minmax(0,1fr)] gap-1 border-t border-border pt-2">
                       {fields.map(({ column }) => (
                         <div key={column.id} className="flex min-w-0 items-baseline justify-between gap-4">
-                          <dt className="text-[0.6875rem] font-medium tracking-[0.04em] text-muted-foreground uppercase">
+                          <dt className="text-[0.6875rem] font-medium text-muted-foreground">
                             {fieldLabel(column)}
                           </dt>
                           <dd className="min-w-0 overflow-hidden text-right break-words [&_.font-data]:break-all [&_span]:align-baseline">{stackedCell(column.cell(row, index))}</dd>
@@ -264,7 +264,7 @@ export function DataTable<T>({
                   key={column.id}
                   aria-sort={column.sortKey && onSort ? (active ? (sortDescending ? "descending" : "ascending") : "none") : undefined}
                   className={cn(
-                    "h-9 whitespace-nowrap text-[0.75rem] font-semibold uppercase tracking-[0.04em] text-muted-foreground",
+                    "h-9 whitespace-nowrap text-[0.75rem] font-medium text-muted-foreground",
                     column.headerClassName,
                   )}
                 >
@@ -272,7 +272,7 @@ export function DataTable<T>({
                     <button
                       type="button"
                       onClick={() => onSort(column.sortKey ?? "")}
-                      className="-ml-1 inline-flex items-center gap-1 rounded-[3px] px-1 py-0.5 leading-none control-optical uppercase tracking-[0.04em] transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                      className="-ml-1 inline-flex items-center gap-1 rounded-sm px-1 py-0.5 leading-none control-optical transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                       aria-label={`Sort by ${sortLabel(column)}`}
                     >
                       {column.header}
@@ -310,7 +310,7 @@ export function DataTable<T>({
               <TableRow key={`loading-${index}`} className="hover:bg-transparent">
                 {columns.map((column) => (
                   <TableCell key={column.id} className={cn("h-10 py-0", column.className)}>
-                    <div className="h-2.5 w-full max-w-32 animate-pulse rounded-[3px] bg-muted" />
+                    <div className="h-2.5 w-full max-w-32 animate-pulse rounded-sm bg-muted" />
                   </TableCell>
                 ))}
               </TableRow>

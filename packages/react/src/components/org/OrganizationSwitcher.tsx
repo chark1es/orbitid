@@ -46,6 +46,7 @@ import {
 import { fillUrlTemplate, resolveRedirect, roleLabel } from "./_shared/utils";
 import type { CommonOrgProps, RedirectUrl } from "./_shared/types";
 import { usePortalClass } from "../auth/_shared/appearance";
+import { useElementProps } from "../../appearance";
 
 export interface OrganizationSwitcherProps extends CommonOrgProps {
   /** Hide the personal account entry (forced organizations). */
@@ -100,6 +101,7 @@ function OrganizationSwitcherView({
   children,
 }: OrganizationSwitcherProps) {
   const portalClass = usePortalClass();
+  const ep = useElementProps();
   const { t } = useLocalizations();
   const instance = useOrbitID();
   const options = useContext(OrbitIDOptionsContext);
@@ -194,7 +196,7 @@ function OrganizationSwitcherView({
         <PopoverTrigger asChild>
           <Button
             variant="ghost"
-            className="h-auto min-w-0 max-w-full justify-start gap-2 px-2 py-1.5 sm:max-w-[16rem]"
+            {...ep("organizationSwitcherTrigger", "h-auto min-w-0 max-w-full justify-start gap-2 px-2 py-1.5 sm:max-w-[16rem]")}
             aria-label={t("organizationSwitcher.triggerLabel")}
             aria-expanded={open}
           >
@@ -218,7 +220,7 @@ function OrganizationSwitcherView({
             <ChevronsUpDownIcon className="ml-auto size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent align="start" className={portalClass("w-80 p-2")}>
+        <PopoverContent align="start" {...ep("organizationSwitcherPopover", portalClass("w-80 p-2"))}>
           <div className="flex flex-col gap-2">
             <Input
               value={query}

@@ -41,7 +41,7 @@ export interface OrganizationListProps extends CommonOrgProps {
 /** Full-page organization picker with invitations, suggestions, personal account and creation. */
 export function OrganizationList(props: OrganizationListProps) {
   return (
-    <OrgRoot appearance={props.appearance} className={props.className}>
+    <OrgRoot appearance={props.appearance} className={props.className} element="organizationList">
       <OrganizationListView {...props} />
     </OrgRoot>
   );

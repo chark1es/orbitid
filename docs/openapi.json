@@ -24629,7 +24629,8 @@
                 "type": "string"
               },
               "branded": {
-                "type": "boolean"
+                "type": "boolean",
+                "description": "Always `false`: OrbitID shows no attribution line on its components."
               },
               "captcha_enabled": {
                 "type": "boolean"
@@ -25698,10 +25699,6 @@
               "primaryColor": {
                 "default": "#2b2522",
                 "type": "string"
-              },
-              "showPoweredBy": {
-                "default": true,
-                "type": "boolean"
               },
               "theme": {
                 "default": "system",

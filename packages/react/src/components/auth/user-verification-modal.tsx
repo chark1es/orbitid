@@ -2,6 +2,8 @@ import { useCallback, useRef, useState } from "react";
 import { useRegisterReverificationUI, type ReverificationRequest } from "../../provider";
 import { toAuthError } from "./_shared/api";
 import { ReverificationDialog } from "./_shared/reverification";
+import { AuthAppearanceScope } from "./_shared/appearance";
+import { ComponentScope } from "./_shared/component-root";
 import type { VerificationModalProps } from "./_shared/types";
 
 /**
@@ -18,6 +20,7 @@ export function UserVerificationModal({
   onCancel,
   title,
   subtitle,
+  appearance,
 }: VerificationModalProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const [requireSecondFactor, setRequireSecondFactor] = useState(false);
@@ -43,24 +46,30 @@ export function UserVerificationModal({
 
   const isOpen = open ?? internalOpen;
 
+  // Mounted on its own (directly under the provider) the modal has no component around it, so it brings its own
+  // scope: provider and prop `appearance`, element resolver, scheme and variables reach the dialog.
   return (
-    <ReverificationDialog
-      open={isOpen}
-      title={title}
-      subtitle={subtitle}
-      requireSecondFactor={requireSecondFactor}
-      onOpenChange={(next) => {
-        onOpenChange?.(next);
-        if (!next) setInternalOpen(false);
-      }}
-      onVerified={() => {
-        onVerified?.();
-        settle(true);
-      }}
-      onCancel={() => {
-        onCancel?.();
-        settle(false);
-      }}
-    />
+    <AuthAppearanceScope appearance={appearance}>
+      <ComponentScope>
+        <ReverificationDialog
+          open={isOpen}
+          title={title}
+          subtitle={subtitle}
+          requireSecondFactor={requireSecondFactor}
+          onOpenChange={(next) => {
+            onOpenChange?.(next);
+            if (!next) setInternalOpen(false);
+          }}
+          onVerified={() => {
+            onVerified?.();
+            settle(true);
+          }}
+          onCancel={() => {
+            onCancel?.();
+            settle(false);
+          }}
+        />
+      </ComponentScope>
+    </AuthAppearanceScope>
   );
 }

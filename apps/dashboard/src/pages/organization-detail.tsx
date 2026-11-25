@@ -112,7 +112,7 @@ export default function OrganizationDetailPage() {
               <code className="font-data text-[0.8125rem] text-muted-foreground">{org.slug}</code>
               <CopyButton value={org.slug} label="Copy slug" size="icon-xs" />
             </div>
-            <dl className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-1 text-xs text-muted-foreground [&_dt]:text-[0.6875rem] [&_dt]:uppercase [&_dt]:tracking-[0.04em]">
+            <dl className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-1 text-xs text-muted-foreground [&_dt]:text-[0.6875rem] [&_dt]:font-medium">
               <div className="flex items-center gap-1.5">
                 <dt>Members</dt>
                 <dd className="font-data text-foreground">{formatNumber(org.members_count ?? 0)}</dd>

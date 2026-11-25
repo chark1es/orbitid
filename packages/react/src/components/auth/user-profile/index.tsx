@@ -2,14 +2,12 @@ import { useEffect, useRef, useState, type ComponentType } from "react";
 import {
   Button,
   Card,
-  CardContent,
   Separator,
-  cn,
 } from "@orbitid/ui";
 import { AppWindowIcon, BuildingIcon, CreditCardIcon, KeyRoundIcon, ShieldCheckIcon, UserIcon } from "lucide-react";
 import { currentUser, displayName, primaryIdentifier } from "../_shared/api";
-import { AuthAppearanceScope, useElementClasses, useThemeScope } from "../_shared/appearance";
-import { contrastForeground, LIGHT_FOREGROUND } from "../../../appearance";
+import { AuthAppearanceScope, useComponentElements } from "../_shared/appearance";
+import { ComponentRoot } from "../_shared/component-root";
 import { organizationsEnabled } from "../../../hooks/internal/organizationFeature";
 import {
   parseProfileChildren,
@@ -71,19 +69,7 @@ function useApiKeysComponent(): { component: ComponentType | null; settled: bool
 function UserProfileInner(props: UserProfileProps) {
   const runtime = useAuthRuntime();
   const { orbit, t, environment } = runtime;
-  const { el, appearance, cssVariables, primaryColor, rootClassName } = useElementClasses();
-  const { theme: resolvedTheme, className: themeClass } = useThemeScope();
-  const brandingStyle: Record<string, string> = { ...cssVariables };
-  if (!appearance.variables.colorPrimary) {
-    const foreground = contrastForeground(primaryColor);
-    // A dark brand color would vanish on the dark surface, so dark mode keeps the theme tokens.
-    const vanishesOnDark = resolvedTheme === "dark" && foreground === LIGHT_FOREGROUND;
-    if (!vanishesOnDark) {
-      brandingStyle["--primary"] = primaryColor;
-      brandingStyle["--ring"] = primaryColor;
-      if (foreground) brandingStyle["--primary-foreground"] = foreground;
-    }
-  }
+  const { ep } = useComponentElements();
   const user = currentUser(orbit);
   const { component: ApiKeys, settled: apiKeysSettled } = useApiKeysComponent();
   const { applications, loaded: applicationsLoaded } = useUserApplications(orbit, user?.id ?? null);
@@ -152,76 +138,95 @@ function UserProfileInner(props: UserProfileProps) {
   const activePage = pages.find((page) => page.id === step) ?? (pending ? undefined : pages[0]);
   const title = activePage?.label ?? t("userProfile.title");
 
-  const panel = (
-    <div className={cn("flex w-full flex-col gap-4", el("userProfile"))}>
-      <header className="flex items-center gap-3">
-        <div className="flex min-w-0 flex-1 flex-col">
-          <h1 className={cn("truncate text-lg font-semibold", el("headerTitle"))}>{title}</h1>
-          <p className="truncate text-sm text-muted-foreground">
-            {displayName(user)}
-            {primaryIdentifier(user) ? ` · ${primaryIdentifier(user)}` : ""}
-          </p>
-        </div>
-      </header>
-      <div className="flex flex-col gap-4 md:flex-row md:gap-6">
-        <nav
-          aria-label={t("userProfile.title")}
-          className={cn(
-            "flex shrink-0 gap-1 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:w-44 md:flex-col md:overflow-visible md:px-0 md:pb-0",
-            el("userProfileNavbar"),
-            el("navbar"),
-          )}
-        >
-          {pages.map((entry) => (
+  const navigation = (
+    <nav
+      aria-label={t("userProfile.title")}
+      {...ep(
+        ["userProfileNavbar", "navbar"],
+        "flex shrink-0 gap-1 overflow-x-auto border-b bg-muted/50 p-2 [scrollbar-width:none] md:w-56 md:flex-col md:overflow-visible md:border-e md:border-b-0 md:p-3 [&::-webkit-scrollbar]:hidden",
+      )}
+    >
+      <div className="hidden px-2 pt-1 pb-4 md:block">
+        <p className="truncate text-sm font-heading">{t("userProfile.title")}</p>
+        <p className="truncate text-xs text-muted-foreground">{environment.app.name}</p>
+      </div>
+      {pages.map((entry) => {
+        const active = activePage?.id === entry.id;
+        return (
+          <Button
+            key={entry.id}
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-current={active ? "page" : undefined}
+            data-active={active ? "true" : undefined}
+            onClick={() => setStep(entry.id)}
+            {...ep(
+              "navbarButton",
+              "h-8 shrink-0 justify-start gap-2.5 px-2.5 text-muted-foreground hover:text-foreground md:w-full",
+              active && "bg-card text-foreground shadow-xs ring-1 ring-border hover:bg-card",
+            )}
+          >
+            <span {...ep("navbarButtonIcon", "flex", active ? "text-foreground" : "text-muted-foreground")}>{entry.icon}</span>
+            {entry.label}
+          </Button>
+        );
+      })}
+      {links.length > 0 ? (
+        <>
+          <Separator className="my-2 hidden md:block" />
+          {links.map((link) => (
             <Button
-              key={entry.id}
-              type="button"
-              variant={activePage?.id === entry.id ? "secondary" : "ghost"}
+              key={link.id}
+              asChild
+              variant="ghost"
               size="sm"
-              aria-current={activePage?.id === entry.id ? "page" : undefined}
-              onClick={() => setStep(entry.id)}
-              className={cn("shrink-0 justify-start gap-2 md:w-full", el("navbarButton"))}
+              {...ep("navbarButton", "h-8 shrink-0 justify-start gap-2.5 px-2.5 text-muted-foreground hover:text-foreground md:w-full")}
             >
-              <span className={cn("text-muted-foreground", el("navbarButtonIcon"))}>{entry.icon}</span>
-              {entry.label}
+              <a href={link.url} target="_blank" rel="noreferrer">
+                <span className="text-muted-foreground">{link.icon}</span>
+                {link.label}
+              </a>
             </Button>
           ))}
-          {links.length > 0 ? (
-            <>
-              <Separator className="my-1 hidden md:block" />
-              {links.map((link) => (
-                <Button key={link.id} asChild variant="ghost" size="sm" className="shrink-0 justify-start gap-2 md:w-full">
-                  <a href={link.url} target="_blank" rel="noreferrer">
-                    <span className="text-muted-foreground">{link.icon}</span>
-                    {link.label}
-                  </a>
-                </Button>
-              ))}
-            </>
-          ) : null}
-        </nav>
-        <div className={cn("min-w-0 flex-1", el("userProfilePage"), el("pageScrollBox"))}>
-          {activePage ? <div data-orbit-page={activePage.id}>{activePage.content}</div> : null}
-        </div>
-      </div>
-      <p className="text-xs text-muted-foreground">{environment.app.name}</p>
+        </>
+      ) : null}
+    </nav>
+  );
+
+  const page = (
+    <div {...ep(["userProfilePage", "pageScrollBox"], "flex min-w-0 flex-1 flex-col gap-6 p-5 sm:p-8")}>
+      <header className="flex flex-col gap-0.5 border-b pb-5">
+        <h1 {...ep("headerTitle", "truncate text-lg font-heading tracking-[-0.01em]")}>{title}</h1>
+        <p className="truncate text-sm text-muted-foreground">
+          {displayName(user)}
+          {primaryIdentifier(user) ? ` · ${primaryIdentifier(user)}` : ""}
+        </p>
+      </header>
+      {activePage ? <div data-orbit-page={activePage.id}>{activePage.content}</div> : null}
+    </div>
+  );
+
+  const panel = (
+    <div {...ep("userProfile", "flex w-full flex-col md:min-h-[32rem] md:flex-row")}>
+      {navigation}
+      {page}
     </div>
   );
 
   return (
     <>
       {props.__modal ? (
-        <div className={cn(themeClass, rootClassName, "p-5 sm:p-6")} style={brandingStyle} data-orbit-theme={resolvedTheme}>
+        <ComponentRoot component="user-profile" className="flex w-full">
           {panel}
-        </div>
+          <UserVerificationModal />
+        </ComponentRoot>
       ) : (
-        <div className={cn(themeClass, rootClassName, "flex w-full justify-center px-4 py-6")} style={brandingStyle} data-orbit-theme={resolvedTheme}>
-          <Card className={cn("w-full max-w-4xl", el("card"))}>
-            <CardContent className="p-5 sm:p-6">{panel}</CardContent>
-          </Card>
-        </div>
+        <ComponentRoot component="user-profile" className="flex w-full justify-center px-4 py-6">
+          <Card {...ep("cardBox", "w-full max-w-4xl gap-0 overflow-hidden rounded-xl py-0 shadow-card")}>{panel}</Card>
+          <UserVerificationModal />
+        </ComponentRoot>
       )}
-      <UserVerificationModal />
     </>
   );
 }

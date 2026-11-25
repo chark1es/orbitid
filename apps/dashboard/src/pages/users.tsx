@@ -36,8 +36,8 @@ import { UserRowActions } from "../components/users/user-row-actions";
 
 const LIST_KEYS = ["banned", "locked", "mfa", "is_anonymous", "created_after", "created_before"];
 
-/** The label token from DESIGN.md: 0.75rem, weight 600, uppercase with +0.04em tracking. */
-const FILTER_LABEL = "text-[0.75rem] font-semibold tracking-[0.04em] uppercase text-muted-foreground";
+/** The label token from DESIGN.md: 0.75rem, weight 500, sentence case, muted. */
+const FILTER_LABEL = "text-[0.75rem] font-medium text-muted-foreground";
 
 /** A date control whose picker stays clickable under a chevron matching the selects. */
 const DATE_INPUT =

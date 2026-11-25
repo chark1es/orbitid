@@ -3,7 +3,7 @@ import { Button, Separator, cn } from "@orbitid/ui";
 import { FingerprintIcon } from "lucide-react";
 import { factorsOf } from "../../_shared/api";
 import { useAuthRuntime, type TranslateFn } from "../../_shared/w6";
-import { useElementClasses } from "../../_shared/appearance";
+import { useComponentElements } from "../../_shared/appearance";
 import type { SignInProps, SignInResource } from "../../_shared/types";
 import type { SignInFlow } from "../flow";
 
@@ -14,12 +14,12 @@ export interface StepProps {
 
 export function Divider() {
   const { t } = useAuthRuntime();
-  const { el } = useElementClasses();
+  const { ep } = useComponentElements();
   return (
-    <div className="flex items-center gap-3" role="separator">
-      <Separator className={cn("flex-1", el("dividerLine"))} />
-      <span className={cn("text-xs text-muted-foreground", el("dividerText"))}>{t("common.or")}</span>
-      <Separator className={cn("flex-1", el("dividerLine"))} />
+    <div {...ep("dividerRow", "flex items-center gap-3")} role="separator">
+      <Separator {...ep("dividerLine", "flex-1")} />
+      <span {...ep("dividerText", "text-xs text-muted-foreground lowercase")}>{t("common.or")}</span>
+      <Separator {...ep("dividerLine", "flex-1")} />
     </div>
   );
 }
@@ -33,16 +33,16 @@ export function FooterSwitch({
   actionLabel: string;
   onClick: () => void;
 }) {
-  const { el } = useElementClasses();
+  const { ep } = useComponentElements();
   return (
-    <p className={cn("flex items-center justify-center gap-1 text-sm", el("footerAction"))}>
-      <span className={cn("text-muted-foreground", el("footerActionText"))}>{text}</span>
+    <p {...ep("footerAction", "flex flex-wrap items-center justify-center gap-x-1 text-sm")}>
+      <span {...ep("footerActionText", "text-muted-foreground")}>{text}</span>
       <Button
         type="button"
         variant="link"
         size="sm"
         onClick={onClick}
-        className={cn("h-auto min-h-6 px-0 py-1 text-sm font-medium", el("footerActionLink"))}
+        {...ep("footerActionLink", "h-auto min-h-6 px-0 py-1 text-sm font-medium")}
       >
         {actionLabel}
       </Button>
@@ -51,8 +51,9 @@ export function FooterSwitch({
 }
 
 export function LinkButton({ label, onClick }: { label: string; onClick: () => void }) {
+  const { ep } = useComponentElements();
   return (
-    <Button type="button" variant="link" size="sm" onClick={onClick} className="h-auto min-h-6 px-0 py-1 text-sm font-medium">
+    <Button type="button" variant="link" size="sm" onClick={onClick} {...ep("formButtonSecondary", "h-auto min-h-6 px-0 py-1 text-sm font-medium")}>
       {label}
     </Button>
   );
@@ -60,21 +61,18 @@ export function LinkButton({ label, onClick }: { label: string; onClick: () => v
 
 export function IdentifierPreview({ value, onEdit }: { value: string; onEdit: () => void }) {
   const { t } = useAuthRuntime();
-  const { el } = useElementClasses();
+  const { ep } = useComponentElements();
   return (
     <div
-      className={cn(
-        "flex items-center justify-between gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm",
-        el("identityPreview"),
-      )}
+      {...ep("identityPreview", "flex items-center justify-between gap-2 rounded-full border bg-muted/50 py-1 ps-3.5 pe-1 text-sm")}
     >
-      <span className={cn("truncate", el("identityPreviewText"))}>{value}</span>
+      <span {...ep("identityPreviewText", "truncate")}>{value}</span>
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={onEdit}
-        className={cn("h-7 px-2 text-xs", el("identityPreviewEditButton"))}
+        {...ep("identityPreviewEditButton", "h-7 rounded-full px-2.5 text-xs")}
       >
         {t("common.edit")}
       </Button>

@@ -12,7 +12,7 @@ import {
 } from "@orbitid/ui";
 import { Loader2Icon } from "lucide-react";
 import { useAuthRuntime } from "../../_shared/w6";
-import { useElementClasses } from "../../_shared/appearance";
+import { useComponentElements } from "../../_shared/appearance";
 import { CaptchaWidget } from "../../_shared/captcha";
 import { Field } from "../../_shared/field";
 import { FormError } from "../../_shared/form-error";
@@ -24,7 +24,7 @@ import { type SignUpStepProps, type StartFormValues, Divider, LegalConsent } fro
 export function SignUpStartStep({ flow, props }: SignUpStepProps) {
   const runtime = useAuthRuntime();
   const { t, environment, navigate } = runtime;
-  const { el, appearance } = useElementClasses();
+  const { ep, appearance } = useComponentElements();
   const { attributes } = environment;
   const form = useForm<StartFormValues>({
     defaultValues: {
@@ -43,6 +43,14 @@ export function SignUpStartStep({ flow, props }: SignUpStepProps) {
   const [legalError, setLegalError] = useState(false);
 
   const socialAtTop = appearance.layout?.socialButtonsPlacement !== "bottom";
+  // `layout.showOptionalFields: false` hides optional name fields, and an optional username when another identifier
+  // is collected; required fields always show.
+  const showOptional = appearance.layout?.showOptionalFields !== false;
+  const hasOtherIdentifier = attributes.email_address.enabled || attributes.phone_number.enabled;
+  const showFirstName = attributes.first_name.enabled && (attributes.first_name.required || showOptional);
+  const showLastName = attributes.last_name.enabled && (attributes.last_name.required || showOptional);
+  const showUsername =
+    attributes.username.enabled && (attributes.username.required || showOptional || !hasOtherIdentifier);
   const social =
     environment.social.length > 0 ? (
       <SocialButtons
@@ -112,10 +120,10 @@ export function SignUpStartStep({ flow, props }: SignUpStepProps) {
           <Divider />
         </>
       ) : null}
-      <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
-        {attributes.first_name.enabled || attributes.last_name.enabled ? (
+      <form onSubmit={submit} {...ep("form", "flex flex-col gap-4")} noValidate>
+        {showFirstName || showLastName ? (
           <div className="grid grid-cols-2 gap-3">
-            {attributes.first_name.enabled ? (
+            {showFirstName ? (
               <Field
                 control={form.control}
                 name="firstName"
@@ -134,12 +142,12 @@ export function SignUpStartStep({ flow, props }: SignUpStepProps) {
                     autoComplete="given-name"
                     placeholder={t("formFieldPlaceholder__firstName")}
                     disabled={flow.busy}
-                    className={cn(el("formFieldInput"))}
+                    {...ep("formFieldInput")}
                   />
                 )}
               </Field>
             ) : null}
-            {attributes.last_name.enabled ? (
+            {showLastName ? (
               <Field
                 control={form.control}
                 name="lastName"
@@ -158,14 +166,14 @@ export function SignUpStartStep({ flow, props }: SignUpStepProps) {
                     autoComplete="family-name"
                     placeholder={t("formFieldPlaceholder__lastName")}
                     disabled={flow.busy}
-                    className={cn(el("formFieldInput"))}
+                    {...ep("formFieldInput")}
                   />
                 )}
               </Field>
             ) : null}
           </div>
         ) : null}
-        {attributes.username.enabled ? (
+        {showUsername ? (
           <Field
             control={form.control}
             name="username"
@@ -188,7 +196,7 @@ export function SignUpStartStep({ flow, props }: SignUpStepProps) {
                 autoComplete="username"
                 placeholder={t("formFieldPlaceholder__username")}
                 disabled={flow.busy}
-                className={cn(el("formFieldInput"))}
+                {...ep("formFieldInput")}
               />
             )}
           </Field>
@@ -213,7 +221,7 @@ export function SignUpStartStep({ flow, props }: SignUpStepProps) {
                 autoComplete="email"
                 placeholder={t("formFieldPlaceholder__emailAddress")}
                 disabled={flow.busy}
-                className={cn(el("formFieldInput"))}
+                {...ep("formFieldInput")}
               />
             )}
           </Field>
@@ -286,7 +294,7 @@ export function SignUpStartStep({ flow, props }: SignUpStepProps) {
         <Button
           type="submit"
           disabled={flow.busy}
-          className={cn("w-full", el("formButtonPrimary"))}
+          {...ep("formButtonPrimary", "w-full")}
         >
           {flow.busy ? <Loader2Icon className="size-4 animate-spin" aria-hidden="true" /> : null}
           {t("signUp.start.action")}

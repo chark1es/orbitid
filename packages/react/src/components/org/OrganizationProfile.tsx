@@ -55,7 +55,7 @@ function OrganizationProfileLink(_props: OrgProfileCustomLinkProps) {
  */
 function OrganizationProfileRoot(props: OrganizationProfileProps) {
   return (
-    <OrgRoot appearance={props.appearance} className={props.className}>
+    <OrgRoot appearance={props.appearance} className={props.className} element="organizationProfile">
       <OrganizationProfileView {...props} />
     </OrgRoot>
   );

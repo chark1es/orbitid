@@ -1,5 +1,4 @@
-import { cn } from "@orbitid/ui";
-import { useElementClasses } from "./appearance";
+import { useComponentElements } from "./appearance";
 import { useAuthRuntime } from "./w6";
 
 /**
@@ -18,13 +17,13 @@ export const IDENTIFIER_STRATEGIES: ReadonlySet<string> = new Set([
 /** The "Last used" chip shown next to the sign-in method this browser completed most recently. */
 export function LastUsedBadge({ className, testId }: { className?: string; testId?: string }) {
   const { t } = useAuthRuntime();
-  const { el } = useElementClasses();
+  const { ep } = useComponentElements();
   return (
     <span
       data-testid={testId}
-      className={cn(
-        "shrink-0 rounded-sm border border-border/70 bg-muted px-1.5 py-0.5 text-[0.6875rem] leading-none font-medium text-muted-foreground control-optical",
-        el("badge"),
+      {...ep(
+        "lastUsedBadge",
+        "shrink-0 rounded-sm border border-border bg-card px-1.5 py-0.5 text-2xs leading-none font-medium text-muted-foreground control-optical",
         className,
       )}
     >

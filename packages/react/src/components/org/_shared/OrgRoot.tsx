@@ -1,45 +1,19 @@
-import { useMemo, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { Alert, AlertDescription, AlertTitle, cn } from "@orbitid/ui";
 import { BuildingIcon } from "lucide-react";
-import { AppearanceContext } from "../../../provider";
-import { resolveAppearance, useAppearance, type Appearance } from "../../../appearance";
+import type { Appearance, ComponentElementKey } from "../../../appearance";
 import { useLocalizations } from "../../../localization";
-import { useThemeScope } from "../../auth/_shared/appearance";
+import { AuthAppearanceScope } from "../../auth/_shared/appearance";
+import { ComponentRoot } from "../../auth/_shared/component-root";
 import { useOrgSettings } from "./hooks";
 
-function OrgBox({ className, children }: { className?: string; children: ReactNode }) {
-  const appearance = useAppearance();
-  // The scheme class is not part of `rootClassName`; a forced `dark` base theme still renders dark through here.
-  const { className: themeClass } = useThemeScope();
+function OrgBox({ className, element, children }: { className?: string; element?: ComponentElementKey; children: ReactNode }) {
+  // The scheme class, branding, variables and `rootBox` all come from the shared component root.
   return (
-    <div
-      className={cn(themeClass, "orbitid-org w-full text-foreground", appearance.rootClassName, className)}
-      style={appearance.cssVariables}
-    >
+    <ComponentRoot component="organization" element={element} className={cn("orbitid-org w-full text-foreground", className)}>
       {children}
-    </div>
+    </ComponentRoot>
   );
-}
-
-function AppearanceScope({
-  appearance,
-  children,
-}: {
-  appearance: Appearance;
-  children: ReactNode;
-}) {
-  const parent = useAppearance();
-  const resolved = useMemo(() => {
-    const base = parent.appearance;
-    return resolveAppearance({
-      ...base,
-      ...appearance,
-      elements: { ...base?.elements, ...appearance.elements },
-      variables: { ...base?.variables, ...appearance.variables },
-      layout: { ...base?.layout, ...appearance.layout },
-    });
-  }, [parent.appearance, appearance]);
-  return <AppearanceContext.Provider value={resolved}>{children}</AppearanceContext.Provider>;
 }
 
 export interface OrgRootProps {
@@ -51,6 +25,8 @@ export interface OrgRootProps {
    * for compact controls such as the switcher that would otherwise leave a stray message in a navbar.
    */
   whenDisabled?: "notice" | "hidden";
+  /** Component element key for the root (`organizationProfile`, `apiKeys`, …). */
+  element?: ComponentElementKey;
   /** Set `false` for surfaces that also work without organizations, such as a user's own API keys. */
   requiresOrganizations?: boolean;
   children: ReactNode;
@@ -81,15 +57,17 @@ function OrgGate({ whenDisabled, children }: { whenDisabled: "notice" | "hidden"
 export function OrgRoot({
   appearance,
   className,
+  element,
   whenDisabled = "notice",
   requiresOrganizations = true,
   children,
 }: OrgRootProps) {
   const gated = requiresOrganizations ? <OrgGate whenDisabled={whenDisabled}>{children}</OrgGate> : children;
-  if (!appearance) return <OrgBox className={className}>{gated}</OrgBox>;
   return (
-    <AppearanceScope appearance={appearance}>
-      <OrgBox className={className}>{gated}</OrgBox>
-    </AppearanceScope>
+    <AuthAppearanceScope appearance={appearance}>
+      <OrgBox className={className} element={element}>
+        {gated}
+      </OrgBox>
+    </AuthAppearanceScope>
   );
 }
