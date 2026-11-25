@@ -323,13 +323,10 @@ A proxy that sends only `X-Real-IP` leaves the server seeing the proxy's address
   refused. An identity provider that has verified the address (Google, a verified GitHub address, an enterprise IdP) takes
   precedence: signing in through it replaces the unproven claim. Leave email verification on if mailbox ownership matters.
 
-- **Account enumeration.** `security.enumerationProtection` (on by default) answers sign-in for an identifier with no
-  account as if the account existed: the form moves on to the password step, offers the factors a typical account would
-  have (password, a code to the email or phone that was typed), and every attempt fails with the same error a wrong
-  password or code gives. A code is issued but never sent and never accepted. The account's name is not returned before
-  the first factor succeeds. What it does not hide: a code prepare skips the delivery, so it can answer faster than one
-  for a real account; failed attempts lock a real account but never a decoy; and sign-up still says when an address is
-  already registered. Turn it off for the friendlier "couldn't find your account" message.
+- **Account enumeration.** `security.enumerationProtection` (on by default) answers sign-in for an unknown identifier
+  as if the account existed: same factors, same errors, and a code that is issued but never sent or accepted. The
+  account's name is withheld until the first factor passes. Not hidden: a code prepare skips delivery, so it can answer
+  faster; decoys never lock out; sign-up still reveals registered addresses. Turn it off for "couldn't find your account".
 - **Authorization requests are not CSRF-protected.** `GET /oauth/authorize` is a top-level navigation by design (the
   OAuth protocol requires it). What keeps it safe is that a code can only be sent to a `redirect_uri` registered for the
   client, is bound to PKCE, and a client with `consent_screen_enabled: false` is treated as first-party. Only turn the
