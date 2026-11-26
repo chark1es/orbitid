@@ -2,6 +2,8 @@
 
 mod common;
 
+use std::collections::BTreeSet;
+
 use axum::http::StatusCode;
 use serde_json::{json, Value};
 
@@ -825,15 +827,36 @@ async fn search_matches_case_insensitively_and_treats_wildcards_literally() {
     )
     .await;
     let ada_id = b_id(&ada);
+    // Search matches user ids too, and those are random, so any user's id can
+    // contain a term by chance (`user_da…` contains `_da`, about one id in a
+    // thousand). That user is then a correct match: expect exactly the users
+    // whose id contains the literal term, plus Ada for the terms that name her.
+    let everyone: BTreeSet<String> = ids(&harness.get("/v1/users").await.value())
+        .into_iter()
+        .collect();
+    assert!(everyone.contains(&ada_id));
+    let matched_by_id = |term: &str| -> BTreeSet<String> {
+        everyone
+            .iter()
+            .filter(|id| id.to_lowercase().contains(term))
+            .cloned()
+            .collect()
+    };
+    let found = |response: &orbitid_core::testing::TestResponse| -> BTreeSet<String> {
+        ids(&response.value()).into_iter().collect()
+    };
 
     for query in ["ADA", "lovelace@EXAMPLE", "ada lovelace"] {
         let encoded = query.replace(' ', "%20");
         let response = harness.get(&format!("/v1/users?query={encoded}")).await;
-        assert_eq!(ids(&response.value()), vec![ada_id.clone()], "{query}");
+        let mut expected = matched_by_id(&query.to_lowercase());
+        expected.insert(ada_id.clone());
+        assert_eq!(found(&response), expected, "{query}");
     }
-    for query in ["%25", "_da"] {
+    // As wildcards, `%` would match everyone and `_da` would match Ada's name.
+    for (query, literal) in [("%25", "%"), ("_da", "_da")] {
         let response = harness.get(&format!("/v1/users?query={query}")).await;
-        assert!(ids(&response.value()).is_empty(), "{query}");
+        assert_eq!(found(&response), matched_by_id(literal), "{query}");
     }
 }
 

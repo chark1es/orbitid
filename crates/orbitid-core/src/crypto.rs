@@ -4,8 +4,8 @@
 //! and the `v1.<iv>.<tag>.<ciphertext>` format are part of the on-disk
 //! contract: data encrypted by the TypeScript server must keep decrypting.
 //! Deriving a key is deliberately cached (scrypt is expensive); callers on the
-//! async runtime should wrap the *first* derivation in `spawn_blocking` (the
-//! settings store does).
+//! async runtime should pay the *first* derivation in `spawn_blocking` through
+//! [`derive_keys`] (the settings store does at startup).
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -140,6 +140,16 @@ fn key32(secret: &str) -> Arc<[u8; 32]> {
 
 fn digest_key(secret: &str) -> Arc<[u8; 32]> {
     derive_key("digest", secret, DIGEST_SALT)
+}
+
+/// Derives and caches every key that [`encrypt`], [`decrypt`] and
+/// [`hash_low_entropy`] use for `secret`. Each is a scrypt run that blocks its
+/// thread (about a second in a debug build), so call this once from
+/// `spawn_blocking` before serving: a request that derives a key itself stalls
+/// its runtime worker, and on a current-thread runtime every other task with it.
+pub fn derive_keys(secret: &str) {
+    key32(secret);
+    digest_key(secret);
 }
 
 /// Keyed digest for values an attacker could enumerate offline (codes, backup codes).

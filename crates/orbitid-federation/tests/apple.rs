@@ -12,7 +12,7 @@ use orbitid_core::safe_fetch::{
     set_safe_fetch_transport_for_tests, SafeFetchOptions, SafeFetchResult, SafeFetchTransport,
 };
 use orbitid_core::testing::test_state;
-use orbitid_federation::apple::{apple_client_secret, reset_apple_client_secret_cache};
+use orbitid_federation::apple::apple_client_secret;
 use orbitid_federation::config::{provider_config, APPLE_ISSUER, APPLE_JWKS_URL, APPLE_TOKEN_URL};
 use orbitid_federation::jwt::reset_jwks_cache;
 use orbitid_federation::test_support::{
@@ -106,7 +106,6 @@ async fn configure_apple(state: &orbitid_core::AppState, secret_key: &TestKeyPai
 
 #[tokio::test]
 async fn mints_and_caches_an_es256_client_secret() {
-    reset_apple_client_secret_cache();
     let ctx = test_state().await;
     let key = make_ec_key_pair("apple-secret").expect("key");
     configure_apple(&ctx.state, &key).await;
@@ -150,13 +149,11 @@ async fn mints_and_caches_an_es256_client_secret() {
         &validation,
     )
     .expect("renewed verifies");
-    reset_apple_client_secret_cache();
 }
 
 #[tokio::test]
 async fn apple_exchange_sends_the_generated_secret_and_reads_the_verified_token() {
     let _guard = SEAM.lock().await;
-    reset_apple_client_secret_cache();
     reset_jwks_cache();
     let ctx = test_state().await;
     let secret_key = make_ec_key_pair("apple-secret").expect("key");
@@ -247,13 +244,11 @@ async fn apple_exchange_sends_the_generated_secret_and_reads_the_verified_token(
     .expect("secret verifies");
 
     set_safe_fetch_transport_for_tests(None);
-    reset_apple_client_secret_cache();
 }
 
 #[tokio::test]
 async fn refuses_an_apple_id_token_that_does_not_verify() {
     let _guard = SEAM.lock().await;
-    reset_apple_client_secret_cache();
     reset_jwks_cache();
     let ctx = test_state().await;
     let secret_key = make_ec_key_pair("apple-secret").expect("key");
@@ -290,5 +285,4 @@ async fn refuses_an_apple_id_token_that_does_not_verify() {
     assert_eq!(error.code, "oauth_callback_error");
     assert!(error.message.contains("verified"));
     set_safe_fetch_transport_for_tests(None);
-    reset_apple_client_secret_cache();
 }
